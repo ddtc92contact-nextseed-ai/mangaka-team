@@ -117,6 +117,8 @@ class Project(TimestampMixin, Base):
     workflow_preset: Mapped[str] = mapped_column(String(100))
     style_lora_name: Mapped[str | None] = mapped_column(String(255), default=None)
     style_lora_weight: Mapped[float] = mapped_column(Float, default=0.8)
+    # Grammaire de mise en page de la série (presets/layout_styles/) : sage, dynamique, nerveuse…
+    layout_style: Mapped[str] = mapped_column(String(100), default="dynamique")
 
     characters: Mapped[list[Character]] = relationship(
         back_populates="project", cascade="all, delete-orphan", order_by="Character.name"
@@ -191,6 +193,12 @@ class Page(TimestampMixin, Base):
     grid_template: Mapped[str | None] = mapped_column(String(100), default=None)
     # Résultat de l'étape « découpage » (voir pipeline/layout.py), rejouable.
     layout: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
+    # Graine de la mise en page (même graine = même page) ; tirée à nouveau par « Nouvelle mise en page ».
+    layout_seed: Mapped[int | None] = mapped_column(Integer, default=None)
+    # Style imposé à cette page (None = celui de la série).
+    layout_style: Mapped[str | None] = mapped_column(String(100), default=None)
+    # Indice de rythme donné par le scénario : lent | normal | rapide (None = normal).
+    rythme: Mapped[str | None] = mapped_column(String(20), default=None)
     state: Mapped[PageState] = mapped_column(_enum(PageState), default=PageState.draft)
 
     chapter: Mapped[Chapter] = relationship(back_populates="pages")
@@ -213,6 +221,8 @@ class Panel(TimestampMixin, Base):
     shot_type: Mapped[str | None] = mapped_column(String(50), default=None)
     dialogues: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)  # inutilisé : voir Bubble
     importance: Mapped[int] = mapped_column(Integer, default=1)
+    # Intensité dramatique donnée par le scénario : calme | normal | choc (None = non précisée).
+    intensity: Mapped[str | None] = mapped_column(String(20), default=None)
     # Géométrie en pixels de la page : {"x1", "y1", "x2", "y2"} (recopiée depuis Page.layout)
     bbox: Mapped[dict[str, int] | None] = mapped_column(JSON, default=None)
     bubble_zone: Mapped[dict[str, int] | None] = mapped_column(JSON, default=None)

@@ -9,7 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from ..pipeline.layout import LayoutError
-from ..pipeline.pages import is_stale, layout_page, move_page_gutter
+from ..pipeline.pages import is_stale, layout_page, move_page_gutter, regeneration_advised, slant_page_cut
 from ..pipeline.script import normalize_shot_type, script_job
 from ..presets import PresetError
 from ..store.models import (
@@ -35,6 +35,7 @@ from .schemas import (
     ChapterOut,
     ChapterReorder,
     ChapterUpdate,
+    CutSlant,
     GutterMove,
     JobOut,
     PageLayoutIn,
@@ -81,14 +82,18 @@ def _one_out(session: Session, chapter: Chapter) -> ChapterOut:
     return chapter_out(chapter, _page_counts(session, [chapter.id]).get(chapter.id, (0, 0)))
 
 
-def page_out(page: Page) -> PageOut:
+def page_out(page: Page, regen_threshold: float | None = None) -> PageOut:
     chosen = {p.id: next((i for i in p.images if i.selected), None) for p in page.panels}
+    layout_panels = {lp.get("panel_id"): lp for lp in (page.layout or {}).get("panels", [])}
     return PageOut(
         id=page.id,
         chapter_id=page.chapter_id,
         number=page.number,
         kind=page.kind.value,
         grid_template=page.grid_template,
+        layout_style=page.layout_style,
+        layout_seed=page.layout_seed,
+        rythme=page.rythme,  # type: ignore[arg-type]
         state=page.state.value,
         layout=page.layout,
         layout_stale=bool(page.panels) and is_stale(page),
@@ -100,6 +105,7 @@ def page_out(page: Page) -> PageOut:
                 characters=list(p.character_names or []),
                 shot_type=p.shot_type,
                 importance=p.importance,
+                intensity=p.intensity,  # type: ignore[arg-type]
                 dialogues=[
                     BubbleOut(id=b.id, speaker=b.speaker_name, text=b.text, kind=b.kind.value) for b in p.bubbles
                 ],
@@ -117,6 +123,8 @@ def page_out(page: Page) -> PageOut:
                 qc_reasons=list(c.qc_reasons or []) if c else [],
                 qc_override=bool(c and (c.qc_details or {}).get("override")),
                 detections=c.detections if c else None,
+                regeneration_advised=regen_threshold is not None
+                and regeneration_advised(p, layout_panels.get(p.id), regen_threshold),
             )
             for p in page.panels
         ],
@@ -287,9 +295,15 @@ def chapter_jobs(chapter_id: int, step: str | None = None, session: Session = De
 
 # --- découpage éditable ---------------------------------------------------------
 @router.get("/chapters/{chapter_id}/pages", response_model=list[PageOut])
-def list_pages(chapter_id: int, session: Session = Depends(get_session)) -> list[PageOut]:
+def list_pages(
+    chapter_id: int, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
+) -> list[PageOut]:
     get_chapter_or_404(session, chapter_id)
-    return [page_out(p) for p in _load_pages(session, chapter_id)]
+    return [_page_out(ctx, p) for p in _load_pages(session, chapter_id)]
+
+
+def _page_out(ctx: AppContext, page: Page) -> PageOut:
+    return page_out(page, ctx.presets.layout.regeneration.ratio_threshold)
 
 
 @router.put("/chapters/{chapter_id}/pages", response_model=list[PageOut])
@@ -342,6 +356,7 @@ def replace_pages(
             session.add(page)
         page.number = n
         page.kind = PageKind(pin.kind)
+        page.rythme = pin.rythme
         ordered: list[Panel] = []
         for i, cin in enumerate(pin.panels):
             panel = panels_by_id.get(cin.id) if cin.id is not None else None
@@ -354,6 +369,7 @@ def replace_pages(
             panel.character_ids = [names[c.casefold()] for c in panel.character_names if c.casefold() in names]
             panel.shot_type = normalize_shot_type(cin.shot_type) or None
             panel.importance = cin.importance
+            panel.intensity = cin.intensity
             # Les bulles sont recréées ; un cadre ou une queue ajustés à la main au lettrage suivent leur `id`.
             previous = {b.id: b for b in panel.bubbles} if panel.id is not None else {}
             panel.bubbles = [
@@ -376,7 +392,7 @@ def replace_pages(
             session.delete(p)
     session.flush()
 
-    for page in result:
+    for page in sorted(result, key=lambda p: p.number):
         if page.grid_template:
             tpl = ctx.presets.layout_templates.get(page.grid_template)
             if tpl is None or tpl.panel_count != len(page.panels):
@@ -386,13 +402,13 @@ def replace_pages(
         elif not page.panels:
             page.layout = None
     session.commit()
-    return [page_out(p) for p in _load_pages(session, chapter_id)]
+    return [_page_out(ctx, p) for p in _load_pages(session, chapter_id)]
 
 
 # --- étape 2 : mise en page -----------------------------------------------------
-def _layout(ctx: AppContext, page: Page) -> None:
+def _layout(ctx: AppContext, page: Page, *, reroll: bool = False) -> None:
     try:
-        layout_page(ctx.presets, page)
+        layout_page(ctx.presets, page, reroll=reroll)
     except (LayoutError, PresetError) as exc:
         raise FieldError("layout", f"page {page.number} : {exc}") from None
 
@@ -401,14 +417,15 @@ def _layout(ctx: AppContext, page: Page) -> None:
 def layout_chapter(
     chapter_id: int, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
 ) -> list[PageOut]:
-    """« Recalculer » tout le chapitre (les gouttières déplacées à la main sont réinitialisées)."""
+    """« Recalculer » tout le chapitre (gouttières et biais modifiés à la main sont réinitialisés ;
+    chaque page garde sa graine, donc sa mise en page)."""
     get_chapter_or_404(session, chapter_id)
     pages = _load_pages(session, chapter_id)
     for page in pages:
         if page.panels:
             _layout(ctx, page)
     session.commit()
-    return [page_out(p) for p in pages]
+    return [_page_out(ctx, p) for p in pages]
 
 
 @router.post("/pages/{page_id}/layout", response_model=PageOut)
@@ -418,10 +435,15 @@ def layout_one_page(
     session: Session = Depends(get_session),
     ctx: AppContext = Depends(get_ctx),
 ) -> PageOut:
-    """« Recalculer » une page ; `template_id` impose un gabarit (null = choix automatique)."""
+    """« Recalculer » une page ; `template_id` impose un gabarit (null = choix automatique), `style` un
+    style de mise en page (null = celui de la série), `reroll` tire une nouvelle mise en page."""
     page = get_page_or_404(session, page_id)
     if not page.panels:
         raise FieldError("layout", "page sans case : rien à mettre en page")
+    if body is not None and "style" in body.model_fields_set:
+        if body.style is not None and body.style not in ctx.presets.layout_styles:
+            raise FieldError("style", f"style de mise en page inconnu : « {body.style} »")
+        page.layout_style = body.style
     if body is not None and "template_id" in body.model_fields_set:
         if body.template_id is not None:
             tpl = ctx.presets.layout_templates.get(body.template_id)
@@ -432,9 +454,9 @@ def layout_one_page(
                     "template_id", f"ce gabarit a {tpl.panel_count} case(s), la page en a {len(page.panels)}"
                 )
         page.grid_template = body.template_id
-    _layout(ctx, page)
+    _layout(ctx, page, reroll=bool(body and body.reroll))
     session.commit()
-    return page_out(page)
+    return _page_out(ctx, page)
 
 
 @router.post("/pages/{page_id}/gutters", response_model=PageOut)
@@ -448,9 +470,33 @@ def move_gutter(
     except (LayoutError, PresetError) as exc:
         raise FieldError("gutter", str(exc)) from None
     session.commit()
-    return page_out(page)
+    return _page_out(ctx, page)
+
+
+@router.post("/pages/{page_id}/cuts", response_model=PageOut)
+def slant_cut(
+    page_id: int, body: CutSlant, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
+) -> PageOut:
+    """Incline une découpe (positions de ses deux extrémités, px de la page) ; les images des cases sont
+    gardées et recadrées au nouveau polygone (`regeneration_advised` signale un ratio trop changé)."""
+    page = get_page_or_404(session, page_id)
+    try:
+        slant_page_cut(ctx.presets, page, path=body.path, index=body.index, ends=body.ends)
+    except (LayoutError, PresetError) as exc:
+        raise FieldError("cut", str(exc)) from None
+    session.commit()
+    return _page_out(ctx, page)
 
 
 @router.get("/layout/templates")
 def list_templates(ctx: AppContext = Depends(get_ctx)) -> list[dict[str, object]]:
     return [{"id": t.id, "name": t.name, "panel_count": t.panel_count} for t in ctx.presets.layout_templates.values()]
+
+
+@router.get("/layout/styles")
+def list_styles(ctx: AppContext = Depends(get_ctx)) -> list[dict[str, object]]:
+    default = ctx.presets.default_layout_style
+    return [
+        {"id": s.id, "name": s.name, "description": s.description, "is_default": s.id == default}
+        for s in ctx.presets.layout_styles.values()
+    ]

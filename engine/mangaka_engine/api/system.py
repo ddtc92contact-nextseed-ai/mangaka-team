@@ -50,6 +50,7 @@ def health(ctx: AppContext = Depends(get_ctx)) -> dict[str, Any]:
             "page_formats": len(ctx.presets.page_formats),
             "workflows": len(ctx.presets.workflows),
             "layout_templates": len(ctx.presets.layout_templates),
+            "layout_styles": len(ctx.presets.layout_styles),
             "prompts": len(ctx.presets.prompts),
             "qc": ctx.presets.qc is not None,
             "issues": len(ctx.presets.issues),
@@ -76,6 +77,15 @@ def list_presets(ctx: AppContext = Depends(get_ctx)) -> dict[str, Any]:
         ],
         "layout_templates": [
             {"id": t.id, "name": t.name, "panel_count": t.panel_count} for t in reg.layout_templates.values()
+        ],
+        "layout_styles": [
+            {
+                "id": st.id,
+                "name": st.name,
+                "description": st.description,
+                "is_default": st.id == reg.default_layout_style,
+            }
+            for st in reg.layout_styles.values()
         ],
         "prompts": sorted(reg.prompts),
         "workflows": [

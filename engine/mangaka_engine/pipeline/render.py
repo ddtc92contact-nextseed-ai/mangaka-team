@@ -161,8 +161,12 @@ def page_inputs(presets: PresetRegistry, files: FileStore, page: Page, fonts: Fo
     specs: list[PanelSpec] = []
     faces_by_panel: dict[int, list[Box]] = {}
     urls: dict[int, str | None] = {}
+    polygons = {lp.get("panel_id"): lp.get("polygon") for lp in page.layout.get("panels", [])}
     for panel in page.panels:
         box = Box.parse(panel.bbox)
+        # Polygone de la case (mise en page ≥ v2) ; une ancienne mise en page n'a que la boîte.
+        raw_poly = polygons.get(panel.id)
+        polygon = [(float(x), float(y)) for x, y in raw_poly] if raw_poly else None
         if box is None:
             warnings.append(
                 LetteringWarning(
@@ -189,7 +193,7 @@ def page_inputs(presets: PresetRegistry, files: FileStore, page: Page, fonts: Fo
             urls[panel.id] = f"/panel-images/{img.id}/file"
             faces = faces_on_page(face_boxes(img, size), size, box)
         faces_by_panel[panel.id] = faces
-        panels.append(PanelArt(id=panel.id, index=panel.index, box=box, image=path, image_size=size))
+        panels.append(PanelArt(id=panel.id, index=panel.index, box=box, image=path, image_size=size, polygon=polygon))
         specs.append(
             PanelSpec(
                 id=panel.id,
@@ -198,6 +202,7 @@ def page_inputs(presets: PresetRegistry, files: FileStore, page: Page, fonts: Fo
                 zone=Box.parse(panel.bubble_zone),
                 faces=faces,
                 characters=list(panel.character_names or []),
+                polygon=polygon,
                 bubbles=[
                     BubbleSpec(
                         id=b.id,
@@ -248,6 +253,7 @@ def lettering_json(page: Page, inputs: PageInputs, fonts: FontBook) -> dict[str,
                 "id": p.id,
                 "index": p.index,
                 "box": p.box.as_rect(),
+                "polygon": [[round(x, 1), round(y, 1)] for x, y in p.polygon] if p.slanted and p.polygon else None,
                 "bubble_zone": spec.zone.as_rect() if spec.zone else None,
                 "image_url": inputs.image_urls.get(p.id),
                 "faces": [f.as_rect() for f in inputs.faces.get(p.id, [])],

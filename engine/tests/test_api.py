@@ -46,7 +46,10 @@ def test_presets_endpoint(client: TestClient) -> None:
         "page_format": "a4-300dpi",
         "workflow": "qwen-image-base",
         "workflow_with_references": "qwen-image-edit-ref",
+        "layout_style": "dynamique",
     }
+    assert {st["id"] for st in data["layout_styles"]} >= {"sage", "dynamique", "nerveuse"}
+    assert [st["id"] for st in data["layout_styles"] if st["is_default"]] == ["dynamique"]
     formats = {f["id"]: f for f in data["page_formats"]}
     assert formats["a4-300dpi"]["width_px"] == 2480
     assert formats["b4-300dpi"]["dpi"] == 300

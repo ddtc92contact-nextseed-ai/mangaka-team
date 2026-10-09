@@ -12,6 +12,11 @@ page y est décalée de `round(fond perdu / 25,4 × dpi)` px (35 px) ; une case 
 page déborde dans le fond perdu. Les repères de coupe, en option, sont dessinés dans une bande
 supplémentaire (`crop_marks.slug_mm`) autour du fond perdu.
 
+Case en biais (polygone convexe du découpage) : l'image, générée à la taille de la boîte englobante,
+est recadrée sur cette boîte puis découpée au polygone par un masque anticrénelé (sur-échantillonné) ;
+la bordure suit les bords du polygone (bande intérieure, comme pour un rectangle). Une case droite
+garde exactement le rendu d'avant.
+
 Le SVG reprend exactement la même géométrie : images embarquées (fichiers d'origine, recadrage
 par `preserveAspectRatio="xMidYMid slice"`), texte en vraies balises `<text>` sélectionnables avec
 la police embarquée (sous-ensemble des caractères utilisés), formes de bulle en chemins.
@@ -27,9 +32,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from xml.sax.saxutils import escape, quoteattr
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageChops, ImageDraw
 
 from ..presets.schemas import LetteringSettings, PageFormat, TextStyle
+from . import geometry as geo
 from .fonts import FontBook, pt_to_px
 from .lettering import MM_PER_INCH, Box, BubbleLayout, LetteringWarning, PageLettering, Shape, normalize_text
 
@@ -80,6 +86,11 @@ class PanelArt:
     box: Box  # px de la page finie
     image: Path | None = None  # fichier de la version retenue (None = case manquante)
     image_size: tuple[int, int] | None = None
+    polygon: list[geo.Point] | None = None  # px de la page finie ; None ou rectangle = case droite
+
+    @property
+    def slanted(self) -> bool:
+        return self.polygon is not None and len(self.polygon) >= 3 and not geo.is_axis_rect(self.polygon)
 
 
 @dataclass
@@ -109,6 +120,31 @@ def panel_rect(panel: PanelArt, canvas: Canvas) -> Box:
         if b.y2 >= canvas.trim_h:
             y2 += canvas.bleed
     return Box(x1, y1, x2, y2)
+
+
+def panel_polygon(panel: PanelArt, canvas: Canvas) -> geo.Polygon:
+    """Polygone de la case dans la feuille ; les sommets posés sur un bord de page passent dans le fond perdu."""
+    assert panel.polygon is not None
+    out = []
+    for x, y in panel.polygon:
+        if canvas.bleed:
+            if x <= 0:
+                x -= canvas.bleed
+            elif x >= canvas.trim_w:
+                x += canvas.bleed
+            if y <= 0:
+                y -= canvas.bleed
+            elif y >= canvas.trim_h:
+                y += canvas.bleed
+        out.append((x + canvas.ox, y + canvas.oy))
+    return out
+
+
+def polygon_mask(poly: Sequence[geo.Point], x0: int, y0: int, w: int, h: int, ss: int) -> Image.Image:
+    """Masque « L » anticrénelé du polygone sur la tuile (x0, y0, w, h) : rendu sur-échantillonné puis réduit."""
+    mask = Image.new("L", (w * ss, h * ss), 0)
+    ImageDraw.Draw(mask).polygon([((x - x0) * ss, (y - y0) * ss) for x, y in poly], fill=255)
+    return mask.resize((w, h), Image.Resampling.BOX) if ss > 1 else mask
 
 
 def cover_crop(iw: int, ih: int, w: float, h: float) -> tuple[float, float, float, float]:
@@ -185,6 +221,9 @@ def render_png(art: PageArt, fonts: FontBook, settings: LetteringSettings, canva
     draw = ImageDraw.Draw(img)
     border = round(pt_to_px(settings.panel_border_pt, dpi))
     for panel in art.panels:
+        if panel.slanted:
+            _draw_slanted_panel(img, panel, fonts, settings, canvas, border, dpi)
+            continue
         rect = panel_rect(panel, canvas)
         x1, y1, x2, y2 = round(rect.x1), round(rect.y1), round(rect.x2), round(rect.y2)
         if panel.image is not None:
@@ -228,6 +267,48 @@ def render_png(art: PageArt, fonts: FontBook, settings: LetteringSettings, canva
     return img.convert("RGB")
 
 
+def _draw_slanted_panel(
+    img: Image.Image,
+    panel: PanelArt,
+    fonts: FontBook,
+    settings: LetteringSettings,
+    canvas: Canvas,
+    border: int,
+    dpi: int,
+) -> None:
+    rect = panel_rect(panel, canvas)
+    x1, y1, x2, y2 = round(rect.x1), round(rect.y1), round(rect.x2), round(rect.y2)
+    w, h = x2 - x1, y2 - y1
+    ss = settings.supersampling
+    poly = panel_polygon(panel, canvas)
+    mask = polygon_mask(poly, x1, y1, w, h, ss)
+    if panel.image is not None:
+        with Image.open(panel.image) as src:
+            src_rgb = src.convert("RGB")
+        crop = cover_crop(src_rgb.width, src_rgb.height, w, h)
+        tile = src_rgb.resize((w, h), Image.Resampling.LANCZOS, box=crop)
+    else:
+        tile = Image.new("RGB", (w, h), _hex(settings.missing_panel_fill))
+    img.paste(tile, (x1, y1), mask)
+    if panel.image is None:
+        st = fonts.preset.missing_panel
+        cx, cy = geo.centroid(poly)
+        text, size = _fit_label(fonts, settings, rect, dpi)
+        font = fonts.pil(st, pt_to_px(size, dpi))
+        ImageDraw.Draw(img).text((cx, cy), fonts.drawable(st, text), font=font, fill=_hex(st.color), anchor="mm")
+    if border:
+        # Bordure intérieure le long des bords du polygone (page finie, sans le fond perdu).
+        trim = [(x + canvas.ox, y + canvas.oy) for x, y in panel.polygon or []]
+        bx1, by1, bx2, by2 = geo.bbox(trim)
+        bx, by = math.floor(bx1) - 1, math.floor(by1) - 1
+        bw, bh = math.ceil(bx2) - bx + 2, math.ceil(by2) - by + 2
+        outer = polygon_mask(trim, bx, by, bw, bh, ss)
+        inner_poly = geo.inset(trim, border)
+        inner = polygon_mask(inner_poly, bx, by, bw, bh, ss) if inner_poly else Image.new("L", (bw, bh), 0)
+        ring = ImageChops.subtract(outer, inner)
+        img.paste(Image.new("RGB", (bw, bh), _hex(settings.panel_border_color)), (bx, by), ring)
+
+
 def png_bytes(img: Image.Image, dpi: int) -> bytes:
     buf = io.BytesIO()
     img.save(buf, format="PNG", dpi=(dpi, dpi), optimize=False, compress_level=6)
@@ -240,6 +321,10 @@ _MIME = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".web
 
 def _f(v: float) -> str:
     return f"{v:.1f}".rstrip("0").rstrip(".") if v % 1 else str(int(v))
+
+
+def _points(poly: Sequence[geo.Point]) -> str:
+    return " ".join(f"{_f(round(x, 1))},{_f(round(y, 1))}" for x, y in poly)
 
 
 def render_svg(art: PageArt, fonts: FontBook, settings: LetteringSettings, canvas: Canvas) -> str:
@@ -274,6 +359,11 @@ def render_svg(art: PageArt, fonts: FontBook, settings: LetteringSettings, canva
     out.append("</style>")
     for panel in art.panels:
         r = panel_rect(panel, canvas)
+        if panel.slanted:
+            out.append(
+                f'<clipPath id="case-{panel.id}"><polygon points="{_points(panel_polygon(panel, canvas))}"/></clipPath>'
+            )
+            continue
         out.append(
             f'<clipPath id="case-{panel.id}"><rect x="{_f(r.x1)}" y="{_f(r.y1)}" width="{_f(r.w)}" height="{_f(r.h)}"/></clipPath>'
         )
@@ -292,14 +382,23 @@ def render_svg(art: PageArt, fonts: FontBook, settings: LetteringSettings, canva
             out.append(f'<image {geom} preserveAspectRatio="xMidYMid slice" href="{href}" xlink:href="{href}"/>')
         else:
             text, size = _fit_label(fonts, settings, r, dpi)
+            cx, cy = geo.centroid(panel_polygon(panel, canvas)) if panel.slanted else (r.cx, r.cy)
             out.append(f'<rect {geom} fill="{settings.missing_panel_fill}"/>')
             out.append(
-                f'<text x="{_f(r.cx)}" y="{_f(r.cy)}" font-family="{fonts.family(label_st)}" '
+                f'<text x="{_f(cx)}" y="{_f(cy)}" font-family="{fonts.family(label_st)}" '
                 f'font-size="{_f(round(pt_to_px(size, dpi), 2))}" fill="{label_st.color}" text-anchor="middle" '
                 f'dominant-baseline="central">{escape(fonts.drawable(label_st, text))}</text>'
             )
         out.append("</g>")
-        if border:
+        if border and panel.slanted:
+            # Trait centré sur le polygone rétréci d'une demi-épaisseur : bordure intérieure, comme le PNG.
+            trim = [(x + ox, y + oy) for x, y in panel.polygon or []]
+            ring = geo.inset(trim, border / 2) or trim
+            out.append(
+                f'<polygon points="{_points(ring)}" fill="none" stroke="{settings.panel_border_color}" '
+                f'stroke-width="{_f(round(border, 2))}" stroke-linejoin="miter"/>'
+            )
+        elif border:
             b = panel.box
             half = border / 2
             out.append(

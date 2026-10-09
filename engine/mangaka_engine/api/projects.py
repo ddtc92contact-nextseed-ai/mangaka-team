@@ -25,6 +25,7 @@ def project_out(project: Project, character_count: int, chapter_count: int) -> P
         workflow_preset=project.workflow_preset,
         style_lora_name=project.style_lora_name,
         style_lora_weight=project.style_lora_weight,
+        layout_style=project.layout_style,
         character_count=character_count,
         chapter_count=chapter_count,
         created_at=project.created_at,
@@ -45,11 +46,15 @@ def _counts(session: Session, project_id: int) -> tuple[int, int]:
     return chars, chapters
 
 
-def _check_presets(ctx: AppContext, page_format: str | None, workflow: str | None) -> None:
+def _check_presets(
+    ctx: AppContext, page_format: str | None, workflow: str | None, layout_style: str | None = None
+) -> None:
     if page_format is not None and page_format not in ctx.presets.page_formats:
         raise FieldError("page_format", f"format de page inconnu : « {page_format} »")
     if workflow is not None and workflow not in ctx.presets.workflows:
         raise FieldError("workflow_preset", f"workflow inconnu : « {workflow} »")
+    if layout_style is not None and layout_style not in ctx.presets.layout_styles:
+        raise FieldError("layout_style", f"style de mise en page inconnu : « {layout_style} »")
 
 
 @router.get("", response_model=list[ProjectOut])
@@ -71,7 +76,10 @@ def create_project(
         raise FieldError("page_format", "aucun format de page par défaut : choisis-en un")
     if workflow is None:
         raise FieldError("workflow_preset", "aucun workflow par défaut : choisis-en un")
-    _check_presets(ctx, page_format, workflow)
+    layout_style = body.layout_style or ctx.presets.default_layout_style
+    if layout_style is None:
+        raise FieldError("layout_style", "aucun style de mise en page disponible (presets/layout_styles/)")
+    _check_presets(ctx, page_format, workflow, layout_style)
     project = Project(
         title=body.title,
         style=body.style,
@@ -81,6 +89,7 @@ def create_project(
         workflow_preset=workflow,
         style_lora_name=body.style_lora_name or None,
         style_lora_weight=body.style_lora_weight,
+        layout_style=layout_style,
     )
     session.add(project)
     session.commit()
@@ -102,10 +111,19 @@ def update_project(
 ) -> ProjectOut:
     project = get_project_or_404(session, project_id)
     changes = body.model_dump(exclude_unset=True)
-    for key in ("title", "page_format", "workflow_preset", "reading_direction", "style", "status", "style_lora_weight"):
+    for key in (
+        "title",
+        "page_format",
+        "workflow_preset",
+        "reading_direction",
+        "style",
+        "status",
+        "style_lora_weight",
+        "layout_style",
+    ):
         if key in changes and changes[key] is None:
             raise FieldError(key, "ne peut pas être vide")
-    _check_presets(ctx, changes.get("page_format"), changes.get("workflow_preset"))
+    _check_presets(ctx, changes.get("page_format"), changes.get("workflow_preset"), changes.get("layout_style"))
     if "reading_direction" in changes:
         changes["reading_direction"] = ReadingDirection(changes["reading_direction"])
     if "status" in changes:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from collections.abc import Callable
 from pathlib import Path
@@ -61,7 +62,15 @@ def _version(path: Path) -> int:
     return v
 
 
+def _drop_v6_columns(con: sqlite3.Connection) -> None:
+    con.execute("ALTER TABLE projects DROP COLUMN layout_style")
+    for column in ("layout_seed", "layout_style", "rythme"):
+        con.execute(f"ALTER TABLE pages DROP COLUMN {column}")
+    con.execute("ALTER TABLE panels DROP COLUMN intensity")
+
+
 def _drop_v5_tables(con: sqlite3.Connection) -> None:
+    _drop_v6_columns(con)
     con.execute("DROP TABLE qc_bench_runs")
     con.execute("DROP TABLE panel_image_annotations")
 
@@ -148,7 +157,7 @@ def test_v2_database_gets_generation_columns(make_settings: Callable[..., Settin
         assert c.get("/jobs/5").json()["params"] == {}
         panel = c.get("/panels/3").json()
         assert panel["final_prompt_manual"] is False and panel["images"] == []
-    assert _version(settings.database_path) == SCHEMA_VERSION == 5
+    assert _version(settings.database_path) == SCHEMA_VERSION == 6
 
 
 def test_v3_database_gets_qc_columns(make_settings: Callable[..., Settings]) -> None:
@@ -201,3 +210,40 @@ def test_v4_database_gets_bench_tables(make_settings: Callable[..., Settings]) -
     fresh = settings.database_path.parent / "fresh.db"
     create_db_engine(fresh).dispose()
     assert _columns(settings.database_path) == _columns(fresh)
+
+
+def test_v5_database_keeps_its_layouts_straight_and_fresh(make_settings: Callable[..., Settings]) -> None:
+    """v5 → v6 : la série existante passe en style « sage », ses mises en page restent à jour et identiques."""
+    settings = make_settings()
+    with TestClient(create_app(settings)) as c:
+        project = c.post("/projects", json={"title": "Série v5", "layout_style": "sage"}).json()
+        chapter = c.post(f"/projects/{project['id']}/chapters", json={"title": "Un", "synopsis": "x"}).json()
+        pages = c.put(
+            f"/chapters/{chapter['id']}/pages",
+            json={"pages": [{"panels": [{"description": "a", "importance": 3}, {"description": "b"}]}]},
+        ).json()
+    page_id = pages[0]["id"]
+    before = pages[0]["layout"]
+    # Retour à un schéma v5 : colonnes v6 retirées, signature à l'ancien format.
+    con = sqlite3.connect(settings.database_path)
+    raw = json.loads(con.execute("SELECT layout FROM pages WHERE id = ?", (page_id,)).fetchone()[0])
+    sig = json.loads(raw["signature"])
+    raw["signature"] = json.dumps([*sig[:4], [spec[:3] for spec in sig[4]]], separators=(",", ":"))
+    for key in ("style",):
+        raw.pop(key, None)
+    con.execute("UPDATE pages SET layout = ? WHERE id = ?", (json.dumps(raw), page_id))
+    _drop_v6_columns(con)
+    con.execute("PRAGMA user_version = 5")
+    con.commit()
+    con.close()
+
+    with TestClient(create_app(settings)) as c:
+        assert c.get(f"/projects/{project['id']}").json()["layout_style"] == "sage"
+        page = c.get(f"/chapters/{chapter['id']}/pages").json()[0]
+        assert page["layout_stale"] is False
+        assert [p["polygon"] for p in page["layout"]["panels"]] == [p["polygon"] for p in before["panels"]]
+        # Recalculer en « sage » redonne les mêmes cases droites.
+        again = c.post(f"/pages/{page_id}/layout", json={}).json()["layout"]
+        assert [p["polygon"] for p in again["panels"]] == [p["polygon"] for p in before["panels"]]
+        assert not any(p["slanted"] for p in again["panels"])
+    assert _version(settings.database_path) == SCHEMA_VERSION
