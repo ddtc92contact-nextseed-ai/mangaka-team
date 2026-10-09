@@ -3,9 +3,13 @@
 Pour l'étape « scénario », il reconnaît le bloc `<contexte>{"task": "script", …}</contexte>` du
 prompt et renvoie un découpage plausible (nombre de pages visé, personnages de la série).
 
+Pour la direction artistique (`"task": "art_direction"`), il renvoie des choix variés mais
+déterministes : même chapitre, même audace, même relance → mêmes choix (`mock_art_direction`).
+
 Pour tester les relances sans vrai LLM, les `invalid_attempts` premiers essais d'une conversation
 renvoient une réponse invalide (variable MOCK_LLM_INVALID_ATTEMPTS, ou `[mock:invalide:N]` dans le
-synopsis du chapitre). L'essai courant se déduit des messages : aucun état entre deux appels.
+synopsis du chapitre ; `[mock:da-invalide:N]` pour la seule direction artistique). L'essai courant se
+déduit des messages : aucun état entre deux appels.
 """
 
 from __future__ import annotations
@@ -21,6 +25,8 @@ Responder = Callable[[list[ChatMessage], bool], str]
 
 _CONTEXT = re.compile(r"<contexte>\s*(\{.*\})\s*</contexte>", re.DOTALL)
 _INVALID_MARK = re.compile(r"\[mock:invalide:(\d+)\]")
+_DA_INVALID_MARK = re.compile(r"\[mock:da-invalide:(\d+)\]")
+TASKS = ("script", "art_direction")
 
 _SHOTS = ["plan large", "plan moyen", "gros plan", "plan américain", "contre-plongée", "plan rapproché", "plongée"]
 _PANELS_PER_PAGE = [5, 4, 6, 3, 5, 4]
@@ -29,6 +35,11 @@ _RYTHMES = ["normal", "rapide", "lent", "normal", "rapide"]
 
 
 def _script_context(messages: list[ChatMessage]) -> dict[str, Any] | None:
+    ctx = _task_context(messages)
+    return ctx if ctx is not None and ctx.get("task") == "script" else None
+
+
+def _task_context(messages: list[ChatMessage]) -> dict[str, Any] | None:
     for m in messages:
         if m.role != "user":
             continue
@@ -39,12 +50,13 @@ def _script_context(messages: list[ChatMessage]) -> dict[str, Any] | None:
             data = json.loads(match.group(1))
         except json.JSONDecodeError:
             return None
-        return data if isinstance(data, dict) and data.get("task") == "script" else None
+        return data if isinstance(data, dict) and data.get("task") in TASKS else None
     return None
 
 
 def _sentences(text: str) -> list[str]:
-    parts = [p.strip() for p in re.split(r"(?<=[.!?…])\s+|\n+", _INVALID_MARK.sub("", text)) if p.strip()]
+    text = _DA_INVALID_MARK.sub("", _INVALID_MARK.sub("", text))
+    parts = [p.strip() for p in re.split(r"(?<=[.!?…])\s+|\n+", text) if p.strip()]
     return parts or ["La scène s'installe."]
 
 
@@ -91,6 +103,124 @@ def mock_script(ctx: dict[str, Any]) -> dict[str, Any]:
     return {"pages": pages, "summary": summary}
 
 
+# --- direction artistique ---------------------------------------------------------
+_DA_RYTHMES = ["montée", "respiration", "montée", "climax"]
+_DA_PLANS = ["plan large", "plan moyen", "plan rapproché", "gros plan", "contre-plongée", "insert", "plongée"]
+_DA_ANGLES = [
+    "de face",
+    "de trois quarts",
+    "de profil",
+    "de dos",
+    "en contre-plongée",
+    "en plongée",
+    "vue subjective",
+    "cadre penché",
+]
+_DA_AMBIANCES = [
+    "lumière froide du petit matin, ombres longues",
+    "contre-jour orangé, silhouettes découpées",
+    "pénombre, reflets de néons sur le sol mouillé",
+    "pluie battante, contours noyés",
+    "soleil de midi, ombres dures et nettes",
+    "brume légère, arrière-plan estompé",
+]
+_DA_SFX = ["BAM", "VLAN", "FSHHH", "CLAC", "BOUM", "TCHAC"]
+_RYTHME_PHRASES = {
+    "calme": "Page d'installation : on laisse respirer le décor et les personnages.",
+    "montée": "La tension monte : les cadrages se resserrent au fil des cases.",
+    "climax": "Sommet de la séquence : on frappe fort, avec des cases très contrastées.",
+    "respiration": "Respiration après l'action : plans plus larges et lecture apaisée.",
+}
+_BOLDNESS = {"sobre": 0, "equilibree": 1, "audacieuse": 2}
+
+
+def mock_art_direction(ctx: dict[str, Any]) -> dict[str, Any]:
+    """Choix plausibles, variés d'une page à l'autre et déterministes (chapitre, audace, relance)."""
+    bold = _BOLDNESS.get(str(ctx.get("variety") or "equilibree"), 1)
+    variant = int(ctx.get("variant") or 0)
+    number = int((ctx.get("chapter") or {}).get("number") or 1)
+    styles = ctx.get("styles") or []
+    pages = ctx.get("pages") or []
+    previous = ctx.get("previous_direction") or {}
+    prev_chocs = {p.get("page") for p in previous.get("pages") or [] if p.get("page_choc")}
+    angles = _DA_ANGLES if bold else _DA_ANGLES[:4]
+    out = []
+    last = max((int(p["page"]) for p in pages), default=1)
+    for page in pages:
+        n = int(page["page"])
+        seed = n * 7 + number * 3 + variant * 5
+        if variant == 0 and n == 1:
+            rythme = "calme"
+        elif variant == 0 and n == last and last > 1:
+            rythme = "climax"
+        else:
+            rythme = _DA_RYTHMES[seed % len(_DA_RYTHMES)]
+        panels = page.get("panels") or []
+        count = len(panels)
+        strongest = max(range(count), key=lambda i: (panels[i].get("importance") or 2, -i)) if count else 0
+        out_panels = []
+        for i, pa in enumerate(panels):
+            if i == strongest and (rythme in ("montée", "climax") or bold == 2):
+                intensity = "choc"
+            elif (pa.get("importance") or 2) <= 1 or rythme in ("calme", "respiration"):
+                intensity = "calme"
+            else:
+                intensity = "normal"
+            shot = pa.get("shot_type")
+            plan = shot if shot in _DA_PLANS and (seed + i) % 3 else _DA_PLANS[(seed + i) % len(_DA_PLANS)]
+            if intensity == "choc" and bold:
+                plan = "gros plan" if seed % 2 else "contre-plongée"
+            cadre = "normal"
+            if intensity == "choc" and bold:
+                cadre = "sans bord" if bold == 1 else "fond perdu"
+            out_panels.append(
+                {
+                    "panel": i + 1,
+                    "intensity": intensity,
+                    "plan": plan,
+                    "angle": angles[(seed + 2 * i) % len(angles)],
+                    "cadre": cadre,
+                    "ambiance": _DA_AMBIANCES[(seed + i) % len(_DA_AMBIANCES)],
+                    "sfx": [{"text": _DA_SFX[(seed + i) % len(_DA_SFX)], "intensity": "fort"}]
+                    if intensity == "choc"
+                    else [],
+                }
+            )
+        page_choc = None
+        if rythme == "climax" and bold and (n not in prev_chocs or variant):
+            page_choc = "pleine page" if count == 1 else "splash"
+        template = None
+        has_choc = any(p["intensity"] == "choc" for p in out_panels)
+        if has_choc and count > 1:
+            wanted = (
+                f"{count}-grand-haut" if strongest == 0 else f"{count}-grand-bas" if strongest == count - 1 else None
+            )
+            if wanted in (page.get("templates") or []):
+                template = wanted
+        layout_style = "nerveuse" if bold == 2 and rythme == "climax" and "nerveuse" in styles else None
+        strong = out_panels[strongest] if out_panels else None
+        rationale = _RYTHME_PHRASES[rythme]
+        if strong is not None and strong["intensity"] == "choc":
+            rationale += f" La case {strongest + 1} porte le temps fort : {strong['plan']} {strong['angle']}"
+            rationale += f", {strong['cadre']}." if strong["cadre"] != "normal" else "."
+        if page_choc:
+            rationale += f" Page choc en {page_choc} pour marquer le sommet du chapitre."
+        if n in prev_chocs and rythme == "climax" and not page_choc:
+            rationale += " Pas de page choc ici : le chapitre précédent en avait déjà une au même endroit."
+        out.append(
+            {
+                "page": n,
+                "rythme": rythme,
+                "layout_style": layout_style,
+                "template": template,
+                "page_choc": page_choc,
+                "rationale": rationale,
+                "panels": out_panels,
+            }
+        )
+    return {"pages": out}
+
+
 class MockLLMProvider:
     name = "mock"
 
@@ -112,7 +242,9 @@ class MockLLMProvider:
         self.requests.append({"messages": list(messages), "temperature": temperature, "json_mode": json_mode})
         if self._responder is not None:
             return LLMResult(text=self._responder(messages, json_mode), model="mock")
-        ctx = _script_context(messages) if json_mode else None
+        ctx = _task_context(messages) if json_mode else None
+        if ctx is not None and ctx.get("task") == "art_direction":
+            return LLMResult(text=self._direction_answer(messages, ctx), model="mock")
         if ctx is not None:
             return LLMResult(text=self._script_answer(messages, ctx), model="mock")
         last = next((m.content for m in reversed(messages) if m.role == "user"), "")
@@ -129,3 +261,13 @@ class MockLLMProvider:
                 return "Voici le découpage : pages 1 à 3…"
             return json.dumps({"pages": [{"panels": [{"description": "", "shot_type": "travelling"}]}]})
         return json.dumps(mock_script(ctx), ensure_ascii=False)
+
+    def _direction_answer(self, messages: list[ChatMessage], ctx: dict[str, Any]) -> str:
+        attempt = 1 + sum(1 for m in messages if m.role == "assistant")
+        mark = _DA_INVALID_MARK.search(str((ctx.get("chapter") or {}).get("synopsis") or ""))
+        invalid = int(mark.group(1)) if mark else self.invalid_attempts
+        if attempt <= invalid:
+            if attempt % 2:
+                return "Voici mes choix de mise en scène : page 1 calme…"
+            return json.dumps({"pages": [{"page": 1, "rythme": "tempête", "panels": [{"panel": 1, "plan": "drone"}]}]})
+        return json.dumps(mock_art_direction(ctx), ensure_ascii=False)

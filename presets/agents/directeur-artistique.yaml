@@ -1,0 +1,105 @@
+# Agent de direction artistique, entre le scénario et la mise en page — voir presets/README.md
+# (« L'équipe : agents du pipeline » et « Direction artistique »).
+id: directeur-artistique
+name: Directeur artistique
+icon: "🎬"
+role: >-
+  Décide du rythme de chaque page, de l'intensité et du cadrage de chaque case (plan, angle, cadre,
+  ambiance, onomatopées) et justifie ses choix ; l'auteur valide avant la mise en page.
+step: 2
+step_label: Direction artistique
+providers: [llm]
+llm: { provider: provider, model: model }
+job_steps: [art_direction]
+knowledge_role: art_direction   # savoir-faire livré : presets/knowledge.yaml › agents.art_direction
+summary: [provider, model]
+secrets:
+  - { env: DEEPSEEK_API_KEY, label: Clé d'API DeepSeek }
+settings:
+  - key: provider
+    label: Fournisseur LLM
+    group: Modèle
+    type: choice
+    choices: [deepseek, ollama, claude, mock]
+    choice_labels: { deepseek: DeepSeek, ollama: Ollama (local), claude: Claude, mock: Factice (mode mock) }
+    source: env:LLM_PROVIDER
+    fallback: mock
+    help: Ollama et Claude sont prévus mais pas encore disponibles.
+  - key: model
+    label: Modèle
+    group: Modèle
+    type: text
+    source: providers.yaml#deepseek.model
+    env_override: DEEPSEEK_MODEL
+    help: Nom du modèle chez le fournisseur (ex. deepseek-chat).
+  - key: temperature
+    label: Température
+    group: Modèle
+    type: number
+    min: 0
+    max: 2
+    step: 0.05
+    source: prompts/direction-artistique.yaml#temperature
+    help: 0 = réponses très régulières, 1 et plus = plus d'invention.
+  - key: variety
+    label: Audace
+    group: Direction
+    type: choice
+    choices: [sobre, equilibree, audacieuse]
+    choice_labels:
+      sobre: Sobre (lisibilité d'abord)
+      equilibree: Équilibrée
+      audacieuse: Audacieuse (cadrages marqués, pages choc)
+    source: prompts/direction-artistique.yaml#variety
+    fallback: equilibree
+    help: Plus l'audace est grande, plus l'agent ose les plans marqués, les cases sans bord et les pages choc.
+  - key: max_retries
+    label: Nouveaux essais après une réponse invalide
+    group: Modèle
+    type: integer
+    min: 0
+    max: 2
+    source: prompts/direction-artistique.yaml#max_retries
+  - key: system
+    label: Consignes système
+    group: Prompts
+    type: prompt
+    source: prompts/direction-artistique.yaml#system
+    variables: &da_vars
+      - series_title
+      - series_style
+      - reading_direction
+      - layout_style
+      - layout_styles
+      - characters
+      - chapter_number
+      - chapter_title
+      - synopsis
+      - summary
+      - pages
+      - previous_direction
+      - variety
+      - request
+      - rythmes
+      - intensities
+      - plans
+      - angles
+      - cadres
+      - page_chocs
+      - sfx_intensities
+      - context_json
+      - bible
+      - savoir_faire
+  - key: user
+    label: Gabarit du chapitre
+    group: Prompts
+    type: prompt
+    source: prompts/direction-artistique.yaml#user
+    variables: *da_vars
+    help: Gardez le bloc <contexte>$context_json</contexte> pour le mode mock.
+  - key: retry
+    label: Consigne de relance
+    group: Prompts
+    type: prompt
+    source: prompts/direction-artistique.yaml#retry
+    variables: [error]

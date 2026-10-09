@@ -6,6 +6,8 @@ Banc d'essai du QC : `QCBenchRun` (historique des mesures du QC sur les cases an
 Savoir-faire : `KnowledgeCollection` (globale ou d'une série) → `KnowledgeDocument` → `KnowledgeChunk`
 (+ index plein texte FTS5 `knowledge_fts`, tenu à jour par des triggers) · `SeriesBible` (une par série)
 · `LLMRun` (passages reçus par chaque appel du LLM).
+Direction artistique : `PageDirection` (une par page : proposition de l'agent, champs verrouillés par
+l'auteur, version appliquée à la mise en page et aux prompts).
 Les fichiers binaires (images) vivent dans `data/`, la base ne stocke que leurs chemins relatifs.
 """
 
@@ -207,6 +209,9 @@ class Page(TimestampMixin, Base):
     chapter: Mapped[Chapter] = relationship(back_populates="pages")
     panels: Mapped[list[Panel]] = relationship(
         back_populates="page", cascade="all, delete-orphan", order_by="Panel.index"
+    )
+    direction: Mapped[PageDirection | None] = relationship(
+        back_populates="page", cascade="all, delete-orphan", uselist=False
     )
 
 
@@ -482,3 +487,29 @@ class LLMRun(Base):
     bible: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
     collections: Mapped[list[str]] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class PageDirection(TimestampMixin, Base):
+    """Direction artistique d'une page (voir pipeline/art_direction.py).
+
+    `values` : choix courants (proposition de l'agent, corrigée par l'auteur) — rythme, style, gabarit,
+    page choc, justification, et par case (repérée par `panel_id`) intensité, plan, angle, cadre,
+    ambiance, onomatopées. `locks` : champs modifiés par l'auteur, gardés quand l'agent repropose.
+    `applied` : copie de `values` au dernier « Appliquer à la mise en page » (lue par la mise en page et
+    le prompt image) ; None tant que rien n'est appliqué.
+    """
+
+    __tablename__ = "page_directions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    page_id: Mapped[int] = mapped_column(ForeignKey("pages.id", ondelete="CASCADE"), unique=True, index=True)
+    chapter_id: Mapped[int] = mapped_column(ForeignKey("chapters.id", ondelete="CASCADE"), index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    values: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    locks: Mapped[list[str]] = mapped_column(JSON, default=list)
+    status: Mapped[str] = mapped_column(String(20), default="proposed")  # proposed | accepted
+    applied: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
+    applied_at: Mapped[datetime | None] = mapped_column(default=None)
+    variant: Mapped[int] = mapped_column(Integer, default=0)  # « Proposer autre chose » : nombre de relances
+
+    page: Mapped[Page] = relationship(back_populates="direction")

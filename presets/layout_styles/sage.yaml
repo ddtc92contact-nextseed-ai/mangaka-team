@@ -28,3 +28,6 @@ rythme:
   lent: { slant_factor: 1, size_contrast: 1 }
   normal: { slant_factor: 1, size_contrast: 1 }
   rapide: { slant_factor: 1, size_contrast: 1 }
+
+# « Page choc » (pleine page ou splash) décidée par la direction artistique : s'ajoute au rythme.
+page_choc: { slant_factor: 1, size_contrast: 1 }

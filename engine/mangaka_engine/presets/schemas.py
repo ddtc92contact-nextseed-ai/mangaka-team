@@ -367,6 +367,8 @@ class LayoutStyle(_Strict):
     default_template_weight: float = Field(gt=0)
     avoid_repeat: bool = Field(description="Jamais deux mises en page identiques d'affilée")
     rythme: dict[Rythme, RythmeRule]
+    # « Page choc » (pleine page / splash) décidée par la direction artistique : s'ajoute au rythme.
+    page_choc: RythmeRule
 
     @model_validator(mode="after")
     def _check(self) -> LayoutStyle:
@@ -559,6 +561,8 @@ class PromptPreset(_Strict):
     max_retries: int = Field(default=2, ge=0, le=2)
     temperature: float | None = Field(default=None, ge=0, le=2)
     max_previous_chapters: int = Field(default=8, ge=0, le=100)
+    # Audace de la direction artistique (prompts/direction-artistique.yaml) : sobre, équilibrée, audacieuse.
+    variety: Literal["sobre", "equilibree", "audacieuse"] | None = None
 
     @field_validator("system", "user", "retry")
     @classmethod
@@ -572,7 +576,17 @@ class PromptPreset(_Strict):
 
 
 # --- Prompt image (étape 3) ---------------------------------------------------
-IMAGE_PROMPT_VARIABLES = {"shot", "description", "characters", "style", "savoir_faire", "bible"}
+IMAGE_PROMPT_VARIABLES = {
+    "shot",
+    "plan",
+    "angle",
+    "ambiance",
+    "description",
+    "characters",
+    "style",
+    "savoir_faire",
+    "bible",
+}
 
 
 class ImagePromptSettings(_Strict):
@@ -580,7 +594,8 @@ class ImagePromptSettings(_Strict):
 
     # Morceaux assemblés dans l'ordre ; un morceau dont une variable est vide est omis.
     # Variables : $shot, $description, $characters, $style, $savoir_faire (passages du savoir-faire),
-    # $bible (notes de la bible sur les personnages de la case).
+    # $bible (notes de la bible sur les personnages de la case) ; direction artistique appliquée :
+    # $plan (son type de plan, sinon celui du scénario), $angle, $ambiance.
     parts: list[str] = Field(
         default_factory=lambda: [
             "$shot.",

@@ -50,6 +50,7 @@ from ..store.models import (
     PanelState,
     QCVerdict,
 )
+from .art_direction import applied_panel_direction
 from .jobs import JobReporter
 from .knowledge import KnowledgeBase
 from .layout import target_size
@@ -105,9 +106,13 @@ def build_panel_prompt(
 ) -> str:
     series = panel.page.chapter.project
     savoir_faire, bible = notes
+    da = applied_panel_direction(panel)
     return build_prompt(
         description=panel.description,
         shot_type=panel.shot_type,
+        plan=da.get("plan"),
+        angle=da.get("angle"),
+        ambiance=da.get("ambiance"),
         characters=[PromptCharacter(c.name, c.visual_description, tuple(c.prompt_keywords or [])) for c in characters],
         style=series.style,
         savoir_faire=savoir_faire,

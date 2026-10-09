@@ -16,6 +16,7 @@ from . import __version__
 from .agents import AgentService
 from .api import (
     agents,
+    art_direction,
     chapters,
     characters,
     comfyui,
@@ -156,6 +157,7 @@ def create_app(settings: Settings | None = None, providers: Providers | None = N
     app.include_router(characters.router)
     app.include_router(comfyui.router)
     app.include_router(chapters.router)
+    app.include_router(art_direction.router)
     app.include_router(jobs.router)
     app.include_router(generation.router)
     app.include_router(lettering.router)

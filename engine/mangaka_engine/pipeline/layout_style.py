@@ -4,7 +4,8 @@ Tout est déterministe pour une graine donnée (`random.Random(seed)`), et toute
 — probabilités et angles des biais, gouttières, poids des gabarits, contraste des tailles — viennent
 du preset. Étapes, pour une page :
 
-1. poids de chaque case = (importance × poids de son intensité) ^ (contraste du style × contraste du rythme) ;
+1. poids de chaque case = (importance × poids de son intensité) ^ (contraste du style × contraste du rythme
+   [× contraste « page choc » si la direction artistique l'a décidé]) ;
 2. gabarit : parmi ceux qui ont le bon nombre de cases, le mieux adapté à ces poids (température 0)
    ou un tirage pondéré par l'adéquation et le poids du gabarit dans le style ; jamais le gabarit de
    la page précédente si le style l'interdit et qu'il existe une autre possibilité ;
@@ -15,9 +16,9 @@ du preset. Étapes, pour une page :
    facteur du rythme de la page ; l'angle est tiré dans la plage du style, puis réduit si une case
    voisine passerait sous la taille minimale.
 
-Un assistant de direction artistique (le LLM du scénario aujourd'hui) ne pilote la mise en page que
-par les champs structurés `importance`, `intensity` (case) et `rythme` (page), et par le choix du
-style : jamais en dessinant les cases.
+La direction artistique (pipeline/art_direction.py) ne pilote la mise en page que par les champs
+structurés `importance`, `intensity` (case), `rythme` et « page choc » (page), et par le choix du
+style et d'un gabarit parmi ceux du preset : jamais en dessinant les cases.
 """
 
 from __future__ import annotations
@@ -66,8 +67,12 @@ def template_weight(style: LayoutStyle, template_id: str) -> float:
     return style.default_template_weight
 
 
-def panel_weights(style: LayoutStyle, specs: Sequence[PanelSpec], rythme: str | None) -> list[float]:
+def panel_weights(
+    style: LayoutStyle, specs: Sequence[PanelSpec], rythme: str | None, page_choc: bool = False
+) -> list[float]:
     contrast = style.size_contrast * style.rythme[_rythme(rythme)].size_contrast
+    if page_choc:
+        contrast *= style.page_choc.size_contrast
     return [(max(1, s.importance) * style.intensity_weight[_intensity(s.intensity)]) ** contrast for s in specs]
 
 
@@ -155,10 +160,11 @@ def plan_page(
     rythme: str | None = None,
     forced: tuple[str, TreeNode] | None = None,
     exclude: Sequence[str] = (),
+    page_choc: bool = False,
 ) -> PagePlan:
     """Arbre de découpes (gabarit, proportions, biais) et gouttières d'une page, pour ce style et cette graine."""
     rng = random.Random(seed)
-    weights = panel_weights(style, specs, rythme)
+    weights = panel_weights(style, specs, rythme, page_choc)
     if forced is not None:
         template_id, tree = forced
     else:
@@ -167,6 +173,8 @@ def plan_page(
     gutters = _draw_gutters(style, rng)
     frame = page_frame(fmt, settings, direction=direction, page_number=page_number, gutters_mm=gutters)
     factor = style.rythme[_rythme(rythme)].slant_factor
+    if page_choc:
+        factor *= style.page_choc.slant_factor
 
     if isinstance(tree, SplitNode):
         _, cuts = _geometry(tree, frame)
@@ -198,7 +206,13 @@ def plan_page(
     return PagePlan(
         template_id=template_id,
         tree=tree,
-        style={"id": style.id, "seed": seed, "rythme": rythme, "gutters_mm": gutters},
+        style={
+            "id": style.id,
+            "seed": seed,
+            "rythme": rythme,
+            "gutters_mm": gutters,
+            **({"page_choc": True} if page_choc else {}),
+        },
     )
 
 
@@ -215,6 +229,7 @@ def styled_layout(
     rythme: str | None = None,
     forced: tuple[str, TreeNode] | None = None,
     exclude: Sequence[str] = (),
+    page_choc: bool = False,
 ) -> dict[str, Any]:
     plan = plan_page(
         fmt,
@@ -228,6 +243,7 @@ def styled_layout(
         rythme=rythme,
         forced=forced,
         exclude=exclude,
+        page_choc=page_choc,
     )
     return compute_layout(
         fmt,

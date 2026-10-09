@@ -52,10 +52,11 @@ def _script(c: TestClient, series_id: int) -> dict[str, Any]:
 
 
 # --- registre --------------------------------------------------------------------------------
-def test_registry_lists_the_five_agents_ready_in_mock_mode(c: TestClient) -> None:
+def test_registry_lists_the_six_agents_ready_in_mock_mode(c: TestClient) -> None:
     agents = c.get("/agents").json()
     assert [a["id"] for a in agents] == [
         "scenariste",
+        "directeur-artistique",
         "metteur-en-page",
         "dessinateur",
         "controleur-qualite",
