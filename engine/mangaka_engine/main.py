@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from . import __version__
-from .api import chapters, characters, generation, jobs, projects, system
+from .api import chapters, characters, generation, jobs, lettering, projects, system
 from .api.deps import AppContext
 from .api.errors import install_error_handlers
 from .config import Settings, get_settings
@@ -90,6 +90,7 @@ def create_app(settings: Settings | None = None, providers: Providers | None = N
     app.include_router(chapters.router)
     app.include_router(jobs.router)
     app.include_router(generation.router)
+    app.include_router(lettering.router)
     return app
 
 

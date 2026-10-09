@@ -154,3 +154,36 @@ def test_build_workflow_rejects_unknown_or_missing_params() -> None:
         build_workflow(loaded, {"positive_prompt": "x", "denoise": 0.4})
     with pytest.raises(PresetError, match="positive_prompt"):
         build_workflow(loaded, {})
+
+
+def test_lettering_presets_are_loaded() -> None:
+    reg = PresetRegistry.load(PRESETS_DIR)
+    fonts = reg.require_fonts()
+    assert set(fonts.styles) == {"speech", "thought", "shout", "narration", "off"}
+    assert fonts.styles["shout"].font in ("bowlby-one", "titan-one", "lilita-one")
+    assert {fonts.styles[k].font for k in ("speech", "thought", "narration")} <= {"baloo2", "fredoka"}
+    for font_id in fonts.fonts:
+        assert reg.font_path(font_id).is_file()
+    assert (PRESETS_DIR / "fonts" / "OFL.txt").is_file()
+    assert reg.lettering.tail.default_direction in ("panel_center", "down")
+
+
+def test_invalid_fonts_preset_is_reported(presets_copy: Path) -> None:
+    path = presets_copy / "fonts.yaml"
+    data = yaml.safe_load(path.read_text())
+    data["styles"]["speech"]["font"] = "comic-sans"
+    data["styles"]["thought"]["min_size_pt"] = 99
+    path.write_text(yaml.safe_dump(data, allow_unicode=True))
+    reg = PresetRegistry.load(presets_copy)
+    assert reg.fonts is None
+    issue = next(i for i in reg.issues if i.file == "fonts.yaml")
+    assert "min_size_pt" in issue.message
+    with pytest.raises(PresetError, match="lettrage impossible"):
+        reg.require_fonts()
+
+
+def test_missing_font_file_is_reported(presets_copy: Path) -> None:
+    (presets_copy / "fonts" / "Fredoka.ttf").unlink()
+    reg = PresetRegistry.load(presets_copy)
+    assert reg.fonts is None
+    assert any("fonts/Fredoka.ttf" in i.message for i in reg.issues)

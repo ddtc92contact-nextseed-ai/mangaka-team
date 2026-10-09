@@ -112,7 +112,7 @@ Short = Annotated[str, StringConstraints(strip_whitespace=True, max_length=120)]
 
 
 class BubbleIn(_In):
-    id: int | None = None  # ignoré : les bulles sont recréées
+    id: int | None = None  # les bulles sont recréées ; l'id ne sert qu'à garder leur position de lettrage
     speaker: Short = ""
     text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)]
     kind: BubbleKindName = "speech"
@@ -184,6 +184,42 @@ class GutterMove(_In):
     path: Annotated[list[Annotated[int, Field(ge=0)]], Field(max_length=10)]
     index: Annotated[int, Field(ge=0)]
     position: float
+
+
+# --- Lettrage (étape 5) ------------------------------------------------------
+Coord = Annotated[int, Field(ge=-100000, le=100000)]
+Extent = Annotated[int, Field(ge=20, le=100000)]
+
+
+class BubbleBox(_In):
+    x: Coord
+    y: Coord
+    w: Extent
+    h: Extent
+
+
+class TailPoint(_In):
+    x: Coord
+    y: Coord
+
+
+class BubbleUpdate(_In):
+    text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)] | None = None
+    kind: BubbleKindName | None = None
+    speaker: Short | None = None
+    # Cadre / pointe ajustés à la main ; null = placement automatique.
+    position: BubbleBox | None = None
+    tail: TailPoint | None = None
+
+
+class RenderIn(_In):
+    bleed: bool = False
+    crop_marks: bool = False
+
+
+class ExportIn(_In):
+    bleed: bool = False
+    crop_marks: bool = False
 
 
 # --- Jobs ----------------------------------------------------------------------

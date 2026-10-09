@@ -348,6 +348,8 @@ def replace_pages(
             panel.character_ids = [names[c.casefold()] for c in panel.character_names if c.casefold() in names]
             panel.shot_type = normalize_shot_type(cin.shot_type) or None
             panel.importance = cin.importance
+            # Les bulles sont recréées ; un cadre ou une queue ajustés à la main au lettrage suivent leur `id`.
+            previous = {b.id: b for b in panel.bubbles} if panel.id is not None else {}
             panel.bubbles = [
                 Bubble(
                     order=j,
@@ -355,6 +357,8 @@ def replace_pages(
                     speaker_id=names.get(d.speaker.casefold()),
                     text=d.text,
                     kind=BubbleKind(d.kind),
+                    position=previous[d.id].position if d.id in previous else None,
+                    tail=previous[d.id].tail if d.id in previous else None,
                 )
                 for j, d in enumerate(cin.dialogues)
             ]
