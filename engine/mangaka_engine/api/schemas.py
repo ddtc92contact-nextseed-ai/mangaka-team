@@ -60,6 +60,8 @@ class ProjectOut(BaseModel):
     style_lora_weight: float
     character_count: int
     chapter_count: int
+    # Pages déjà mises en page : changer le sens de lecture les recalcule (confirmation dans l'UI).
+    laid_out_page_count: int = 0
     created_at: datetime
     updated_at: datetime
 
