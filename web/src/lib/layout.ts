@@ -93,3 +93,8 @@ export function insetPolygon(poly: Point[], d: number): Point[] {
   }
   return out;
 }
+
+/** Polygone convexe agrandi de `d` (liseré blanc d'une incrustation, comme le moteur). */
+export function outsetPolygon(poly: Point[], d: number): Point[] {
+  return insetPolygon(poly, -d);
+}

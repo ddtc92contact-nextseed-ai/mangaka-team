@@ -3,13 +3,14 @@
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Button, ButtonLink, Card, EmptyState, Loading, Select } from "@/components/ui";
-import { api, fullErrorMessage, type BubbleUpdate } from "@/lib/api";
+import { api, fullErrorMessage, type BubbleUpdate, type Intensity, type SfxUpdate } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
 import { PAGE_KINDS } from "@/lib/script";
 import { useChapter } from "../chapter-context";
 import { BubbleEditor } from "./bubble-editor";
 import { ExportPanel } from "./export-panel";
 import { LetteringCanvas, type CanvasEdit, type LetteringCanvasHandle } from "./lettering-canvas";
+import { AddSfx, SfxEditor } from "./sfx-editor";
 
 export default function LetteringRoute() {
   return (
@@ -44,6 +45,7 @@ function Lettering() {
   const selectedId = selection && page && selection.page === page.id ? selection.id : null;
   const selected = data?.bubbles.find((b) => b.id === selectedId) ?? null;
   const selectedIndex = selected && data ? data.bubbles.indexOf(selected) : -1;
+  const selectedSfx = data?.sfx?.find((x) => x.id === selectedId) ?? null;
 
   // Échap ferme l'éditeur et rend le focus à la bulle.
   useEffect(() => {
@@ -88,13 +90,33 @@ function Lettering() {
       if (!ok) lettering.reload();
     });
   };
+  const commitSfx = (id: number, sfx: SfxUpdate) => {
+    update(id, { sfx }).then((ok) => {
+      if (!ok) lettering.reload();
+    });
+  };
+  const addSfx = (panelId: number, text: string, intensity: Intensity) =>
+    run(async () => {
+      const next = await api.addSfx(panelId, { text, intensity });
+      lettering.setData(next);
+      const created = (next.sfx ?? []).filter((x) => x.panel_id === panelId).sort((a, b) => b.id - a.id)[0];
+      if (created) select(created.id);
+      setNotice(`Onomatopée « ${text} » ajoutée.`);
+    });
+  const deleteSfx = (id: number) =>
+    run(async () => {
+      lettering.setData(await api.deleteSfx(id));
+      select(null);
+    });
   const recompute = () => {
     if (!page || !data) return;
-    const manual = data.bubbles.filter((b) => b.manual || b.manual_tail).length;
+    const manual =
+      data.bubbles.filter((b) => b.manual || b.manual_tail).length +
+      (data.sfx ?? []).filter((x) => x.manual || x.manual_size || x.manual_angle || x.manual_skew).length;
     if (
       manual &&
       !window.confirm(
-        `Recalculer le lettrage de la page ${page.number} ? ${manual} bulle${manual > 1 ? "s" : ""} ajustée${manual > 1 ? "s" : ""} à la main ser${manual > 1 ? "ont" : "a"} replacée${manual > 1 ? "s" : ""}.`,
+        `Recalculer le lettrage de la page ${page.number} ? ${manual} élément${manual > 1 ? "s" : ""} ajusté${manual > 1 ? "s" : ""} à la main ser${manual > 1 ? "ont" : "a"} replacé${manual > 1 ? "s" : ""}.`,
       )
     )
       return;
@@ -120,6 +142,7 @@ function Lettering() {
   const prev = list[index - 1];
   const next = list[index + 1];
   const bubbleCount = page.panels.reduce((n, p) => n + p.dialogues.length, 0);
+  const sfxCount = data?.sfx?.length ?? page.panels.reduce((n, p) => n + (p.sfx?.length ?? 0), 0);
 
   return (
     <div className="space-y-4">
@@ -147,6 +170,7 @@ function Lettering() {
         </div>
         <p className="text-sm text-zinc-400">
           {bubbleCount} bulle{bubbleCount > 1 ? "s" : ""}
+          {sfxCount > 0 && ` · ${sfxCount} onomatopée${sfxCount > 1 ? "s" : ""}`}
         </p>
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <label className="flex items-center gap-2 text-sm text-zinc-400">
@@ -197,10 +221,11 @@ function Lettering() {
                 disabled={busy}
                 onSelect={select}
                 onCommit={commit}
+                onCommitSfx={commitSfx}
               />
               <p className="mt-3 text-center text-xs text-zinc-500">
-                Clique sur une bulle (ou Tab puis Entrée) pour l&apos;éditer · flèches pour la déplacer, Alt + flèches pour
-                la redimensionner · Échap ferme l&apos;éditeur.
+                Clique sur une bulle ou une onomatopée (ou Tab puis Entrée) pour l&apos;éditer · flèches pour la déplacer,
+                Alt + flèches pour la redimensionner · Échap ferme l&apos;éditeur.
               </p>
             </Card>
           )}
@@ -223,6 +248,23 @@ function Lettering() {
               }}
             />
           )}
+          {selectedSfx && data && (
+            <SfxEditor
+              key={`${selectedSfx.id}:${selectedSfx.text}:${selectedSfx.intensity}:${selectedSfx.font.id}:${selectedSfx.font.size_pt}:${selectedSfx.angle}:${selectedSfx.skew}`}
+              sfx={selectedSfx}
+              fonts={data.sfx_fonts ?? {}}
+              warnings={data.warnings}
+              busy={busy}
+              onSave={(body) => update(selectedSfx.id, body)}
+              onDelete={() => deleteSfx(selectedSfx.id)}
+              onClose={() => {
+                const id = selectedSfx.id;
+                select(null);
+                requestAnimationFrame(() => canvasRef.current?.focusBubble(id));
+              }}
+            />
+          )}
+          {data && <AddSfx key={data.page_id} panels={data.panels} busy={busy} onAdd={addSfx} />}
           {data && (
             <Card data-testid="lettering-warnings">
               <h2 className="mb-2 font-semibold text-zinc-100">Avertissements</h2>
@@ -239,7 +281,7 @@ function Lettering() {
                             className="ml-1 text-rose-300 underline hover:text-rose-200"
                             onClick={() => select(w.bubble_id)}
                           >
-                            voir la bulle
+                            {data.sfx?.some((x) => x.id === w.bubble_id) ? "voir l'onomatopée" : "voir la bulle"}
                           </button>
                         )}
                       </span>

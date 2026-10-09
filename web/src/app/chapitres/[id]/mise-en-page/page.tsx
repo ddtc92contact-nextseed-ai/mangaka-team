@@ -2,9 +2,19 @@
 
 import { useState, type KeyboardEvent, type PointerEvent } from "react";
 import { Alert, Button, ButtonLink, Card, EmptyState, Loading, Select } from "@/components/ui";
-import { api, errorMessage, type LayoutGutter, type PageData, type PageLayout } from "@/lib/api";
+import {
+  api,
+  errorMessage,
+  type FrameKind,
+  type LayoutGutter,
+  type LayoutPanel,
+  type PageData,
+  type PageLayout,
+  type PanelData,
+  type PanelFrame,
+} from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
-import { INTENSITIES, RYTHMES, centroid, panelPolygon, svgPoints, type Point } from "@/lib/layout";
+import { INTENSITIES, RYTHMES, centroid, outsetPolygon, panelPolygon, svgPoints, type Point } from "@/lib/layout";
 import { PAGE_KINDS } from "@/lib/script";
 import { useChapter } from "../chapter-context";
 
@@ -45,6 +55,8 @@ export default function LayoutPreviewPage() {
     run(async () => replacePage(await api.moveGutter(selected.id, { path: g.path, index: g.index, position })));
   const slantCut = (g: LayoutGutter, ends: [number, number]) =>
     selected && run(async () => replacePage(await api.slantCut(selected.id, { path: g.path, index: g.index, ends })));
+  const setFrame = (panel: PanelData, change: Partial<PanelFrame>) =>
+    run(async () => replacePage(await api.setPanelFrame(panel.id, { ...(panel.frame ?? {}), ...change })));
 
   if (pages.loading && !pages.data) return <Loading />;
   if (pages.error) return <Alert>Impossible de charger les pages : {pages.error}</Alert>;
@@ -206,7 +218,8 @@ export default function LayoutPreviewPage() {
               </>
             )}{" "}
             · glisse une gouttière pour redimensionner ses cases voisines, ou une poignée ronde au bout d&apos;une découpe
-            pour l&apos;incliner (flèches du clavier aussi).
+            pour l&apos;incliner (flèches du clavier aussi). Bord, fond perdu et incrustation se règlent case par case, à
+            droite.
           </p>
         )}
       </div>
@@ -228,6 +241,11 @@ export default function LayoutPreviewPage() {
                     <p className="text-zinc-400">
                       {lp.width} × {lp.height} px · ratio {lp.ratio.toFixed(2)}
                       {lp.slanted && <span className="ml-1 text-sky-300">· en biais</span>}
+                      {lp.bleed && <span className="ml-1 text-sky-300">· fond perdu</span>}
+                      {lp.inset && <span className="ml-1 text-sky-300">· incrustée dans la case {(lp.host_index ?? 0) + 1}</span>}
+                      {lp.frame && lp.frame !== "border" && (
+                        <span className="ml-1 text-sky-300">· {lp.frame === "fade" ? "fondu" : "sans bord"}</span>
+                      )}
                     </p>
                     <p className="text-zinc-500">
                       génération {lp.target.width} × {lp.target.height}
@@ -241,6 +259,14 @@ export default function LayoutPreviewPage() {
                       <p className="font-medium text-amber-300" data-testid="regeneration-advised">
                         Régénération conseillée
                       </p>
+                    )}
+                    {panel && (
+                      <FrameControls
+                        panel={panel}
+                        layoutPanel={lp}
+                        disabled={busy || selected.layout_stale}
+                        onChange={(change) => setFrame(panel, change)}
+                      />
                     )}
                   </li>
                 );
@@ -424,13 +450,29 @@ function PageSvg({
           strokeDasharray={`${stroke * 4} ${stroke * 3}`}
         />
       )}
-      {layout.panels.map((p) => {
+      {drawOrder(layout.panels).map((p) => {
         const poly = panelPolygon(p);
         const [cx, cy] = centroid(poly);
         const r = Math.min(110, Math.min(p.width, p.height) / 5);
+        const frameless = p.frame === "none" || p.frame === "fade";
         return (
-          <g key={p.index} data-testid={compact ? undefined : "layout-panel"} data-slanted={p.slanted ? "true" : undefined}>
-            <polygon points={svgPoints(poly)} fill="#ffffff" stroke="#18181b" strokeWidth={stroke} strokeLinejoin="miter" />
+          <g
+            key={p.index}
+            data-testid={compact ? undefined : "layout-panel"}
+            data-slanted={p.slanted ? "true" : undefined}
+            data-frame={p.frame ?? "border"}
+            data-bleed={p.bleed ? "true" : undefined}
+            data-inset={p.inset ? "true" : undefined}
+          >
+            {p.inset && <polygon points={svgPoints(outsetPolygon(poly, stroke * 3))} fill="#f4f4f5" />}
+            <polygon
+              points={svgPoints(poly)}
+              fill={p.frame === "fade" ? "#fafafa" : "#ffffff"}
+              stroke={frameless ? "#a1a1aa" : "#18181b"}
+              strokeWidth={frameless ? stroke / 1.5 : stroke}
+              strokeDasharray={frameless ? `${stroke * 3} ${stroke * 2}` : undefined}
+              strokeLinejoin="miter"
+            />
             {p.bubble_zone && (
               <rect
                 x={p.bubble_zone.x1}
@@ -563,5 +605,81 @@ function PageSvg({
           );
         })}
     </svg>
+  );
+}
+
+/** Ordre de dessin : les cases de l'arbre, puis les incrustations par-dessus (comme à l'export). */
+function drawOrder(panels: LayoutPanel[]): LayoutPanel[] {
+  return [...panels.filter((p) => !p.inset), ...panels.filter((p) => p.inset)];
+}
+
+const FRAME_LABELS: Record<FrameKind, string> = { border: "bordure", none: "sans bord", fade: "fondu au papier" };
+
+/** Options de cadre d'une case : « auto » = décidée par le style de mise en page (valeur actuelle entre parenthèses). */
+function FrameControls({
+  panel,
+  layoutPanel,
+  disabled,
+  onChange,
+}: {
+  panel: PanelData;
+  layoutPanel: LayoutPanel;
+  disabled: boolean;
+  onChange: (change: Partial<PanelFrame>) => void;
+}) {
+  const forced = panel.frame ?? { frame: null, bleed: null, inset: null };
+  const yesNo = (v: boolean | null) => (v === null ? "" : v ? "oui" : "non");
+  const parse = (v: string) => (v === "" ? null : v === "oui");
+  const n = panel.index + 1;
+  const bleedOff = !layoutPanel.bleed_possible && !forced.bleed;
+  return (
+    <div className="mt-2 grid grid-cols-1 gap-1.5" data-testid="frame-controls">
+      <label className="flex items-center justify-between gap-2 text-zinc-400">
+        <span>Bord</span>
+        <Select
+          className="!w-36 py-1 text-xs"
+          value={forced.frame ?? ""}
+          onChange={(e) => onChange({ frame: (e.target.value || null) as FrameKind | null })}
+          disabled={disabled}
+          aria-label={`Bord de la case ${n}`}
+          data-testid="panel-frame"
+        >
+          <option value="">Auto ({FRAME_LABELS[layoutPanel.frame ?? "border"]})</option>
+          <option value="border">Bordure</option>
+          <option value="none">Sans bord</option>
+          <option value="fade">Fondu au papier</option>
+        </Select>
+      </label>
+      <label className="flex items-center justify-between gap-2 text-zinc-400" title={bleedOff ? "La case ne touche pas un bord extérieur de la page" : undefined}>
+        <span>Fond perdu</span>
+        <Select
+          className="!w-36 py-1 text-xs"
+          value={yesNo(forced.bleed)}
+          onChange={(e) => onChange({ bleed: parse(e.target.value) })}
+          disabled={disabled || bleedOff || Boolean(layoutPanel.inset)}
+          aria-label={`Fond perdu de la case ${n}`}
+          data-testid="panel-bleed"
+        >
+          <option value="">Auto ({layoutPanel.bleed ? "oui" : "non"})</option>
+          <option value="oui">Oui</option>
+          <option value="non">Non</option>
+        </Select>
+      </label>
+      <label className="flex items-center justify-between gap-2 text-zinc-400">
+        <span>Incrustation</span>
+        <Select
+          className="!w-36 py-1 text-xs"
+          value={yesNo(forced.inset)}
+          onChange={(e) => onChange({ inset: parse(e.target.value) })}
+          disabled={disabled}
+          aria-label={`Incrustation de la case ${n}`}
+          data-testid="panel-inset"
+        >
+          <option value="">Auto ({layoutPanel.inset ? "oui" : "non"})</option>
+          <option value="oui">Oui (dans sa voisine)</option>
+          <option value="non">Non</option>
+        </Select>
+      </label>
+    </div>
   );
 }

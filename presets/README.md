@@ -130,6 +130,45 @@ conseillée (« Régénération conseillée ») que si le ratio de la boîte eng
 plus de `regeneration.ratio_threshold` (`layout.yaml`, 15 %) de celui de l'image retenue. « Recalculer »
 revient à la mise en page de la graine (retouches perdues, comme pour les gouttières).
 
+### Options de cadre (`frames`)
+
+Chaque case peut être **sans bord** (`frame: none`, image à bord franc ; `fade`, l'image se fond au
+papier sur `frames.fade_mm` de `lettering.yaml`), **à fond perdu** (`bleed`) ou **incrustée** (`inset`) :
+
+- **fond perdu** : seulement pour une case posée sur un bord extérieur de la zone utile (haut, bas,
+  côté opposé à la reliure). Ces bords avancent jusqu'au bord de la page (et jusqu'au bord du fond
+  perdu à l'export « fond perdu ») ; gouttières et biais ne bougent pas, aucune bordure n'est tracée
+  le long d'un bord rogné, les repères de coupe restent dans leur bande. Bulles et onomatopées restent
+  dans la zone utile (`live_polygon`).
+- **incrustation** : petite case (gros plan de réaction) posée dans sa voisine — la précédente, sinon
+  la suivante —, en bas côté fin de lecture, à `inset.margin_mm` des bords de l'hôte, sur un liseré
+  blanc (`frames.inset_outline_mm`), dessinée après les autres cases. Elle ne prend pas de case dans le
+  gabarit (une page de 4 cases dont une incrustée utilise un gabarit de 3 cases).
+
+Les probabilités suivent la même règle que les biais (intensité si donnée, sinon importance) :
+
+```yaml
+frames:
+  by_importance:
+    1: { frameless: 0.03, bleed: 0, inset: 0.12 }
+    2: { frameless: 0.05, bleed: 0.08, inset: 0 }
+    3: { frameless: 0.1, bleed: 0.35, inset: 0 }
+  by_intensity:
+    calme: { frameless: 0.12, bleed: 0.05, inset: 0.15 }
+    normal: { frameless: 0.04, bleed: 0.08, inset: 0.05 }
+    choc: { frameless: 0.08, bleed: 0.5, inset: 0 }
+  fade: 0.6          # part des cases sans bord qui se fondent au papier (sinon bord franc)
+  inset: { size: 0.4, margin_mm: 3, min_side_mm: 12, max_per_page: 1, min_page_panels: 3,
+           shot_types: [gros plan, très gros plan, plan rapproché] }
+```
+
+« sage » n'en tire jamais (une page sage reste identique), « dynamique » parfois, « nerveuse » souvent
+sur les cases fortes. Les tirages utilisent un générateur à part (`cadres:<graine>`) : gabarit, biais et
+gouttières d'une page ne changent pas. Dans l'onglet Mise en page, chaque case a trois menus (Bord, Fond
+perdu, Incrustation) : « Auto » = décision du style, sinon option imposée (`PUT /panels/{id}/frame`,
+stockée dans `Panel.frame`). Changer le bord ou le fond perdu garde les retouches de gouttières et de
+biais ; ajouter ou retirer une incrustation recalcule la page depuis sa graine.
+
 ### Direction artistique : comment piloter la mise en page
 
 La mise en page est de la **géométrie déterministe** : aucune IA ne dessine les cases. Un assistant de
@@ -141,6 +180,7 @@ demain — ne la pilote **que** par ces champs structurés, validés par le sch�
 | `importance` | case | 1 transition, 2 normale, 3 forte | taille de la case (choix du gabarit), règle de biais `by_importance` |
 | `intensity` (facultatif) | case | `calme`, `normal`, `choc` | poids de taille (`intensity_weight`), règle de biais `by_intensity` (prioritaire) |
 | `rythme` (facultatif) | page | `lent`, `normal`, `rapide` | facteurs de biais et de contraste de la page (`rythme`) |
+| `sfx` (facultatif) | case | `[{text, intensity}]` | onomatopées posées au lettrage (jamais dans la description ni le prompt image) |
 
 …et par le choix du style de la série ou d'une page. Jamais de coordonnées, de polygones ni de dessin
 libre : pour un nouvel effet, on ajoute un champ au schéma et une règle au style. Le LLM factice (mode
@@ -371,6 +411,32 @@ Le texte n'est **jamais** dessiné par le modèle d'image : il est posé au lett
 - Visages : le lettrage évite les boîtes de visages enregistrées par le QC sur la version retenue
   (`PanelImage.detections.faces`, à défaut `PanelImage.params` : `faces`, `qc.faces`…, en px de l'image).
 - Les SVG exportés embarquent un sous-ensemble renommé (`mk-…`) de chaque police (clause 3 de l'OFL).
+
+### Onomatopées (type `sfx`)
+
+« CLIC », « BIIIP ! », « VROUM ! » : grand texte sans bulle, lui aussi vectoriel (jamais dessiné par
+le modèle d'image : « onomatopées » est dans `forbidden_text_terms` et le texte n'entre pas dans le
+prompt de la case).
+
+- `fonts.yaml` → `sfx` : police par intensité (`by_intensity` : Lilita One / Titan One / Bowlby One) et
+  polices proposées dans l'écran Lettrage (`choices`), capitales, interligne.
+- `lettering.yaml` → `sfx` : taille de base par intensité pour une case de `reference_panel_mm`
+  (facteur borné par `scale_min` / `scale_max`, puis `min_size_pt` / `max_size_pt`, réduite si plus large
+  que `max_width` × la case), remplissage, contour épais (`outline_pt`) et halo blanc (`halo_pt`),
+  plages d'angle et de cisaillement (tirage déterministe, graine = l'onomatopée), **débordement
+  maximal** hors de la case (`max_overflow_mm`, mesuré perpendiculairement à chaque bord : une
+  onomatopée peut chevaucher une bordure), écarts avec les visages, bulles et autres onomatopées.
+- Placement automatique après toutes les bulles de la page : en bas côté fin de lecture si possible,
+  jamais sur un visage (QC), une bulle, une autre onomatopée ou une incrustation tant qu'il y a de la
+  place (sinon avertissement). Placée à la main, elle est gardée, ramenée vers la case seulement si elle
+  dépasse la limite.
+- Écran Lettrage : « Onomatopées » pour en ajouter une ; sur la planche, glisser pour déplacer, rond
+  bleu pour tourner, carré rose pour la taille (clavier : flèches, Alt + ←/→ tourner, Alt + ↑/↓ taille) ;
+  le panneau règle texte, intensité, police, taille, angle et italique. API : `POST /panels/{id}/sfx`,
+  `PATCH /bubbles/{id}` (`sfx` : `x`, `y`, `size_pt`, `angle`, `skew`, `font`, `intensity` ; `null` =
+  automatique), `DELETE /bubbles/{id}`.
+- Export : PNG (halo, contour, remplissage, transformés) et SVG (`<g transform="translate rotate
+  skewX">` + `<text>` : le texte reste sélectionnable, police réduite embarquée).
 
 ### Polices disponibles
 
