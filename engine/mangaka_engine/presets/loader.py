@@ -56,6 +56,7 @@ class LoadedWorkflow:
     preset: WorkflowPreset
     workflow: dict[str, Any]
     source: Path
+    preset_path: Path | None = None  # YAML du preset
 
 
 @dataclass
@@ -151,6 +152,13 @@ class PresetRegistry:
             if wf is not None:
                 reg._register(reg.workflows, wf.preset.id, wf, path)
 
+        reg._check_reference_pairs()
+        # Ordre des listes déroulantes : texte → image d'abord, puis avec références ; par nom ensuite
+        # (« … · Qualité » avant « … · Rapide »).
+        reg.workflows = dict(
+            sorted(reg.workflows.items(), key=lambda kv: (bool(kv[1].preset.reference_images), kv[1].preset.name))
+        )
+
         for path in sorted((root / "layouts").glob("*.y*ml")):
             lib = reg._parse(path, LayoutTemplateFile)
             for tpl in lib.templates if lib else []:
@@ -234,6 +242,25 @@ class PresetRegistry:
             reg.issues.append(PresetIssue(reg._rel(defaults_path), "fichier absent"))
         return reg
 
+    def _check_reference_pairs(self) -> None:
+        """`with_references` doit désigner un workflow chargé qui a des emplacements de référence.
+
+        Le workflow reste chargé (ses cases sans référence se génèrent), mais une case avec
+        références échouera avec un message clair : jamais de repli sur un autre palier.
+        """
+        for wf in self.workflows.values():
+            target = wf.preset.with_references
+            if target is None:
+                continue
+            other = self.workflows.get(target)
+            if other is None:
+                problem = f"with_references : workflow inconnu ou invalide : {target}"
+            elif not other.preset.reference_images:
+                problem = f"with_references : le workflow {target} n'a pas d'emplacement de référence"
+            else:
+                continue
+            self.issues.append(PresetIssue(self._rel(wf.preset_path or wf.source), problem))
+
     def _rel(self, path: Path) -> str:
         try:
             return str(path.relative_to(self.root))
@@ -280,7 +307,7 @@ class PresetRegistry:
         if errors:
             self.issues.append(PresetIssue(self._rel(path), " ; ".join(errors)))
             return None
-        return LoadedWorkflow(preset=preset, workflow=workflow, source=json_path)
+        return LoadedWorkflow(preset=preset, workflow=workflow, source=json_path, preset_path=path)
 
 
 def check_workflow_mapping(preset: WorkflowPreset, workflow: Any) -> list[str]:

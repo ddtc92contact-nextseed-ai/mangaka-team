@@ -13,6 +13,8 @@ from mangaka_engine.config import REPO_ROOT, Settings
 from mangaka_engine.main import create_app
 
 PRESETS_DIR = REPO_ROOT / "presets"
+# Réponses enregistrées sur un vrai ComfyUI (GX10) : /object_info réduit, /system_stats, refus de /prompt.
+COMFY_FIXTURES = Path(__file__).parent / "fixtures" / "comfyui"
 
 
 @pytest.fixture

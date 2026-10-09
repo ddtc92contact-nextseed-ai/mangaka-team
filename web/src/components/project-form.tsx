@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState, type FormEvent } from "react";
-import { api, EngineError, errorMessage, type Project, type ProjectInput } from "@/lib/api";
+import { api, EngineError, errorMessage, type Presets, type Project, type ProjectInput } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
 import { Modal } from "./modal";
 import { DIRECTIONS, DirectionPicker } from "./reading-direction";
@@ -9,6 +9,18 @@ import { SERIES_STATUS } from "./status";
 import { Alert, Button, Field, Input, Select, Textarea } from "./ui";
 
 const DIRECTION_REQUIRED = "Choisis le sens de lecture : manga (droite → gauche) ou BD (gauche → droite).";
+
+/** Rappelle quel workflow du même palier sert aux cases avec images de référence. */
+function WorkflowHint({ presets, workflow }: { presets?: Presets["workflows"]; workflow: string }) {
+  const current = presets?.find((w) => w.id === workflow);
+  if (!current?.with_references) return null;
+  const refs = presets?.find((w) => w.id === current.with_references);
+  return (
+    <p className="mt-1 text-xs text-zinc-500">
+      Cases avec images de référence : {refs?.name ?? `${current.with_references} (preset introuvable)`}
+    </p>
+  );
+}
 
 export function ProjectForm({
   initial,
@@ -191,6 +203,7 @@ export function ProjectForm({
               <option value={workflow}>{workflow} (preset introuvable)</option>
             )}
           </Select>
+          <WorkflowHint presets={presets.data?.workflows} workflow={workflow} />
         </Field>
       </div>
       <div className="flex justify-end">

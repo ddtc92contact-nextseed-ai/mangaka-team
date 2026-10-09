@@ -13,10 +13,24 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from . import __version__
-from .api import chapters, characters, generation, jobs, knowledge, lettering, projects, qc, qc_bench, system
+from .api import (
+    chapters,
+    characters,
+    comfyui,
+    generation,
+    jobs,
+    knowledge,
+    lettering,
+    projects,
+    qc,
+    qc_bench,
+    system,
+)
 from .api.deps import AppContext
 from .api.errors import install_error_handlers
 from .config import Settings, get_settings
+from .pipeline.comfy_trial import STEP as TRIAL_STEP
+from .pipeline.comfy_trial import TrialExecutor
 from .pipeline.generation import STEP as GENERATION_STEP
 from .pipeline.generation import GenerationExecutor, describe_error, recover_states
 from .pipeline.jobs import JobRunner
@@ -84,6 +98,16 @@ def build_context(settings: Settings, providers: Providers | None = None) -> App
     queue.add_step(
         QC_BENCH_STEP, QueueStep(execute=QCBenchExecutor(db, presets, qc_executor), describe_error=describe_qc_error)
     )
+    # La case d'essai aussi : une vraie génération, jamais en parallèle d'une autre.
+    trial = TrialExecutor(
+        db,
+        presets,
+        files,
+        providers.comfyui,
+        comfyui_error=providers.errors.get("comfyui"),
+        poll_s=settings.comfyui_poll_s,
+    )
+    queue.add_step(TRIAL_STEP, QueueStep(execute=trial, describe_error=describe_error, interrupt=trial.interrupt))
     queue.start()
     return AppContext(
         settings=settings,
@@ -114,6 +138,7 @@ def create_app(settings: Settings | None = None, providers: Providers | None = N
     app.include_router(system.router)
     app.include_router(projects.router)
     app.include_router(characters.router)
+    app.include_router(comfyui.router)
     app.include_router(chapters.router)
     app.include_router(jobs.router)
     app.include_router(generation.router)

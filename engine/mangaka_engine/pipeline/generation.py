@@ -119,16 +119,29 @@ def build_panel_prompt(
 def resolve_preset_id(
     presets: PresetRegistry, panel: Panel, characters: Sequence[Character], requested: str | None = None
 ) -> str:
-    """Demande > preset de la case > workflow « avec références » si besoin > workflow de la série."""
+    """Demande > preset de la case > workflow « avec références » si besoin > workflow de la série.
+
+    Le workflow « avec références » est celui du palier de la série (`with_references` de son
+    preset) ; `defaults.workflow_with_references` ne sert qu'aux presets qui n'en déclarent pas.
+    """
     if requested:
         return requested
     if panel.generation_preset:
         return panel.generation_preset
+    series_id = panel.page.chapter.project.workflow_preset
+    if not any(c.reference_images for c in characters):
+        return series_id
+    series = presets.workflows.get(series_id)
+    if series is not None:
+        if series.preset.reference_images:
+            return series_id
+        if series.preset.with_references:
+            return series.preset.with_references
     defaults = presets.defaults
     with_refs = defaults.workflow_with_references if defaults else None
-    if with_refs and with_refs in presets.workflows and any(c.reference_images for c in characters):
+    if with_refs and with_refs in presets.workflows:
         return with_refs
-    return panel.page.chapter.project.workflow_preset
+    return series_id
 
 
 def panel_target(presets: PresetRegistry, page: Page, panel: Panel) -> dict[str, int] | None:
