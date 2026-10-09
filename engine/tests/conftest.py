@@ -29,6 +29,7 @@ def make_settings(tmp_path: Path) -> Callable[..., Settings]:
             "deepseek_model": None,
             "mangaka_data_dir": tmp_path / "data",
             "mangaka_presets_dir": PRESETS_DIR,
+            "mock_comfyui_seconds": 0,
         }
         values.update(overrides)
         return Settings(_env_file=None, **values)

@@ -118,3 +118,26 @@ def test_newer_database_is_refused(tmp_path: Path) -> None:
     con.close()
     with pytest.raises(MigrationError, match="plus récente"):
         create_db_engine(db)
+
+
+def test_v2_database_gets_generation_columns(make_settings: Callable[..., Settings]) -> None:
+    settings = make_settings()
+    _v1_db(settings.database_path, with_pages=True)
+    create_db_engine(settings.database_path).dispose()
+    # retour à un schéma v2 (avant la génération), avec un job existant
+    con = sqlite3.connect(settings.database_path)
+    con.execute("ALTER TABLE jobs DROP COLUMN params")
+    con.execute("ALTER TABLE panels DROP COLUMN final_prompt_manual")
+    con.execute(
+        "INSERT INTO jobs (id, step, status, progress, message, created_at) VALUES (5, 'script', 'succeeded', 100, '', ?)",
+        (NOW,),
+    )
+    con.execute("PRAGMA user_version = 2")
+    con.commit()
+    con.close()
+
+    with TestClient(create_app(settings)) as c:
+        assert c.get("/jobs/5").json()["params"] == {}
+        panel = c.get("/panels/3").json()
+        assert panel["final_prompt_manual"] is False and panel["images"] == []
+    assert _version(settings.database_path) == SCHEMA_VERSION == 3
