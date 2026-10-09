@@ -3,11 +3,20 @@
 import { useState } from "react";
 import { useQueue } from "@/components/queue";
 import { Alert, Button, Field, Input, Loading, ProgressBar, Select, Textarea } from "@/components/ui";
-import { api, fullErrorMessage, type GenerateInput, type PanelImage, type WorkflowPreset } from "@/lib/api";
+import {
+  api,
+  fullErrorMessage,
+  type GenerateInput,
+  type PanelImage,
+  type QCStatus,
+  type VisionMode,
+  type WorkflowPreset,
+} from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
 import { MAX_VARIANTS, PANEL_STATE, formatDuration, isValidSeed } from "@/lib/generation";
 import { useJob } from "@/lib/jobs";
 import type { PanelView } from "./page-canvas";
+import { PanelQC } from "./panel-qc";
 import { VersionsStrip } from "./versions";
 
 /** Panneau latéral d'une case : contenu, prompt final, réglages de génération, progression, versions. */
@@ -15,6 +24,7 @@ export function PanelInspector({
   panelId,
   view,
   presets,
+  qcStatus,
   refreshKey,
   onClose,
   onChanged,
@@ -22,6 +32,7 @@ export function PanelInspector({
   panelId: number;
   view: PanelView | null;
   presets: WorkflowPreset[] | null;
+  qcStatus: QCStatus | null;
   refreshKey: number;
   onClose: () => void;
   onChanged: () => void;
@@ -102,6 +113,23 @@ export function PanelInspector({
   }
   const cancelJob = (jobId: number) => run(() => cancel(jobId));
 
+  const runQC = (vision: VisionMode, image?: PanelImage) =>
+    run(async () => {
+      await api.runPanelQC(panelId, { vision, ...(image ? { image_id: image.id } : {}) });
+      refresh();
+      onChanged();
+      setNotice(vision === "force" ? "Contrôle avec la vision mis en file." : "Contrôle qualité mis en file.");
+    });
+  const overrideQC = (img: PanelImage) =>
+    run(async () => {
+      const updated = await api.overrideQC(img.id);
+      if (d) detail.setData({ ...d, images: d.images.map((i) => (i.id === updated.id ? updated : i)) });
+      onChanged();
+      setNotice("Version validée à la main (décision tracée dans le QC).");
+    });
+
+  const qcImage = chosen ?? (d?.images.length ? d.images[d.images.length - 1] : null);
+
   const resolvedName = presets?.find((p) => p.id === d?.resolved_preset)?.name ?? d?.resolved_preset ?? "—";
   const hasImages = (d?.images.length ?? 0) > 0;
 
@@ -119,7 +147,13 @@ export function PanelInspector({
           </h2>
           {d && (
             <p className="mt-0.5 text-xs text-zinc-400">
-              {running ? `Génération ${live?.progress ?? running.job.progress} %` : pending.length ? "En file" : PANEL_STATE[d.state] ?? d.state}
+              {running
+                ? `Génération ${live?.progress ?? running.job.progress} %`
+                : pending.length
+                  ? "En file"
+                  : view?.qc
+                    ? "Contrôle qualité…"
+                    : (PANEL_STATE[d.state] ?? d.state)}
               {d.target && ` · ${d.target.width} × ${d.target.height} px`}
             </p>
           )}
@@ -299,6 +333,15 @@ export function PanelInspector({
               Même seed
             </Button>
           </div>
+
+          <PanelQC
+            image={qcImage}
+            job={view?.qc ?? null}
+            status={qcStatus}
+            busy={busy}
+            onRun={(vision) => runQC(vision, qcImage ?? undefined)}
+            onOverride={overrideQC}
+          />
 
           <div className="space-y-2">
             <h3 className="text-sm font-medium text-zinc-300">

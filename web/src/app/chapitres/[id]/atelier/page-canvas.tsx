@@ -2,7 +2,9 @@
 
 import { useImperativeHandle, useRef, type KeyboardEvent, type Ref } from "react";
 import { engineUrl, type Job, type LayoutPanel, type PageData, type PanelData, type QueueItem } from "@/lib/api";
+import { DetectionOverlay, QCBadge } from "@/components/qc";
 import { PANEL_STATE } from "@/lib/generation";
+import { needsReview } from "@/lib/qc";
 
 /** Ce que montre une case de l'atelier, d'après la page, la file d'attente et le dernier job. */
 export interface PanelView {
@@ -10,6 +12,8 @@ export interface PanelView {
   running: QueueItem | null;
   pending: QueueItem[];
   failure: Job | null;
+  /** Contrôle qualité en cours ou en attente pour cette case. */
+  qc: QueueItem | null;
 }
 
 export type ArrowDir = "left" | "right" | "up" | "down";
@@ -46,12 +50,18 @@ export function PageCanvas({
   views,
   selectedPanelId,
   onOpen,
+  showBoxes = false,
+  onlyReview = false,
   ref,
 }: {
   page: PageData;
   views: Map<number, PanelView>;
   selectedPanelId: number | null;
   onOpen: (panelId: number) => void;
+  /** Superpose les boîtes détectées par le QC (visages, mains, texte). */
+  showBoxes?: boolean;
+  /** Filtre « seulement les cases à revoir » : les autres cases sont estompées. */
+  onlyReview?: boolean;
   ref?: Ref<PageCanvasHandle>;
 }) {
   const buttons = useRef(new Map<number, HTMLButtonElement>());
@@ -89,13 +99,22 @@ export function PageCanvas({
         const running = view?.running ?? null;
         const queued = !running && (view?.pending.length ?? 0) > 0;
         const failure = !running && !queued ? (view?.failure ?? null) : null;
+        const checking = !running && !queued && view?.qc ? view.qc : null;
+        const dimmed = onlyReview && !needsReview(panel) && !selected;
         const stateLabel = running
           ? `Génération ${running.job.progress} %`
           : queued
             ? "En file"
             : failure
               ? "Échec"
-              : PANEL_STATE[panel.state] ?? panel.state;
+              : checking
+                ? checking.job.status === "running"
+                  ? "Contrôle qualité…"
+                  : "QC en file"
+                : PANEL_STATE[panel.state] ?? panel.state;
+        const qcLabel = panel.qc_verdict
+          ? ` — QC ${panel.qc_verdict === "ok" ? "ok" : panel.qc_verdict === "review" ? "à revoir" : "rejet"}${panel.qc_score !== null ? ` (${panel.qc_score}/100)` : ""}`
+          : "";
         return (
           <button
             key={lp.index}
@@ -107,12 +126,13 @@ export function PageCanvas({
             onClick={() => onOpen(panel.id)}
             onKeyDown={(e) => onKeyDown(e, lp)}
             aria-pressed={selected}
-            aria-label={`Case ${panel.index + 1} — ${stateLabel}${panel.shot_type ? ` — ${panel.shot_type}` : ""}`}
+            aria-label={`Case ${panel.index + 1} — ${stateLabel}${qcLabel}${panel.shot_type ? ` — ${panel.shot_type}` : ""}`}
             data-testid="workshop-panel"
             data-state={running ? "generating" : queued ? "queued" : failure ? "failed" : panel.state}
-            className={`group absolute overflow-hidden bg-white transition-shadow focus-visible:z-20 focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-sky-400 ${
+            data-qc={panel.qc_verdict ?? "none"}
+            className={`group absolute overflow-hidden bg-white transition-[box-shadow,opacity] focus-visible:z-20 focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-sky-400 ${
               selected ? "z-10 ring-4 ring-rose-500" : "ring-2 ring-zinc-900 hover:ring-4 hover:ring-rose-300"
-            }`}
+            } ${dimmed ? "opacity-30 hover:opacity-70 focus-visible:opacity-100" : ""}`}
             style={{
               left: pct(lp.x1, W),
               top: pct(lp.y1, H),
@@ -128,6 +148,14 @@ export function PageCanvas({
                 className={`h-full w-full object-cover ${running || queued ? "opacity-60" : ""}`}
                 draggable={false}
               />
+            ) : null}
+            {panel.selected_image_url && showBoxes && panel.detections ? (
+              <DetectionOverlay detections={panel.detections} fit="cover" />
+            ) : null}
+            {panel.selected_image_url ? (
+              <span className="absolute right-1 top-1">
+                <QCBadge verdict={panel.qc_verdict} score={panel.qc_score} override={panel.qc_override} />
+              </span>
             ) : (
               <span className="flex h-full w-full flex-col items-center justify-center gap-1 bg-zinc-200 p-1 text-center text-zinc-600 [background-image:repeating-linear-gradient(45deg,transparent_0_10px,rgba(0,0,0,0.035)_10px_20px)]">
                 <span className="text-lg font-bold leading-none text-zinc-800">{panel.index + 1}</span>
@@ -138,7 +166,7 @@ export function PageCanvas({
             {panel.selected_image_url && (
               <span className="absolute left-1 top-1 rounded bg-zinc-950/80 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-100">
                 {panel.index + 1}
-                {(running || queued || failure || panel.state === "review") && (
+                {(running || queued || failure || checking || panel.state === "review") && (
                   <span className="ml-1 font-normal text-zinc-300">· {stateLabel}</span>
                 )}
               </span>

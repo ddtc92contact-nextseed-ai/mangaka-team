@@ -8,10 +8,12 @@ import { queueItems, useQueue } from "@/components/queue";
 import { Alert, Button, ButtonLink, Card, EmptyState, Loading, Select } from "@/components/ui";
 import { api, fullErrorMessage, type Job, type PageData } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
+import { needsReview } from "@/lib/qc";
 import { PAGE_KINDS } from "@/lib/script";
 import { useChapter } from "../chapter-context";
 import { PageCanvas, type PageCanvasHandle, type PanelView } from "./page-canvas";
 import { PanelInspector } from "./panel-inspector";
+import { QCToolbar } from "./qc-toolbar";
 
 export default function WorkshopRoute() {
   return (
@@ -31,6 +33,9 @@ function Workshop() {
   const pages = useEngineData(() => api.listPages(chapter.id), [chapter.id, finished]);
   const jobs = useEngineData(() => api.chapterJobs(chapter.id, "generation"), [chapter.id, finished]);
   const presets = useEngineData(() => api.workflowPresets());
+  const qcStatus = useEngineData(() => api.qcStatus());
+  const [onlyReview, setOnlyReview] = useState(false);
+  const [showBoxes, setShowBoxes] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -65,13 +70,14 @@ function Workshop() {
     const map = new Map<number, PanelView>();
     for (const p of list) {
       for (const panel of p.panels) {
-        const mine = items.filter((i) => i.panel_id === panel.id);
+        const mine = items.filter((i) => i.panel_id === panel.id && i.job.step !== "qc");
         const last = latest.get(panel.id);
         map.set(panel.id, {
           panel,
           running: mine.find((i) => i.job.status === "running") ?? null,
           pending: mine.filter((i) => i.job.status === "pending"),
           failure: last?.status === "failed" ? last : null,
+          qc: items.find((i) => i.panel_id === panel.id && i.job.step === "qc") ?? null,
         });
       }
     }
@@ -137,8 +143,11 @@ function Workshop() {
     );
 
   const index = list.indexOf(page);
-  const prev = list[index - 1];
-  const next = list[index + 1];
+  // Filtre « à revoir » : les flèches sautent aux pages qui ont des cases à revoir.
+  const browsable = onlyReview ? list.filter((p) => p === page || p.panels.some(needsReview)) : list;
+  const at = browsable.indexOf(page);
+  const prev = at >= 0 ? browsable[at - 1] : list[index - 1];
+  const next = at >= 0 ? browsable[at + 1] : list[index + 1];
   const missing = missingPanels([page]).length;
   const done = page.panels.filter((p) => p.selected_image_id !== null).length;
 
@@ -158,13 +167,15 @@ function Workshop() {
             value={page.id}
             onChange={(e) => navigate(Number(e.target.value), null)}
           >
-            {list.map((p) => {
+            {browsable.map((p) => {
               const ready = p.panels.filter((pa) => pa.selected_image_id !== null).length;
+              const toReview = p.panels.filter(needsReview).length;
               return (
                 <option key={p.id} value={p.id}>
                   Page {p.number}
                   {p.kind !== "story" ? ` (${PAGE_KINDS[p.kind].toLowerCase()})` : ""} — {ready}/{p.panels.length} case
                   {p.panels.length > 1 ? "s" : ""}
+                  {toReview ? ` · ${toReview} à revoir` : ""}
                   {!p.layout && p.panels.length ? " · sans mise en page" : ""}
                 </option>
               );
@@ -199,6 +210,21 @@ function Workshop() {
       {notice && !error && <Alert tone="info">{notice}</Alert>}
       {jobs.error && <Alert>Historique des générations indisponible : {jobs.error}</Alert>}
 
+      <QCToolbar
+        chapterId={chapter.id}
+        pages={list}
+        status={qcStatus.data}
+        onlyReview={onlyReview}
+        onOnlyReview={setOnlyReview}
+        showBoxes={showBoxes}
+        onShowBoxes={setShowBoxes}
+        onOpenPanel={(pageId, panelId) => navigate(pageId, panelId)}
+        onChanged={() => {
+          pages.reload();
+          jobs.reload();
+        }}
+      />
+
       <div className={`grid gap-6 ${openPanelId ? "lg:grid-cols-[minmax(0,1fr)_24rem]" : ""}`}>
         <div className="min-w-0">
           {!page.panels.length ? (
@@ -224,7 +250,15 @@ function Workshop() {
                   <Alert tone="info">Mise en page obsolète : recalcule-la dans « Mise en page » pour des tailles justes.</Alert>
                 </div>
               )}
-              <PageCanvas ref={canvasRef} page={page} views={views} selectedPanelId={openPanelId} onOpen={open} />
+              <PageCanvas
+                ref={canvasRef}
+                page={page}
+                views={views}
+                selectedPanelId={openPanelId}
+                onOpen={open}
+                showBoxes={showBoxes}
+                onlyReview={onlyReview}
+              />
               <p className="mt-3 text-center text-xs text-zinc-500">
                 Clique sur une case (ou flèches puis Entrée) pour la générer et choisir sa version · Échap ferme le panneau.
               </p>
@@ -238,6 +272,7 @@ function Workshop() {
               panelId={openPanelId}
               view={views.get(openPanelId) ?? null}
               presets={presets.data}
+              qcStatus={qcStatus.data}
               refreshKey={finished}
               onClose={close}
               onChanged={() => {

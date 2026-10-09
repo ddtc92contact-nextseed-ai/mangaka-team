@@ -89,7 +89,95 @@ export interface PanelData {
   image_count: number;
   selected_image_id: number | null;
   selected_image_url: string | null;
+  /** QC de la version choisie (null : pas encore contrôlée). */
+  qc_verdict: QCVerdict | null;
+  qc_score: number | null;
+  qc_reasons: string[];
+  qc_override: boolean;
+  detections: Detections | null;
 }
+
+export type QCVerdict = "ok" | "review" | "reject";
+export type QCLayerName = "detectors" | "identity" | "vision";
+
+/** Boîte détectée, en px de l'image générée. */
+export interface DetectionBox {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  score: number;
+  label: string;
+}
+
+export interface Detections {
+  width: number;
+  height: number;
+  faces: DetectionBox[];
+  hands: DetectionBox[];
+  text: DetectionBox[];
+  provider?: string | null;
+}
+
+export interface QCLayer {
+  status: "done" | "skipped" | "unavailable" | "error";
+  score: number | null;
+  reasons: string[];
+  at_least: QCVerdict | null;
+  message: string | null;
+  duration_ms: number;
+  provider: string | null;
+  characters?: { name: string; similarity: number; score: number; ok: boolean }[];
+  without_references?: string[];
+  counts?: { faces: number; hands: number; text: number };
+  expected_faces?: number;
+  attempts?: number;
+  why?: string;
+}
+
+/** Détail du dernier QC d'une version. */
+export interface QCDetails {
+  verdict?: QCVerdict;
+  score?: number;
+  computed_verdict?: QCVerdict;
+  source?: "auto" | "manual" | "human";
+  attempt?: number;
+  at?: string;
+  duration_ms?: number;
+  layers?: Partial<Record<QCLayerName, QCLayer>>;
+  override?: { verdict: "ok"; by: string; at: string; previous_verdict: QCVerdict | null; previous_score: number | null; note: string | null } | null;
+  history?: { verdict: QCVerdict | null; score: number | null; source: string | null; at: string | null; override?: boolean }[];
+  auto_retry?: { attempt: number; job_id?: number; error?: string };
+}
+
+export interface QCStatus {
+  available: boolean;
+  detail: string | null;
+  auto_after_generation: boolean;
+  max_auto_retries: number;
+  ok_min: number | null;
+  reject_below: number | null;
+  vision_mode: string | null;
+  layers: Record<QCLayerName, { provider: string | null; available: boolean; detail: string | null }>;
+}
+
+export interface QCSummary {
+  ok: number;
+  review: number;
+  reject: number;
+  unchecked: number;
+  no_image: number;
+  total: number;
+}
+
+export interface ChapterQCResult {
+  job: Job | null;
+  panel_ids: number[];
+  skipped: number;
+  summary: QCSummary;
+}
+
+export type VisionMode = "auto" | "force" | "skip";
 
 export type PanelState = "draft" | "queued" | "generating" | "review" | "qc" | "flagged" | "approved";
 
@@ -196,6 +284,9 @@ export interface PanelImage {
   };
   qc_score: number | null;
   qc_reasons: string[];
+  qc_verdict: QCVerdict | null;
+  qc: QCDetails;
+  detections: Detections | null;
   created_at: string;
 }
 
@@ -320,7 +411,10 @@ export interface Health {
     queue_pending: number;
     detail: string | null;
   };
-  providers: Record<"llm" | "vision" | "comfyui", { name: string | null; ok: boolean; detail: string | null }>;
+  providers: Record<
+    "llm" | "vision" | "comfyui" | "detectors" | "identity",
+    { name: string | null; ok: boolean; detail: string | null }
+  >;
   mock: boolean;
   presets: { page_formats: number; workflows: number; issues: number };
 }
@@ -467,6 +561,15 @@ export const api = {
     request<BatchGenerateResult>(`/chapters/${id}/generate`, json("POST", body)),
   selectPanelImage: (id: number) => request<PanelImage[]>(`/panel-images/${id}/select`, { method: "POST" }),
   deletePanelImage: (id: number) => request<void>(`/panel-images/${id}`, { method: "DELETE" }),
+
+  qcStatus: () => request<QCStatus>("/qc/status"),
+  runPanelQC: (id: number, body: { image_id?: number; vision?: VisionMode } = {}) =>
+    request<Job>(`/panels/${id}/qc`, json("POST", body)),
+  runChapterQC: (id: number, body: { force?: boolean; vision?: VisionMode } = {}) =>
+    request<ChapterQCResult>(`/chapters/${id}/qc`, json("POST", body)),
+  chapterQC: (id: number) => request<QCSummary>(`/chapters/${id}/qc`),
+  overrideQC: (imageId: number, note?: string) =>
+    request<PanelImage>(`/panel-images/${imageId}/qc/override`, json("POST", note ? { note } : {})),
 };
 
 export function errorMessage(err: unknown): string {

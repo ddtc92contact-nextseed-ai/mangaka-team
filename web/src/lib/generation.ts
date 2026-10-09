@@ -5,10 +5,10 @@ export const PANEL_STATE: Record<PanelState, string> = {
   draft: "Brouillon",
   queued: "En file",
   generating: "Génération",
-  review: "À revoir",
-  qc: "Contrôle",
-  flagged: "Signalée",
-  approved: "Validée",
+  review: "Générée",
+  qc: "Contrôle qualité",
+  flagged: "À revoir (QC)",
+  approved: "QC ok",
 };
 
 export const MAX_VARIANTS = 4;
