@@ -40,6 +40,13 @@ desktop_dir() {
   printf '%s' "$dir"
 }
 
+# Met à jour le cache du menu des applications (facultatif).
+refresh_menu() {
+  if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database "$APPS_DIR" 2>/dev/null || true
+  fi
+}
+
 # Argument de la clé Exec (spécification Desktop Entry) : entre guillemets, avec " ` $ \
 # échappés, puis les \ doublés pour la chaîne du fichier.
 exec_arg() {
@@ -84,7 +91,7 @@ do_uninstall() {
       say "supprimé : $f"
     fi
   done
-  command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$APPS_DIR" 2>/dev/null || true
+  refresh_menu
   say "icône désinstallée"
 }
 
@@ -106,7 +113,7 @@ do_install() {
   mkdir -p "$APPS_DIR"
   install -m 0755 "$tmp" "$APPS_DIR/$FILE_NAME"
   say "menu des applications : $APPS_DIR/$FILE_NAME"
-  command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$APPS_DIR" 2>/dev/null || true
+  refresh_menu
 
   desk="$(desktop_dir)"
   if [[ "$desk" == "$HOME" || "$desk" == "$HOME/" ]]; then

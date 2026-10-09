@@ -99,7 +99,7 @@ wait_healthy() {
 ollama_up() { [[ "$(http_code "$OLLAMA_URL/api/version")" == 200 ]]; }
 comfyui_up() { [[ "$(http_code "$COMFYUI_URL/system_stats")" == 200 ]]; }
 APP_URL="http://127.0.0.1:$PORT"
-# shellcheck disable=SC2329 # appelée via wait_healthy
+# shellcheck disable=SC2317,SC2329 # appelée via wait_healthy
 app_up() { [[ "$(http_code "$APP_URL/" 10)" != 000 ]]; }
 # Une page qui répond sur le port est-elle bien la nôtre (lancée à la main avec npm run dev) ?
 app_is_ours() { http_body "$APP_URL/" 30 | grep -q "mangaka-team"; }
