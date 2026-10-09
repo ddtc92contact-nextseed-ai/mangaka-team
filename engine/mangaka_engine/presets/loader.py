@@ -9,6 +9,7 @@ Arborescence attendue :
       image_prompt.yaml        # construction du prompt final des cases (étape 3)
       fonts.yaml + fonts/      # polices de lettrage (OFL) et style de texte par type de bulle
       lettering.yaml           # formes et placement des bulles, assemblage, repères de coupe
+      qc.yaml                  # contrôle qualité des cases (étape 4) : seuils, poids, règles
       page_formats/*.yaml      # formats de page
       layouts/*.yaml           # gabarits de planche
       prompts/*.yaml           # prompts des étapes LLM
@@ -39,6 +40,7 @@ from .schemas import (
     PageFormat,
     PromptPreset,
     ProvidersPreset,
+    QCSettings,
     WorkflowPreset,
 )
 
@@ -72,6 +74,7 @@ class PresetRegistry:
     fonts: FontsPreset | None = None
     lettering: LetteringSettings = field(default_factory=LetteringSettings)
     providers: ProvidersPreset | None = None
+    qc: QCSettings | None = None
     defaults: Defaults | None = None
     issues: list[PresetIssue] = field(default_factory=list)
 
@@ -111,6 +114,11 @@ class PresetRegistry:
             return (self.root / fonts.fonts[font_id].file).resolve()
         except KeyError:
             raise PresetError(f"police inconnue : « {font_id} »") from None
+
+    def require_qc(self) -> QCSettings:
+        if self.qc is None:
+            raise PresetError("presets/qc.yaml absent ou invalide : contrôle qualité indisponible")
+        return self.qc
 
     def require_providers(self) -> ProvidersPreset:
         if self.providers is None:
@@ -178,6 +186,12 @@ class PresetRegistry:
             lettering = reg._parse(lettering_path, LetteringSettings)
             if lettering is not None:
                 reg.lettering = lettering
+
+        qc_path = root / "qc.yaml"
+        if qc_path.exists():
+            reg.qc = reg._parse(qc_path, QCSettings)
+        else:
+            reg.issues.append(PresetIssue(reg._rel(qc_path), "fichier absent : contrôle qualité indisponible"))
 
         providers_path = root / "providers.yaml"
         if providers_path.exists():

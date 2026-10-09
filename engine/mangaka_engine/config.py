@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     llm_provider: str | None = None
     vision_provider: str | None = None
     comfyui_provider: str | None = None
+    # Contrôle qualité : détecteurs (visages/mains/texte) et cohérence des personnages (CCIP).
+    qc_detectors_provider: str | None = None
+    qc_identity_provider: str | None = None
 
     deepseek_api_key: SecretStr | None = None
     deepseek_base_url: str | None = None
@@ -34,6 +37,9 @@ class Settings(BaseSettings):
 
     # Mode mock : nombre de réponses invalides du LLM factice avant une réponse valide (test des relances).
     mock_llm_invalid_attempts: int = 0
+    # Mode mock : score de la couche vision factice et nombre de réponses invalides avant une valide.
+    mock_vision_score: int = 80
+    mock_vision_invalid_attempts: int = 0
 
     comfyui_url: str = "http://127.0.0.1:8188"
     comfyui_timeout_s: float = 5.0  # par requête HTTP ; la durée max d'une génération est dans le preset

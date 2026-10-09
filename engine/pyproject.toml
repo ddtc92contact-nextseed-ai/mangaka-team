@@ -23,6 +23,11 @@ dev = [
   "pytest>=8.2",
   "ruff>=0.6",
 ]
+# Contrôle qualité réel (détecteurs anime ONNX + CCIP de deepghs, CPU). Optionnel : sans lui,
+# le moteur démarre et l'atelier affiche « détecteurs non installés ».
+qc = [
+  "dghs-imgutils>=0.19",
+]
 
 [build-system]
 requires = ["setuptools>=69"]

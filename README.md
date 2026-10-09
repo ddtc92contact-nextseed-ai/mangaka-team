@@ -59,6 +59,26 @@ ComfyUI éteint → « ComfyUI hors ligne (127.0.0.1:8188) » immédiatement, ja
 « en cours ». La progression arrive par le websocket de ComfyUI (`/ws`), avec repli sur un
 sondage de `/history`.
 
+### Contrôle qualité réel (étape 4)
+
+Le QC tourne en mock sans rien installer. Pour les vraies couches sur la GX10 :
+
+```bash
+# 1. Détecteurs visages / mains / texte + cohérence des personnages (deepghs, CPU, ARM64 OK)
+engine/.venv/bin/pip install -e "engine[qc]"
+#    Les modèles ONNX sont téléchargés depuis Hugging Face au premier contrôle, puis mis en cache
+#    (~/.cache/huggingface).
+
+# 2. Vision « la case colle-t-elle à sa description ? » (Ollama local)
+ollama pull qwen3-vl:4b
+```
+
+Puis dans `.env` : `QC_DETECTORS_PROVIDER=dghs`, `QC_IDENTITY_PROVIDER=dghs`,
+`VISION_PROVIDER=ollama` (URL et modèle dans `presets/providers.yaml`, `keep_alive: 0` : le modèle
+est déchargé aussitôt pour rendre la mémoire à ComfyUI). Sans l'extra `qc`, le moteur démarre quand
+même : l'atelier affiche « détecteurs non installés » et le QC continue avec les couches restantes.
+Seuils, poids et règles : [`presets/qc.yaml`](presets/README.md#contrôle-qualité-qcyaml).
+
 Redémarre `npm run dev`. Le tableau de bord affiche l'état de chaque fournisseur ; une
 configuration incomplète (ex. clé absente) y apparaît en rouge sans empêcher le moteur de démarrer.
 
@@ -69,7 +89,10 @@ configuration incomplète (ex. clé absente) y apparaît en rouge sans empêcher
 | `PORT` | `3000` | Port de l'interface web |
 | `ENGINE_PORT` | `8765` | Port du moteur (joint par l'UI via le proxy `/api/engine`) |
 | `LLM_PROVIDER` | `mock` | `deepseek` ou `mock` (`ollama`, `claude` : prévus) |
-| `VISION_PROVIDER` | `mock` | `mock` (`deepseek`, `ollama` : jalon 3) |
+| `VISION_PROVIDER` | `mock` | Couche vision du QC : `ollama` (Qwen3-VL 4B) ou `mock` (DeepSeek n'accepte pas d'images) |
+| `QC_DETECTORS_PROVIDER` | `mock` | Couche détecteurs du QC : `dghs` (extra `engine[qc]`) ou `mock` |
+| `QC_IDENTITY_PROVIDER` | `mock` | Couche cohérence des personnages (CCIP) : `dghs` (extra `engine[qc]`) ou `mock` |
+| `MOCK_VISION_SCORE` / `MOCK_VISION_INVALID_ATTEMPTS` | `80` / `0` | Mode mock : score de la vision factice, nombre de réponses invalides avant une valide (test des relances) |
 | `COMFYUI_PROVIDER` | `mock` | `http` ou `mock` |
 | `COMFYUI_URL` | `http://127.0.0.1:8188` | Adresse de ComfyUI |
 | `COMFYUI_TIMEOUT_S` | `5` | Délai d'une requête HTTP vers ComfyUI (la durée max d'une génération est `timeout_s` du preset de workflow) |
@@ -142,6 +165,40 @@ personnage, chaînés dans cet ordre avec leurs poids. Taille : celle calculée 
 `generating` puis `review` quand toutes ses cases ont une version ; le chapitre passe en
 « génération ». Au redémarrage du moteur, les générations en cours ou en attente sont marquées
 en échec (« Interrompu par un redémarrage du moteur ») et les états recalculés.
+
+### Contrôle qualité (étape 4)
+
+Objectif : produire beaucoup de cases et **ne relire que les douteuses**. Trois couches, réglées
+uniquement dans `presets/qc.yaml` (validé au chargement, aucun seuil dans le code) :
+
+1. **détecteurs** (rapide, CPU) : visages, mains, texte parasite (détecteurs anime ONNX deepghs).
+   Règles : moins de visages que de personnages → à revoir ; texte détecté → rejet ; main détectée
+   à faible confiance → pénalité… Les boîtes sont gardées par version (`detections`, en px de
+   l'image) pour que le lettrage évite les visages ;
+2. **cohérence des personnages** : similarité CCIP entre la case et les images de référence de
+   chaque fiche, seuil dans le preset ;
+3. **vision** (lente) : Qwen3-VL 4B via Ollama, réponse JSON validée (score 0–100 + raisons ;
+   invalide → 1 nouvel essai → erreur lisible). Ne tourne que si les couches 1-2 hésitent (zone de
+   doute du preset) ou à la demande. Les jobs `qc` passent **par la file de la génération** : la
+   vision ne tourne jamais pendant une génération ComfyUI (et attend si ComfyUI a une file non vide).
+
+Score combiné = moyenne pondérée des couches qui ont tourné → `ok` / `review` (à revoir) / `reject`
+(rejet), durci par les règles. Après chaque génération (`auto_after_generation`), un QC automatique
+est mis en file ; un rejet relance une génération avec une nouvelle seed (`max_auto_retries`), puis
+la case est signalée « à revoir » (la meilleure version est choisie). Rien n'est supprimé.
+
+| Route | Rôle |
+| --- | --- |
+| `POST /panels/{id}/qc` | `{image_id?, vision?: "auto"\|"force"\|"skip"}` → `202` + job `qc` (version choisie par défaut). |
+| `POST /chapters/{id}/qc` | `{force?: false, vision?}` → `{job, panel_ids, skipped, summary}` : un job pour toutes les cases non contrôlées (toutes avec `force`), progression SSE. |
+| `GET /chapters/{id}/qc` | Compteurs `{ok, review, reject, unchecked, no_image, total}` (version choisie de chaque case). |
+| `POST /panel-images/{id}/qc/override` | « Valider quand même » : verdict forcé à `ok`, décision humaine tracée (`qc.override`, historique). |
+| `GET /qc/status` | Preset et fournisseur de chaque couche (« détecteurs non installés »…). |
+
+Chaque version porte `qc_verdict`, `qc_score`, `qc_reasons` (en français), `qc` (détail par couche :
+statut, score, durée en ms, raisons ; source auto / manuelle / humaine ; historique) et `detections`.
+États de case : `qc` pendant un contrôle, puis `approved` (QC ok) ou `flagged` (à revoir / rejet)
+d'après la version choisie.
 
 En mode mock, ComfyUI factice renvoie une image de la taille demandée avec « CASE n », la seed et
 la taille dessinées dessus, après une progression factice (`MOCK_COMFYUI_SECONDS`).

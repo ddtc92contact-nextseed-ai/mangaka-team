@@ -439,3 +439,125 @@ class ImagePromptSettings(_Strict):
             if unknown:
                 raise ValueError(f"variables inconnues : {', '.join(sorted(unknown))}")
         return value
+
+
+# --- Contrôle qualité (étape 4) -----------------------------------------------
+# Aucune valeur par défaut pour les seuils : tout est écrit dans presets/qc.yaml.
+Severity = Literal["review", "reject"]
+
+
+class QCRule(_Strict):
+    """Règle déclenchée : `penalty` points retirés au score de la couche ; `at_least` impose un verdict minimal."""
+
+    penalty: int = Field(ge=0, le=100)
+    at_least: Severity | None = None
+
+
+class QCExtraFaceRule(QCRule):
+    tolerance: int = Field(ge=0, le=20, description="Visages en trop tolérés")
+
+
+class QCHandRule(QCRule):
+    max_penalty: int = Field(ge=0, le=100, description="Plafond de pénalité pour l'ensemble des mains")
+
+
+class QCDetector(_Strict):
+    """Un détecteur : seuil de prise en compte des boîtes + options passées telles quelles au détecteur."""
+
+    min_confidence: float = Field(ge=0, le=1)
+    options: dict[str, Any] = Field(default_factory=dict)
+
+
+class QCHandDetector(QCDetector):
+    suspect_below: float = Field(ge=0, le=1, description="Main détectée sous cette confiance = suspecte")
+
+
+class QCDetectorRules(_Strict):
+    missing_face: QCRule
+    extra_face: QCExtraFaceRule
+    text: QCRule
+    suspect_hand: QCHandRule
+
+
+class QCDetectorsSettings(_Strict):
+    face: QCDetector
+    hand: QCHandDetector
+    text: QCDetector
+    rules: QCDetectorRules
+    # Types de plan où les visages peuvent légitimement manquer (insert, dos…) : pas de comptage.
+    face_count_ignored_for_shots: list[str] = Field(default_factory=list)
+
+
+class QCIdentitySettings(_Strict):
+    min_similarity: float = Field(ge=0, le=1)
+    below: QCRule
+    max_references: int = Field(ge=1, le=20, description="Images de référence comparées par personnage")
+    crop_scale: float = Field(ge=1, le=10, description="Agrandissement de la boîte du visage pour le recadrage")
+
+
+class QCScoreBand(_Strict):
+    min: int = Field(ge=0, le=100)
+    max: int = Field(ge=0, le=100)
+
+    @model_validator(mode="after")
+    def _check(self) -> QCScoreBand:
+        if self.min > self.max:
+            raise ValueError("min doit être inférieur ou égal à max")
+        return self
+
+
+class QCVisionSettings(_Strict):
+    # never : jamais automatiquement ; on_doubt : seulement si les couches 1-2 hésitent ; always : toujours.
+    mode: Literal["never", "on_doubt", "always"]
+    doubt_band: QCScoreBand
+    max_retries: int = Field(ge=0, le=3, description="Nouveaux essais après une réponse invalide")
+    wait_idle_s: float = Field(ge=0, description="Attente max de la fin d'une génération ComfyUI en cours")
+    max_reasons: int = Field(ge=1, le=20)
+    # Variables : $description, $characters, $shot.
+    prompt: str
+
+    @field_validator("prompt")
+    @classmethod
+    def _check_prompt(cls, value: str) -> str:
+        tpl = string.Template(value)
+        if not tpl.is_valid():
+            raise ValueError("gabarit invalide : un « $ » isolé doit s'écrire « $$ »")
+        unknown = set(tpl.get_identifiers()) - {"description", "characters", "shot"}
+        if unknown:
+            raise ValueError(f"variables inconnues : {', '.join(sorted(unknown))}")
+        return value
+
+
+class QCWeights(_Strict):
+    detectors: float = Field(ge=0)
+    identity: float = Field(ge=0)
+    vision: float = Field(ge=0)
+
+    @model_validator(mode="after")
+    def _check(self) -> QCWeights:
+        if self.detectors + self.identity + self.vision <= 0:
+            raise ValueError("au moins un poids doit être positif")
+        return self
+
+
+class QCVerdictThresholds(_Strict):
+    ok_min: int = Field(ge=0, le=100, description="Score à partir duquel la case est ok")
+    reject_below: int = Field(ge=0, le=100, description="Score sous lequel la case est rejetée")
+
+    @model_validator(mode="after")
+    def _check(self) -> QCVerdictThresholds:
+        if self.reject_below > self.ok_min:
+            raise ValueError("reject_below doit être inférieur ou égal à ok_min")
+        return self
+
+
+class QCSettings(_Strict):
+    """Contrôle qualité des cases (`presets/qc.yaml`) : seuils, poids, règles, nombre d'essais."""
+
+    auto_after_generation: bool
+    max_auto_retries: int = Field(ge=0, le=5)
+    verdict: QCVerdictThresholds
+    weights: QCWeights
+    detectors: QCDetectorsSettings
+    identity: QCIdentitySettings
+    vision: QCVisionSettings

@@ -128,6 +128,8 @@ def test_v2_database_gets_generation_columns(make_settings: Callable[..., Settin
     con = sqlite3.connect(settings.database_path)
     con.execute("ALTER TABLE jobs DROP COLUMN params")
     con.execute("ALTER TABLE panels DROP COLUMN final_prompt_manual")
+    for column in ("qc_verdict", "qc_details", "detections"):
+        con.execute(f"ALTER TABLE panel_images DROP COLUMN {column}")
     con.execute(
         "INSERT INTO jobs (id, step, status, progress, message, created_at) VALUES (5, 'script', 'succeeded', 100, '', ?)",
         (NOW,),
@@ -140,4 +142,27 @@ def test_v2_database_gets_generation_columns(make_settings: Callable[..., Settin
         assert c.get("/jobs/5").json()["params"] == {}
         panel = c.get("/panels/3").json()
         assert panel["final_prompt_manual"] is False and panel["images"] == []
-    assert _version(settings.database_path) == SCHEMA_VERSION == 3
+    assert _version(settings.database_path) == SCHEMA_VERSION == 4
+
+
+def test_v3_database_gets_qc_columns(make_settings: Callable[..., Settings]) -> None:
+    settings = make_settings()
+    _v1_db(settings.database_path, with_pages=True)
+    create_db_engine(settings.database_path).dispose()
+    # retour à un schéma v3 (avant le contrôle qualité), avec une version d'image existante
+    con = sqlite3.connect(settings.database_path)
+    for column in ("qc_verdict", "qc_details", "detections"):
+        con.execute(f"ALTER TABLE panel_images DROP COLUMN {column}")
+    con.execute(
+        "INSERT INTO panel_images (id, panel_id, version, path, params, qc_reasons, selected, created_at)"
+        " VALUES (1, 3, 1, 'x.png', '{}', '[]', 1, ?)",
+        (NOW,),
+    )
+    con.execute("PRAGMA user_version = 3")
+    con.commit()
+    con.close()
+
+    with TestClient(create_app(settings)) as c:
+        img = c.get("/panels/3").json()["images"][0]
+        assert img["qc_verdict"] is None and img["qc"] == {} and img["detections"] is None
+    assert _version(settings.database_path) == SCHEMA_VERSION

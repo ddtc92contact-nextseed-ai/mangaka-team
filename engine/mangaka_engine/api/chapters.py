@@ -82,6 +82,7 @@ def _one_out(session: Session, chapter: Chapter) -> ChapterOut:
 
 
 def page_out(page: Page) -> PageOut:
+    chosen = {p.id: next((i for i in p.images if i.selected), None) for p in page.panels}
     return PageOut(
         id=page.id,
         chapter_id=page.chapter_id,
@@ -111,6 +112,11 @@ def page_out(page: Page) -> PageOut:
                 image_count=len(p.images),
                 selected_image_id=next((i.id for i in p.images if i.selected), None),
                 selected_image_url=next((f"/panel-images/{i.id}/file" for i in p.images if i.selected), None),
+                qc_verdict=c.qc_verdict.value if (c := chosen[p.id]) and c.qc_verdict else None,
+                qc_score=c.qc_score if c else None,
+                qc_reasons=list(c.qc_reasons or []) if c else [],
+                qc_override=bool(c and (c.qc_details or {}).get("override")),
+                detections=c.detections if c else None,
             )
             for p in page.panels
         ],

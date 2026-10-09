@@ -218,3 +218,15 @@ def test_lettering_is_deterministic(letterer: Letterer) -> None:
     a = [b.to_json() for b in letterer.letter_panel(panel, "rtl").bubbles]
     b = [b.to_json() for b in letterer.letter_panel(panel, "rtl").bubbles]
     assert a == b
+
+
+def test_face_boxes_read_qc_detections() -> None:
+    """Les boîtes enregistrées par le QC (#10) dans `PanelImage.detections` sont évitées."""
+    from mangaka_engine.pipeline.render import face_boxes
+    from mangaka_engine.providers.qc.base import Box as QCBox
+    from mangaka_engine.providers.qc.base import Detections
+    from mangaka_engine.store.models import PanelImage
+
+    det = Detections(800, 600, faces=[QCBox(100, 50, 300, 250, 0.9, "face")], hands=[QCBox(1, 2, 30, 40, 0.8)])
+    img = PanelImage(params={}, detections=det.as_dict() | {"provider": "mock"})
+    assert face_boxes(img, (800, 600)) == [Box(100, 50, 300, 250)]
