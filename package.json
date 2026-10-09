@@ -1,0 +1,23 @@
+{
+  "name": "mangaka-team",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Studio local de planches manga/BD assisté par IA",
+  "workspaces": [
+    "web"
+  ],
+  "engines": {
+    "node": ">=20.9"
+  },
+  "scripts": {
+    "postinstall": "node scripts/setup-engine.mjs",
+    "setup:engine": "node scripts/setup-engine.mjs",
+    "dev": "node scripts/dev.mjs",
+    "dev:web": "npm --workspace web run dev",
+    "lint": "npm --workspace web run lint",
+    "typecheck": "npm --workspace web run typecheck",
+    "build": "npm --workspace web run build",
+    "test:engine": "node scripts/run-engine.mjs -m pytest",
+    "lint:engine": "node scripts/run-engine.mjs -m ruff check ."
+  }
+}
