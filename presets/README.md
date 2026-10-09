@@ -19,6 +19,8 @@ Après modification d'un preset, redémarre le moteur (`npm run dev`).
 | `prompts/*.yaml` | Prompts des étapes LLM (`script` : découpage d'un chapitre) |
 | `image_prompt.yaml` | Construction du prompt final des cases (étape 3) et termes « pas de texte » du prompt négatif |
 | `workflows/*.yaml` + `*.json` | Workflows ComfyUI : le JSON API exporté + le mapping des paramètres |
+| `fonts.yaml` + `fonts/` | Polices de lettrage (OFL, licence dans `fonts/OFL.txt`) et style de texte par type de bulle |
+| `lettering.yaml` | Formes et placement des bulles, queues, bordures de case, repères de coupe |
 
 ## Format de page
 
@@ -196,3 +198,22 @@ version de ComfyUI et des fichiers présents sur le GX10. Pour les remplacer par
 lettrage, jamais dessiné par le modèle) et `strip_quotes` retire les répliques entre guillemets
 de la description. Le prompt est stocké sur la case ; une édition manuelle est conservée jusqu'à
 « reconstruire le prompt ».
+
+## Lettrage (étape 5)
+
+Le texte n'est **jamais** dessiné par le modèle d'image : il est posé au lettrage, en vectoriel.
+
+- `fonts.yaml` : `fonts` (id → fichier + nom) et `styles` par type de bulle (`speech`, `thought`,
+  `shout`, `narration`, `"off"` — entre guillemets, sinon YAML lit un booléen) : police, graisse
+  (polices variables), taille en **points** (`size_pt`), taille minimale lisible (`min_size_pt`),
+  pas de réduction, interligne, capitales. `hyphenation` règle la césure française (pyphen).
+  Faute de place à la taille minimale, la bulle garde tout son texte et la case affiche un
+  avertissement.
+- `lettering.yaml` : marges intérieures par type, forme de la parole (ellipse / rectangle arrondi),
+  nuage, pointes du cri, queue (longueur, base, direction par défaut sans visage détecté), écarts
+  bulle ↔ bulle / bord de case / visage, couleurs, bordure des cases, repères de coupe.
+- Fond perdu : `bleed_mm` du format de page. Feuille = `round((mm + 2 × fond perdu) / 25,4 × dpi)`
+  → A4 300 DPI + 3 mm = 2551 × 3579 px.
+- Visages : le lettrage évite les boîtes de visages enregistrées par le QC sur la version retenue
+  (`PanelImage.params` : `faces`, `qc.faces` ou `qc.boxes.faces`, en px de l'image).
+- Les SVG exportés embarquent un sous-ensemble renommé (`mk-…`) de chaque police (clause 3 de l'OFL).

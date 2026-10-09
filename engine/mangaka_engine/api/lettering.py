@@ -156,7 +156,7 @@ def get_render(
     return _render_out(info)
 
 
-def _render_file(ctx: AppContext, page_id: int, ext: str, media_type: str) -> FileResponse:
+def _render_file(ctx: AppContext, page_id: int, ext: str, media_type: str, *, inline: bool = False) -> FileResponse:
     info = read_render_info(ctx.files, page_id)
     if info is None:
         raise HTTPException(status_code=404, detail="Page pas encore rendue")
@@ -164,7 +164,13 @@ def _render_file(ctx: AppContext, page_id: int, ext: str, media_type: str) -> Fi
     path = ctx.files.absolute(f"{render_folder(page_id)}/{name}")
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Fichier de rendu manquant dans data/")
-    return FileResponse(path, media_type=media_type, filename=name, headers={"Cache-Control": "no-store"})
+    return FileResponse(
+        path,
+        media_type=media_type,
+        filename=name,
+        headers={"Cache-Control": "no-store"},
+        content_disposition_type="inline" if inline else "attachment",
+    )
 
 
 @router.get("/pages/{page_id}/render.png")
@@ -174,7 +180,8 @@ def get_render_png(page_id: int, ctx: AppContext = Depends(get_ctx)) -> FileResp
 
 @router.get("/pages/{page_id}/render.svg")
 def get_render_svg(page_id: int, ctx: AppContext = Depends(get_ctx)) -> FileResponse:
-    return _render_file(ctx, page_id, "svg", "image/svg+xml")
+    """SVG affiché dans le navigateur (texte sélectionnable) ; « Enregistrer sous » pour le fichier."""
+    return _render_file(ctx, page_id, "svg", "image/svg+xml", inline=True)
 
 
 # --- export d'un chapitre ---------------------------------------------------------------------

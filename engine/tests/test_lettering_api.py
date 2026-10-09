@@ -164,6 +164,7 @@ def test_render_page_png_300dpi_and_svg(client: TestClient) -> None:
         assert tuple(round(v) for v in im.info["dpi"]) == (300, 300)
     svg = client.get(info["svg_url"])
     assert svg.status_code == 200 and svg.headers["content-type"].startswith("image/svg+xml")
+    assert svg.headers["content-disposition"].startswith("inline")  # s'ouvre dans le navigateur
     root = ET.fromstring(svg.content)
     texts = "".join("".join(t.itertext()) for t in root.iter("{http://www.w3.org/2000/svg}text"))
     assert "cœur" in texts and "forêt" in texts and "«" in texts
