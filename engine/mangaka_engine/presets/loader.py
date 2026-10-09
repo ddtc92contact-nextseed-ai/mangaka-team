@@ -7,6 +7,7 @@ Arborescence attendue :
       providers.yaml           # paramètres des fournisseurs (modèle LLM, URL…)
       layout.yaml              # paramètres du découpage (zones de bulles, taille de génération…)
       image_prompt.yaml        # construction du prompt final des cases (étape 3)
+      qc.yaml                  # contrôle qualité des cases (étape 4) : seuils, poids, règles
       page_formats/*.yaml      # formats de page
       layouts/*.yaml           # gabarits de planche
       prompts/*.yaml           # prompts des étapes LLM
@@ -35,6 +36,7 @@ from .schemas import (
     PageFormat,
     PromptPreset,
     ProvidersPreset,
+    QCSettings,
     WorkflowPreset,
 )
 
@@ -66,6 +68,7 @@ class PresetRegistry:
     layout: LayoutSettings = field(default_factory=LayoutSettings)
     image_prompt: ImagePromptSettings = field(default_factory=ImagePromptSettings)
     providers: ProvidersPreset | None = None
+    qc: QCSettings | None = None
     defaults: Defaults | None = None
     issues: list[PresetIssue] = field(default_factory=list)
 
@@ -93,6 +96,11 @@ class PresetRegistry:
             return self.prompts[preset_id]
         except KeyError:
             raise PresetError(f"prompt introuvable : presets/prompts/{preset_id}.yaml") from None
+
+    def require_qc(self) -> QCSettings:
+        if self.qc is None:
+            raise PresetError("presets/qc.yaml absent ou invalide : contrôle qualité indisponible")
+        return self.qc
 
     def require_providers(self) -> ProvidersPreset:
         if self.providers is None:
@@ -140,6 +148,12 @@ class PresetRegistry:
             image_prompt = reg._parse(image_prompt_path, ImagePromptSettings)
             if image_prompt is not None:
                 reg.image_prompt = image_prompt
+
+        qc_path = root / "qc.yaml"
+        if qc_path.exists():
+            reg.qc = reg._parse(qc_path, QCSettings)
+        else:
+            reg.issues.append(PresetIssue(reg._rel(qc_path), "fichier absent : contrôle qualité indisponible"))
 
         providers_path = root / "providers.yaml"
         if providers_path.exists():

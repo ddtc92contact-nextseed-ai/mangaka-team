@@ -27,7 +27,6 @@ from mangaka_engine.providers.comfyui import (
 )
 from mangaka_engine.providers.factory import Providers
 from mangaka_engine.providers.llm import MockLLMProvider
-from mangaka_engine.providers.vision import MockVisionProvider
 from mangaka_engine.store.models import Job, JobStatus, Panel, PanelState
 from tests.conftest import PRESETS_DIR, png_bytes
 
@@ -65,9 +64,10 @@ class GatedComfy(MockComfyUIClient):
 
 
 def _providers(comfy: ComfyUIClient | None) -> Providers:
+    # Aucune couche de QC : pas de contrôle automatique après génération (couvert par test_qc.py).
     return Providers(
         llm=MockLLMProvider(),
-        vision=MockVisionProvider(),
+        vision=None,
         comfyui=comfy,
         names={"llm": "mock", "vision": "mock", "comfyui": getattr(comfy, "name", "http")},
         errors={} if comfy is not None else {"comfyui": "client ComfyUI inconnu"},

@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 from collections.abc import Callable
+from typing import Any
 
 import httpx
 import pytest
@@ -24,6 +25,8 @@ from mangaka_engine.providers.comfyui import (
 from mangaka_engine.providers.factory import (
     ProviderSelectionError,
     build_comfyui,
+    build_detectors,
+    build_identity,
     build_llm,
     build_providers,
     build_vision,
@@ -40,7 +43,8 @@ from mangaka_engine.providers.llm import (
     LLMUnavailableError,
     MockLLMProvider,
 )
-from mangaka_engine.providers.vision import MockVisionProvider
+from mangaka_engine.providers.qc import MockDetectorProvider, MockIdentityProvider
+from mangaka_engine.providers.vision import MockVisionProvider, OllamaVisionProvider, VisionUnavailableError
 from tests.conftest import PRESETS_DIR, png_bytes
 
 PRESETS = PresetRegistry.load(PRESETS_DIR)
@@ -55,7 +59,8 @@ def test_defaults_are_mock_without_env(make_settings: Callable[..., Settings]) -
     assert isinstance(p.llm, MockLLMProvider)
     assert isinstance(p.vision, MockVisionProvider)
     assert isinstance(p.comfyui, MockComfyUIClient)
-    assert p.names == {"llm": "mock", "vision": "mock", "comfyui": "mock"}
+    assert isinstance(p.detectors, MockDetectorProvider) and isinstance(p.identity, MockIdentityProvider)
+    assert p.names == {"llm": "mock", "vision": "mock", "comfyui": "mock", "detectors": "mock", "identity": "mock"}
 
 
 def test_key_alone_does_not_leave_mock_mode(make_settings: Callable[..., Settings]) -> None:
@@ -91,8 +96,11 @@ def test_explicit_deepseek_without_key_is_reported_not_fatal(make_settings: Call
         ("llm_provider", "gpt", "llm", "inconnu"),
         ("llm_provider", "ollama", "llm", "pas encore disponible"),
         ("llm_provider", "claude", "llm", "pas encore disponible"),
-        ("vision_provider", "ollama", "vision", "pas encore disponible"),
+        ("vision_provider", "deepseek", "vision", "n'accepte pas d'images"),
+        ("vision_provider", "gpt4v", "vision", "inconnu"),
         ("comfyui_provider", "grpc", "comfyui", "inconnu"),
+        ("qc_detectors_provider", "yolo", "detectors", "inconnu"),
+        ("qc_identity_provider", "arcface", "identity", "inconnu"),
     ],
 )
 def test_unknown_or_unimplemented_providers(
@@ -101,8 +109,10 @@ def test_unknown_or_unimplemented_providers(
     s = make_settings(**{field: value})
     build = {
         "llm": lambda: build_llm(s, PRESETS),
-        "vision": lambda: build_vision(s),
+        "vision": lambda: build_vision(s, PRESETS),
         "comfyui": lambda: build_comfyui(s),
+        "detectors": lambda: build_detectors(s),
+        "identity": lambda: build_identity(s),
     }
     with pytest.raises(ProviderSelectionError, match=match):
         build[builder]()
@@ -214,9 +224,57 @@ def test_mock_llm_is_deterministic() -> None:
 
 
 def test_mock_vision() -> None:
-    v = MockVisionProvider(score=72).score_image(b"png", prompt="x")
-    assert v.score == 72 and v.reasons
-    assert MockVisionProvider().score_image(b"", prompt="x").score == 0
+    v = json.loads(MockVisionProvider(score=72).ask(b"png", "x"))
+    assert v["score"] == 72 and v["raisons"]
+    assert json.loads(MockVisionProvider().ask(b"", "x"))["score"] == 0
+    flaky = MockVisionProvider(invalid_attempts=1)
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(flaky.ask(b"png", "x"))
+    assert json.loads(flaky.ask(b"png", "x"))["score"] == 80 and flaky.calls == 2
+
+
+def test_ollama_vision_selected_from_preset(make_settings: Callable[..., Settings]) -> None:
+    v = build_vision(make_settings(vision_provider="ollama"), PRESETS)
+    assert isinstance(v, OllamaVisionProvider) and v.model == "qwen3-vl:4b" and v.keep_alive == 0
+
+
+def test_dghs_without_extra_is_reported_not_fatal(
+    make_settings: Callable[..., Settings], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("mangaka_engine.providers.qc.dghs.imgutils_installed", lambda: False)
+    s = make_settings(qc_detectors_provider="dghs", qc_identity_provider="dghs")
+    p = build_providers(s, PRESETS)
+    assert p.detectors is None and p.identity is None
+    assert "détecteurs non installés" in p.errors["detectors"] and "engine[qc]" in p.errors["identity"]
+    assert p.names["detectors"] == "dghs"
+
+
+def ollama(handler: Callable[[httpx.Request], httpx.Response]) -> OllamaVisionProvider:
+    return OllamaVisionProvider(
+        base_url="http://ollama.test/", model="qwen3-vl:4b", keep_alive=0, transport=httpx.MockTransport(handler)
+    )
+
+
+def test_ollama_vision_request_and_errors() -> None:
+    seen: list[dict[str, Any]] = []
+
+    def ok(req: httpx.Request) -> httpx.Response:
+        seen.append(json.loads(req.content))
+        return httpx.Response(200, json={"message": {"role": "assistant", "content": '{"score": 66, "raisons": []}'}})
+
+    assert json.loads(ollama(ok).ask(b"img", "Décris", schema={"type": "object"}))["score"] == 66
+    body = seen[0]
+    assert body["model"] == "qwen3-vl:4b" and body["keep_alive"] == 0 and body["stream"] is False
+    assert body["messages"][0]["images"] == ["aW1n"] and body["format"] == {"type": "object"}
+
+    with pytest.raises(VisionUnavailableError, match="ollama pull qwen3-vl:4b"):
+        ollama(lambda r: httpx.Response(404, json={"error": "model not found"})).ask(b"x", "p")
+
+    def down(req: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("refused")
+
+    with pytest.raises(VisionUnavailableError, match="ollama serve"):
+        ollama(down).ask(b"x", "p")
 
 
 # --- ComfyUI mock ----------------------------------------------------------

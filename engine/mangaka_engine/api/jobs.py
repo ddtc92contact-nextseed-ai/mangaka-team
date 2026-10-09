@@ -104,7 +104,7 @@ def cancel_job(job_id: int, ctx: AppContext = Depends(get_ctx)) -> JobOut:
         step, status = job.step, job.status
     if status in TERMINAL:
         raise HTTPException(status_code=409, detail="Ce job est déjà terminé")
-    if step == ctx.generation.step:
+    if ctx.generation.handles(step):
         if ctx.generation.cancel(job_id) == CancelResult.finished:
             raise HTTPException(status_code=409, detail="Ce job est déjà terminé")
     elif not ctx.jobs.cancel(job_id):

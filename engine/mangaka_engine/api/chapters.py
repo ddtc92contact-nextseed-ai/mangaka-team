@@ -111,6 +111,8 @@ def page_out(page: Page) -> PageOut:
                 image_count=len(p.images),
                 selected_image_id=next((i.id for i in p.images if i.selected), None),
                 selected_image_url=next((f"/panel-images/{i.id}/file" for i in p.images if i.selected), None),
+                qc_verdict=next((i.qc_verdict.value for i in p.images if i.selected and i.qc_verdict), None),
+                qc_score=next((i.qc_score for i in p.images if i.selected), None),
             )
             for p in page.panels
         ],

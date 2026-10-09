@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from ..pipeline.generation import (
     ACTIVE,
+    QC_STEP,
     STEP,
     GenerationError,
     enqueue_panel,
@@ -24,7 +25,7 @@ from ..pipeline.generation import (
     update_panel_prompt,
 )
 from ..presets import PresetError
-from ..store.models import Job, JobStatus, Page, Panel, PanelImage
+from ..store.models import Chapter, Job, JobStatus, Page, Panel, PanelImage
 from .chapters import get_chapter_or_404, get_page_or_404
 from .deps import AppContext, get_ctx, get_session
 from .errors import FieldError
@@ -67,6 +68,9 @@ def panel_image_out(img: PanelImage) -> PanelImageOut:
         params=params,
         qc_score=img.qc_score,
         qc_reasons=list(img.qc_reasons or []),
+        qc_verdict=img.qc_verdict.value if img.qc_verdict else None,
+        qc=dict(img.qc_details or {}),
+        detections=img.detections,
         created_at=img.created_at,
     )
 
@@ -86,9 +90,12 @@ def _get_image_or_404(session: Session, image_id: int) -> PanelImage:
 
 
 def _active_jobs(session: Session, panel_id: int) -> list[Job]:
+    """Générations et contrôles qualité en cours ou en attente pour la case."""
     return list(
         session.scalars(
-            select(Job).where(Job.panel_id == panel_id, Job.step == STEP, Job.status.in_(ACTIVE)).order_by(Job.id)
+            select(Job)
+            .where(Job.panel_id == panel_id, Job.step.in_([STEP, QC_STEP]), Job.status.in_(ACTIVE))
+            .order_by(Job.id)
         )
     )
 
@@ -269,6 +276,8 @@ def select_panel_image(image_id: int, session: Session = Depends(get_session)) -
     panel = img.panel
     for other in panel.images:
         other.selected = other.id == img.id
+    session.flush()
+    refresh_states(session, [panel.id])  # l'état de la case suit le verdict QC de la version choisie
     session.commit()
     return [panel_image_out(i) for i in panel.images]
 
@@ -289,24 +298,35 @@ def delete_panel_image(
 
 
 # --- file d'attente ---------------------------------------------------------------------
-def _median_durations(session: Session) -> tuple[dict[str, float], float | None]:
+def _median_durations(session: Session) -> tuple[dict[str, float], float | None, float | None]:
+    """Médianes des durées réussies : par preset et toutes générations confondues, puis des contrôles QC."""
     rows = session.execute(
-        select(Job.params, Job.duration_ms)
-        .where(Job.step == STEP, Job.status == JobStatus.succeeded, Job.duration_ms.is_not(None))
+        select(Job.step, Job.params, Job.duration_ms)
+        .where(Job.step.in_([STEP, QC_STEP]), Job.status == JobStatus.succeeded, Job.duration_ms.is_not(None))
         .order_by(Job.id.desc())
         .limit(500)
     ).all()
     by_preset: dict[str, list[float]] = {}
     overall: list[float] = []
-    for params, duration_ms in rows:
+    qc: list[float] = []
+    for step, params, duration_ms in rows:
         seconds = duration_ms / 1000
+        if step == QC_STEP:
+            n = len((params or {}).get("image_ids") or []) or 1
+            if len(qc) < MEDIAN_SAMPLE:
+                qc.append(seconds / n)
+            continue
         preset = (params or {}).get("preset")
         if isinstance(preset, str) and len(by_preset.setdefault(preset, [])) < MEDIAN_SAMPLE:
             by_preset[preset].append(seconds)
         if len(overall) < MEDIAN_SAMPLE:
             overall.append(seconds)
     medians = {k: statistics.median(v) for k, v in by_preset.items() if v}
-    return medians, statistics.median(overall) if overall else None
+    return (
+        medians,
+        statistics.median(overall) if overall else None,
+        statistics.median(qc) if qc else None,
+    )
 
 
 def _elapsed_s(started: datetime | None) -> float:
@@ -320,21 +340,26 @@ def _elapsed_s(started: datetime | None) -> float:
 
 @router.get("/queue", response_model=QueueOut)
 def get_queue(session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)) -> QueueOut:
-    """Générations en cours et en attente (ordre d'exécution), avec une estimation du temps restant."""
+    """Générations et contrôles qualité en cours et en attente (ordre d'exécution), avec une estimation
+    du temps restant. Les deux étapes partagent la même file : un seul job à la fois."""
     jobs = list(
         session.scalars(
             select(Job)
-            .where(Job.step == STEP, Job.status.in_(ACTIVE))
+            .where(Job.step.in_([STEP, QC_STEP]), Job.status.in_(ACTIVE))
             .order_by((Job.status == JobStatus.running).desc(), Job.id)
         )
     )
-    medians, overall = _median_durations(session)
+    medians, overall, qc_median = _median_durations(session)
     items: list[QueueItemOut] = []
     cumulative: float | None = 0.0
     for position, job in enumerate(jobs, start=0 if jobs and jobs[0].status == JobStatus.running else 1):
         params = job.params or {}
         preset = params.get("preset")
-        estimate = medians.get(preset, overall) if isinstance(preset, str) else overall
+        is_qc = job.step == QC_STEP
+        if is_qc:
+            estimate = qc_median * (len(params.get("image_ids") or []) or 1) if qc_median is not None else None
+        else:
+            estimate = medians.get(preset, overall) if isinstance(preset, str) else overall
         if estimate is None or cumulative is None:
             cumulative = None
         else:
@@ -344,12 +369,21 @@ def get_queue(session: Session = Depends(get_session), ctx: AppContext = Depends
             cumulative += remaining
         panel = session.get(Panel, job.panel_id) if job.panel_id is not None else None
         page = panel.page if panel else None
-        chapter = page.chapter if page else None
+        chapter = page.chapter if page else (session.get(Chapter, job.chapter_id) if job.chapter_id else None)
+        if panel:
+            label = panel_label(panel)
+        elif chapter:
+            label = f"{chapter.project.title} · ch. {chapter.number}"
+        else:
+            label = f"Job {job.id}"
+        if is_qc:
+            n = len(params.get("image_ids") or [])
+            label = f"Contrôle qualité · {label}" + (f" ({n} cases)" if not panel and n > 1 else "")
         items.append(
             QueueItemOut(
                 job=job_out(job),
                 position=position,
-                label=panel_label(panel) if panel else f"Job {job.id}",
+                label=label,
                 panel_id=panel.id if panel else None,
                 panel_index=panel.index if panel else None,
                 page_id=page.id if page else None,
@@ -359,7 +393,7 @@ def get_queue(session: Session = Depends(get_session), ctx: AppContext = Depends
                 chapter_title=chapter.title if chapter else None,
                 project_id=chapter.project_id if chapter else None,
                 series_title=chapter.project.title if chapter else None,
-                preset=preset if isinstance(preset, str) else None,
+                preset=preset if isinstance(preset, str) and not is_qc else None,
                 variant=params.get("variant"),
                 count=params.get("count"),
                 estimated_duration_s=round(estimate, 1) if estimate is not None else None,

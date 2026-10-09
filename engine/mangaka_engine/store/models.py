@@ -75,6 +75,12 @@ class PanelState(enum.StrEnum):
     approved = "approved"
 
 
+class QCVerdict(enum.StrEnum):
+    ok = "ok"
+    review = "review"  # à revoir
+    reject = "reject"  # rejet
+
+
 class BubbleKind(enum.StrEnum):
     speech = "speech"
     thought = "thought"
@@ -239,6 +245,11 @@ class PanelImage(Base):
     params: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     qc_score: Mapped[int | None] = mapped_column(Integer, default=None)
     qc_reasons: Mapped[list[str]] = mapped_column(JSON, default=list)
+    qc_verdict: Mapped[QCVerdict | None] = mapped_column(_enum(QCVerdict), default=None)
+    # Détail du dernier QC : couches (score, durée, raisons), décision humaine, historique.
+    qc_details: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    # Boîtes détectées (visages, mains, texte) en px de l'image : réutilisées par le lettrage.
+    detections: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
     selected: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
