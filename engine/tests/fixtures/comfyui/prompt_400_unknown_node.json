@@ -1,0 +1,13 @@
+{
+ "error": {
+  "type": "missing_node_type",
+  "message": "Node 'Cache Qwen Image 2.1' not found. The custom node may not be installed.",
+  "details": "Node ID '#4'",
+  "extra_info": {
+   "node_id": "4",
+   "class_type": "NoeudInexistant",
+   "node_title": "Cache Qwen Image 2.1"
+  }
+ },
+ "node_errors": {}
+}

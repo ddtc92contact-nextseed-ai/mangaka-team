@@ -50,19 +50,68 @@ class ComfyUIWorkflowError(ComfyUIError):
         super().__init__(f"{message} — {details}" if details else message)
 
 
+# Entrées de chargeurs (sous-chaîne du nom d'entrée → libellé) : sert aux messages
+# « modèle introuvable dans ComfyUI : … ». Aucun nom de fichier ici, seulement des noms d'entrées.
+_FILE_INPUT_LABELS = (
+    ("lora", "LoRA"),
+    ("vae", "VAE"),
+    ("clip", "encodeur de texte"),
+    ("text_encoder", "encodeur de texte"),
+    ("unet", "modèle"),
+    ("ckpt", "modèle"),
+    ("model", "modèle"),
+)
+
+# Types d'erreurs de validation de `/prompt` (champ `type`) → libellé français.
+_NODE_ERROR_LABELS = {
+    "required_input_missing": "entrée obligatoire manquante",
+    "value_smaller_than_min": "valeur trop petite",
+    "value_bigger_than_max": "valeur trop grande",
+    "invalid_input_type": "type de valeur invalide",
+    "return_type_mismatch": "liaison de type incompatible",
+    "bad_linked_input": "liaison invalide",
+    "dependency_cycle": "boucle entre nœuds",
+    "custom_validation_failed": "valeur refusée par le nœud",
+    "exception_during_validation": "erreur pendant la validation",
+    "exception_during_inner_validation": "erreur pendant la validation",
+}
+
+
+def missing_value_message(input_name: str, value: Any) -> str:
+    """« modèle introuvable dans ComfyUI : x.safetensors » d'après le nom de l'entrée du chargeur."""
+    name = input_name.lower()
+    for key, label in _FILE_INPUT_LABELS:
+        if key in name:
+            return f"{label} introuvable dans ComfyUI : {value}"
+    if name == "image":
+        return f"image introuvable dans ComfyUI (dossier input) : {value}"
+    return f"valeur « {value} » refusée pour l'entrée {input_name}"
+
+
+def _node_error_message(err: dict[str, Any]) -> str:
+    kind = str(err.get("type") or "")
+    msg = str(err.get("message", "")).strip()
+    details = str(err.get("details", "")).strip()
+    extra = err.get("extra_info") if isinstance(err.get("extra_info"), dict) else {}
+    input_name = str(extra.get("input_name") or "")
+    if kind == "value_not_in_list" and input_name:
+        return missing_value_message(input_name, extra.get("received_value", "?"))
+    original = f"{msg} : {details}" if details and details not in msg else msg
+    label = _NODE_ERROR_LABELS.get(kind)
+    if label is None:
+        return original
+    target = f" ({input_name})" if input_name else ""
+    return f"{label}{target} — {original}" if original else f"{label}{target}"
+
+
 def format_node_errors(node_errors: dict[str, Any], limit: int = 5) -> str:
-    """`node_errors` de `/prompt` → « nœud 1 (UNETLoader) : Value not in list: unet_name… »."""
+    """`node_errors` de `/prompt` → « nœud 1 (UNETLoader) : modèle introuvable dans ComfyUI : … »."""
     parts: list[str] = []
     for node_id, info in node_errors.items():
         if not isinstance(info, dict):
             continue
         cls = info.get("class_type")
-        msgs = []
-        for err in info.get("errors") or []:
-            if isinstance(err, dict):
-                msg = str(err.get("message", "")).strip()
-                details = str(err.get("details", "")).strip()
-                msgs.append(f"{msg} : {details}" if details and details not in msg else msg)
+        msgs = [_node_error_message(err) for err in info.get("errors") or [] if isinstance(err, dict)]
         label = f"nœud {node_id}" + (f" ({cls})" if cls else "")
         parts.append(f"{label} : {' ; '.join(m for m in msgs if m) or 'erreur'}")
     if len(parts) > limit:
@@ -70,8 +119,42 @@ def format_node_errors(node_errors: dict[str, Any], limit: int = 5) -> str:
     return " | ".join(parts)
 
 
+def describe_prompt_error(data: Any, status_code: int) -> str:
+    """Erreur globale d'un refus de `/prompt` (champ `error`) en français."""
+    err = data.get("error") if isinstance(data, dict) else None
+    if not isinstance(err, dict):
+        return str(err) if isinstance(err, str) and err else f"HTTP {status_code}"
+    kind = err.get("type")
+    message = str(err.get("message") or "").strip()
+    extra = err.get("extra_info") if isinstance(err.get("extra_info"), dict) else {}
+    if kind == "prompt_outputs_failed_validation":
+        return "le workflow ne passe pas la validation de ComfyUI"
+    if kind == "missing_node_type":
+        node = f" (nœud {extra['node_id']})" if extra.get("node_id") else ""
+        return (
+            f"nœud inconnu : {extra.get('class_type') or message}{node} — "
+            "nœud personnalisé non installé ou ComfyUI pas à jour ?"
+        )
+    if kind == "prompt_no_outputs":
+        return "le workflow n'a aucun nœud de sortie"
+    if kind == "invalid_prompt":
+        return f"workflow invalide : {message}"
+    return message or f"HTTP {status_code}"
+
+
+def is_out_of_memory(exception_type: str, message: str) -> bool:
+    text = f"{exception_type} {message}".lower()
+    return "outofmemory" in text or "out of memory" in text or "allocation on device" in text
+
+
 class ComfyUIExecutionError(ComfyUIError):
     code = "comfyui_execution"
+
+
+class ComfyUIOutOfMemoryError(ComfyUIExecutionError):
+    """Mémoire GPU insuffisante pendant la génération."""
+
+    code = "comfyui_out_of_memory"
 
 
 class ComfyUITimeoutError(ComfyUIError):
@@ -88,6 +171,14 @@ class ComfyUIClient(Protocol):
     name: str
 
     def health(self) -> ComfyStatus: ...
+
+    def system_stats(self) -> dict[str, Any]:
+        """`GET /system_stats` : versions, RAM, périphériques (VRAM)."""
+        ...
+
+    def object_info(self) -> dict[str, Any]:
+        """`GET /object_info` : classes de nœuds, leurs entrées et les valeurs permises (fichiers…)."""
+        ...
 
     def queue_prompt(self, workflow: dict[str, Any]) -> str: ...
 
@@ -125,7 +216,14 @@ def images_from_history(entry: dict[str, Any], output_node: str) -> list[ImageRe
             raise ComfyUIInterruptedError("génération interrompue dans ComfyUI")
         for kind, data in status.get("messages") or []:
             if kind == "execution_error" and isinstance(data, dict):
-                message = f"{message} : {data.get('node_type', '?')} — {data.get('exception_message', '').strip()}"
+                node_type = data.get("node_type", "?")
+                text = str(data.get("exception_message", "")).strip()
+                if is_out_of_memory(str(data.get("exception_type", "")), text):
+                    raise ComfyUIOutOfMemoryError(
+                        f"mémoire GPU insuffisante dans ComfyUI ({node_type}) : libère la mémoire "
+                        "(autre génération, Ollama…), passe sur le palier Rapide ou réduis la taille"
+                    )
+                message = f"{message} : {node_type} — {text.splitlines()[0] if text else 'erreur'}"
                 break
         raise ComfyUIExecutionError(message)
     node_out = (entry.get("outputs") or {}).get(output_node) or {}
