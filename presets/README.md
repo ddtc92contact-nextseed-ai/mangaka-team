@@ -112,6 +112,7 @@ slants:                           # probabilité de biais d'une découpe et angl
 rythme:                           # selon le rythme de la page (absent = normal)
   rapide: { slant_factor: 1.6, size_contrast: 1.2 }
   # … lent et normal
+page_choc: { slant_factor: 1.3, size_contrast: 1.8 }   # page choc de la direction artistique, en plus du rythme
 ```
 
 Une découpe passe en biais avec la probabilité de la case voisine la plus « forte » × le
@@ -132,20 +133,49 @@ revient à la mise en page de la graine (retouches perdues, comme pour les goutt
 
 ### Direction artistique : comment piloter la mise en page
 
-La mise en page est de la **géométrie déterministe** : aucune IA ne dessine les cases. Un assistant de
-direction artistique — le LLM du scénario aujourd'hui (`prompts/script.yaml`), un agent DA dédié
-demain — ne la pilote **que** par ces champs structurés, validés par le schéma Pydantic du scénario :
+La mise en page est de la **géométrie déterministe** : aucune IA ne dessine les cases. Le LLM du
+scénario (`prompts/script.yaml`) et l'agent « Directeur artistique » (`prompts/direction-artistique.yaml`)
+ne la pilotent **que** par ces champs structurés, validés par Pydantic :
 
 | Champ | Où | Valeurs | Effet |
 | --- | --- | --- | --- |
 | `importance` | case | 1 transition, 2 normale, 3 forte | taille de la case (choix du gabarit), règle de biais `by_importance` |
 | `intensity` (facultatif) | case | `calme`, `normal`, `choc` | poids de taille (`intensity_weight`), règle de biais `by_intensity` (prioritaire) |
 | `rythme` (facultatif) | page | `lent`, `normal`, `rapide` | facteurs de biais et de contraste de la page (`rythme`) |
+| gabarit suggéré (DA) | page | un gabarit au bon nombre de cases | imposé à la page tant qu'il n'est pas écarté par « Nouvelle mise en page » |
+| page choc (DA) | page | `pleine page`, `splash` | facteurs `page_choc` du style, en plus du rythme |
 
 …et par le choix du style de la série ou d'une page. Jamais de coordonnées, de polygones ni de dessin
 libre : pour un nouvel effet, on ajoute un champ au schéma et une règle au style. Le LLM factice (mode
 mock) remplit ces champs. Ils sont modifiables à la main dans le découpage (API `PUT
 /chapters/{id}/pages`).
+
+### Agent « Directeur artistique » (`prompts/direction-artistique.yaml`)
+
+Étape LLM entre le scénario et la mise en page, lancée depuis l'onglet **Direction artistique** du
+chapitre (tout le chapitre, ou une page avec « Proposer autre chose »). Il reçoit le scénario validé, la
+bible et les personnages, le style de mise en page de la série, les choix du chapitre précédent (pour ne
+pas se répéter) et son savoir-faire (`knowledge.yaml` › `art_direction`). Il répond en JSON :
+
+- par page : `rythme` (`calme`, `montée`, `climax`, `respiration`), `layout_style` (null ou un style),
+  `template` (null ou un gabarit possible), `page_choc` (null, `pleine page`, `splash`), `rationale`
+  (justification en français montrée à l'auteur) ;
+- par case : `intensity`, `plan` (plan large / moyen / rapproché, gros plan, insert, plongée,
+  contre-plongée), `angle`, `cadre` (normal, sans bord, fond perdu, incrustation), `ambiance`, `sfx`
+  (onomatopées : texte + intensité).
+
+Réponse invalide (schéma, pages ou cases manquantes, gabarit impossible) → relance avec l'erreur
+(`max_retries`, 2 au maximum) → sinon erreur visible sur le job. `variety` (sobre, equilibree,
+audacieuse) règle l'audace, modifiable dans « L'équipe » (globalement ou par série), comme le modèle, la
+température et les consignes.
+
+L'auteur corrige n'importe quel champ : il est alors **verrouillé** (🔒) et gardé quand l'agent repropose,
+jusqu'à ce qu'il le déverrouille ; une page « acceptée » n'est pas remplacée par une relance de tout le
+chapitre. **« Appliquer à la mise en page »** recopie les choix : rythme de la page (calme et respiration →
+`lent`, montée → `normal`, climax → `rapide`), style suggéré, intensité des cases, gabarit suggéré et
+page choc ; seules les pages dont la mise en page change sont recalculées. Les choix appliqués
+alimentent aussi le prompt image (`$plan`, `$angle`, `$ambiance`). Le cadre et les onomatopées sont
+conservés pour le lettrage. Si le découpage d'une page change, sa direction est marquée « à refaire ».
 
 ## Prompts (`prompts/*.yaml`)
 
@@ -343,7 +373,9 @@ référence de la GX10, puis validés contre le ComfyUI 0.37 de la machine. Pour
 
 ## Prompt final des cases (`image_prompt.yaml`)
 
-`parts` est une liste de morceaux `string.Template` assemblés dans l'ordre (`$shot`,
+`parts` est une liste de morceaux `string.Template` assemblés dans l'ordre (`$plan` = plan de la
+direction artistique appliquée, sinon celui du scénario, `$angle` et `$ambiance` de la direction
+artistique, `$shot` = plan du scénario,
 `$description`, `$characters`, `$style`, `$bible` = notes de la bible sur les personnages de la
 case, `$savoir_faire` = passages du savoir-faire de l'agent `image_prompt`) ; un morceau dont une
 variable est vide est omis.
