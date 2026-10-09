@@ -96,8 +96,9 @@ def test_add_move_rotate_resize_and_delete_sfx(client: TestClient) -> None:
     assert client.get("/lettering/sfx-fonts/inconnue.ttf").status_code == 404
     bad = client.patch(f"/bubbles/{fx['id']}", json={"sfx": {"font": "inconnue"}})
     assert bad.status_code == 422, bad.text
-    # déplacer, tourner, agrandir
-    x, y = fx["center"]["x"] + 30, fx["center"]["y"] - 20
+    # déplacer, tourner, agrandir : au centre de la case (sa place automatique dépend des images générées)
+    box = page["layout"]["panels"][1]
+    x, y = (box["x1"] + box["x2"]) / 2 + 0.25, (box["y1"] + box["y2"]) / 2 - 0.25
     let = _ok(
         client.patch(
             f"/bubbles/{fx['id']}", json={"sfx": {"x": x, "y": y, "angle": -25.5, "size_pt": 40, "font": "titan-one"}}
