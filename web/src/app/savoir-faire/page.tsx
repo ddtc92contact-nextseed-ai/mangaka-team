@@ -46,7 +46,7 @@ export default function KnowledgeLibraryPage() {
                     <p className="mt-3 text-xs text-zinc-500">
                       {c.document_count} document{c.document_count > 1 ? "s" : ""} · {c.chunk_count} passage
                       {c.chunk_count > 1 ? "s" : ""} · {formatTokens(c.token_count)}
-                      {c.whole && <span className="ml-1 text-sky-300">· injectée entière</span>}
+                      {c.whole && <span className="text-sky-300"> · injectée entière</span>}
                     </p>
                   </Link>
                 </li>

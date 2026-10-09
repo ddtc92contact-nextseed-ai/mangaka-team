@@ -483,3 +483,43 @@ def test_deleting_series_removes_its_collections_and_index(client: TestClient) -
     assert client.get("/knowledge/collections").json() == []
     with client.app.state.ctx.db.session_scope() as session:  # type: ignore[attr-defined]
         assert session.execute(text("SELECT count(*) FROM knowledge_fts")).scalar() == 0
+
+
+def test_image_prompt_never_carries_quoted_text_from_bible_or_knowledge(
+    make_settings: Callable[..., Settings],
+) -> None:
+    with TestClient(create_app(make_settings())) as c:
+        c.app.state.ctx.knowledge.settings = KnowledgeSettings(  # type: ignore[attr-defined]
+            small_collection_tokens=0,
+            agents={
+                "image_prompt": KnowledgeAgent(
+                    label="Prompts", collections=["Design"], budget_tokens=80, top_k=1, bible_max_tokens=60
+                )
+            },
+        )
+        col = c.post("/knowledge/collections", json={"name": "Design"}).json()
+        c.post(
+            f"/knowledge/collections/{col['id']}/documents",
+            json={"title": "Léa", "content": 'Léa : frange courte, crie "Halte !" en pointant du doigt.'},
+        )
+        series = _series(c, "Enquêtes")
+        lea = c.post(f"/projects/{series['id']}/characters", json={"name": "Léa"}).json()
+        note = "Détective en herbe, têtue, dit « ça cloche ! ». Imperméable jaune."
+        c.put(f"/projects/{series['id']}/bible", json={"character_notes": {str(lea["id"]): note}})
+        ch = c.post(f"/projects/{series['id']}/chapters", json={"synopsis": "Léa.", "target_page_count": 1}).json()
+        job = c.post(f"/chapters/{ch['id']}/script").json()
+        c.app.state.ctx.jobs.wait(job["id"])  # type: ignore[attr-defined]
+        page = c.get(f"/chapters/{ch['id']}/pages").json()[0]
+        panel = next(p for p in page["panels"] if "Léa" in p["characters"])
+        prompt = c.post(f"/panels/{panel['id']}/prompt/rebuild").json()["final_prompt"]
+        assert "Repères de la bible : Léa : Détective en herbe, têtue, dit. Imperméable jaune." in prompt
+        assert "Notes de style : Léa : frange courte, crie en pointant du doigt." in prompt
+        assert "cloche" not in prompt and "Halte" not in prompt
+        assert not any(q in prompt for q in '«»“”"')
+
+
+def test_strip_quoted_handles_nested_and_stray_quotes() -> None:
+    from mangaka_engine.pipeline.prompt import strip_quoted
+
+    assert strip_quoted("« Elle dit « ça cloche ! ». » Fin.") == "Fin."
+    assert strip_quoted("Il hurle « Stop ! sans fermer") == "Il hurle Stop ! sans fermer"

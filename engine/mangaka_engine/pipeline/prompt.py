@@ -24,7 +24,9 @@ class PromptCharacter:
 
 
 # Répliques entre guillemets français, anglais ou droits.
-_QUOTES = re.compile(r"«[^»]*»|“[^”]*”|\"[^\"]*\"")
+# Le plus intérieur d'abord : « Elle dit « ça cloche ! ». » disparaît en entier.
+_QUOTES = re.compile(r"«[^«»]*»|“[^“”]*”|\"[^\"]*\"")
+_STRAY_QUOTES = re.compile(r"[«»“”\"]")
 _SPACES = re.compile(r"\s+")
 
 
@@ -35,8 +37,12 @@ def _clean(text: str | None) -> str:
 
 def strip_quoted(text: str) -> str:
     """Retire les répliques entre guillemets d'une description (« Fuyez ! » cria-t-elle → cria-t-elle)."""
-    out = _QUOTES.sub(" ", text)
-    out = re.sub(r"\s+([,.;:!?])", r"\1", out)
+    out, previous = text, None
+    while out != previous:
+        previous, out = out, _QUOTES.sub(" ", out)
+    out = _STRAY_QUOTES.sub(" ", out)  # guillemet orphelin : jamais transmis au modèle d'image
+    # Espace laissée par la réplique avant « , » ou « . » ; l'espace française avant « : ; ! ? » reste.
+    out = re.sub(r"\s+([,.])", r"\1", out)
     return _SPACES.sub(" ", out).strip(" ,;:")
 
 
@@ -61,9 +67,10 @@ def build_prompt(
 ) -> str:
     """Assemble le prompt positif d'une case à partir des morceaux du preset."""
     settings = settings or ImagePromptSettings()
-    desc = description or ""
+    desc, savoir_faire, bible = description or "", savoir_faire or "", bible or ""
     if settings.strip_quotes:
-        desc = strip_quoted(desc)
+        # Notes de la bible et savoir-faire aussi : le texte n'est jamais dessiné par le modèle.
+        desc, savoir_faire, bible = strip_quoted(desc), strip_quoted(savoir_faire), strip_quoted(bible)
     shot = _clean(shot_type)
     values = {
         "shot": shot[:1].upper() + shot[1:] if shot else "",
