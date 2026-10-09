@@ -89,6 +89,10 @@ export interface PanelData {
   importance: number;
   intensity: Intensity | null;
   dialogues: Dialogue[];
+  /** Onomatopées de la case (lettrage hors bulle). */
+  sfx?: PanelSfx[];
+  /** Options de cadre imposées à la case (null = décidées par le style de mise en page). */
+  frame?: PanelFrame | null;
   bbox: Rect | null;
   bubble_zone: Rect | null;
   state: PanelState;
@@ -106,6 +110,21 @@ export interface PanelData {
   detections: Detections | null;
   /** Le ratio de la case s'écarte trop de celui de l'image retenue : régénération conseillée. */
   regeneration_advised: boolean;
+}
+
+export interface PanelSfx {
+  id: number;
+  text: string;
+  intensity: Intensity | null;
+}
+
+export type FrameKind = "border" | "none" | "fade";
+
+/** Options de cadre d'une case : null = décidée par le style. */
+export interface PanelFrame {
+  frame: FrameKind | null;
+  bleed: boolean | null;
+  inset: boolean | null;
 }
 
 export type QCVerdict = "ok" | "review" | "reject";
@@ -204,6 +223,15 @@ export interface LayoutPanel extends Rect {
   /** Polygone de la case (px de la page) ; absent dans une mise en page d'avant les biais. */
   polygon?: [number, number][];
   slanted?: boolean;
+  /** Options de cadre effectives (absentes dans une mise en page d'avant). */
+  frame?: FrameKind;
+  bleed?: boolean;
+  /** La case touche un bord extérieur de la zone utile : le fond perdu est possible. */
+  bleed_possible?: boolean;
+  inset?: boolean;
+  host_index?: number | null;
+  /** Fond perdu : partie de la case dans la zone utile. */
+  live_polygon?: [number, number][];
 }
 
 export interface LayoutGutter extends Rect {
@@ -729,18 +757,60 @@ export interface PageLettering {
   bleed_mm: number;
   layout_stale: boolean;
   styles: Record<BubbleKind, { family: string; name: string; url: string; size_pt: number }>;
+  /** Polices proposées pour les onomatopées. */
+  sfx_fonts?: Record<string, { family: string; name: string; url: string }>;
+  sfx_settings?: { max_overflow_mm: number | null };
   panels: {
     id: number;
     index: number;
+    /** Cadre de la case dans la zone utile (où se posent bulles et onomatopées). */
     box: Rect;
-    /** Polygone de la case quand elle est en biais (null = son cadre). */
+    /** Polygone de la case quand elle est en biais ou à fond perdu (null = son cadre). */
     polygon?: [number, number][] | null;
+    frame?: FrameKind;
+    inset?: boolean;
+    bleed?: boolean;
     bubble_zone: Rect | null;
     image_url: string | null;
     faces: Rect[];
   }[];
   bubbles: LetteredBubble[];
+  sfx?: LetteredSfx[];
   warnings: LetteringWarning[];
+}
+
+/** Onomatopée calculée : lignes dans le repère local (centre = origine), `transform` SVG vers la page. */
+export interface LetteredSfx {
+  id: number;
+  panel_id: number;
+  kind: "sfx";
+  text: string;
+  intensity: Intensity;
+  font: { id: string; family: string; size_pt: number; size_px: number };
+  center: { x: number; y: number };
+  angle: number;
+  skew: number;
+  half: { w: number; h: number };
+  quad: [number, number][];
+  lines: { text: string; x: number; y: number }[];
+  paint: { fill: string; outline: string; outline_px: number; halo: string; halo_px: number };
+  transform: string;
+  manual: boolean;
+  manual_size: boolean;
+  manual_angle: boolean;
+  manual_skew: boolean;
+  overflow_px: number;
+}
+
+/** Réglages d'une onomatopée ; null = calcul automatique. */
+export interface SfxUpdate {
+  intensity?: Intensity | null;
+  font?: string | null;
+  size_pt?: number | null;
+  angle?: number | null;
+  skew?: number | null;
+  x?: number | null;
+  y?: number | null;
 }
 
 export interface BubbleUpdate {
@@ -749,6 +819,7 @@ export interface BubbleUpdate {
   speaker?: string;
   position?: BubbleBox | null;
   tail?: { x: number; y: number } | null;
+  sfx?: SfxUpdate | null;
 }
 
 export interface PageRender {
@@ -1236,6 +1307,8 @@ export const api = {
   slantCut: (pageId: number, body: { path: number[]; index: number; ends: [number, number] }) =>
     request<PageData>(`/pages/${pageId}/cuts`, json("POST", body)),
   layoutStyles: () => request<LayoutStyle[]>("/layout/styles"),
+  setPanelFrame: (panelId: number, body: Partial<PanelFrame>) =>
+    request<PageData>(`/panels/${panelId}/frame`, json("PUT", body)),
   moveGutter: (pageId: number, body: { path: number[]; index: number; position: number }) =>
     request<PageData>(`/pages/${pageId}/gutters`, json("POST", body)),
   layoutTemplates: () => request<LayoutTemplate[]>("/layout/templates"),
@@ -1264,6 +1337,9 @@ export const api = {
   getLettering: (pageId: number) => request<PageLettering>(`/pages/${pageId}/lettering`),
   resetLettering: (pageId: number) => request<PageLettering>(`/pages/${pageId}/lettering/reset`, { method: "POST" }),
   updateBubble: (id: number, body: BubbleUpdate) => request<PageLettering>(`/bubbles/${id}`, json("PATCH", body)),
+  addSfx: (panelId: number, body: { text: string; intensity?: Intensity; x?: number; y?: number }) =>
+    request<PageLettering>(`/panels/${panelId}/sfx`, json("POST", body)),
+  deleteSfx: (id: number) => request<PageLettering>(`/bubbles/${id}`, { method: "DELETE" }),
   renderPage: (pageId: number, body: ExportOptions) => request<PageRender>(`/pages/${pageId}/render`, json("POST", body)),
   getRender: (pageId: number) => request<PageRender>(`/pages/${pageId}/render`),
   exportChapter: (chapterId: number, body: ExportOptions) =>

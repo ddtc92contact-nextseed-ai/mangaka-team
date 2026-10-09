@@ -431,3 +431,39 @@ def test_series_isolation_of_previous_direction_and_settings(c: TestClient) -> N
     assert last_context()["variety"] == "equilibree"
     _direct(c, a2)
     assert last_context()["variety"] == "audacieuse"
+
+
+def test_cadre_and_sfx_go_to_frames_and_lettering(c: TestClient) -> None:
+    """Le cadre devient une option de cadre de la case, les onomatopées des sfx du lettrage (#28)."""
+    chapter_id, page = _three_panel_page(c, "sage")
+    ids = [pa["panel_id"] for pa in _direct(c, chapter_id)["pages"][0]["panels"]]
+    _panel_edit(
+        c,
+        page["id"],
+        page={"rythme": "montée", "template": None, "page_choc": None, "layout_style": None},
+        panels=[
+            {"panel_id": ids[0], "cadre": "fond perdu", "sfx": [{"text": "VROUM !", "intensity": "fort"}]},
+            {"panel_id": ids[1], "cadre": "sans bord", "sfx": []},
+            {"panel_id": ids[2], "cadre": "incrustation", "sfx": [{"text": "bip", "intensity": "léger"}]},
+        ],
+    )
+    out = c.post(f"/chapters/{chapter_id}/direction/apply", json={}).json()
+    p = out["pages"][0]
+    assert [pa["frame"] for pa in p["panels"]] == [
+        {"frame": None, "bleed": True, "inset": None},
+        {"frame": "none", "bleed": None, "inset": None},
+        {"frame": None, "bleed": None, "inset": True},
+    ]
+    assert [[(s["text"], s["intensity"]) for s in pa["sfx"]] for pa in p["panels"]] == [
+        [("VROUM !", "choc")],
+        [],
+        [("bip", "calme")],
+    ]
+    lay = p["layout"]["panels"]
+    assert lay[0]["bleed"] and lay[1]["frame"] == "none" and lay[2]["inset"] and not p["layout_stale"]
+    # l'auteur impose un fondu à la case 2 ; la DA repasse en « normal » partout
+    c.put(f"/panels/{ids[1]}/frame", json={"frame": "fade"})
+    _panel_edit(c, page["id"], panels=[{"panel_id": i, "cadre": "normal", "sfx": []} for i in ids])
+    p = c.post(f"/chapters/{chapter_id}/direction/apply", json={}).json()["pages"][0]
+    assert [pa["frame"] for pa in p["panels"]] == [None, {"frame": "fade", "bleed": None, "inset": None}, None]
+    assert all(pa["sfx"] == [] for pa in p["panels"])  # onomatopées de la DA retirées

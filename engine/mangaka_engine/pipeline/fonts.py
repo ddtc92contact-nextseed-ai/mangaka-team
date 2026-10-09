@@ -89,6 +89,10 @@ class FontBook:
     def family(self, style: TextStyle) -> str:
         return family_name(style.font, style.weight, style.italic)
 
+    def sfx_style(self, font_id: str) -> TextStyle:
+        """Style d'aperçu d'une police d'onomatopée (taille sans importance)."""
+        return TextStyle(font=font_id, size_pt=24, min_size_pt=24)
+
     def name(self, style: TextStyle) -> str:
         """Nom d'affichage de la police (« Comic Neue »…)."""
         return self.preset.fonts[style.font].name

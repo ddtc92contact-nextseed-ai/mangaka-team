@@ -31,3 +31,21 @@ rythme:
 
 # « Page choc » (pleine page ou splash) décidée par la direction artistique : s'ajoute au rythme.
 page_choc: { slant_factor: 1, size_contrast: 1 }
+# Options de cadre : jamais tirées (une page « sage » reste identique) ; on peut les imposer case par case dans l'UI.
+frames:
+  by_importance:
+    1: { frameless: 0, bleed: 0, inset: 0 }
+    2: { frameless: 0, bleed: 0, inset: 0 }
+    3: { frameless: 0, bleed: 0, inset: 0 }
+  by_intensity:
+    calme: { frameless: 0, bleed: 0, inset: 0 }
+    normal: { frameless: 0, bleed: 0, inset: 0 }
+    choc: { frameless: 0, bleed: 0, inset: 0 }
+  fade: 0
+  inset:                   # géométrie d'une incrustation imposée à la main
+    size: 0.4
+    margin_mm: 3
+    min_side_mm: 12
+    max_per_page: 0
+    min_page_panels: 3
+    shot_types: []

@@ -93,6 +93,7 @@ class BubbleKind(enum.StrEnum):
     shout = "shout"
     narration = "narration"
     off = "off"
+    sfx = "sfx"  # onomatopée : lettrage hors bulle (pas de forme ni de queue)
 
 
 class JobStatus(enum.StrEnum):
@@ -231,6 +232,9 @@ class Panel(TimestampMixin, Base):
     importance: Mapped[int] = mapped_column(Integer, default=1)
     # Intensité dramatique donnée par le scénario : calme | normal | choc (None = non précisée).
     intensity: Mapped[str | None] = mapped_column(String(20), default=None)
+    # Options de cadre imposées dans l'UI : {"frame": "border"|"none"|"fade", "bleed": bool, "inset": bool} ;
+    # une clé absente (ou None) = décidée par le style de mise en page.
+    frame: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
     # Géométrie en pixels de la page : {"x1", "y1", "x2", "y2"} (recopiée depuis Page.layout)
     bbox: Mapped[dict[str, int] | None] = mapped_column(JSON, default=None)
     bubble_zone: Mapped[dict[str, int] | None] = mapped_column(JSON, default=None)
@@ -335,6 +339,9 @@ class Bubble(TimestampMixin, Base):
     # ils ont été ajustés à la main dans l'écran Lettrage ; None = placement automatique (étape 5).
     position: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
     tail: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
+    # Onomatopée (kind = sfx) : {"intensity", "font", "size_pt", "angle", "skew"} ; une valeur absente ou
+    # None = calculée par le lettrage. Son centre ajusté à la main est dans `position` ({"x", "y", "manual"}).
+    sfx: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
 
     panel: Mapped[Panel] = relationship(back_populates="bubbles")
 

@@ -92,7 +92,8 @@ export function PageCanvas({
       role="group"
       aria-label={`Page ${page.number} : ${layout.panels.length} cases. Flèches pour passer d'une case à l'autre, Entrée pour ouvrir.`}
     >
-      {layout.panels.map((lp) => {
+      {/* Les incrustations après les autres cases : elles se posent sur leur case hôte. */}
+      {[...layout.panels.filter((p) => !p.inset), ...layout.panels.filter((p) => p.inset)].map((lp) => {
         const panel = panelOf(lp);
         if (!panel) return null;
         const view = views.get(panel.id);

@@ -15,6 +15,18 @@ Une découpe peut être en biais (`slants` d'un nœud, cf. presets/schemas.py) :
 alors une largeur constante, mesurée perpendiculairement à la découpe. Sans biais, chaque case est
 exactement le rectangle d'avant (mêmes coordonnées entières).
 
+Options de cadre (`frames`, une entrée par case, décidées par le style ou imposées dans l'UI) :
+
+- `frame` : `border` (bordure), `none` (sans bord, image à bord franc) ou `fade` (sans bord, l'image se
+  fond au papier) — rendu seulement, la géométrie ne change pas ;
+- `bleed` : les bords de la case posés sur un bord extérieur de la zone utile (haut, bas, côté opposé à
+  la reliure) avancent jusqu'au bord de la page ; à l'export avec fond perdu, ils vont jusqu'au bord
+  du fond perdu. Les autres bords (gouttières, biais) ne bougent pas. `live_polygon` garde la case
+  dans la zone utile (bulles et onomatopées y restent) ;
+- `inset` : la case ne prend pas de place dans l'arbre de découpes ; c'est un rectangle posé dans sa
+  case hôte (`host_index`, la précédente sinon la suivante), en bas côté fin de lecture, entièrement
+  contenu dans l'hôte (marge `margin_mm`) et dessiné après lui.
+
 Les calculs se font dans « l'espace de lecture » (colonnes de gauche à droite), puis la page est
 mise en miroir dans la zone utile si la lecture se fait de droite à gauche (manga).
 Les boîtes sont entières ; x2/y2 sont exclusifs (largeur = x2 − x1).
@@ -79,6 +91,36 @@ class PanelSpec:
     dialogue_chars: int = 0
     panel_id: int | None = None
     intensity: str | None = None  # calme | normal | choc (indice de mise en scène du scénario)
+    shot_type: str | None = None
+    # Options de cadre imposées dans l'UI ({"frame", "bleed", "inset"}) ; le reste vient du style.
+    frame: dict[str, Any] | None = None
+
+
+FRAME_KINDS = ("border", "none", "fade")
+
+
+def default_frame() -> dict[str, Any]:
+    return {"frame": "border", "bleed": False, "inset": False}
+
+
+def normalize_frames(frames: Sequence[dict[str, Any]] | None, n: int) -> list[dict[str, Any]]:
+    """Décisions de cadre d'une page (une par case) ; absentes ou illisibles = case bordée ordinaire."""
+    if not frames or len(frames) != n:
+        return [default_frame() for _ in range(n)]
+    out = []
+    for f in frames:
+        entry = {**default_frame(), **(f if isinstance(f, dict) else {})}
+        if entry["frame"] not in FRAME_KINDS:
+            entry["frame"] = "border"
+        entry["bleed"] = bool(entry["bleed"]) and not entry["inset"]
+        entry["inset"] = bool(entry["inset"])
+        out.append(entry)
+    hosts = [f.get("host") for f in out]
+    for i, f in enumerate(out):
+        h = hosts[i]
+        if f["inset"] and not (isinstance(h, int) and 0 <= h < n and h != i and not out[h]["inset"]):
+            raise LayoutError(f"incrustation de la case {i + 1} sans case hôte valable")
+    return out
 
 
 # --- arbre ----------------------------------------------------------------------
@@ -460,11 +502,19 @@ def compute_layout(
     page_number: int,
     template_id: str,
     style: dict[str, Any] | None = None,
+    frames: Sequence[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Géométrie complète de la page. `style` (id, graine, rythme, gouttières) vient de la grammaire de
-    mise en page (`layout_style.py`) ; ses gouttières remplacent celles du format."""
-    if count_panels(tree) != len(panels):
-        raise LayoutError(f"le gabarit « {template_id} » a {count_panels(tree)} cases, la page en a {len(panels)}")
+    mise en page (`layout_style.py`) ; ses gouttières remplacent celles du format. `frames` : options de
+    cadre de chaque case (cf. en-tête) ; les incrustations ne prennent pas de feuille dans l'arbre."""
+    decided = normalize_frames(frames, len(panels))
+    in_tree = [i for i, f in enumerate(decided) if not f["inset"]]
+    if count_panels(tree) != len(in_tree):
+        insets = len(panels) - len(in_tree)
+        extra = f" dont {insets} incrustée{'s' if insets > 1 else ''}" if insets else ""
+        raise LayoutError(
+            f"le gabarit « {template_id} » a {count_panels(tree)} cases, la page en a {len(panels)}{extra}"
+        )
     gutters_mm = (style or {}).get("gutters_mm")
     frame = page_frame(fmt, settings, direction=direction, page_number=page_number, gutters_mm=gutters_mm)
     leaves, cuts = _geometry(tree, frame)
@@ -474,10 +524,7 @@ def compute_layout(
     def mx(x: float) -> float:
         return L + R - x if direction == "rtl" else x
 
-    panels_out: list[dict[str, Any]] = []
-    for i, (leaf, spec) in enumerate(zip(leaves, panels, strict=True)):
-        # Sommets arrondis au dixième de px : la boîte, la zone de bulles et le rendu partent du même polygone.
-        poly = [(float(x), float(y)) for x, y in (geo.round_point(p) for p in _out_poly(leaf, direction, frame))]
+    def panel_out(i: int, poly: geo.Polygon, spec: PanelSpec) -> dict[str, Any]:
         top = min(range(len(poly)), key=lambda k: (poly[k][1], poly[k][0]))
         poly = poly[top:] + poly[:top]  # contour horaire depuis le sommet en haut à gauche
         rect = bounding_rect(poly)
@@ -485,21 +532,48 @@ def compute_layout(
             raise LayoutError("découpe trop inclinée : une case disparaît (réduis le biais)")
         slanted = not geo.is_axis_rect(poly)
         zone = bubble_zone(rect, spec.dialogue_chars, direction, fmt, settings, poly if slanted else None)
-        panels_out.append(
-            {
-                "index": i,
-                "reading_order": i + 1,
-                "panel_id": spec.panel_id,
-                **rect.as_dict(),
-                "width": rect.w,
-                "height": rect.h,
-                "ratio": round(rect.w / rect.h, 4),
-                "target": target_size(rect.w, rect.h, settings),
-                "bubble_zone": zone.as_dict() if zone else None,
-                "polygon": [geo.round_point(p) for p in poly],
-                "slanted": slanted,
-            }
+        return {
+            "index": i,
+            "reading_order": i + 1,
+            "panel_id": spec.panel_id,
+            **rect.as_dict(),
+            "width": rect.w,
+            "height": rect.h,
+            "ratio": round(rect.w / rect.h, 4),
+            "target": target_size(rect.w, rect.h, settings),
+            "bubble_zone": zone.as_dict() if zone else None,
+            "polygon": [geo.round_point(p) for p in poly],
+            "slanted": slanted,
+        }
+
+    by_index: dict[int, dict[str, Any]] = {}
+    leaf_polys: dict[int, geo.Polygon] = {}
+    for i, leaf in zip(in_tree, leaves, strict=True):
+        # Sommets arrondis au dixième de px : la boîte, la zone de bulles et le rendu partent du même polygone.
+        poly = [(float(x), float(y)) for x, y in (geo.round_point(p) for p in _out_poly(leaf, direction, frame))]
+        leaf_polys[i] = poly
+        by_index[i] = panel_out(i, poly, panels[i])
+    for i, f in enumerate(decided):
+        if f["inset"]:
+            rect = _inset_rect(leaf_polys[f["host"]], f, direction, frame)
+            by_index[i] = panel_out(i, rect.polygon(), panels[i])
+    for i, f in enumerate(decided):
+        out = by_index[i]
+        bleed_poly = None if f["inset"] else _bleed_polygon(leaf_polys[i], frame)
+        out.update(
+            frame=f["frame"],
+            inset=f["inset"],
+            host_index=f["host"] if f["inset"] else None,
+            bleed_possible=bleed_poly is not None,
+            bleed=bool(f["bleed"] and bleed_poly),
         )
+        if out["bleed"] and bleed_poly:
+            # Fond perdu : boîte, ratio et taille de génération deviennent ceux de la case agrandie ;
+            # la zone de bulles et `live_polygon` restent dans la zone utile.
+            rounded = [(float(x), float(y)) for x, y in map(geo.round_point, bleed_poly)]
+            grown = by_index[i] = {**out, **panel_out(i, rounded, panels[i])}
+            grown.update(bubble_zone=out["bubble_zone"], live_polygon=out["polygon"], slanted=out["slanted"])
+    panels_out = [by_index[i] for i in range(len(panels))]
 
     gutters_out: list[dict[str, Any]] = []
     for g in cuts:
@@ -554,7 +628,84 @@ def compute_layout(
     }
     if style is not None:
         out["style"] = style
+    if any(f["frame"] != "border" or f["bleed"] or f["inset"] for f in decided):
+        # Seulement s'il y a une option : une page sans option garde exactement le JSON d'avant.
+        out["frames"] = [
+            {k: v for k, v in f.items() if k in ("frame", "bleed", "inset", "host", "size", "margin_mm", "min_side_mm")}
+            for f in decided
+        ]
     return out
+
+
+def _bleed_polygon(poly: geo.Polygon, frame: Frame) -> geo.Polygon | None:
+    """Case agrandie jusqu'au bord de la page sur ses bords extérieurs (posés sur la zone utile, hors reliure).
+
+    Chaque bord extérieur avance parallèlement jusqu'au bord de la page ; les bords voisins (gouttières,
+    biais) gardent leur direction. None si la case ne touche aucun bord extérieur.
+    """
+    live = frame.live
+    outer = {
+        "top": live.y1,
+        "bottom": frame.height - live.y2,
+        "left": live.x1 if frame.inner_side != "left" else None,
+        "right": frame.width - live.x2 if frame.inner_side != "right" else None,
+    }
+    offsets: list[float] = []
+    touched = False
+    n = len(poly)
+    for k in range(n):
+        (x1, y1), (x2, y2) = poly[k], poly[(k + 1) % n]
+        if math.hypot(x2 - x1, y2 - y1) < geo.EPS:
+            continue
+        side = None
+        if abs(y1 - live.y1) < 0.05 and abs(y2 - live.y1) < 0.05:
+            side = "top"
+        elif abs(y1 - live.y2) < 0.05 and abs(y2 - live.y2) < 0.05:
+            side = "bottom"
+        elif abs(x1 - live.x1) < 0.05 and abs(x2 - live.x1) < 0.05:
+            side = "left"
+        elif abs(x1 - live.x2) < 0.05 and abs(x2 - live.x2) < 0.05:
+            side = "right"
+        dist = outer.get(side) if side else None
+        if dist is not None and dist > 0:
+            offsets.append(-float(dist))
+            touched = True
+        else:
+            offsets.append(0.0)
+    if not touched:
+        return None
+    grown = geo.offset_edges(poly, offsets)
+    return grown or None
+
+
+def _inset_rect(host: geo.Polygon, info: dict[str, Any], direction: Direction, frame: Frame) -> Rect:
+    """Rectangle d'une incrustation dans sa case hôte : en bas, côté fin de lecture, à `margin_mm` des bords.
+
+    Taille = `size` × les côtés de la boîte de l'hôte, réduite par paliers jusqu'à `min_side_mm`.
+    """
+    ppm = frame.px_per_mm
+    size = float(info.get("size") or 0.4)
+    margin = float(info.get("margin_mm") if info.get("margin_mm") is not None else 3) * ppm
+    min_side = float(info.get("min_side_mm") or 12) * ppm
+    region = geo.inset(host, margin)
+    if len(region) < 3:
+        raise LayoutError("incrustation impossible : la case hôte est trop petite")
+    planes = geo.edges(region)
+    hx1, hy1, hx2, hy2 = geo.bbox(host)
+    rx1, ry1, rx2, ry2 = geo.bbox(region)
+    w, h = (hx2 - hx1) * size, (hy2 - hy1) * size
+    while min(w, h) >= min_side:
+        wi, hi = max(1, round(w)), max(1, round(h))
+        step = max(1, min(wi, hi) // 20)
+        ys = range(math.floor(ry2) - hi, math.ceil(ry1) - 1, -step)
+        xs_ltr = range(math.floor(rx2) - wi, math.ceil(rx1) - 1, -step)
+        xs = xs_ltr if direction == "ltr" else range(math.ceil(rx1), math.floor(rx2) - wi + 1, step)
+        for y in ys:
+            for x in xs:
+                if geo.contains_box(planes, x, y, x + wi, y + hi):
+                    return Rect(x, y, x + wi, y + hi)
+        w, h = w * 0.9, h * 0.9
+    raise LayoutError("incrustation impossible : la case hôte est trop petite")
 
 
 def _node_at(tree: TreeNode, path: Sequence[int]) -> SplitNode:
@@ -625,6 +776,7 @@ def _relayout(
         page_number=int(layout["page_number"]),
         template_id=layout["template_id"],
         style=layout.get("style"),
+        frames=layout.get("frames"),
     )
 
 

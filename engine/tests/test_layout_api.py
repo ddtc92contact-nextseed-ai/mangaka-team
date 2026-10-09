@@ -203,6 +203,8 @@ def test_rerolled_layout_survives_recalculation(app_client: TestClient) -> None:
                         "description": pa["description"],
                         "importance": pa["importance"],
                         "intensity": pa["intensity"],
+                        "shot_type": pa["shot_type"],  # seul le dialogue change (le plan compte pour les incrustations)
+                        "characters": pa["characters"],
                         "dialogues": [
                             {**d, "text": d["text"] + " Encore." if p["id"] == page["id"] else d["text"]}
                             for d in pa["dialogues"]
@@ -219,6 +221,75 @@ def test_rerolled_layout_survives_recalculation(app_client: TestClient) -> None:
     after = next(p for p in out.json() if p["id"] == page["id"])
     assert after["layout"]["signature"] != rolled["layout"]["signature"]  # bien recalculée
     same(after, rolled)
+
+
+def _breakdown(current: list[dict], panel: Callable[[dict], dict]) -> dict:
+    """Corps du PUT /chapters/{id}/pages renvoyant le découpage tel quel, `panel` appliqué à chaque case."""
+    return {
+        "pages": [
+            {
+                "id": p["id"],
+                "kind": p["kind"],
+                "rythme": p["rythme"],
+                "panels": [
+                    panel(
+                        {
+                            "id": pa["id"],
+                            "description": pa["description"],
+                            "importance": pa["importance"],
+                            "intensity": pa["intensity"],
+                            "shot_type": pa["shot_type"],
+                            "characters": pa["characters"],
+                            "dialogues": pa["dialogues"],
+                        }
+                    )
+                    for pa in p["panels"]
+                ],
+            }
+            for p in current
+        ]
+    }
+
+
+def test_changing_the_shot_of_an_inset_panel_recomputes_the_page(
+    app_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Les incrustations tirées dépendent du plan des cases : le changer dans le Scénario rend la page obsolète."""
+    c = app_client
+    seeds = iter(range(1, 10_000))
+    monkeypatch.setattr("mangaka_engine.pipeline.pages.secrets.randbelow", lambda _n: next(seeds))
+    _, pages = _scripted(c, layout_style="dynamique")
+    chapter_id = pages[0]["chapter_id"]
+    found = None
+    for _ in range(300):  # graines successives : la première page avec une incrustation tirée
+        for page in [p for p in pages if len(p["panels"]) >= 3]:
+            out = c.post(f"/pages/{page['id']}/layout", json={"reroll": True}).json()
+            inset = next((i for i, lp in enumerate(out["layout"]["panels"]) if lp.get("inset")), None)
+            if inset is not None:
+                found = (out, inset)
+                break
+        if found:
+            break
+    assert found, "aucune incrustation tirée"
+    rolled, index = found
+    panel_id = rolled["panels"][index]["id"]
+    assert rolled["panels"][index]["shot_type"] in ("gros plan", "très gros plan", "plan rapproché")
+    # même plan renvoyé : rien ne change
+    current = c.get(f"/chapters/{chapter_id}/pages").json()
+    same = next(
+        p
+        for p in c.put(f"/chapters/{chapter_id}/pages", json=_breakdown(current, lambda pa: pa)).json()
+        if p["id"] == rolled["id"]
+    )
+    assert same["layout"]["signature"] == rolled["layout"]["signature"] and not same["layout_stale"]
+    # plan large : plus éligible à l'incrustation → page recalculée, sans incrustation
+    body = _breakdown(current, lambda pa: {**pa, "shot_type": "plan large"} if pa["id"] == panel_id else pa)
+    out = c.put(f"/chapters/{chapter_id}/pages", json=body)
+    assert out.status_code == 200, out.text
+    after = next(p for p in out.json() if p["id"] == rolled["id"])
+    assert after["layout"]["signature"] != rolled["layout"]["signature"] and not after["layout_stale"]
+    assert not after["layout"]["panels"][index].get("inset")
+    assert after["layout_seed"] == rolled["layout_seed"]
 
 
 def test_cut_and_gutter_positions_must_be_finite(app_client: TestClient) -> None:

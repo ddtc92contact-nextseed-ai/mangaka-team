@@ -3,8 +3,13 @@
 // Aperçu SVG d'une page mise en page : cases (polygones), zones de bulles, gouttières et découpes
 // déplaçables / inclinables (écran Mise en page), ou miniature (`compact`).
 import { useState, type KeyboardEvent, type PointerEvent } from "react";
-import type { LayoutGutter, PageLayout } from "@/lib/api";
-import { centroid, panelPolygon, svgPoints, type Point } from "@/lib/layout";
+import type { LayoutGutter, LayoutPanel, PageLayout } from "@/lib/api";
+import { centroid, outsetPolygon, panelPolygon, svgPoints, type Point } from "@/lib/layout";
+
+/** Ordre de dessin : les cases de l'arbre, puis les incrustations par-dessus (comme à l'export). */
+function drawOrder(panels: LayoutPanel[]): LayoutPanel[] {
+  return [...panels.filter((p) => !p.inset), ...panels.filter((p) => p.inset)];
+}
 
 const KEY_STEP = 24; // ≈ 2 mm à 300 DPI
 
@@ -176,17 +181,29 @@ export function PageSvg({
           strokeDasharray={`${stroke * 4} ${stroke * 3}`}
         />
       )}
-      {layout.panels.map((p) => {
+      {drawOrder(layout.panels).map((p) => {
         const poly = panelPolygon(p);
         const [cx, cy] = centroid(poly);
         const r = Math.min(110, Math.min(p.width, p.height) / 5);
+        const lit = highlight !== null && p.panel_id === highlight;
+        // Case sans bord (franc ou fondu) : contour en pointillés gris.
+        const frameless = p.frame === "none" || p.frame === "fade";
         return (
-          <g key={p.index} data-testid={compact ? undefined : "layout-panel"} data-slanted={p.slanted ? "true" : undefined}>
+          <g
+            key={p.index}
+            data-testid={compact ? undefined : "layout-panel"}
+            data-slanted={p.slanted ? "true" : undefined}
+            data-frame={p.frame ?? "border"}
+            data-bleed={p.bleed ? "true" : undefined}
+            data-inset={p.inset ? "true" : undefined}
+          >
+            {p.inset && <polygon points={svgPoints(outsetPolygon(poly, stroke * 3))} fill="#f4f4f5" />}
             <polygon
               points={svgPoints(poly)}
-              fill={highlight !== null && p.panel_id === highlight ? "#ffe4e6" : "#ffffff"}
-              stroke={highlight !== null && p.panel_id === highlight ? "#e11d48" : "#18181b"}
-              strokeWidth={highlight !== null && p.panel_id === highlight ? stroke * 2 : stroke}
+              fill={lit ? "#ffe4e6" : p.frame === "fade" ? "#fafafa" : "#ffffff"}
+              stroke={lit ? "#e11d48" : frameless ? "#a1a1aa" : "#18181b"}
+              strokeWidth={lit ? stroke * 2 : frameless ? stroke / 1.5 : stroke}
+              strokeDasharray={frameless && !lit ? `${stroke * 3} ${stroke * 2}` : undefined}
               strokeLinejoin="miter"
             />
             {p.bubble_zone && (

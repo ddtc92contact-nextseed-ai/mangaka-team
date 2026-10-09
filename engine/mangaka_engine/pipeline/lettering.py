@@ -18,7 +18,12 @@ Règles :
 - **queue** : vers le visage du locuteur s'il est détecté, sinon dans la direction par défaut du
   preset ; hors-champ → vers le bord de la case ; récitatif → pas de queue ;
 - **jamais de texte coupé en silence** : faute de place, la bulle garde tout son texte (taille
-  minimale) et un avertissement est émis.
+  minimale) et un avertissement est émis ;
+- **onomatopées** (`sfx`, voir `SfxSpec`) : grand texte sans bulle, posé après toutes les bulles de la
+  page. Taille selon l'intensité et la taille de la case, angle et cisaillement tirés (graine =
+  l'onomatopée) ; son contour (texte + contour épais + halo, transformé) peut dépasser de la case d'au
+  plus `max_overflow_mm`, jamais sur un visage, une bulle, une autre onomatopée ou une incrustation tant
+  que c'est possible.
 
 Tout est calculé en flottants puis arrondi au dixième de pixel : deux exécutions donnent le même
 résultat, ce qui rend les rendus PNG / SVG reproductibles (tests « golden »).
@@ -36,7 +41,7 @@ from typing import Any, Literal
 
 import pyphen
 
-from ..presets.schemas import FontsPreset, LetteringSettings, TextStyle
+from ..presets.schemas import FontsPreset, LetteringSettings, SfxSettings, TextStyle
 from . import geometry as geo
 from .fonts import NBSP, NNBSP, FontBook, pt_to_px
 
@@ -407,6 +412,9 @@ class PanelSpec:
     bubbles: list[BubbleSpec] = field(default_factory=list)
     # Polygone de la case (px de la page) quand elle est en biais ; None = son cadre `box`.
     polygon: list[Point] | None = None
+    sfx: list[SfxSpec] = field(default_factory=list)
+    # Zones à laisser libres (incrustation posée sur la case) : ni bulle ni onomatopée dessus.
+    obstacles: list[Box] = field(default_factory=list)
 
     @property
     def slanted(self) -> bool:
@@ -418,6 +426,27 @@ class PanelSpec:
             assert self.polygon is not None
             return geo.clamp_point(self.polygon, x, y)
         return self.box.clamp_point(x, y)
+
+    def outline(self) -> list[Point]:
+        """Contour de la case : son polygone, sinon les quatre coins de son cadre."""
+        if self.polygon is not None and len(self.polygon) >= 3:
+            return list(self.polygon)
+        return geo.rect_polygon(self.box.x1, self.box.y1, self.box.x2, self.box.y2)
+
+
+@dataclass
+class SfxSpec:
+    """Une onomatopée : texte et réglages imposés dans l'écran Lettrage (None = calculé)."""
+
+    id: int
+    text: str
+    order: int = 0
+    intensity: str | None = None  # calme | normal | choc
+    font: str | None = None
+    size_pt: float | None = None
+    angle: float | None = None  # degrés, sens horaire à l'écran
+    skew: float | None = None  # degrés (cisaillement horizontal, comme skewX en SVG)
+    center: Point | None = None  # px de la page, placé à la main
 
 
 @dataclass(frozen=True)
@@ -475,9 +504,90 @@ class BubbleLayout:
         }
 
 
+@dataclass
+class SfxLayout:
+    """Onomatopée calculée. Les lignes sont dans le repère local (centre du texte = origine) ; le
+    passage à la page est `transform` (rotation · cisaillement, puis translation au centre)."""
+
+    id: int
+    panel_id: int
+    text: str
+    intensity: str
+    font_id: str
+    style: TextStyle
+    family: str
+    size_pt: float
+    size_px: float
+    angle: float
+    skew: float
+    center: Point
+    lines: list[TextLine]
+    half: tuple[float, float]  # demi-largeur / demi-hauteur du contour local (halo compris)
+    quad: list[Point]  # contour transformé (px de la page) : sert au placement et aux tests
+    outline_px: float
+    halo_px: float
+    fill: str
+    outline: str
+    halo: str
+    manual: bool  # centre placé à la main
+    manual_size: bool
+    manual_angle: bool
+    manual_skew: bool
+    overflow_px: float  # dépassement réel hors de la case (≤ max_overflow_mm)
+
+    @property
+    def matrix(self) -> tuple[float, float, float, float]:
+        return sfx_matrix(self.angle, self.skew)
+
+    def svg_transform(self) -> str:
+        cx, cy = self.center
+        return f"translate({cx:.1f} {cy:.1f}) rotate({self.angle:.2f}) skewX({self.skew:.2f})"
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "panel_id": self.panel_id,
+            "kind": "sfx",
+            "text": self.text,
+            "intensity": self.intensity,
+            "font": {
+                "id": self.font_id,
+                "family": self.family,
+                "size_pt": self.size_pt,
+                "size_px": round(self.size_px, 2),
+            },
+            "center": {"x": round(self.center[0], 1), "y": round(self.center[1], 1)},
+            "angle": round(self.angle, 2),
+            "skew": round(self.skew, 2),
+            "half": {"w": round(self.half[0], 1), "h": round(self.half[1], 1)},
+            "quad": [[round(x, 1), round(y, 1)] for x, y in self.quad],
+            "lines": [{"text": ln.text, "x": round(ln.x, 1), "y": round(ln.y, 1)} for ln in self.lines],
+            "paint": {
+                "fill": self.fill,
+                "outline": self.outline,
+                "outline_px": round(self.outline_px, 2),
+                "halo": self.halo,
+                "halo_px": round(self.halo_px, 2),
+            },
+            "transform": self.svg_transform(),
+            "manual": self.manual,
+            "manual_size": self.manual_size,
+            "manual_angle": self.manual_angle,
+            "manual_skew": self.manual_skew,
+            "overflow_px": round(self.overflow_px, 1),
+        }
+
+
+def sfx_matrix(angle: float, skew: float) -> tuple[float, float, float, float]:
+    """Matrice 2×2 de rotate(angle) · skewX(skew) (degrés, y vers le bas : angle > 0 = sens horaire)."""
+    a, t = math.radians(angle), math.tan(math.radians(skew))
+    c, s = math.cos(a), math.sin(a)
+    return c, c * t - s, s, s * t + c
+
+
 @dataclass(frozen=True)
 class LetteringWarning:
-    code: str  # text_overflow | faces_covered | missing_image | layout_stale | no_layout
+    code: str  # text_overflow | faces_covered | missing_image | layout_stale | no_layout | sfx_*
     message: str
     panel_id: int | None = None
     bubble_id: int | None = None
@@ -490,6 +600,7 @@ class LetteringWarning:
 class PageLettering:
     bubbles: list[BubbleLayout]
     warnings: list[LetteringWarning]
+    sfx: list[SfxLayout] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -767,6 +878,7 @@ class Letterer:
         out: dict[int, BubbleLayout] = {}
         inner = panel.box.inset(self.mm(self.s.panel_margin_mm))
         faces = [f.expand(self.mm(self.s.face_margin_mm)) for f in panel.faces]
+        faces += [o.expand(self.mm(self.s.spacing_mm)) for o in panel.obstacles]
         label = f"Case {panel.index + 1}"
         fits: Callable[[Box], bool] | None = None
         if panel.slanted:
@@ -838,7 +950,8 @@ class Letterer:
                     fitted.append(f)
                 boxes = None
                 if not overflow_ids:
-                    boxes = self.place_sequence([f.outer for f in fitted], inner, obstacles, direction, tails, fits)
+                    hard = [*obstacles, *panel.obstacles]
+                    boxes = self.place_sequence([f.outer for f in fitted], inner, hard, direction, tails, fits)
                     if boxes is not None and panel.faces:
                         warnings.append(
                             LetteringWarning(
@@ -909,14 +1022,208 @@ class Letterer:
             overflow=overflow,
         )
 
-    def letter_page(self, panels: Sequence[PanelSpec], direction: Direction) -> PageLettering:
+    def letter_page(self, panels: Sequence[PanelSpec], direction: Direction, page: Box | None = None) -> PageLettering:
+        """Bulles de chaque case, puis onomatopées (elles peuvent déborder sur une voisine : toutes les
+        bulles de la page sont déjà posées). `page` : cadre de la page finie, jamais dépassé."""
         bubbles: list[BubbleLayout] = []
         warnings: list[LetteringWarning] = []
         for panel in panels:
             res = self.letter_panel(panel, direction)
             bubbles += res.bubbles
             warnings += res.warnings
-        return PageLettering(bubbles, warnings)
+        sfx: list[SfxLayout] = []
+        if any(p.sfx for p in panels):
+            taken: list[list[Point]] = [_box_poly(b.box) for b in bubbles]
+            taken += [_box_poly(o) for p in panels for o in p.obstacles]
+            faces = [_box_poly(f.expand(self.mm(self.s.sfx.face_margin_mm))) for p in panels for f in p.faces]
+            for panel in panels:
+                for spec in panel.sfx:
+                    lay, warn = self.letter_sfx(panel, spec, direction, faces, taken, page)
+                    sfx.append(lay)
+                    taken.append(lay.quad)
+                    warnings += warn
+        return PageLettering(bubbles, warnings, sfx)
+
+    # onomatopées ---------------------------------------------------------------------------
+    def sfx_style(self, spec: SfxSpec, size_pt: float) -> tuple[str, TextStyle]:
+        font_id = self.preset.sfx_font(spec.intensity, spec.font)
+        cfg = self.preset.sfx
+        st = TextStyle(
+            font=font_id,
+            size_pt=size_pt,
+            min_size_pt=size_pt,
+            line_height=cfg.line_height if cfg else 0.95,
+            uppercase=cfg.uppercase if cfg else True,
+            color=self.s.sfx.fill,
+        )
+        return font_id, st
+
+    def sfx_auto_size(self, panel: PanelSpec, intensity: str) -> float:
+        c = self.s.sfx
+        side_mm = min(panel.box.w, panel.box.h) / self.dpi * MM_PER_INCH
+        scale = min(max(side_mm / c.reference_panel_mm, c.scale_min), c.scale_max)
+        return round(min(max(c.size_pt[intensity] * scale, c.min_size_pt), c.max_size_pt), 1)  # type: ignore[index]
+
+    def sfx_block(self, spec: SfxSpec, size_pt: float) -> tuple[str, TextStyle, list[TextLine], tuple[float, float]]:
+        """Lignes centrées sur l'origine (encre réelle : accents compris) et demi-taille du contour."""
+        font_id, st = self.sfx_style(spec, size_pt)
+        font = self.fonts.pil(st, self.pt(size_pt))
+        text = normalize_text(spec.text, uppercase=st.uppercase)
+        raw = [ln for ln in text.split("\n") if ln.strip()] or [text or " "]
+        size_px = self.pt(size_pt)
+        line_px = size_px * st.line_height
+        drawn = [self.fonts.drawable(st, ln) for ln in raw]
+        boxes = [font.getbbox(ln, anchor="ms") for ln in drawn]
+        tops = [i * line_px + b[1] for i, b in enumerate(boxes)]
+        bottoms = [i * line_px + b[3] for i, b in enumerate(boxes)]
+        left, right = min(b[0] for b in boxes), max(b[2] for b in boxes)
+        top, bottom = min(tops), max(bottoms)
+        dx, dy = -(left + right) / 2, -(top + bottom) / 2
+        lines = [TextLine(ln, _r(dx), _r(i * line_px + dy), font.getlength(ln)) for i, ln in enumerate(drawn)]
+        pad = self.pt(self.s.sfx.outline_pt + self.s.sfx.halo_pt)
+        return font_id, st, lines, ((right - left) / 2 + pad, (bottom - top) / 2 + pad)
+
+    def letter_sfx(
+        self,
+        panel: PanelSpec,
+        spec: SfxSpec,
+        direction: Direction,
+        faces: Sequence[Sequence[Point]],
+        taken: Sequence[Sequence[Point]],
+        page: Box | None,
+    ) -> tuple[SfxLayout, list[LetteringWarning]]:
+        c: SfxSettings = self.s.sfx
+        label = f"Case {panel.index + 1}"
+        warnings: list[LetteringWarning] = []
+        intensity = spec.intensity if spec.intensity in c.size_pt else "normal"
+        rng = random.Random(f"sfx:{spec.id}")
+        sign = rng.choice((-1.0, 1.0))
+        auto_angle = sign * (c.angle_deg.min + (c.angle_deg.max - c.angle_deg.min) * rng.random())
+        auto_skew = -sign * (c.skew_deg.min + (c.skew_deg.max - c.skew_deg.min) * rng.random())
+        angle = float(spec.angle) if spec.angle is not None else round(auto_angle, 1)
+        skew = float(spec.skew) if spec.skew is not None else round(auto_skew, 1)
+        matrix = sfx_matrix(angle, skew)
+        planes = geo.edges(panel.outline())
+        limit = self.mm(c.max_overflow_mm)
+        gap = self.mm(c.bubble_gap_mm)
+        page_planes = geo.edges(_box_poly(page)) if page else []
+
+        size = float(spec.size_pt) if spec.size_pt is not None else self.sfx_auto_size(panel, intensity)
+        block = self.sfx_block(spec, size)
+        if spec.size_pt is None:
+            # Pas plus large que max_width × la case (texte long) : réduit par pas jusqu'au minimum.
+            while 2 * block[3][0] > c.max_width * panel.box.w and size > c.min_size_pt:
+                size = max(c.min_size_pt, round(size * 0.92, 1))
+                block = self.sfx_block(spec, size)
+
+        def quad_at(half: tuple[float, float], x: float, y: float) -> list[Point]:
+            hw, hh = half
+            return geo.affine(matrix, x, y, [(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)])
+
+        def within(q: Sequence[Point]) -> bool:
+            if geo.overflow(planes, q) > limit + 1e-6:
+                return False
+            return not page_planes or geo.overflow(page_planes, q) <= 1e-6
+
+        def free(q: Sequence[Point], with_faces: bool) -> bool:
+            if any(geo.convex_overlap(q, o, gap) for o in taken):
+                return False
+            return not with_faces or not any(geo.convex_overlap(q, f) for f in faces)
+
+        cx0, cy0 = geo.centroid(panel.outline())
+        center: Point | None = None
+        if spec.center is not None:
+            # Placée à la main : gardée, sauf dépassement au-delà de la limite → ramenée vers le centre.
+            tx, ty = spec.center
+            shrunk = False
+            for _ in range(8):
+                if within(quad_at(block[3], cx0, cy0)):
+                    break
+                size = max(c.min_size_pt / 2, round(size * 0.85, 1))
+                block = self.sfx_block(spec, size)
+                shrunk = True
+            if shrunk:
+                warnings.append(self._sfx_warn("sfx_too_big", label, spec, panel, "réduite pour ne pas trop déborder"))
+            if within(quad_at(block[3], tx, ty)):
+                center = (tx, ty)
+            else:
+                lo, hi = 0.0, 1.0
+                for _ in range(24):
+                    mid = (lo + hi) / 2
+                    if within(quad_at(block[3], cx0 + (tx - cx0) * mid, cy0 + (ty - cy0) * mid)):
+                        lo = mid
+                    else:
+                        hi = mid
+                center = (cx0 + (tx - cx0) * lo, cy0 + (ty - cy0) * lo)
+        else:
+            bx = panel.box
+            tx = bx.x1 + bx.w * (0.68 if direction == "ltr" else 0.32)
+            ty = bx.y1 + bx.h * 0.66
+            step = max(1.0, self.mm(c.grid_mm))
+            for attempt in range(6):
+                half = block[3]
+                cands = [
+                    (x, y)
+                    for y in _steps(bx.y1 - limit, bx.y2 + limit, step)
+                    for x in _steps(bx.x1 - limit, bx.x2 + limit, step)
+                ]
+                cands.sort(key=lambda p: (round((p[0] - tx) ** 2 + (p[1] - ty) ** 2, 3), p[1], p[0]))
+                for with_faces in (True, False):
+                    center = next((p for p in cands if within(q := quad_at(half, *p)) and free(q, with_faces)), None)
+                    if center is not None:
+                        if not with_faces:
+                            warnings.append(
+                                self._sfx_warn("sfx_faces_covered", label, spec, panel, "chevauche un visage")
+                            )
+                        break
+                if center is not None or attempt == 5:
+                    break
+                size = max(c.min_size_pt, round(size * 0.85, 1))
+                block = self.sfx_block(spec, size)
+            if center is None:
+                center = (cx0, cy0)
+                warnings.append(self._sfx_warn("sfx_no_room", label, spec, panel, "pas de place libre"))
+        font_id, st, lines, half = block
+        center = (_r(center[0]), _r(center[1]))
+        quad = quad_at(half, *center)
+        return (
+            SfxLayout(
+                id=spec.id,
+                panel_id=panel.id,
+                text=spec.text,
+                intensity=intensity,
+                font_id=font_id,
+                style=st,
+                family=self.fonts.family(st),
+                size_pt=size,
+                size_px=self.pt(size),
+                angle=angle,
+                skew=skew,
+                center=center,
+                lines=lines,
+                half=half,
+                quad=quad,
+                outline_px=self.pt(c.outline_pt),
+                halo_px=self.pt(c.halo_pt),
+                fill=c.fill,
+                outline=c.outline,
+                halo=c.halo,
+                manual=spec.center is not None,
+                manual_size=spec.size_pt is not None,
+                manual_angle=spec.angle is not None,
+                manual_skew=spec.skew is not None,
+                overflow_px=max(0.0, geo.overflow(planes, quad)),
+            ),
+            warnings,
+        )
+
+    def _sfx_warn(self, code: str, label: str, spec: SfxSpec, panel: PanelSpec, why: str) -> LetteringWarning:
+        excerpt = spec.text if len(spec.text) <= 20 else spec.text[:19] + "…"
+        return LetteringWarning(code, f"{label} : onomatopée « {excerpt} » {why}.", panel.id, spec.id)
+
+
+def _box_poly(b: Box) -> list[Point]:
+    return geo.rect_polygon(b.x1, b.y1, b.x2, b.y2)
 
 
 def _steps(lo: float, hi: float, step: float) -> list[float]:

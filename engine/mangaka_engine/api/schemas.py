@@ -21,6 +21,7 @@ LoraName = Annotated[str, StringConstraints(strip_whitespace=True, max_length=25
 LoraWeight = Annotated[float, Field(ge=0, le=2)]
 IntensityName = Literal["calme", "normal", "choc"]
 RythmeName = Literal["lent", "normal", "rapide"]
+FrameKindName = Literal["border", "none", "fade"]
 
 
 class _In(BaseModel):
@@ -127,6 +128,15 @@ class BubbleIn(_In):
     kind: BubbleKindName = "speech"
 
 
+SfxText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=60)]
+
+
+class SfxIn(_In):
+    id: int | None = None  # recréées comme les bulles ; l'id garde leurs réglages de lettrage
+    text: SfxText
+    intensity: IntensityName | None = None
+
+
 class PanelIn(_In):
     id: int | None = None
     description: LongText = ""
@@ -135,6 +145,8 @@ class PanelIn(_In):
     importance: Annotated[int, Field(ge=1, le=3)] = 2
     intensity: IntensityName | None = None
     dialogues: Annotated[list[BubbleIn], Field(max_length=12)] = Field(default_factory=list)
+    # Onomatopées : absent = celles de la case sont gardées telles quelles.
+    sfx: Annotated[list[SfxIn], Field(max_length=8)] | None = None
 
 
 class PageIn(_In):
@@ -155,6 +167,20 @@ class BubbleOut(BaseModel):
     kind: BubbleKindName
 
 
+class SfxOut(BaseModel):
+    id: int
+    text: str
+    intensity: IntensityName | None = None
+
+
+class PanelFrameIn(_In):
+    """Options de cadre imposées à une case ; null (ou absent) = décidée par le style de mise en page."""
+
+    frame: FrameKindName | None = None
+    bleed: bool | None = None
+    inset: bool | None = None
+
+
 class PanelOut(BaseModel):
     id: int
     index: int
@@ -164,6 +190,9 @@ class PanelOut(BaseModel):
     importance: int
     intensity: IntensityName | None = None
     dialogues: list[BubbleOut]
+    sfx: list[SfxOut] = Field(default_factory=list)
+    # Options de cadre imposées dans l'UI (les options effectives sont dans layout.panels).
+    frame: PanelFrameIn | None = None
     bbox: dict[str, int] | None
     bubble_zone: dict[str, int] | None
     state: str = "draft"
@@ -241,6 +270,19 @@ class TailPoint(_In):
     y: Coord
 
 
+class SfxParams(_In):
+    """Réglages d'une onomatopée (écran Lettrage) : une clé envoyée à null rend la valeur au calcul automatique."""
+
+    intensity: IntensityName | None = None
+    font: PresetId | None = None
+    size_pt: Annotated[float, Field(ge=4, le=300, allow_inf_nan=False)] | None = None
+    angle: Annotated[float, Field(ge=-180, le=180, allow_inf_nan=False)] | None = None
+    skew: Annotated[float, Field(ge=-45, le=45, allow_inf_nan=False)] | None = None
+    # Centre (px de la page) placé à la main ; x et y vont ensemble.
+    x: Annotated[float, Field(ge=-100000, le=100000, allow_inf_nan=False)] | None = None
+    y: Annotated[float, Field(ge=-100000, le=100000, allow_inf_nan=False)] | None = None
+
+
 class BubbleUpdate(_In):
     text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)] | None = None
     kind: BubbleKindName | None = None
@@ -248,6 +290,15 @@ class BubbleUpdate(_In):
     # Cadre / pointe ajustés à la main ; null = placement automatique.
     position: BubbleBox | None = None
     tail: TailPoint | None = None
+    # Onomatopée seulement.
+    sfx: SfxParams | None = None
+
+
+class SfxCreate(_In):
+    text: SfxText
+    intensity: IntensityName = "normal"
+    x: Annotated[float, Field(ge=-100000, le=100000, allow_inf_nan=False)] | None = None
+    y: Annotated[float, Field(ge=-100000, le=100000, allow_inf_nan=False)] | None = None
 
 
 class RenderIn(_In):

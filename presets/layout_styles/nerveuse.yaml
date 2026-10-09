@@ -36,3 +36,21 @@ rythme:
 
 # « Page choc » (pleine page ou splash) décidée par la direction artistique : s'ajoute au rythme.
 page_choc: { slant_factor: 1.4, size_contrast: 2.2 }
+# Options de cadre : fonds perdus fréquents sur les cases fortes, incrustations de réaction.
+frames:
+  by_importance:
+    1: { frameless: 0.08, bleed: 0.05, inset: 0.3 }
+    2: { frameless: 0.12, bleed: 0.25, inset: 0.05 }
+    3: { frameless: 0.2, bleed: 0.75, inset: 0 }
+  by_intensity:
+    calme: { frameless: 0.25, bleed: 0.1, inset: 0.3 }
+    normal: { frameless: 0.12, bleed: 0.3, inset: 0.15 }
+    choc: { frameless: 0.2, bleed: 0.9, inset: 0 }
+  fade: 0.4
+  inset:
+    size: 0.42
+    margin_mm: 2.5
+    min_side_mm: 12
+    max_per_page: 2
+    min_page_panels: 3
+    shot_types: [gros plan, très gros plan, plan rapproché, plan moyen]

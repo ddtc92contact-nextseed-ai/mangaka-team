@@ -16,7 +16,9 @@ Les choix sont stockés par page (`PageDirection`). Un champ modifié par l'aute
 nouvelle proposition le garde tant qu'il n'est pas déverrouillé. « Appliquer » recopie les choix dans
 ce que lit la grammaire de mise en page (rythme et style de la page, intensité des cases, gabarit
 suggéré et page choc) et dans le prompt image (plan, angle, ambiance), puis ne recalcule que les
-pages dont la mise en page change. Le cadre et les onomatopées sont gardés pour le lettrage (#28).
+pages dont la mise en page change. Le cadre devient une option de cadre de la case (`Panel.frame` :
+sans bord, fond perdu, incrustation) et les onomatopées des bulles `sfx` du lettrage — sans toucher
+à une option ou une onomatopée réglée par l'auteur.
 """
 
 from __future__ import annotations
@@ -36,7 +38,7 @@ from sqlalchemy.orm import Session
 from ..presets import PresetRegistry, PromptPreset
 from ..providers.llm import ChatMessage, LLMError, LLMProvider
 from ..store.db import Database
-from ..store.models import Chapter, Character, LLMRun, Page, PageDirection, PageKind, Panel, utcnow
+from ..store.models import Bubble, BubbleKind, Chapter, Character, LLMRun, Page, PageDirection, PageKind, Panel, utcnow
 from ..validation import format_errors
 from .knowledge import AgentKnowledge, KnowledgeBase
 from .layout import LayoutError
@@ -777,9 +779,15 @@ def apply_direction(presets: PresetRegistry, pages: Sequence[Page]) -> ApplyResu
         elif previous.get("layout_style") and page.layout_style == previous.get("layout_style"):
             page.layout_style = None  # le style imposé par l'application précédente est retiré
         intensities = {pa.get("panel_id"): pa.get("intensity") for pa in v.get("panels") or []}
+        by_panel = {pa.get("panel_id"): pa for pa in v.get("panels") or []}
+        before = {pa.get("panel_id"): pa for pa in previous.get("panels") or []}
         for panel in page.panels:
             if intensities.get(panel.id) in INTENSITIES:
                 panel.intensity = intensities[panel.id]
+            choice = by_panel.get(panel.id)
+            if choice is not None:
+                _apply_cadre(panel, choice.get("cadre"), (before.get(panel.id) or {}).get("cadre"))
+                _apply_sfx(panel, choice.get("sfx") or [])
         d.applied = copy.deepcopy(v)
         d.applied_at = utcnow()
         result.applied.append(page.number)
@@ -791,6 +799,49 @@ def apply_direction(presets: PresetRegistry, pages: Sequence[Page]) -> ApplyResu
                 continue
             result.relaid.append(page.number)
     return result
+
+
+# Cadre de direction artistique → option de cadre de la case (pipeline/layout.py).
+CADRE_TO_FRAME: dict[str, dict[str, Any]] = {
+    "normal": {},
+    "sans bord": {"frame": "none"},
+    "fond perdu": {"bleed": True},
+    "incrustation": {"inset": True},
+}
+SFX_TO_INTENSITY = {"léger": "calme", "moyen": "normal", "fort": "choc"}
+DA_SOURCE = "direction"  # marque des onomatopées posées par la direction artistique
+
+
+def _apply_cadre(panel: Panel, cadre: str | None, before: str | None) -> None:
+    """Options de cadre de la DA : remplace celles de l'application précédente, jamais celles de l'auteur."""
+    current = dict(panel.frame or {})
+    for key, value in CADRE_TO_FRAME.get(before or "normal", {}).items():
+        if current.get(key) == value:
+            current.pop(key)  # posée par la DA la dernière fois
+    for key, value in CADRE_TO_FRAME.get(cadre or "normal", {}).items():
+        current.setdefault(key, value)
+    panel.frame = current or None
+
+
+def _apply_sfx(panel: Panel, sfx: Sequence[dict[str, Any]]) -> None:
+    """Onomatopées de la DA : celles de l'application précédente (non retouchées) sont remplacées ;
+    celles du scénario ou ajoutées à la main restent, et un texte déjà présent n'est pas doublé."""
+    for b in list(panel.bubbles):
+        params = b.sfx or {}
+        if b.kind == BubbleKind.sfx and params.get("source") == DA_SOURCE and not (b.position or {}).get("manual"):
+            panel.bubbles.remove(b)
+    present = {b.text.casefold() for b in panel.bubbles if b.kind == BubbleKind.sfx}
+    order = max((b.order for b in panel.bubbles), default=-1) + 1
+    for item in sfx:
+        text = str(item.get("text") or "").strip()
+        if not text or text.casefold() in present:
+            continue
+        present.add(text.casefold())
+        intensity = SFX_TO_INTENSITY.get(str(item.get("intensity") or "moyen"), "normal")
+        panel.bubbles.append(
+            Bubble(order=order, text=text, kind=BubbleKind.sfx, sfx={"intensity": intensity, "source": DA_SOURCE})
+        )
+        order += 1
 
 
 # --- job ------------------------------------------------------------------------

@@ -13,7 +13,7 @@ from PIL import Image, ImageDraw
 
 from mangaka_engine.pipeline.assembly import PageArt, PanelArt, canvas_geometry, render_png
 from mangaka_engine.pipeline.fonts import FontBook
-from mangaka_engine.pipeline.lettering import Box, BubbleSpec, Letterer
+from mangaka_engine.pipeline.lettering import Box, BubbleSpec, Letterer, SfxSpec
 from mangaka_engine.pipeline.lettering import PanelSpec as LetterSpec
 from mangaka_engine.presets import PresetRegistry
 from mangaka_engine.presets.schemas import Gutters, Margins, PageFormat
@@ -59,10 +59,20 @@ def synthetic_image(path: Path, size: tuple[int, int], colors: tuple[tuple[int, 
     return path
 
 
-def render_layout(tmp: Path, presets: PresetRegistry, fonts: FontBook, layout: dict[str, Any]) -> Image.Image:
+def render_layout(
+    tmp: Path,
+    presets: PresetRegistry,
+    fonts: FontBook,
+    layout: dict[str, Any],
+    *,
+    sfx: dict[int, list[SfxSpec]] | None = None,
+    bubbles: dict[int, list[tuple[str, str, str]]] | None = None,
+    crop_marks: bool = False,
+) -> Image.Image:
     fmt = golden_format()
     panels: list[PanelArt] = []
     specs: list[LetterSpec] = []
+    bubbles = BUBBLES if bubbles is None else bubbles
     for lp in layout["panels"]:
         i = lp["index"]
         box = Box(lp["x1"], lp["y1"], lp["x2"], lp["y2"])
@@ -70,22 +80,38 @@ def render_layout(tmp: Path, presets: PresetRegistry, fonts: FontBook, layout: d
         img = synthetic_image(tmp / f"case-{i}.png", size, COLORS[i % len(COLORS)])
         polygon = lp.get("polygon")
         extra: dict[str, Any] = {"polygon": [tuple(p) for p in polygon]} if polygon else {}
-        panels.append(PanelArt(i + 1, i, box, img, size, **extra))
+        panels.append(
+            PanelArt(i + 1, i, box, img, size, frame=lp.get("frame", "border"), inset=bool(lp.get("inset")), **extra)
+        )
+        # Lettrage dans la zone utile (fond perdu : partie de la case dans la zone utile).
+        live = lp.get("live_polygon")
+        lbox, lextra = box, extra
+        if live:
+            xs, ys = [p[0] for p in live], [p[1] for p in live]
+            lbox, lextra = Box(min(xs), min(ys), max(xs), max(ys)), {"polygon": [tuple(p) for p in live]}
         zone = lp.get("bubble_zone")
+        insets = [
+            Box(q["x1"], q["y1"], q["x2"], q["y2"])
+            for q in layout["panels"]
+            if q.get("inset") and q.get("host_index") == i
+        ]
         specs.append(
             LetterSpec(
                 id=i + 1,
                 index=i,
-                box=box,
+                box=lbox,
                 zone=Box(zone["x1"], zone["y1"], zone["x2"], zone["y2"]) if zone else None,
                 bubbles=[
                     BubbleSpec(10 * (i + 1) + j, kind, text, who, j)
-                    for j, (kind, text, who) in enumerate(BUBBLES.get(i, []))
+                    for j, (kind, text, who) in enumerate(bubbles.get(i, []))
                 ],
-                **extra,
+                sfx=list((sfx or {}).get(i, [])),
+                obstacles=insets,
+                **lextra,
             )
         )
-    lettering = Letterer(fonts, presets.lettering, fmt.dpi).letter_page(specs, layout["direction"])
+    page = Box(0, 0, fmt.width_px, fmt.height_px)
+    lettering = Letterer(fonts, presets.lettering, fmt.dpi).letter_page(specs, layout["direction"], page)
     art = PageArt(number=layout["page_number"], fmt=fmt, panels=panels, lettering=lettering)
-    canvas = canvas_geometry(fmt, presets.lettering, bleed=True)
+    canvas = canvas_geometry(fmt, presets.lettering, bleed=True, crop_marks=crop_marks)
     return render_png(art, fonts, presets.lettering, canvas)

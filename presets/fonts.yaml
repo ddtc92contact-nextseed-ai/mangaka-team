@@ -52,6 +52,18 @@ styles:
     min_size_pt: 6.5
     line_height: 1.0
 
+# Onomatopées (« CLIC », « VROUM ! ») : lettrage hors bulle, jamais dessiné par le modèle d'image.
+# Police par intensité de l'onomatopée (calme | normal | choc) ; `choices` : polices proposées dans
+# l'écran Lettrage. Taille, contour, halo, angle et débordement : lettering.yaml (`sfx`).
+sfx:
+  by_intensity:
+    calme: lilita-one
+    normal: titan-one
+    choc: bowlby-one
+  choices: [bowlby-one, titan-one, lilita-one]
+  uppercase: true
+  line_height: 0.95
+
 # Libellé dessiné sur l'aplat gris d'une case sans version choisie.
 missing_panel:
   font: lilita-one
