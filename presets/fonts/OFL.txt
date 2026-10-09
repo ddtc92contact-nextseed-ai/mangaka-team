@@ -7,6 +7,8 @@ BowlbyOne.ttf  Copyright (c) 2011 by vernon adams (vern@newtypography.co.uk), wi
                "Bowlby" "Bowlby One" and "Bowlby One SC".
 TitanOne.ttf   Copyright (c) 2011 Rodrigo Fuenzalida (hello@rfuenzalida.com), with Reserved Font Name "Titan One"
 LilitaOne.ttf  Copyright (c) 2011 Juan Montoreano (juan@remolacha.biz), with Reserved Font Names "Lilita One"
+ComicNeue-*.ttf  Copyright 2014 The Comic Neue Project Authors (https://github.com/crozynski/comicneue)
+               (Regular, Bold, Italic, BoldItalic ; licence d'origine aussi dans OFL-ComicNeue.txt)
 
 Les sous-ensembles embarqués dans les SVG exportés sont renommés (« mk-speech », « mk-shout »…) :
 une version modifiée ne doit pas porter un nom de police réservé (clause 3).

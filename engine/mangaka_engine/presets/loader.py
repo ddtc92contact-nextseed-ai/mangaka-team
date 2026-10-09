@@ -108,12 +108,17 @@ class PresetRegistry:
             raise PresetError("presets/fonts.yaml absent ou invalide : lettrage impossible")
         return self.fonts
 
-    def font_path(self, font_id: str) -> Path:
+    def font_path(self, font_id: str, weight: int | None = None, italic: bool = False) -> Path:
+        """Fichier d'une police ; pour une famille statique, celui de la graisse (gras ≥ 600) et du style."""
         fonts = self.require_fonts()
         try:
-            return (self.root / fonts.fonts[font_id].file).resolve()
+            font = fonts.fonts[font_id]
         except KeyError:
             raise PresetError(f"police inconnue : « {font_id} »") from None
+        try:
+            return (self.root / font.resolve(weight, italic)).resolve()
+        except ValueError as exc:
+            raise PresetError(str(exc)) from None
 
     def require_qc(self) -> QCSettings:
         if self.qc is None:
@@ -171,7 +176,7 @@ class PresetRegistry:
         if fonts_path.exists():
             fonts = reg._parse(fonts_path, FontsPreset)
             if fonts is not None:
-                missing = [f.file for f in fonts.fonts.values() if not (root / f.file).is_file()]
+                missing = [f for font in fonts.fonts.values() for f in font.files() if not (root / f).is_file()]
                 if missing:
                     reg.issues.append(
                         PresetIssue(reg._rel(fonts_path), f"fichiers de police absents : {', '.join(missing)}")

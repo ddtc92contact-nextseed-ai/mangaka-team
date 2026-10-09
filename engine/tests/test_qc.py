@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import threading
 import time
+import tomllib
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
@@ -12,6 +14,7 @@ from typing import Any
 import pytest
 import yaml
 from fastapi.testclient import TestClient
+from packaging.requirements import Requirement
 
 from mangaka_engine.config import Settings
 from mangaka_engine.main import create_app
@@ -25,11 +28,12 @@ from mangaka_engine.pipeline.qc import (
     run_vision,
     vision_decision,
 )
-from mangaka_engine.presets import PresetRegistry
+from mangaka_engine.presets import PresetError, PresetRegistry
 from mangaka_engine.providers.comfyui import MockComfyUIClient
 from mangaka_engine.providers.factory import Providers
 from mangaka_engine.providers.llm import MockLLMProvider
 from mangaka_engine.providers.qc import Box, Detections, MockDetectorProvider, MockIdentityProvider
+from mangaka_engine.providers.qc.dghs import DETECTOR_MODELS, _call_onnx, check_detector_options
 from mangaka_engine.providers.vision import MockVisionProvider, VisionResponseError
 from mangaka_engine.store.models import Job, JobStatus, QCVerdict
 from tests.conftest import PRESETS_DIR, png_bytes
@@ -278,6 +282,59 @@ def test_qc_preset_is_validated_at_load(presets_copy: Path) -> None:
     (presets_copy / "qc.yaml").unlink()
     reg = PresetRegistry.load(presets_copy)
     assert reg.qc is None and any(i.file == "qc.yaml" for i in reg.issues)
+
+
+def test_qc_preset_detector_options_are_published_by_deepghs() -> None:
+    data = yaml.safe_load((PRESETS_DIR / "qc.yaml").read_text(encoding="utf-8"))
+    for kind in ("face", "hand", "text"):
+        options = data["detectors"][kind]["options"]
+        assert check_detector_options(kind, options) == [], f"detectors.{kind}.options"
+        spec = DETECTOR_MODELS[kind]
+        if "level" in options:
+            assert options["level"] in spec["models"][options.get("version", spec["default_version"])]
+
+
+def test_unknown_detector_level_is_a_readable_preset_error(presets_copy: Path) -> None:
+    data = yaml.safe_load((presets_copy / "qc.yaml").read_text(encoding="utf-8"))
+    data["detectors"]["hand"]["options"] = {"level": "m"}
+    data["detectors"]["text"]["options"] = {"modle": "dbnet"}
+    (presets_copy / "qc.yaml").write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
+    reg = PresetRegistry.load(presets_copy)
+    assert reg.qc is None
+    msg = next(i.message for i in reg.issues if i.file == "qc.yaml")
+    assert "detectors.hand.options" in msg and "« m »" in msg and "valeurs permises : n, s" in msg
+    assert "detectors.text.options" in msg and "modle : option inconnue" in msg
+    with pytest.raises(PresetError, match="contrôle qualité indisponible"):
+        reg.require_qc()
+
+    assert check_detector_options("face", {"version": "v1.2", "level": "n"})[0].startswith("level : « n »")
+    assert "version : « v9 »" in check_detector_options("hand", {"version": "v9"})[0]
+    assert "model : « x »" in check_detector_options("text", {"model": "x"})[0]
+
+
+def test_qc_extra_installs_cpu_onnxruntime() -> None:
+    pyproject = tomllib.loads((Path(__file__).parents[1] / "pyproject.toml").read_text(encoding="utf-8"))
+    qc = [Requirement(r).name for r in pyproject["project"]["optional-dependencies"]["qc"]]
+    assert "onnxruntime" in qc and "onnxruntime-gpu" not in qc
+
+
+def test_detector_gpu_load_error_falls_back_to_cpu(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setenv("ONNX_MODE", "gpu")
+    calls: list[str] = []
+
+    def load() -> str:
+        calls.append(os.environ["ONNX_MODE"])
+        if os.environ["ONNX_MODE"] != "cpu":
+            raise RuntimeError("libcudnn.so.9: cannot open shared object file")
+        return "ok"
+
+    assert _call_onnx(load) == "ok" and calls == ["gpu", "cpu"]
+    assert "repli sur CPUExecutionProvider" in caplog.text
+
+    with pytest.raises(ValueError, match="autre"):  # une autre erreur n'est pas masquée
+        _call_onnx(lambda: (_ for _ in ()).throw(ValueError("autre")))
 
 
 # --- API ------------------------------------------------------------------------------------

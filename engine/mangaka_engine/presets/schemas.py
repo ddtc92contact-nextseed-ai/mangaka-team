@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import string
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PositiveFloat, field_validator, model_validator
+
+from ..providers.qc.dghs import check_detector_options
 
 MM_PER_INCH = 25.4
 
@@ -248,16 +250,41 @@ BUBBLE_KINDS = ("speech", "thought", "shout", "narration", "off")
 HEX_COLOR = r"^#[0-9a-fA-F]{6}$"
 
 
+BOLD_FROM = 600  # graisse à partir de laquelle une famille statique prend son fichier gras (comme CSS)
+
+
 class FontFile(_Strict):
-    file: str = Field(description="Fichier TTF/OTF, relatif à fonts.yaml")
+    """Police de lettrage : un fichier (variable ou statique), ou une famille statique regular/gras/italique."""
+
+    file: str = Field(description="Fichier TTF/OTF (regular), relatif à fonts.yaml")
     name: str = Field(description="Nom d'affichage")
+    bold: str | None = Field(default=None, description="Fichier gras (graisse ≥ 600)")
+    italic: str | None = Field(default=None, description="Fichier italique")
+    bold_italic: str | None = Field(default=None, description="Fichier gras italique")
+
+    def files(self) -> list[str]:
+        return [f for f in (self.file, self.bold, self.italic, self.bold_italic) if f]
+
+    def resolve(self, weight: int | None, italic: bool) -> str:
+        """Fichier d'une graisse / d'un style. Faute de gras italique, l'italique (jamais le droit)."""
+        bold = weight is not None and weight >= BOLD_FROM
+        if italic:
+            if bold and self.bold_italic:
+                return self.bold_italic
+            if self.italic is None:
+                raise ValueError(f"« {self.name} » n'a pas de fichier italique")
+            return self.italic
+        return self.bold if bold and self.bold else self.file
 
 
 class TextStyle(_Strict):
     """Style de texte d'un type de bulle (taille en points typographiques : indépendante du DPI)."""
 
     font: str
-    weight: int | None = Field(default=None, ge=1, le=1000, description="Graisse (polices variables)")
+    weight: int | None = Field(
+        default=None, ge=1, le=1000, description="Graisse (police variable, ou ≥ 600 = fichier gras d'une famille)"
+    )
+    italic: bool = Field(default=False, description="Fichier italique de la famille (obligatoire s'il est demandé)")
     size_pt: float = Field(gt=0, le=72)
     min_size_pt: float = Field(gt=0, le=72, description="Taille minimale lisible : en dessous, avertissement")
     step_pt: float = Field(default=0.5, gt=0, le=10)
@@ -298,6 +325,8 @@ class FontsPreset(_Strict):
         for key, style in [*self.styles.items(), ("missing_panel", self.missing_panel)]:
             if style.font not in self.fonts:
                 raise ValueError(f"{key} : police inconnue « {style.font} »")
+            if style.italic and self.fonts[style.font].italic is None:
+                raise ValueError(f"{key} : « {self.fonts[style.font].name} » n'a pas de fichier italique")
         return self
 
 
@@ -462,14 +491,34 @@ class QCHandRule(QCRule):
 
 
 class QCDetector(_Strict):
-    """Un détecteur : seuil de prise en compte des boîtes + options passées telles quelles au détecteur."""
+    """Un détecteur : seuil de prise en compte des boîtes + options passées telles quelles au détecteur.
+
+    Les options sont vérifiées contre les modèles publiés par deepghs (`providers/qc/dghs.py`) :
+    un niveau inconnu est une erreur de preset, pas une exception à chaque case.
+    """
+
+    kind: ClassVar[str] = "face"
 
     min_confidence: float = Field(ge=0, le=1)
     options: dict[str, Any] = Field(default_factory=dict)
 
+    @field_validator("options")
+    @classmethod
+    def _check_options(cls, value: dict[str, Any]) -> dict[str, Any]:
+        problems = check_detector_options(cls.kind, value)
+        if problems:
+            raise ValueError(" ; ".join(problems))
+        return value
+
 
 class QCHandDetector(QCDetector):
+    kind: ClassVar[str] = "hand"
+
     suspect_below: float = Field(ge=0, le=1, description="Main détectée sous cette confiance = suspecte")
+
+
+class QCTextDetector(QCDetector):
+    kind: ClassVar[str] = "text"
 
 
 class QCDetectorRules(_Strict):
@@ -482,7 +531,7 @@ class QCDetectorRules(_Strict):
 class QCDetectorsSettings(_Strict):
     face: QCDetector
     hand: QCHandDetector
-    text: QCDetector
+    text: QCTextDetector
     rules: QCDetectorRules
     # Types de plan où les visages peuvent légitimement manquer (insert, dos…) : pas de comptage.
     face_count_ignored_for_shots: list[str] = Field(default_factory=list)

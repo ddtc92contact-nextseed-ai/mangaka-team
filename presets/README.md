@@ -20,7 +20,7 @@ Après modification d'un preset, redémarre le moteur (`npm run dev`).
 | `image_prompt.yaml` | Construction du prompt final des cases (étape 3) et termes « pas de texte » du prompt négatif |
 | `qc.yaml` | Contrôle qualité des cases (étape 4) : poids, seuils de verdict, règles des détecteurs, seuil CCIP, zone de doute de la vision, nouveaux essais automatiques |
 | `workflows/*.yaml` + `*.json` | Workflows ComfyUI : le JSON API exporté + le mapping des paramètres |
-| `fonts.yaml` + `fonts/` | Polices de lettrage (OFL, licence dans `fonts/OFL.txt`) et style de texte par type de bulle |
+| `fonts.yaml` + `fonts/` | Polices de lettrage (OFL, licences dans `fonts/OFL*.txt`) et style de texte par type de bulle |
 | `lettering.yaml` | Formes et placement des bulles, queues, bordures de case, repères de coupe |
 
 ## Format de page
@@ -219,6 +219,47 @@ Le texte n'est **jamais** dessiné par le modèle d'image : il est posé au lett
   (`PanelImage.detections.faces`, à défaut `PanelImage.params` : `faces`, `qc.faces`…, en px de l'image).
 - Les SVG exportés embarquent un sous-ensemble renommé (`mk-…`) de chaque police (clause 3 de l'OFL).
 
+### Polices disponibles
+
+| Id | Nom | Fichiers | Graisse / italique |
+| --- | --- | --- | --- |
+| `baloo2` | Baloo 2 | `Baloo2.ttf` (variable) | `weight` 400 → 800 |
+| `fredoka` | Fredoka | `Fredoka.ttf` (variable) | `weight` 300 → 700 |
+| `bowlby-one` | Bowlby One | `BowlbyOne.ttf` | une seule graisse |
+| `titan-one` | Titan One | `TitanOne.ttf` | une seule graisse |
+| `lilita-one` | Lilita One | `LilitaOne.ttf` | une seule graisse |
+| `comic-neue` | Comic Neue | `ComicNeue-Regular/Bold/Italic/BoldItalic.ttf` (famille statique) | `weight` ≥ 600 → Bold ; `italic: true` → Italic (Bold Italic si les deux) |
+
+Une famille statique se déclare avec un fichier par variante (`file` = regular, `bold`, `italic`,
+`bold_italic`, tous facultatifs sauf `file`). `italic: true` sur un style dont la police n'a pas de
+fichier italique rend `fonts.yaml` invalide (pas de faux italique). Licences : `fonts/OFL.txt` et
+`fonts/OFL-ComicNeue.txt`.
+
+### Changer la police d'un style
+
+Les styles par défaut ne changent pas (parole en Baloo 2). Pour passer un type de bulle en Comic
+Neue, modifie son bloc dans `styles` de `fonts.yaml`, puis redémarre le moteur :
+
+```yaml
+styles:
+  speech:            # parole en Comic Neue Bold
+    font: comic-neue
+    weight: 700      # ≥ 600 → ComicNeue-Bold.ttf ; 400 ou absent → ComicNeue-Regular.ttf
+    size_pt: 9
+    min_size_pt: 6.5
+    line_height: 1.0
+  thought:           # pensée en Comic Neue Italic
+    font: comic-neue
+    italic: true     # → ComicNeue-Italic.ttf
+    size_pt: 8.5
+    min_size_pt: 6.5
+    line_height: 1.1
+```
+
+L'écran Lettrage affiche le nom de la police de la bulle sélectionnée (« Parole · Comic Neue · 9 pt »)
+et `GET /presets` liste les polices déclarées (`fonts`). Le lettrage est recalculé avec la nouvelle
+police (taille du texte réajustée) ; relance ensuite le rendu ou l'export de la page.
+
 ## Contrôle qualité (`qc.yaml`)
 
 Tous les seuils du QC vivent ici (aucun n'a de valeur par défaut dans le code : une clé manquante
@@ -231,7 +272,7 @@ commenté sert de référence ; l'essentiel :
 | `max_auto_retries` | Nouveaux essais (nouvelle seed) après un rejet automatique, avant « à revoir » |
 | `verdict.ok_min` / `verdict.reject_below` | Score combiné ≥ `ok_min` → ok ; < `reject_below` → rejet ; entre les deux → à revoir |
 | `weights` | Poids des couches `detectors` / `identity` / `vision` (renormalisés sur celles qui ont tourné) |
-| `detectors.face\|hand\|text` | `min_confidence` (boîtes ignorées en dessous), `options` passées au détecteur deepghs ; `hand.suspect_below` |
+| `detectors.face\|hand\|text` | `min_confidence` (boîtes ignorées en dessous), `options` passées au détecteur deepghs, vérifiées au chargement (`level` : `n` ou `s` pour visages et mains ; `text.model` : modèle publié par deepghs ; liste dans `engine/mangaka_engine/providers/qc/dghs.py`) ; `hand.suspect_below` |
 | `detectors.rules` | `missing_face`, `extra_face` (+ `tolerance`), `text`, `suspect_hand` (+ `max_penalty`) : `penalty` (points retirés) et `at_least` (`review` / `reject` : verdict minimal imposé) |
 | `detectors.face_count_ignored_for_shots` | Types de plan où le nombre de visages n'est pas vérifié (insert…) |
 | `identity` | `min_similarity` (1 − différence CCIP), règle `below`, `max_references`, `crop_scale` |

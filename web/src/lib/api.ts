@@ -567,6 +567,7 @@ export interface Presets {
     height_px: number;
   }[];
   workflows: { id: string; name: string; description: string; params: string[] }[];
+  fonts: { id: string; name: string; bold: boolean; italic: boolean }[];
   layout_templates: LayoutTemplate[];
   prompts: string[];
   issues: { file: string; message: string }[];
@@ -615,7 +616,7 @@ export interface PageLettering {
   height: number;
   bleed_mm: number;
   layout_stale: boolean;
-  styles: Record<BubbleKind, { family: string; url: string; size_pt: number }>;
+  styles: Record<BubbleKind, { family: string; name: string; url: string; size_pt: number }>;
   panels: { id: number; index: number; box: Rect; bubble_zone: Rect | null; image_url: string | null; faces: Rect[] }[];
   bubbles: LetteredBubble[];
   warnings: LetteringWarning[];

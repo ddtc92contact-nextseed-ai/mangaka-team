@@ -1,4 +1,4 @@
-# Polices de lettrage (étape 5). Fichiers dans fonts/, licence SIL OFL 1.1 (fonts/OFL.txt).
+# Polices de lettrage (étape 5). Fichiers dans fonts/, licence SIL OFL 1.1 (fonts/OFL*.txt).
 # Le texte des bulles n'est jamais dessiné par le modèle d'image : il est posé ici, en vectoriel.
 #
 # Tailles en points typographiques (1 pt = 1/72 pouce) : indépendantes du DPI de la page.
@@ -10,8 +10,16 @@ fonts:
   bowlby-one: { file: fonts/BowlbyOne.ttf, name: Bowlby One }
   titan-one: { file: fonts/TitanOne.ttf, name: Titan One }
   lilita-one: { file: fonts/LilitaOne.ttf, name: Lilita One }
+  # Famille statique : `weight` ≥ 600 → fichier gras, `italic: true` → fichier italique.
+  # Licence : fonts/OFL-ComicNeue.txt. Pour l'utiliser : voir « Changer la police d'un style » (README).
+  comic-neue:
+    name: Comic Neue
+    file: fonts/ComicNeue-Regular.ttf
+    bold: fonts/ComicNeue-Bold.ttf
+    italic: fonts/ComicNeue-Italic.ttf
+    bold_italic: fonts/ComicNeue-BoldItalic.ttf
 
-# Type de bulle → police, graisse, taille.
+# Type de bulle → police, graisse, italique (familles qui en ont un), taille.
 styles:
   speech:      # parole
     font: baloo2

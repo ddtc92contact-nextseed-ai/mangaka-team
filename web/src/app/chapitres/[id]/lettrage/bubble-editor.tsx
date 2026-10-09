@@ -7,9 +7,10 @@ import { BUBBLE_KINDS } from "@/lib/script";
 
 const TAIL_STEP = 24; // ≈ 2 mm à 300 DPI
 
-/** Panneau d'édition de la bulle choisie : texte, type, locuteur, position automatique, queue. */
+/** Panneau d'édition de la bulle choisie : texte, type (et sa police), locuteur, position automatique, queue. */
 export function BubbleEditor({
   bubble,
+  fontName,
   index,
   warnings,
   busy,
@@ -17,6 +18,8 @@ export function BubbleEditor({
   onClose,
 }: {
   bubble: LetteredBubble;
+  /** Nom d'affichage de la police du style de la bulle (fonts.yaml). */
+  fontName?: string;
   index: number;
   warnings: LetteringWarning[];
   busy: boolean;
@@ -46,7 +49,8 @@ export function BubbleEditor({
         <div>
           <h2 className="font-semibold text-zinc-100">Bulle {index + 1}</h2>
           <p className="text-xs text-zinc-500">
-            {BUBBLE_KINDS[bubble.kind]} · {bubble.font.size_pt.toLocaleString("fr-FR")} pt ·{" "}
+            {BUBBLE_KINDS[bubble.kind]} · {fontName ? `${fontName} · ` : ""}
+            {bubble.font.size_pt.toLocaleString("fr-FR")} pt ·{" "}
             {bubble.manual ? "cadre ajusté à la main" : "placement automatique"}
             {bubble.manual_tail ? " · queue ajustée" : ""}
           </p>
