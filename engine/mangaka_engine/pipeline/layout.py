@@ -256,6 +256,7 @@ class _Cut:
     end_lo: tuple[float, float]  # bornes de chaque extrémité
     end_hi: tuple[float, float]
     gap: geo.Polygon  # bande de la gouttière
+    visible: tuple[geo.Point, geo.Point] | None = None  # partie de la ligne médiane dans le nœud
     before: list[int] = field(default_factory=list)  # cases de part et d'autre (index de feuille)
     after: list[int] = field(default_factory=list)
 
@@ -337,6 +338,7 @@ def _place(
         nx, ny, d = _halfplane(cut.line(), axis)
         planes.append((nx, ny, d))
         cut.gap = geo.clip(geo.clip(region, -nx, -ny, -(d - g / 2)), nx, ny, d + g / 2)
+        cut.visible = geo.clip_segment(*cut.line(), region)
         node_cuts.append(cut)
     for i, child in enumerate(children):
         poly = region
@@ -525,6 +527,8 @@ def compute_layout(
                 # Ligne médiane de la découpe (extrémité « début » puis « fin » : gauche → droite dans
                 # le sens de lecture pour une découpe horizontale, haut → bas pour une verticale).
                 "line": [geo.round_point((mx(p0[0]), p0[1])), geo.round_point((mx(p1[0]), p1[1]))],
+                # Extrémités visibles de la découpe (dans sa zone) : là où l'interface pose ses poignées.
+                "handles": [geo.round_point((mx(q[0]), q[1])) for q in (g.visible or (p0, p1))],
                 "ends": [round(v, 1) for v in ends],
                 "ends_min": [round(v, 1) for v in ends_min],
                 "ends_max": [round(v, 1) for v in ends_max],

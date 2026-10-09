@@ -141,7 +141,7 @@ export function ProjectForm({
           />
         </Field>
       </div>
-      <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-5 md:grid-cols-2">
         <Field label="Sens de lecture" htmlFor="reading_direction" error={errors.reading_direction}>
           <Select
             id="reading_direction"

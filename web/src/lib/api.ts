@@ -213,6 +213,8 @@ export interface LayoutGutter extends Rect {
   max: number;
   /** Ligne médiane de la découpe : extrémité « début » puis « fin ». */
   line?: [[number, number], [number, number]];
+  /** Extrémités visibles de la découpe (poignées d'inclinaison). */
+  handles?: [[number, number], [number, number]];
   /** Positions des deux extrémités le long de l'axe découpé, et leurs bornes. */
   ends?: [number, number];
   ends_min?: [number, number];

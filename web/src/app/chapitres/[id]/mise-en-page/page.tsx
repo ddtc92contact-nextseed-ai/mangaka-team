@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { useState, type KeyboardEvent, type PointerEvent } from "react";
 import { Alert, Button, ButtonLink, Card, EmptyState, Loading, Select } from "@/components/ui";
 import { api, errorMessage, type LayoutGutter, type PageData, type PageLayout } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
@@ -261,7 +261,7 @@ const KEY_STEP = 24; // ≈ 2 mm à 300 DPI
 
 type Drag =
   | { kind: "gutter"; layout: PageLayout; gutter: LayoutGutter; position: number }
-  | { kind: "end"; layout: PageLayout; gutter: LayoutGutter; end: 0 | 1; ends: [number, number] };
+  | { kind: "end"; layout: PageLayout; gutter: LayoutGutter; end: 0 | 1; ends: [number, number]; from: number };
 
 /** Ligne médiane d'une découpe, avec repli pour une mise en page d'avant les biais. */
 function cutLine(g: LayoutGutter): [Point, Point] {
@@ -320,7 +320,6 @@ function PageSvg({
   onMoveGutter?: (g: LayoutGutter, position: number) => void;
   onSlantCut?: (g: LayoutGutter, ends: [number, number]) => void;
 }) {
-  const svgRef = useRef<SVGSVGElement>(null);
   // Le glissé en cours appartient à une mise en page : il disparaît dès qu'une nouvelle arrive.
   const [dragState, setDrag] = useState<Drag | null>(null);
   const drag = dragState && dragState.layout === layout ? dragState : null;
@@ -329,8 +328,10 @@ function PageSvg({
   const stroke = Math.max(4, Math.round(W / 300));
   const handleR = stroke * 5;
 
-  function toPage(e: PointerEvent): { x: number; y: number } | null {
-    const svg = svgRef.current;
+  function toPage(e: PointerEvent<SVGElement>): { x: number; y: number } | null {
+    // Repère de la page : celui du <svg> qui contient l'élément saisi.
+    const target = e.currentTarget;
+    const svg = target instanceof SVGSVGElement ? target : target.ownerSVGElement;
     const ctm = svg?.getScreenCTM();
     if (!svg || !ctm) return null;
     const pt = new DOMPoint(e.clientX, e.clientY).matrixTransform(ctm.inverse());
@@ -349,8 +350,12 @@ function PageSvg({
   function onEndDown(e: PointerEvent<SVGElement>, g: LayoutGutter, end: 0 | 1) {
     if (!onSlantCut || !g.ends) return;
     e.stopPropagation();
+    const p = toPage(e);
+    if (!p) return;
     e.currentTarget.setPointerCapture(e.pointerId);
-    setDrag({ kind: "end", layout, gutter: g, end, ends: [...g.ends] });
+    // Glissé relatif : la poignée est sur la partie visible, l'extrémité au bord de la zone découpée.
+    const from = g.orientation === "vertical" ? p.x : p.y;
+    setDrag({ kind: "end", layout, gutter: g, end, ends: [...g.ends], from });
   }
   function onPointerMove(e: PointerEvent<SVGElement>) {
     if (!drag) return;
@@ -360,7 +365,7 @@ function PageSvg({
     if (drag.kind === "gutter") setDrag({ ...drag, position: clamp(drag.gutter, v) });
     else {
       const ends: [number, number] = [...drag.ends];
-      ends[drag.end] = clampEnd(drag.gutter, drag.end, v);
+      ends[drag.end] = clampEnd(drag.gutter, drag.end, drag.gutter.ends![drag.end] + v - drag.from);
       setDrag({ ...drag, ends });
     }
   }
@@ -399,7 +404,6 @@ function PageSvg({
 
   return (
     <svg
-      ref={svgRef}
       viewBox={`0 0 ${W} ${H}`}
       className={compact ? "block w-full" : "mx-auto block max-h-[72vh] w-full touch-none"}
       style={{ aspectRatio: `${W} / ${H}` }}
@@ -492,6 +496,10 @@ function PageSvg({
                   [line[1][0], line[1][1] + shift],
                 ];
           const width = vertical ? layout.gutters_px.vertical : layout.gutters_px.horizontal;
+          // Poignées sur la partie visible de la découpe, décalées comme son extrémité pendant un glissé.
+          const handles: [Point, Point] = g.handles ?? line;
+          const deltas = [0, 1].map((j) => (endDrag && g.ends ? endDrag.ends[j] - g.ends[j] : shift));
+          const handlePts = handles.map(([x, y], j): Point => (vertical ? [x + deltas[j], y] : [x, y + deltas[j]]));
           const label = `Gouttière ${vertical ? "verticale" : "horizontale"}`;
           return (
             <g key={`${g.path.join("-")}:${g.index}`} data-testid="cut">
@@ -529,8 +537,8 @@ function PageSvg({
                 ([0, 1] as const).map((j) => (
                   <circle
                     key={j}
-                    cx={shown[j][0]}
-                    cy={shown[j][1]}
+                    cx={handlePts[j][0]}
+                    cy={handlePts[j][1]}
                     r={handleR}
                     fill={endDrag?.end === j ? "#e11d48" : "#ffffff"}
                     stroke="#e11d48"

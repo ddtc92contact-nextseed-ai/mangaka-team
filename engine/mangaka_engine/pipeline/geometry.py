@@ -143,6 +143,27 @@ def clamp_point(poly: Sequence[Point], x: float, y: float) -> Point:
     return nearest_on_boundary(poly, x, y)
 
 
+def clip_segment(p0: Point, p1: Point, poly: Sequence[Point]) -> tuple[Point, Point] | None:
+    """Partie du segment [p0, p1] dans le polygone convexe (None si elle est vide)."""
+    lo, hi = 0.0, 1.0
+    dx, dy = p1[0] - p0[0], p1[1] - p0[1]
+    for a, b, c in edges(poly):
+        den = a * dx + b * dy
+        num = c - (a * p0[0] + b * p0[1])
+        if abs(den) < EPS:
+            if num < -EPS:
+                return None
+            continue
+        t = num / den
+        if den > 0:
+            hi = min(hi, t)
+        else:
+            lo = max(lo, t)
+    if hi - lo < EPS:
+        return None
+    return (p0[0] + lo * dx, p0[1] + lo * dy), (p0[0] + hi * dx, p0[1] + hi * dy)
+
+
 def mirror(poly: Sequence[Point], left: float, right: float) -> Polygon:
     """Miroir horizontal dans [left, right] ; l'ordre est inversé pour garder un contour horaire."""
     return [(left + right - x, y) for x, y in reversed(poly)]
