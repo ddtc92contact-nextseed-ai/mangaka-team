@@ -30,6 +30,7 @@ export function ProjectForm({
     workflow_preset: initial?.workflow_preset,
     style_lora_name: initial?.style_lora_name ?? "",
     style_lora_weight: initial?.style_lora_weight ?? 0.8,
+    layout_style: initial?.layout_style,
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
@@ -38,6 +39,10 @@ export function ProjectForm({
   const defaults = presets.data?.defaults;
   const pageFormat = form.page_format ?? defaults?.page_format ?? "";
   const workflow = form.workflow_preset ?? defaults?.workflow ?? "";
+  const styles = presets.data?.layout_styles ?? [];
+  const layoutStyle =
+    form.layout_style ?? defaults?.layout_style ?? styles.find((s) => s.is_default)?.id ?? "";
+  const styleInfo = styles.find((s) => s.id === layoutStyle);
 
   const set = <K extends keyof ProjectInput>(key: K, value: ProjectInput[K]) => {
     setForm((f) => ({ ...f, [key]: value }));
@@ -53,6 +58,7 @@ export function ProjectForm({
       ...form,
       page_format: pageFormat || undefined,
       workflow_preset: workflow || undefined,
+      layout_style: layoutStyle || undefined,
       style_lora_name: form.style_lora_name?.trim() || null,
     };
     try {
@@ -135,7 +141,7 @@ export function ProjectForm({
           />
         </Field>
       </div>
-      <div className="grid gap-5 md:grid-cols-3">
+      <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
         <Field label="Sens de lecture" htmlFor="reading_direction" error={errors.reading_direction}>
           <Select
             id="reading_direction"
@@ -147,6 +153,29 @@ export function ProjectForm({
                 {label}
               </option>
             ))}
+          </Select>
+        </Field>
+        <Field
+          label="Style de mise en page"
+          htmlFor="layout_style"
+          error={errors.layout_style}
+          hint={styleInfo?.description || "Découpes, biais et gouttières de toutes les pages de la série."}
+        >
+          <Select
+            id="layout_style"
+            value={layoutStyle}
+            onChange={(e) => set("layout_style", e.target.value)}
+            aria-invalid={Boolean(errors.layout_style)}
+            disabled={!presets.data}
+          >
+            {styles.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+            {layoutStyle && presets.data && !styles.some((s) => s.id === layoutStyle) && (
+              <option value={layoutStyle}>{layoutStyle} (preset introuvable)</option>
+            )}
           </Select>
         </Field>
         <Field label="Format de page" htmlFor="page_format" error={errors.page_format}>

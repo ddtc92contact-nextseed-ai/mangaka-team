@@ -2,9 +2,10 @@
 
 import { useMemo, useState, type ComponentProps } from "react";
 import { Alert, Button, ButtonLink, Card, EmptyState, Field, Input, Loading, Select, Textarea } from "@/components/ui";
-import { api, EngineError, errorMessage, type Job } from "@/lib/api";
+import { api, EngineError, errorMessage, type Intensity, type Job, type Rythme } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
 import { isFinished, useJob } from "@/lib/jobs";
+import { INTENSITIES, RYTHMES } from "@/lib/layout";
 import {
   BUBBLE_KINDS,
   IMPORTANCE,
@@ -306,6 +307,25 @@ function PageEditor({
           ))}
         </Select>
         </div>
+        {page.kind === "story" && (
+          <div className="w-44">
+            <Select
+              aria-label={`Rythme de la page ${index + 1}`}
+              title="Indice de rythme pour la mise en page (biais, contraste des tailles)"
+              className="py-1 text-xs"
+              value={page.rythme ?? ""}
+              onChange={(e) => onChange({ ...page, rythme: (e.target.value || null) as Rythme | null })}
+              disabled={disabled}
+            >
+              <option value="">Rythme : non précisé</option>
+              {Object.entries(RYTHMES).map(([v, l]) => (
+                <option key={v} value={v}>
+                  Rythme : {l}
+                </option>
+              ))}
+            </Select>
+          </div>
+        )}
         <span className="text-xs text-zinc-500">
           {page.panels.length} case{page.panels.length > 1 ? "s" : ""}
         </span>
@@ -438,6 +458,25 @@ function PanelEditor({
               disabled={disabled}
             >
               {Object.entries(IMPORTANCE).map(([v, l]) => (
+                <option key={v} value={v}>
+                  {l}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <label htmlFor={`${id}-int`} className="text-xs text-zinc-400">
+              Intensité (mise en page)
+            </label>
+            <Select
+              id={`${id}-int`}
+              className="py-1.5"
+              value={panel.intensity ?? ""}
+              onChange={(e) => set("intensity", (e.target.value || null) as Intensity | null)}
+              disabled={disabled}
+            >
+              <option value="">Non précisée</option>
+              {Object.entries(INTENSITIES).map(([v, l]) => (
                 <option key={v} value={v}>
                   {l}
                 </option>

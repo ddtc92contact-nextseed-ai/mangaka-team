@@ -4,6 +4,7 @@ import { useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { Alert, Button, ButtonLink, Card, EmptyState, Loading, Select } from "@/components/ui";
 import { api, errorMessage, type LayoutGutter, type PageData, type PageLayout } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
+import { INTENSITIES, RYTHMES, centroid, panelPolygon, svgPoints, type Point } from "@/lib/layout";
 import { PAGE_KINDS } from "@/lib/script";
 import { useChapter } from "../chapter-context";
 
@@ -11,6 +12,8 @@ export default function LayoutPreviewPage() {
   const { chapter } = useChapter();
   const pages = useEngineData(() => api.listPages(chapter.id), [chapter.id]);
   const templates = useEngineData(() => api.layoutTemplates());
+  const styles = useEngineData(() => api.layoutStyles());
+  const project = useEngineData(() => api.getProject(chapter.project_id), [chapter.project_id]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -34,15 +37,14 @@ export default function LayoutPreviewPage() {
     }
   }
 
-  const recomputePage = (templateId?: string | null) =>
-    selected &&
-    run(async () =>
-      replacePage(await api.layoutPage(selected.id, templateId === undefined ? {} : { template_id: templateId })),
-    );
+  const relayout = (body: { template_id?: string | null; style?: string | null; reroll?: boolean } = {}) =>
+    selected && run(async () => replacePage(await api.layoutPage(selected.id, body)));
   const recomputeAll = () => run(async () => pages.setData(await api.layoutChapter(chapter.id)));
   const moveGutter = (g: LayoutGutter, position: number) =>
     selected &&
     run(async () => replacePage(await api.moveGutter(selected.id, { path: g.path, index: g.index, position })));
+  const slantCut = (g: LayoutGutter, ends: [number, number]) =>
+    selected && run(async () => replacePage(await api.slantCut(selected.id, { path: g.path, index: g.index, ends })));
 
   if (pages.loading && !pages.data) return <Loading />;
   if (pages.error) return <Alert>Impossible de charger les pages : {pages.error}</Alert>;
@@ -58,6 +60,9 @@ export default function LayoutPreviewPage() {
 
   const sameCount = (templates.data ?? []).filter((t) => t.panel_count === selected?.panels.length);
   const anyStale = list.some((p) => p.layout_stale);
+  const seriesStyle = project.data?.layout_style;
+  const styleName = (id: string | null | undefined) => styles.data?.find((s) => s.id === id)?.name ?? id ?? "—";
+  const advised = selected?.panels.filter((p) => p.regeneration_advised) ?? [];
 
   return (
     <div className="grid gap-6 lg:grid-cols-[9rem_minmax(0,1fr)_16rem]">
@@ -101,6 +106,24 @@ export default function LayoutPreviewPage() {
           </h2>
           {selected && selected.panels.length > 0 && (
             <>
+              <label htmlFor="layout-style" className="sr-only">
+                Style de mise en page de la page
+              </label>
+              <Select
+                id="layout-style"
+                className="!w-auto py-1.5 text-sm"
+                value={selected.layout_style ?? ""}
+                onChange={(e) => relayout({ style: e.target.value || null })}
+                disabled={busy || !styles.data}
+                data-testid="page-style"
+              >
+                <option value="">Style de la série ({styleName(seriesStyle)})</option>
+                {(styles.data ?? []).map((s) => (
+                  <option key={s.id} value={s.id}>
+                    Style : {s.name}
+                  </option>
+                ))}
+              </Select>
               <label htmlFor="template" className="sr-only">
                 Gabarit
               </label>
@@ -108,7 +131,7 @@ export default function LayoutPreviewPage() {
                 id="template"
                 className="!w-auto py-1.5 text-sm"
                 value={selected.grid_template ?? ""}
-                onChange={(e) => recomputePage(e.target.value || null)}
+                onChange={(e) => relayout({ template_id: e.target.value || null })}
                 disabled={busy || !templates.data}
               >
                 <option value="">Gabarit automatique{selected.layout && !selected.grid_template ? ` (${templateName(selected.layout.template_id)})` : ""}</option>
@@ -118,7 +141,10 @@ export default function LayoutPreviewPage() {
                   </option>
                 ))}
               </Select>
-              <Button variant="secondary" onClick={() => recomputePage()} disabled={busy} data-testid="recompute-page">
+              <Button onClick={() => relayout({ reroll: true })} disabled={busy} data-testid="reroll-page">
+                Nouvelle mise en page
+              </Button>
+              <Button variant="secondary" onClick={() => relayout()} disabled={busy} data-testid="recompute-page">
                 Recalculer
               </Button>
             </>
@@ -135,7 +161,15 @@ export default function LayoutPreviewPage() {
         {error && <Alert>{error}</Alert>}
         {anyStale && !error && (
           <Alert tone="info">
-            Certaines pages sont obsolètes (format ou sens de lecture de la série modifié) : clique sur « Recalculer ».
+            Certaines pages sont obsolètes (format, sens de lecture ou style de mise en page de la série modifié) : clique
+            sur « Recalculer ».
+          </Alert>
+        )}
+        {advised.length > 0 && (
+          <Alert tone="info">
+            Régénération conseillée pour {advised.length > 1 ? "les cases" : "la case"}{" "}
+            {advised.map((p) => p.index + 1).join(", ")} : leur forme a trop changé depuis l&apos;image retenue. Les
+            autres images sont simplement recadrées.
           </Alert>
         )}
         <Card className="p-3">
@@ -146,7 +180,7 @@ export default function LayoutPreviewPage() {
             </EmptyState>
           ) : !selected.layout ? (
             <EmptyState title="Mise en page non calculée">
-              <Button onClick={() => recomputePage()} disabled={busy}>
+              <Button onClick={() => relayout()} disabled={busy}>
                 Calculer
               </Button>
             </EmptyState>
@@ -154,6 +188,7 @@ export default function LayoutPreviewPage() {
             <PageSvg
               layout={selected.layout}
               onMoveGutter={selected.layout_stale || busy ? undefined : moveGutter}
+              onSlantCut={selected.layout_stale || busy ? undefined : slantCut}
               labels={selected.panels.map((p) => p.shot_type ?? "")}
             />
           )}
@@ -162,8 +197,16 @@ export default function LayoutPreviewPage() {
           <p className="text-xs text-zinc-500">
             {selected.layout.page.width} × {selected.layout.page.height} px · {selected.layout.dpi} DPI ·{" "}
             {selected.layout.direction === "rtl" ? "lecture droite → gauche" : "lecture gauche → droite"} · reliure à{" "}
-            {selected.layout.inner_side === "left" ? "gauche" : "droite"} · glisse une gouttière pour redimensionner ses
-            cases voisines (flèches du clavier aussi).
+            {selected.layout.inner_side === "left" ? "gauche" : "droite"}
+            {selected.layout.style && (
+              <>
+                {" "}
+                · style {styleName(selected.layout.style.id)} · graine {selected.layout.style.seed}
+                {selected.rythme && <> · rythme {RYTHMES[selected.rythme].toLowerCase()}</>}
+              </>
+            )}{" "}
+            · glisse une gouttière pour redimensionner ses cases voisines, ou une poignée ronde au bout d&apos;une découpe
+            pour l&apos;incliner (flèches du clavier aussi).
           </p>
         )}
       </div>
@@ -174,15 +217,17 @@ export default function LayoutPreviewPage() {
             <h3 className="mb-3 text-sm font-semibold text-zinc-100">Cases (ordre de lecture)</h3>
             <ol className="space-y-3 text-xs">
               {selected.layout.panels.map((lp) => {
-                const panel = selected.panels[lp.index];
+                const panel = selected.panels.find((p) => p.id === lp.panel_id) ?? selected.panels[lp.index];
                 return (
-                  <li key={lp.index} className="border-b border-zinc-800 pb-2 last:border-0">
+                  <li key={lp.index} className="border-b border-zinc-800 pb-2 last:border-0" data-testid="layout-panel-info">
                     <p className="font-medium text-zinc-200">
                       {lp.reading_order}. {panel?.shot_type ?? "—"}
                       <span className="ml-1 text-zinc-500">· imp. {panel?.importance}</span>
+                      {panel?.intensity && <span className="ml-1 text-zinc-500">· {INTENSITIES[panel.intensity].toLowerCase()}</span>}
                     </p>
                     <p className="text-zinc-400">
                       {lp.width} × {lp.height} px · ratio {lp.ratio.toFixed(2)}
+                      {lp.slanted && <span className="ml-1 text-sky-300">· en biais</span>}
                     </p>
                     <p className="text-zinc-500">
                       génération {lp.target.width} × {lp.target.height}
@@ -192,6 +237,11 @@ export default function LayoutPreviewPage() {
                         ? `bulles : ${lp.bubble_zone.x2 - lp.bubble_zone.x1} × ${lp.bubble_zone.y2 - lp.bubble_zone.y1} px`
                         : "case muette"}
                     </p>
+                    {panel?.regeneration_advised && (
+                      <p className="font-medium text-amber-300" data-testid="regeneration-advised">
+                        Régénération conseillée
+                      </p>
+                    )}
                   </li>
                 );
               })}
@@ -209,24 +259,75 @@ export default function LayoutPreviewPage() {
 
 const KEY_STEP = 24; // ≈ 2 mm à 300 DPI
 
+type Drag =
+  | { kind: "gutter"; layout: PageLayout; gutter: LayoutGutter; position: number }
+  | { kind: "end"; layout: PageLayout; gutter: LayoutGutter; end: 0 | 1; ends: [number, number] };
+
+/** Ligne médiane d'une découpe, avec repli pour une mise en page d'avant les biais. */
+function cutLine(g: LayoutGutter): [Point, Point] {
+  if (g.line) return g.line;
+  const vertical = g.orientation === "vertical";
+  return vertical
+    ? [
+        [g.position, g.y1],
+        [g.position, g.y2],
+      ]
+    : [
+        [g.x1, g.position],
+        [g.x2, g.position],
+      ];
+}
+
+/** Ligne de la découpe dont les extrémités sont aux positions `ends` (le long de l'axe découpé). */
+function lineWithEnds(g: LayoutGutter, ends: [number, number]): [Point, Point] {
+  const [a, b] = cutLine(g);
+  return g.orientation === "vertical"
+    ? [
+        [ends[0], a[1]],
+        [ends[1], b[1]],
+      ]
+    : [
+        [a[0], ends[0]],
+        [b[0], ends[1]],
+      ];
+}
+
+/** Bande de `half` de part et d'autre de la ligne (zone de saisie d'une gouttière en biais). */
+function band([a, b]: [Point, Point], half: number): Point[] {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const len = Math.hypot(dx, dy) || 1;
+  const nx = (-dy / len) * half;
+  const ny = (dx / len) * half;
+  return [
+    [a[0] + nx, a[1] + ny],
+    [b[0] + nx, b[1] + ny],
+    [b[0] - nx, b[1] - ny],
+    [a[0] - nx, a[1] - ny],
+  ];
+}
+
 function PageSvg({
   layout,
   compact = false,
   labels = [],
   onMoveGutter,
+  onSlantCut,
 }: {
   layout: PageLayout;
   compact?: boolean;
   labels?: string[];
   onMoveGutter?: (g: LayoutGutter, position: number) => void;
+  onSlantCut?: (g: LayoutGutter, ends: [number, number]) => void;
 }) {
   const svgRef = useRef<SVGSVGElement>(null);
   // Le glissé en cours appartient à une mise en page : il disparaît dès qu'une nouvelle arrive.
-  const [dragState, setDrag] = useState<{ layout: PageLayout; gutter: LayoutGutter; position: number } | null>(null);
+  const [dragState, setDrag] = useState<Drag | null>(null);
   const drag = dragState && dragState.layout === layout ? dragState : null;
   const { width: W, height: H } = layout.page;
   const live = layout.live_area;
   const stroke = Math.max(4, Math.round(W / 300));
+  const handleR = stroke * 5;
 
   function toPage(e: PointerEvent): { x: number; y: number } | null {
     const svg = svgRef.current;
@@ -237,40 +338,70 @@ function PageSvg({
   }
 
   const clamp = (g: LayoutGutter, v: number) => Math.min(g.max, Math.max(g.min, v));
+  const clampEnd = (g: LayoutGutter, j: 0 | 1, v: number) =>
+    g.ends_min && g.ends_max ? Math.min(g.ends_max[j], Math.max(g.ends_min[j], v)) : v;
 
-  function onPointerDown(e: PointerEvent<SVGRectElement>, g: LayoutGutter) {
+  function onGutterDown(e: PointerEvent<SVGElement>, g: LayoutGutter) {
     if (!onMoveGutter) return;
     e.currentTarget.setPointerCapture(e.pointerId);
-    setDrag({ layout, gutter: g, position: g.position });
+    setDrag({ kind: "gutter", layout, gutter: g, position: g.position });
   }
-  function onPointerMove(e: PointerEvent<SVGRectElement>) {
+  function onEndDown(e: PointerEvent<SVGElement>, g: LayoutGutter, end: 0 | 1) {
+    if (!onSlantCut || !g.ends) return;
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setDrag({ kind: "end", layout, gutter: g, end, ends: [...g.ends] });
+  }
+  function onPointerMove(e: PointerEvent<SVGElement>) {
     if (!drag) return;
     const p = toPage(e);
     if (!p) return;
     const v = drag.gutter.orientation === "vertical" ? p.x : p.y;
-    setDrag({ ...drag, position: clamp(drag.gutter, v) });
+    if (drag.kind === "gutter") setDrag({ ...drag, position: clamp(drag.gutter, v) });
+    else {
+      const ends: [number, number] = [...drag.ends];
+      ends[drag.end] = clampEnd(drag.gutter, drag.end, v);
+      setDrag({ ...drag, ends });
+    }
   }
   function onPointerUp() {
-    if (!drag || !onMoveGutter) return;
-    if (Math.abs(drag.position - drag.gutter.position) >= 1) onMoveGutter(drag.gutter, drag.position);
+    if (!drag) return;
+    if (drag.kind === "gutter") {
+      if (onMoveGutter && Math.abs(drag.position - drag.gutter.position) >= 1) onMoveGutter(drag.gutter, drag.position);
+      else setDrag(null);
+      return;
+    }
+    const before = drag.gutter.ends!;
+    if (onSlantCut && Math.abs(drag.ends[drag.end] - before[drag.end]) >= 1) onSlantCut(drag.gutter, drag.ends);
     else setDrag(null);
   }
-  function onKey(e: KeyboardEvent<SVGRectElement>, g: LayoutGutter) {
-    if (!onMoveGutter) return;
+  function arrow(e: KeyboardEvent, g: LayoutGutter): number {
     const dir =
       g.orientation === "vertical"
         ? { ArrowLeft: -1, ArrowRight: 1 }[e.key as "ArrowLeft"]
         : { ArrowUp: -1, ArrowDown: 1 }[e.key as "ArrowUp"];
+    if (dir) e.preventDefault();
+    return dir ?? 0;
+  }
+  function onGutterKey(e: KeyboardEvent<SVGElement>, g: LayoutGutter) {
+    if (!onMoveGutter) return;
+    const dir = arrow(e, g);
+    if (dir) onMoveGutter(g, clamp(g, g.position + dir * KEY_STEP));
+  }
+  function onEndKey(e: KeyboardEvent<SVGElement>, g: LayoutGutter, end: 0 | 1) {
+    if (!onSlantCut || !g.ends) return;
+    const dir = arrow(e, g);
     if (!dir) return;
-    e.preventDefault();
-    onMoveGutter(g, clamp(g, g.position + dir * KEY_STEP));
+    const ends: [number, number] = [...g.ends];
+    ends[end] = clampEnd(g, end, ends[end] + dir * KEY_STEP);
+    onSlantCut(g, ends);
   }
 
   return (
     <svg
       ref={svgRef}
       viewBox={`0 0 ${W} ${H}`}
-      className={compact ? "block w-full" : "mx-auto block max-h-[72vh] w-full"}
+      className={compact ? "block w-full" : "mx-auto block max-h-[72vh] w-full touch-none"}
       style={{ aspectRatio: `${W} / ${H}` }}
       role="img"
       aria-label={`Aperçu de la page ${layout.page_number}, gabarit ${layout.template_id}`}
@@ -290,12 +421,12 @@ function PageSvg({
         />
       )}
       {layout.panels.map((p) => {
-        const cx = (p.x1 + p.x2) / 2;
-        const cy = (p.y1 + p.y2) / 2;
+        const poly = panelPolygon(p);
+        const [cx, cy] = centroid(poly);
         const r = Math.min(110, Math.min(p.width, p.height) / 5);
         return (
-          <g key={p.index}>
-            <rect x={p.x1} y={p.y1} width={p.width} height={p.height} fill="#ffffff" stroke="#18181b" strokeWidth={stroke} />
+          <g key={p.index} data-testid={compact ? undefined : "layout-panel"} data-slanted={p.slanted ? "true" : undefined}>
+            <polygon points={svgPoints(poly)} fill="#ffffff" stroke="#18181b" strokeWidth={stroke} strokeLinejoin="miter" />
             {p.bubble_zone && (
               <rect
                 x={p.bubble_zone.x1}
@@ -328,7 +459,7 @@ function PageSvg({
                 {labels[p.index] && p.height > 300 && (
                   <text
                     x={cx}
-                    y={p.y2 - Math.max(40, stroke * 6)}
+                    y={cy + r + Math.min(64, p.width / 12) * 1.4}
                     fill="#52525b"
                     fontSize={Math.min(64, p.width / 12)}
                     textAnchor="middle"
@@ -345,43 +476,81 @@ function PageSvg({
       {!compact &&
         layout.gutters.map((g) => {
           const vertical = g.orientation === "vertical";
-          const active = drag?.gutter === g;
-          const pos = active ? drag.position : g.position;
-          const pad = 36;
-          const hit = vertical
-            ? { x: g.x1 - pad, y: g.y1, width: g.x2 - g.x1 + 2 * pad, height: g.y2 - g.y1 }
-            : { x: g.x1, y: g.y1 - pad, width: g.x2 - g.x1, height: g.y2 - g.y1 + 2 * pad };
+          const gutterDrag = drag?.kind === "gutter" && drag.gutter === g ? drag : null;
+          const endDrag = drag?.kind === "end" && drag.gutter === g ? drag : null;
+          const line = cutLine(g);
+          const shift = gutterDrag ? gutterDrag.position - g.position : 0;
+          const shown: [Point, Point] = endDrag
+            ? lineWithEnds(g, endDrag.ends)
+            : vertical
+              ? [
+                  [line[0][0] + shift, line[0][1]],
+                  [line[1][0] + shift, line[1][1]],
+                ]
+              : [
+                  [line[0][0], line[0][1] + shift],
+                  [line[1][0], line[1][1] + shift],
+                ];
+          const width = vertical ? layout.gutters_px.vertical : layout.gutters_px.horizontal;
+          const label = `Gouttière ${vertical ? "verticale" : "horizontale"}`;
           return (
-            <g key={`${g.path.join("-")}:${g.index}`}>
-              {active && (
+            <g key={`${g.path.join("-")}:${g.index}`} data-testid="cut">
+              {(gutterDrag || endDrag) && (
                 <line
-                  x1={vertical ? pos : g.x1}
-                  x2={vertical ? pos : g.x2}
-                  y1={vertical ? g.y1 : pos}
-                  y2={vertical ? g.y2 : pos}
+                  x1={shown[0][0]}
+                  y1={shown[0][1]}
+                  x2={shown[1][0]}
+                  y2={shown[1][1]}
                   stroke="#e11d48"
                   strokeWidth={stroke * 1.5}
                 />
               )}
-              <rect
-                {...hit}
+              <polygon
+                points={svgPoints(band(line, width / 2 + 36))}
                 fill="#e11d48"
-                fillOpacity={active ? 0.18 : 0}
+                fillOpacity={gutterDrag ? 0.18 : 0}
                 className={onMoveGutter ? "outline-none hover:[fill-opacity:0.15] focus:[fill-opacity:0.3]" : undefined}
                 style={{ cursor: onMoveGutter ? (vertical ? "col-resize" : "row-resize") : "default" }}
                 tabIndex={onMoveGutter ? 0 : -1}
                 role="slider"
                 aria-orientation={vertical ? "horizontal" : "vertical"}
-                aria-label={`Gouttière ${vertical ? "verticale" : "horizontale"}`}
+                aria-label={label}
                 aria-valuemin={Math.round(g.min)}
                 aria-valuemax={Math.round(g.max)}
-                aria-valuenow={Math.round(pos)}
+                aria-valuenow={Math.round(gutterDrag ? gutterDrag.position : g.position)}
                 data-testid="gutter"
-                onPointerDown={(e) => onPointerDown(e, g)}
+                onPointerDown={(e) => onGutterDown(e, g)}
                 onPointerMove={onPointerMove}
                 onPointerUp={onPointerUp}
-                onKeyDown={(e) => onKey(e, g)}
+                onKeyDown={(e) => onGutterKey(e, g)}
               />
+              {onSlantCut &&
+                g.ends &&
+                ([0, 1] as const).map((j) => (
+                  <circle
+                    key={j}
+                    cx={shown[j][0]}
+                    cy={shown[j][1]}
+                    r={handleR}
+                    fill={endDrag?.end === j ? "#e11d48" : "#ffffff"}
+                    stroke="#e11d48"
+                    strokeWidth={stroke}
+                    className="outline-none focus:[stroke-width:12px]"
+                    style={{ cursor: vertical ? "ew-resize" : "ns-resize" }}
+                    tabIndex={0}
+                    role="slider"
+                    aria-orientation={vertical ? "horizontal" : "vertical"}
+                    aria-label={`${label} : ${j === 0 ? (vertical ? "extrémité haute" : "extrémité de début") : vertical ? "extrémité basse" : "extrémité de fin"} (inclinaison${g.angle_deg ? ` ${g.angle_deg.toFixed(1)}°` : ""})`}
+                    aria-valuemin={Math.round(g.ends_min?.[j] ?? 0)}
+                    aria-valuemax={Math.round(g.ends_max?.[j] ?? 0)}
+                    aria-valuenow={Math.round((endDrag ? endDrag.ends : g.ends!)[j])}
+                    data-testid="cut-end"
+                    onPointerDown={(e) => onEndDown(e, g, j)}
+                    onPointerMove={onPointerMove}
+                    onPointerUp={onPointerUp}
+                    onKeyDown={(e) => onEndKey(e, g, j)}
+                  />
+                ))}
             </g>
           );
         })}

@@ -7,6 +7,9 @@ export type SeriesStatus = "ongoing" | "paused" | "completed" | "cancelled";
 export type ChapterStatus = "draft" | "script" | "layout" | "generation" | "lettering" | "ready" | "published";
 export type PageKind = "story" | "bonus" | "chapter_cover";
 export type BubbleKind = "speech" | "thought" | "shout" | "narration" | "off";
+/** Indices de mise en scène du scénario, lus par la grammaire de mise en page. */
+export type Intensity = "calme" | "normal" | "choc";
+export type Rythme = "lent" | "normal" | "rapide";
 
 /** Une série (« projet » côté moteur). */
 export interface Project {
@@ -19,6 +22,8 @@ export interface Project {
   workflow_preset: string;
   style_lora_name: string | null;
   style_lora_weight: number;
+  /** Style de mise en page de la série (presets/layout_styles/). */
+  layout_style: string;
   character_count: number;
   chapter_count: number;
   created_at: string;
@@ -35,6 +40,7 @@ export type ProjectInput = Pick<
   | "workflow_preset"
   | "style_lora_name"
   | "style_lora_weight"
+  | "layout_style"
 >;
 
 export interface Chapter {
@@ -79,6 +85,7 @@ export interface PanelData {
   characters: string[];
   shot_type: string | null;
   importance: number;
+  intensity: Intensity | null;
   dialogues: Dialogue[];
   bbox: Rect | null;
   bubble_zone: Rect | null;
@@ -95,6 +102,8 @@ export interface PanelData {
   qc_reasons: string[];
   qc_override: boolean;
   detections: Detections | null;
+  /** Le ratio de la case s'écarte trop de celui de l'image retenue : régénération conseillée. */
+  regeneration_advised: boolean;
 }
 
 export type QCVerdict = "ok" | "review" | "reject";
@@ -190,6 +199,9 @@ export interface LayoutPanel extends Rect {
   ratio: number;
   target: { width: number; height: number };
   bubble_zone: Rect | null;
+  /** Polygone de la case (px de la page) ; absent dans une mise en page d'avant les biais. */
+  polygon?: [number, number][];
+  slanted?: boolean;
 }
 
 export interface LayoutGutter extends Rect {
@@ -199,6 +211,14 @@ export interface LayoutGutter extends Rect {
   position: number;
   min: number;
   max: number;
+  /** Ligne médiane de la découpe : extrémité « début » puis « fin ». */
+  line?: [[number, number], [number, number]];
+  /** Positions des deux extrémités le long de l'axe découpé, et leurs bornes. */
+  ends?: [number, number];
+  ends_min?: [number, number];
+  ends_max?: [number, number];
+  slant_mm?: [number, number];
+  angle_deg?: number;
 }
 
 export interface PageLayout {
@@ -214,6 +234,7 @@ export interface PageLayout {
   gutters_px: { horizontal: number; vertical: number };
   panels: LayoutPanel[];
   gutters: LayoutGutter[];
+  style?: { id: string; seed: number; rythme: Rythme | null; gutters_mm: { horizontal: number; vertical: number } | null };
 }
 
 export interface PageData {
@@ -222,6 +243,10 @@ export interface PageData {
   number: number;
   kind: PageKind;
   grid_template: string | null;
+  /** Style imposé à la page (null = celui de la série). */
+  layout_style: string | null;
+  layout_seed: number | null;
+  rythme: Rythme | null;
   state: string;
   layout: PageLayout | null;
   layout_stale: boolean;
@@ -235,12 +260,14 @@ export interface PanelInput {
   characters: string[];
   shot_type: string | null;
   importance: number;
+  intensity?: Intensity | null;
   dialogues: Dialogue[];
 }
 
 export interface PageInput {
   id?: number;
   kind: PageKind;
+  rythme?: Rythme | null;
   panels: PanelInput[];
 }
 
@@ -509,6 +536,13 @@ export interface LayoutTemplate {
   panel_count: number;
 }
 
+export interface LayoutStyle {
+  id: string;
+  name: string;
+  description: string;
+  is_default: boolean;
+}
+
 export interface ReferenceImage {
   id: number;
   url: string;
@@ -556,7 +590,7 @@ export interface Health {
 }
 
 export interface Presets {
-  defaults: { page_format: string; workflow: string } | null;
+  defaults: { page_format: string; workflow: string; layout_style?: string | null } | null;
   page_formats: {
     id: string;
     name: string;
@@ -569,6 +603,7 @@ export interface Presets {
   workflows: { id: string; name: string; description: string; params: string[] }[];
   fonts: { id: string; name: string; bold: boolean; italic: boolean }[];
   layout_templates: LayoutTemplate[];
+  layout_styles: LayoutStyle[];
   prompts: string[];
   issues: { file: string; message: string }[];
 }
@@ -617,7 +652,16 @@ export interface PageLettering {
   bleed_mm: number;
   layout_stale: boolean;
   styles: Record<BubbleKind, { family: string; name: string; url: string; size_pt: number }>;
-  panels: { id: number; index: number; box: Rect; bubble_zone: Rect | null; image_url: string | null; faces: Rect[] }[];
+  panels: {
+    id: number;
+    index: number;
+    box: Rect;
+    /** Polygone de la case quand elle est en biais (null = son cadre). */
+    polygon?: [number, number][] | null;
+    bubble_zone: Rect | null;
+    image_url: string | null;
+    faces: Rect[];
+  }[];
   bubbles: LetteredBubble[];
   warnings: LetteringWarning[];
 }
@@ -755,8 +799,11 @@ export const api = {
   savePages: (chapterId: number, pages: PageInput[]) =>
     request<PageData[]>(`/chapters/${chapterId}/pages`, json("PUT", { pages })),
   layoutChapter: (chapterId: number) => request<PageData[]>(`/chapters/${chapterId}/layout`, { method: "POST" }),
-  layoutPage: (pageId: number, body: { template_id?: string | null } = {}) =>
+  layoutPage: (pageId: number, body: { template_id?: string | null; style?: string | null; reroll?: boolean } = {}) =>
     request<PageData>(`/pages/${pageId}/layout`, json("POST", body)),
+  slantCut: (pageId: number, body: { path: number[]; index: number; ends: [number, number] }) =>
+    request<PageData>(`/pages/${pageId}/cuts`, json("POST", body)),
+  layoutStyles: () => request<LayoutStyle[]>("/layout/styles"),
   moveGutter: (pageId: number, body: { path: number[]; index: number; position: number }) =>
     request<PageData>(`/pages/${pageId}/gutters`, json("POST", body)),
   layoutTemplates: () => request<LayoutTemplate[]>("/layout/templates"),
