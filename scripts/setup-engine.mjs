@@ -28,5 +28,17 @@ if (!hasVenv()) {
 }
 
 run(venvPython(), ["-m", "pip", "install", "--quiet", "--upgrade", "pip"]);
-run(venvPython(), ["-m", "pip", "install", "--quiet", "-e", ".[dev]"]);
+// MANGAKA_ENGINE_QC=1 : installe aussi le QC réel (extra `qc`, onnxruntime CPU).
+const extras = process.env.MANGAKA_ENGINE_QC === "1" ? ".[dev,qc]" : ".[dev]";
+run(venvPython(), ["-m", "pip", "install", "--quiet", "-e", extras]);
+
+// imgutils installe lui-même onnxruntime-gpu à l'import s'il ne trouve pas onnxruntime et que
+// `nvidia-smi` existe (GX10) : sans cuDNN, il échoue. On le remplace par la version CPU.
+const gpuOrt = spawnSync(venvPython(), ["-m", "pip", "show", "--quiet", "onnxruntime-gpu"], { cwd: ENGINE_DIR });
+if (gpuOrt.status === 0) {
+  console.log("[moteur] onnxruntime-gpu détecté : remplacé par onnxruntime (CPU, le GPU reste à ComfyUI)");
+  run(venvPython(), ["-m", "pip", "uninstall", "--yes", "--quiet", "onnxruntime-gpu"]);
+  // Les deux paquets partagent le module `onnxruntime` : réinstallation forcée de la version CPU.
+  run(venvPython(), ["-m", "pip", "install", "--quiet", "--force-reinstall", "--no-deps", "onnxruntime>=1.18"]);
+}
 console.log("[moteur] prêt.");
