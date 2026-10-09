@@ -1,0 +1,3 @@
+# Presets appliqués aux nouveaux projets (modifiables projet par projet).
+page_format: a4-300dpi
+workflow: qwen-image-base

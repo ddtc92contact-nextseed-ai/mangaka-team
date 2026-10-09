@@ -1,0 +1,22 @@
+# Dépendances
+node_modules/
+engine/.venv/
+
+# Données locales (base SQLite, images) — jamais commitées
+/data/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Divers
+.DS_Store
+*.log

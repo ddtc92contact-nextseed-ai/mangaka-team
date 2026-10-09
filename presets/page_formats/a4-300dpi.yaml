@@ -1,0 +1,15 @@
+# A4 portrait, 300 DPI → 2480 × 3508 px.
+id: a4-300dpi
+name: A4 portrait — 300 DPI
+width_mm: 210
+height_mm: 297
+dpi: 300
+bleed_mm: 3
+margins_mm:
+  top: 15
+  bottom: 15
+  inner: 15   # côté reliure
+  outer: 12
+gutters_mm:
+  horizontal: 6  # entre deux rangées de cases
+  vertical: 4    # entre deux cases d'une même rangée
