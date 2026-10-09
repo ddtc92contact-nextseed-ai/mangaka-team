@@ -207,18 +207,21 @@ class PageLayoutIn(_In):
     reroll: bool = False
 
 
+FinitePx = Annotated[float, Field(allow_inf_nan=False)]
+
+
 class CutSlant(_In):
     """Incline une découpe : positions (px de la page, le long de l'axe découpé) de ses deux extrémités."""
 
     path: Annotated[list[Annotated[int, Field(ge=0)]], Field(max_length=10)]
     index: Annotated[int, Field(ge=0)]
-    ends: Annotated[list[float], Field(min_length=2, max_length=2)]
+    ends: Annotated[list[FinitePx], Field(min_length=2, max_length=2)]
 
 
 class GutterMove(_In):
     path: Annotated[list[Annotated[int, Field(ge=0)]], Field(max_length=10)]
     index: Annotated[int, Field(ge=0)]
-    position: float
+    position: FinitePx
 
 
 # --- Lettrage (étape 5) ------------------------------------------------------

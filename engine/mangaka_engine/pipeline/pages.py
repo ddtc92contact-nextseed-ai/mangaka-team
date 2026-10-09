@@ -72,6 +72,8 @@ def is_stale(page: Page) -> bool:
 
 def _store(page: Page, layout: dict[str, Any]) -> dict[str, Any]:
     layout = {**layout, "signature": layout_signature(page)}
+    if REROLL_KEY not in layout and page.layout and REROLL_KEY in page.layout:
+        layout[REROLL_KEY] = page.layout[REROLL_KEY]  # gouttière, biais, miroir : le tirage est gardé
     page.layout = layout
     for panel, lp in zip(page.panels, layout["panels"], strict=True):
         panel.bbox = {k: lp[k] for k in ("x1", "y1", "x2", "y2")}
@@ -79,6 +81,18 @@ def _store(page: Page, layout: dict[str, Any]) -> dict[str, Any]:
     if page.state == PageState.draft:
         page.state = PageState.layout
     return layout
+
+
+# Gabarits écartés par « Nouvelle mise en page » : réappliqués à chaque recalcul de la page tant que
+# son nombre de cases ne change pas, sinon la même graine retomberait sur un autre gabarit.
+REROLL_KEY = "reroll_exclude"
+
+
+def _rerolled_out(page: Page, panel_count: int) -> list[str]:
+    saved = (page.layout or {}).get(REROLL_KEY)
+    if isinstance(saved, dict) and saved.get("panels") == panel_count:
+        return [t for t in saved.get("templates", []) if isinstance(t, str)]
+    return []
 
 
 def _previous_template(page: Page) -> str | None:
@@ -120,13 +134,14 @@ def layout_page(presets: PresetRegistry, page: Page, *, reroll: bool = False) ->
         )
         return _store(page, layout)
 
-    exclude: list[str] = []
+    rerolled_out = _rerolled_out(page, len(specs))
     if reroll:
         page.layout_seed = secrets.randbelow(2**31 - 1)
-        if page.layout and not forced:
-            exclude.append(page.layout.get("template_id", ""))
+        if page.layout and not forced and page.layout.get("template_id"):
+            rerolled_out = [page.layout["template_id"]]
     elif page.layout_seed is None:
         page.layout_seed = default_seed(page.chapter_id, page.number)
+    exclude = [] if forced else list(rerolled_out)
     previous = _previous_template(page)
     if style.avoid_repeat and previous and not forced:
         exclude.append(previous)
@@ -143,6 +158,8 @@ def layout_page(presets: PresetRegistry, page: Page, *, reroll: bool = False) ->
         forced=forced,
         exclude=exclude,
     )
+    if rerolled_out:
+        layout[REROLL_KEY] = {"panels": len(specs), "templates": rerolled_out}
     return _store(page, layout)
 
 

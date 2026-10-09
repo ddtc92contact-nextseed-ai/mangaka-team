@@ -166,3 +166,68 @@ def test_changing_reading_direction_mirrors_slanted_pages(app_client: TestClient
     assert after["layout"]["tree"] == page["layout"]["tree"]  # mêmes biais, mêmes proportions
     assert after["layout"]["style"] == page["layout"]["style"]
     assert [lp["slanted"] for lp in after["layout"]["panels"]] == [lp["slanted"] for lp in page["layout"]["panels"]]
+
+
+def test_rerolled_layout_survives_recalculation(app_client: TestClient) -> None:
+    """« Nouvelle mise en page » est reproductible : recalculer (page, chapitre, scénario modifié) la garde."""
+    c = app_client
+    _, pages = _scripted(c, layout_style="dynamique")
+    chapter_id = pages[0]["chapter_id"]
+
+    def same(a: dict, b: dict) -> None:
+        assert a["layout_seed"] == b["layout_seed"]
+        assert a["layout"]["template_id"] == b["layout"]["template_id"]
+        assert a["layout"]["tree"] == b["layout"]["tree"]  # mêmes proportions, mêmes biais
+        assert [lp["polygon"] for lp in a["layout"]["panels"]] == [lp["polygon"] for lp in b["layout"]["panels"]]
+
+    for page in [p for p in pages if p["panels"]]:
+        for _ in range(4):
+            rolled = c.post(f"/pages/{page['id']}/layout", json={"reroll": True}).json()
+            same(c.post(f"/pages/{page['id']}/layout", json={}).json(), rolled)
+            chapter = c.post(f"/chapters/{chapter_id}/layout").json()
+            same(next(p for p in chapter if p["id"] == page["id"]), rolled)
+
+    # scénario modifié (dialogue plus long) : la page devient obsolète et est recalculée avec son tirage
+    current = c.get(f"/chapters/{chapter_id}/pages").json()
+    page = next(p for p in current if p["panels"] and p["panels"][0]["dialogues"])
+    rolled = c.post(f"/pages/{page['id']}/layout", json={"reroll": True}).json()
+    body = {
+        "pages": [
+            {
+                "id": p["id"],
+                "kind": p["kind"],
+                "rythme": p["rythme"],
+                "panels": [
+                    {
+                        "id": pa["id"],
+                        "description": pa["description"],
+                        "importance": pa["importance"],
+                        "intensity": pa["intensity"],
+                        "dialogues": [
+                            {**d, "text": d["text"] + " Encore." if p["id"] == page["id"] else d["text"]}
+                            for d in pa["dialogues"]
+                        ],
+                    }
+                    for pa in p["panels"]
+                ],
+            }
+            for p in current
+        ]
+    }
+    out = c.put(f"/chapters/{chapter_id}/pages", json=body)
+    assert out.status_code == 200, out.text
+    after = next(p for p in out.json() if p["id"] == page["id"])
+    assert after["layout"]["signature"] != rolled["layout"]["signature"]  # bien recalculée
+    same(after, rolled)
+
+
+def test_cut_and_gutter_positions_must_be_finite(app_client: TestClient) -> None:
+    c = app_client
+    _, pages = _scripted(c)
+    page = pages[0]
+    for url, body in (
+        ("cuts", '{"path": [], "index": 0, "ends": [NaN, 10]}'),
+        ("gutters", '{"path": [], "index": 0, "position": Infinity}'),
+    ):
+        r = c.post(f"/pages/{page['id']}/{url}", content=body, headers={"content-type": "application/json"})
+        assert r.status_code == 422, r.text
