@@ -7,6 +7,8 @@ Arborescence attendue :
       providers.yaml           # paramètres des fournisseurs (modèle LLM, URL…)
       layout.yaml              # paramètres du découpage (zones de bulles, taille de génération…)
       image_prompt.yaml        # construction du prompt final des cases (étape 3)
+      fonts.yaml + fonts/      # polices de lettrage (OFL) et style de texte par type de bulle
+      lettering.yaml           # formes et placement des bulles, assemblage, repères de coupe
       page_formats/*.yaml      # formats de page
       layouts/*.yaml           # gabarits de planche
       prompts/*.yaml           # prompts des étapes LLM
@@ -28,10 +30,12 @@ from pydantic import BaseModel, ValidationError
 
 from .schemas import (
     Defaults,
+    FontsPreset,
     ImagePromptSettings,
     LayoutSettings,
     LayoutTemplate,
     LayoutTemplateFile,
+    LetteringSettings,
     PageFormat,
     PromptPreset,
     ProvidersPreset,
@@ -65,6 +69,8 @@ class PresetRegistry:
     prompts: dict[str, PromptPreset] = field(default_factory=dict)
     layout: LayoutSettings = field(default_factory=LayoutSettings)
     image_prompt: ImagePromptSettings = field(default_factory=ImagePromptSettings)
+    fonts: FontsPreset | None = None
+    lettering: LetteringSettings = field(default_factory=LetteringSettings)
     providers: ProvidersPreset | None = None
     defaults: Defaults | None = None
     issues: list[PresetIssue] = field(default_factory=list)
@@ -93,6 +99,18 @@ class PresetRegistry:
             return self.prompts[preset_id]
         except KeyError:
             raise PresetError(f"prompt introuvable : presets/prompts/{preset_id}.yaml") from None
+
+    def require_fonts(self) -> FontsPreset:
+        if self.fonts is None:
+            raise PresetError("presets/fonts.yaml absent ou invalide : lettrage impossible")
+        return self.fonts
+
+    def font_path(self, font_id: str) -> Path:
+        fonts = self.require_fonts()
+        try:
+            return (self.root / fonts.fonts[font_id].file).resolve()
+        except KeyError:
+            raise PresetError(f"police inconnue : « {font_id} »") from None
 
     def require_providers(self) -> ProvidersPreset:
         if self.providers is None:
@@ -140,6 +158,26 @@ class PresetRegistry:
             image_prompt = reg._parse(image_prompt_path, ImagePromptSettings)
             if image_prompt is not None:
                 reg.image_prompt = image_prompt
+
+        fonts_path = root / "fonts.yaml"
+        if fonts_path.exists():
+            fonts = reg._parse(fonts_path, FontsPreset)
+            if fonts is not None:
+                missing = [f.file for f in fonts.fonts.values() if not (root / f.file).is_file()]
+                if missing:
+                    reg.issues.append(
+                        PresetIssue(reg._rel(fonts_path), f"fichiers de police absents : {', '.join(missing)}")
+                    )
+                else:
+                    reg.fonts = fonts
+        else:
+            reg.issues.append(PresetIssue(reg._rel(fonts_path), "fichier absent : lettrage indisponible"))
+
+        lettering_path = root / "lettering.yaml"
+        if lettering_path.exists():
+            lettering = reg._parse(lettering_path, LetteringSettings)
+            if lettering is not None:
+                reg.lettering = lettering
 
         providers_path = root / "providers.yaml"
         if providers_path.exists():

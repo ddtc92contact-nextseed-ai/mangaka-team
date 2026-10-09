@@ -1,0 +1,60 @@
+# Polices de lettrage (étape 5). Fichiers dans fonts/, licence SIL OFL 1.1 (fonts/OFL.txt).
+# Le texte des bulles n'est jamais dessiné par le modèle d'image : il est posé ici, en vectoriel.
+#
+# Tailles en points typographiques (1 pt = 1/72 pouce) : indépendantes du DPI de la page.
+# À 300 DPI, 9 pt ≈ 37 px. Le texte est réduit par pas de `step_pt` jusqu'à `min_size_pt` pour
+# tenir dans la bulle ; au-delà, la case affiche un avertissement (jamais de texte coupé).
+fonts:
+  baloo2: { file: fonts/Baloo2.ttf, name: Baloo 2 }        # variable : graisse 400 → 800
+  fredoka: { file: fonts/Fredoka.ttf, name: Fredoka }      # variable : graisse 300 → 700
+  bowlby-one: { file: fonts/BowlbyOne.ttf, name: Bowlby One }
+  titan-one: { file: fonts/TitanOne.ttf, name: Titan One }
+  lilita-one: { file: fonts/LilitaOne.ttf, name: Lilita One }
+
+# Type de bulle → police, graisse, taille.
+styles:
+  speech:      # parole
+    font: baloo2
+    weight: 600
+    size_pt: 9
+    min_size_pt: 6.5
+    line_height: 1.0
+  thought:     # pensée
+    font: fredoka
+    weight: 400
+    size_pt: 8.5
+    min_size_pt: 6.5
+    line_height: 1.1
+  shout:       # cri
+    font: bowlby-one
+    size_pt: 10
+    min_size_pt: 7
+    line_height: 1.05
+    uppercase: true
+  narration:   # récitatif (cartouche)
+    font: fredoka
+    weight: 500
+    size_pt: 8
+    min_size_pt: 6
+    line_height: 1.1
+  "off":       # hors-champ (clé entre guillemets : sinon YAML lit un booléen)
+    font: baloo2
+    weight: 500
+    size_pt: 9
+    min_size_pt: 6.5
+    line_height: 1.0
+
+# Libellé dessiné sur l'aplat gris d'une case sans version choisie.
+missing_panel:
+  font: lilita-one
+  size_pt: 14
+  min_size_pt: 6
+  color: "#3f3f46"
+  uppercase: true
+
+# Césure (pyphen) : seuls les mots d'au moins `min_word_chars` lettres sont coupés, et seulement
+# si la ligne resterait vide à plus de `min_gap` (sinon le mot passe entier à la ligne).
+hyphenation:
+  language: fr
+  min_word_chars: 6
+  min_gap: 0.3
