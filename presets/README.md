@@ -18,6 +18,7 @@ Après modification d'un preset, redémarre le moteur (`npm run dev`).
 | `layouts/*.yaml` | Bibliothèque de gabarits de planche (arbres de découpes) |
 | `prompts/*.yaml` | Prompts des étapes LLM (`script` : découpage d'un chapitre) |
 | `image_prompt.yaml` | Construction du prompt final des cases (étape 3) et termes « pas de texte » du prompt négatif |
+| `qc.yaml` | Contrôle qualité des cases (étape 4) : poids, seuils de verdict, règles des détecteurs, seuil CCIP, zone de doute de la vision, nouveaux essais automatiques |
 | `workflows/*.yaml` + `*.json` | Workflows ComfyUI : le JSON API exporté + le mapping des paramètres |
 
 ## Format de page
@@ -196,3 +197,25 @@ version de ComfyUI et des fichiers présents sur le GX10. Pour les remplacer par
 lettrage, jamais dessiné par le modèle) et `strip_quotes` retire les répliques entre guillemets
 de la description. Le prompt est stocké sur la case ; une édition manuelle est conservée jusqu'à
 « reconstruire le prompt ».
+
+## Contrôle qualité (`qc.yaml`)
+
+Tous les seuils du QC vivent ici (aucun n'a de valeur par défaut dans le code : une clé manquante
+rend le fichier invalide et le QC indisponible, erreur visible dans `GET /presets`). Le fichier
+commenté sert de référence ; l'essentiel :
+
+| Clé | Rôle |
+| --- | --- |
+| `auto_after_generation` | QC automatique après chaque génération |
+| `max_auto_retries` | Nouveaux essais (nouvelle seed) après un rejet automatique, avant « à revoir » |
+| `verdict.ok_min` / `verdict.reject_below` | Score combiné ≥ `ok_min` → ok ; < `reject_below` → rejet ; entre les deux → à revoir |
+| `weights` | Poids des couches `detectors` / `identity` / `vision` (renormalisés sur celles qui ont tourné) |
+| `detectors.face\|hand\|text` | `min_confidence` (boîtes ignorées en dessous), `options` passées au détecteur deepghs ; `hand.suspect_below` |
+| `detectors.rules` | `missing_face`, `extra_face` (+ `tolerance`), `text`, `suspect_hand` (+ `max_penalty`) : `penalty` (points retirés) et `at_least` (`review` / `reject` : verdict minimal imposé) |
+| `detectors.face_count_ignored_for_shots` | Types de plan où le nombre de visages n'est pas vérifié (insert…) |
+| `identity` | `min_similarity` (1 − différence CCIP), règle `below`, `max_references`, `crop_scale` |
+| `vision` | `mode` (`never` / `on_doubt` / `always`), `doubt_band` (score des couches 1-2 où la vision tranche), `max_retries`, `wait_idle_s`, `max_reasons`, `prompt` (`$description`, `$characters`, `$shot`) |
+
+Installation des vraies couches sur la GX10 : `engine/.venv/bin/pip install -e "engine[qc]"` (détecteurs
+et CCIP deepghs) et `ollama pull qwen3-vl:4b` (vision), puis `QC_DETECTORS_PROVIDER=dghs`,
+`QC_IDENTITY_PROVIDER=dghs`, `VISION_PROVIDER=ollama` dans `.env`.
