@@ -2,9 +2,12 @@
 
 | Variable            | Valeurs                                   | Défaut                                  |
 |---------------------|-------------------------------------------|-----------------------------------------|
-| LLM_PROVIDER        | deepseek, ollama*, claude*, mock          | deepseek si DEEPSEEK_API_KEY, sinon mock |
+| LLM_PROVIDER        | deepseek, ollama*, claude*, mock          | mock                                    |
 | VISION_PROVIDER     | deepseek*, ollama*, mock                  | mock                                    |
 | COMFYUI_PROVIDER    | http, mock                                | mock                                    |
+
+Le mode réel s'active explicitement (cf. `.env.example`) : une DEEPSEEK_API_KEY
+exportée dans le shell ne suffit pas à quitter le mode mock.
 
 (*) prévus par la spec, pas encore implémentés : une erreur lisible est renvoyée.
 """
@@ -41,11 +44,7 @@ def _check(kind: str, name: str, choices: tuple[str, ...], implemented: tuple[st
 
 
 def resolve_llm_name(settings: Settings) -> str:
-    explicit = _normalize(settings.llm_provider)
-    if explicit:
-        return explicit
-    has_key = settings.deepseek_api_key is not None and settings.deepseek_api_key.get_secret_value().strip()
-    return "deepseek" if has_key else "mock"
+    return _normalize(settings.llm_provider) or "mock"
 
 
 def build_llm(settings: Settings, presets: PresetRegistry) -> LLMProvider:

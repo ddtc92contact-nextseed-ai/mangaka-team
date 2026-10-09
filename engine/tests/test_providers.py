@@ -56,8 +56,13 @@ def test_defaults_are_mock_without_env(make_settings: Callable[..., Settings]) -
     assert p.names == {"llm": "mock", "vision": "mock", "comfyui": "mock"}
 
 
-def test_llm_auto_selects_deepseek_when_key_present(make_settings: Callable[..., Settings]) -> None:
+def test_key_alone_does_not_leave_mock_mode(make_settings: Callable[..., Settings]) -> None:
     s = make_settings(llm_provider=None, deepseek_api_key="sk-test")
+    assert isinstance(build_llm(s, PRESETS), MockLLMProvider)
+
+
+def test_deepseek_selected_explicitly(make_settings: Callable[..., Settings]) -> None:
+    s = make_settings(llm_provider="deepseek", deepseek_api_key="sk-test")
     llm = build_llm(s, PRESETS)
     assert isinstance(llm, DeepSeekProvider)
     assert llm.model == PRESETS.require_providers().deepseek.model
