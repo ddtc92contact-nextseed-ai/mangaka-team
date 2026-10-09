@@ -31,6 +31,12 @@ agents:
     series_collections: true
     budget_tokens: 2500
     top_k: 6
+  art_direction:
+    label: Directeur artistique (avant l'étape 2)
+    collections: [Mise en page, Rythme et découpage]
+    series_collections: true
+    budget_tokens: 1500
+    top_k: 4
   image_prompt:
     label: Prompts image (étape 3)
     collections: [Design de personnages, Mise en page]

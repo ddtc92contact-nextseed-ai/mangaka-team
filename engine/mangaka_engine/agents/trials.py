@@ -197,6 +197,10 @@ def trial_layout(ctx: TrialContext) -> dict[str, Any]:
 PANEL = {
     "description": "Aiko lève son sabre face à Ren sur le toit, le vent soulève son bandeau. « Je n'ai pas peur ! »",
     "shot_type": "contre-plongée",
+    # Direction artistique appliquée à la case d'essai ($plan, $angle, $ambiance).
+    "plan": "gros plan",
+    "angle": "en contre-plongée",
+    "ambiance": "contre-jour orangé, vent violent",
     "size": (1400, 900),
 }
 
@@ -213,6 +217,9 @@ def trial_image_prompt(ctx: TrialContext) -> dict[str, Any]:
     positive = build_prompt(
         description=PANEL["description"],  # type: ignore[arg-type]
         shot_type=PANEL["shot_type"],  # type: ignore[arg-type]
+        plan=PANEL["plan"],  # type: ignore[arg-type]
+        angle=PANEL["angle"],  # type: ignore[arg-type]
+        ambiance=PANEL["ambiance"],  # type: ignore[arg-type]
         characters=characters,
         style=SERIES["style"],
         settings=presets.image_prompt,

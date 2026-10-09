@@ -72,7 +72,7 @@ settings:
     group: Prompt
     type: prompt_list
     source: image_prompt.yaml#parts
-    variables: [shot, description, characters, style, savoir_faire, bible]
+    variables: [plan, angle, ambiance, shot, description, characters, style, savoir_faire, bible]
     help: Un morceau dont une variable est vide est omis.
   - key: character
     label: Présentation d'un personnage

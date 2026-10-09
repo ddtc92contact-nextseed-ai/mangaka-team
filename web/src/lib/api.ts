@@ -238,7 +238,14 @@ export interface PageLayout {
   gutters_px: { horizontal: number; vertical: number };
   panels: LayoutPanel[];
   gutters: LayoutGutter[];
-  style?: { id: string; seed: number; rythme: Rythme | null; gutters_mm: { horizontal: number; vertical: number } | null };
+  style?: {
+    id: string;
+    seed: number;
+    rythme: Rythme | null;
+    gutters_mm: { horizontal: number; vertical: number } | null;
+    /** Page choc décidée par la direction artistique. */
+    page_choc?: boolean;
+  };
 }
 
 export interface PageData {
@@ -884,6 +891,83 @@ export interface SeriesAgentOverride {
   settings: { key: string; label: string }[];
 }
 
+// --- Direction artistique -------------------------------------------------------------------
+export type DaRythme = "calme" | "montée" | "climax" | "respiration";
+export type DaPageChoc = "pleine page" | "splash";
+
+export interface DaSfx {
+  text: string;
+  intensity: string;
+}
+
+export interface DaPanel {
+  panel_id: number;
+  index: number;
+  intensity: Intensity | null;
+  plan: string | null;
+  angle: string | null;
+  cadre: string | null;
+  ambiance: string;
+  sfx: DaSfx[];
+}
+
+/** Choix de direction artistique d'une page (`has_direction` faux : pas encore proposée). */
+export interface PageDirection {
+  page_id: number;
+  number: number;
+  panel_count: number;
+  rythme: DaRythme | null;
+  layout_style: string | null;
+  template: string | null;
+  page_choc: DaPageChoc | null;
+  rationale: string;
+  panels: DaPanel[];
+  has_direction: boolean;
+  /** Champs modifiés par l'auteur, gardés quand l'agent repropose : « rythme », « 12.plan »… */
+  locks: string[];
+  status: "proposed" | "accepted";
+  variant: number;
+  out_of_date: boolean;
+  applied: boolean;
+  pending: boolean;
+  applied_at: string | null;
+}
+
+export interface ChapterDirection {
+  chapter_id: number;
+  variety: string;
+  variety_label: string;
+  series_layout_style: string;
+  pages: PageDirection[];
+  options: {
+    rythmes: DaRythme[];
+    intensities: Intensity[];
+    plans: string[];
+    angles: string[];
+    cadres: string[];
+    page_chocs: DaPageChoc[];
+    sfx_intensities: string[];
+    styles: { value: string; label: string }[];
+    templates: LayoutTemplate[];
+  };
+}
+
+export interface DirectionEdit {
+  page?: Partial<Pick<PageDirection, "rythme" | "layout_style" | "template" | "page_choc">>;
+  panels?: ({ panel_id: number } & Partial<Omit<DaPanel, "panel_id" | "index">>)[];
+  lock?: string[];
+  unlock?: string[];
+  accept?: boolean;
+}
+
+export interface DirectionApplyResult {
+  applied: number[];
+  relaid: number[];
+  skipped: { number: number; reason: string }[];
+  message: string;
+  pages: PageData[];
+}
+
 export class EngineError extends Error {
   constructor(
     message: string,
@@ -1134,6 +1218,14 @@ export const api = {
   chapterJobs: (chapterId: number, step?: string) =>
     request<Job[]>(`/chapters/${chapterId}/jobs${step ? `?step=${encodeURIComponent(step)}` : ""}`),
   getJob: (id: number) => request<Job>(`/jobs/${id}`),
+
+  getDirection: (chapterId: number) => request<ChapterDirection>(`/chapters/${chapterId}/direction`),
+  startDirection: (chapterId: number, pageId?: number) =>
+    request<Job>(`/chapters/${chapterId}/direction`, json("POST", pageId ? { page_id: pageId } : {})),
+  editDirection: (pageId: number, body: DirectionEdit) =>
+    request<PageDirection>(`/pages/${pageId}/direction`, json("PATCH", body)),
+  applyDirection: (chapterId: number, pageIds?: number[]) =>
+    request<DirectionApplyResult>(`/chapters/${chapterId}/direction/apply`, json("POST", pageIds ? { page_ids: pageIds } : {})),
 
   listPages: (chapterId: number) => request<PageData[]>(`/chapters/${chapterId}/pages`),
   savePages: (chapterId: number, pages: PageInput[]) =>

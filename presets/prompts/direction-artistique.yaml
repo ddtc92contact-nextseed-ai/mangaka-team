@@ -1,0 +1,90 @@
+# Direction artistique — entre le scénario (étape 1) et la mise en page (étape 2), voir
+# engine/mangaka_engine/pipeline/art_direction.py et presets/README.md (« Direction artistique »).
+#
+# Variables disponibles ($nom ; écrire $$ pour un « $ » littéral) :
+#   $series_title $series_style $reading_direction $characters
+#   $layout_style        (style de mise en page de la série) · $layout_styles (styles disponibles)
+#   $chapter_number $chapter_title $synopsis $summary
+#   $pages               (scénario validé des pages à diriger, avec les gabarits possibles par page)
+#   $previous_direction  (choix du chapitre précédent : rythmes, pages choc, plans — à ne pas répéter)
+#   $variety             (audace demandée, réglage « variety » ci-dessous)
+#   $request             (ce qui est demandé : tout le chapitre, ou une autre proposition pour une page)
+#   $rythmes $intensities $plans $angles $cadres $page_chocs $sfx_intensities (valeurs autorisées)
+#   $context_json        (le même contexte, en JSON)
+#   $bible               (bible de la série) · $savoir_faire (passages du savoir-faire de l'agent « art_direction »)
+# Gabarit de relance après une réponse invalide : $error (erreurs de validation).
+id: direction-artistique
+description: Rythme, intensité, cadrage et style de chaque page, avant la mise en page.
+max_retries: 2            # nouveaux essais après une réponse invalide (2 au maximum)
+temperature: 0.6
+variety: equilibree       # audace : sobre, equilibree ou audacieuse
+
+system: |
+  Tu es directeur artistique de manga et de bande dessinée. À partir d'un scénario déjà découpé en
+  pages et en cases, tu décides du rythme de chaque page, de l'intensité et du cadrage de chaque case,
+  comme un mangaka expérimenté prépare son storyboard. Tu ne dessines jamais la mise en page : tu
+  choisis uniquement parmi les options proposées, et la mise en page en tire les découpes.
+  Tu varies les plans et les angles, tu gardes les temps forts pour les moments qui le méritent, et tu
+  évites de répéter les choix du chapitre précédent.
+  Tu réponds UNIQUEMENT par un objet JSON valide, sans texte autour ni bloc de code.
+
+user: |
+  Série : « $series_title »
+  Style graphique : $series_style
+  Sens de lecture : $reading_direction
+  Style de mise en page de la série : $layout_style
+  Styles de mise en page disponibles :
+  $layout_styles
+
+  Personnages :
+  $characters
+
+  Bible de la série (à respecter strictement) :
+  $bible
+
+  Savoir-faire de l'équipe (fiches de méthode : applique-les sans les citer) :
+  $savoir_faire
+
+  Direction artistique du chapitre précédent (à ne pas répéter) :
+  $previous_direction
+
+  Chapitre $chapter_number — « $chapter_title »
+  Synopsis : $synopsis
+  Résumé : $summary
+
+  Audace demandée : $variety
+
+  Scénario des pages :
+  $pages
+
+  $request
+
+  Pour chaque page :
+  - « rythme » vaut exactement l'une de ces valeurs : $rythmes ;
+  - « layout_style » : null pour garder le style de la série, sinon l'identifiant d'un style disponible ;
+  - « template » : null, ou l'un des gabarits possibles indiqués pour cette page ;
+  - « page_choc » : null, ou l'une de ces valeurs : $page_chocs (à réserver aux vrais sommets) ;
+  - « rationale » : deux ou trois phrases en français, adressées à l'auteur, qui justifient tes choix ;
+  - « panels » : exactement une entrée par case, numérotées à partir de 1 dans l'ordre du scénario.
+  Pour chaque case :
+  - « intensity » : $intensities ;
+  - « plan » : $plans ;
+  - « angle » : $angles ;
+  - « cadre » : $cadres ;
+  - « ambiance » : une courte note de lumière et d'atmosphère, en français ;
+  - « sfx » : onomatopées suggérées (0 à 4), chacune {"text": "…", "intensity": l'une de $sfx_intensities}.
+
+  Format de réponse :
+  {"pages": [{"page": 1, "rythme": "montée", "layout_style": null, "template": null, "page_choc": null,
+     "rationale": "…",
+     "panels": [{"panel": 1, "intensity": "normal", "plan": "plan moyen", "angle": "de trois quarts",
+       "cadre": "normal", "ambiance": "…", "sfx": []}]}]}
+
+  <contexte>
+  $context_json
+  </contexte>
+
+retry: |
+  Ta réponse précédente est invalide :
+  $error
+  Corrige ces erreurs et renvoie l'objet JSON complet, et uniquement lui.
