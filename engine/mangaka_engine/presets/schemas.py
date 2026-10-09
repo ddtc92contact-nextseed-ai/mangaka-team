@@ -243,6 +243,145 @@ class LayoutSettings(_Strict):
     bubble_zone: BubbleZoneSettings = Field(default_factory=BubbleZoneSettings)
 
 
+# --- Lettrage (étape 5) -------------------------------------------------------
+BUBBLE_KINDS = ("speech", "thought", "shout", "narration", "off")
+HEX_COLOR = r"^#[0-9a-fA-F]{6}$"
+
+
+class FontFile(_Strict):
+    file: str = Field(description="Fichier TTF/OTF, relatif à fonts.yaml")
+    name: str = Field(description="Nom d'affichage")
+
+
+class TextStyle(_Strict):
+    """Style de texte d'un type de bulle (taille en points typographiques : indépendante du DPI)."""
+
+    font: str
+    weight: int | None = Field(default=None, ge=1, le=1000, description="Graisse (polices variables)")
+    size_pt: float = Field(gt=0, le=72)
+    min_size_pt: float = Field(gt=0, le=72, description="Taille minimale lisible : en dessous, avertissement")
+    step_pt: float = Field(default=0.5, gt=0, le=10)
+    line_height: float = Field(default=1.1, gt=0.5, le=3)
+    uppercase: bool = False
+    color: str = Field(default="#000000", pattern=HEX_COLOR)
+
+    @model_validator(mode="after")
+    def _check(self) -> TextStyle:
+        if self.min_size_pt > self.size_pt:
+            raise ValueError("min_size_pt doit être ≤ size_pt")
+        return self
+
+
+class Hyphenation(_Strict):
+    language: str = "fr"
+    min_word_chars: int = Field(default=6, ge=2, description="Mots plus courts : jamais coupés")
+    # Un mot qui ne tient pas en fin de ligne n'est coupé que si la ligne resterait vide à plus de
+    # cette proportion ; sinon il passe entier à la ligne suivante.
+    min_gap: float = Field(default=0.3, ge=0, le=1)
+
+
+class FontsPreset(_Strict):
+    fonts: dict[str, FontFile] = Field(min_length=1)
+    styles: dict[str, TextStyle]
+    # Libellé « case manquante » dessiné sur l'aplat gris d'une case sans image.
+    missing_panel: TextStyle
+    hyphenation: Hyphenation = Field(default_factory=Hyphenation)
+
+    @model_validator(mode="after")
+    def _check(self) -> FontsPreset:
+        missing = [k for k in BUBBLE_KINDS if k not in self.styles]
+        if missing:
+            raise ValueError(f"styles absents : {', '.join(missing)}")
+        unknown = [k for k in self.styles if k not in BUBBLE_KINDS]
+        if unknown:
+            raise ValueError(f"types de bulle inconnus : {', '.join(unknown)}")
+        for key, style in [*self.styles.items(), ("missing_panel", self.missing_panel)]:
+            if style.font not in self.fonts:
+                raise ValueError(f"{key} : police inconnue « {style.font} »")
+        return self
+
+
+class Padding(_Strict):
+    x: float = Field(ge=0)
+    y: float = Field(ge=0)
+
+
+class CloudShape(_Strict):
+    bump_mm: float = Field(default=5, gt=0, description="Largeur d'une bosse du nuage")
+    amplitude_mm: float = Field(default=1.2, ge=0)
+    tail_bubbles: int = Field(default=3, ge=0, le=8)
+
+
+class ShoutShape(_Strict):
+    spike_mm: float = Field(default=2.5, ge=0, description="Longueur des pointes")
+    spike_every_mm: float = Field(default=4, gt=0, description="Écart entre deux pointes")
+    jitter: float = Field(default=0.35, ge=0, le=1, description="Irrégularité des pointes (0 = régulières)")
+
+
+class TailSettings(_Strict):
+    length_mm: float = Field(default=7, gt=0, description="Longueur par défaut (sans visage détecté)")
+    max_length_mm: float = Field(default=18, gt=0)
+    base_mm: float = Field(default=4, gt=0, description="Largeur de la queue à sa base")
+    # Sans visage détecté : vers le centre de la case, ou droit vers le bas.
+    default_direction: Literal["panel_center", "down"] = "panel_center"
+    face_gap_mm: float = Field(default=1.5, ge=0, description="La pointe s'arrête à cette distance du visage")
+
+
+class CropMarks(_Strict):
+    length_mm: float = Field(default=5, gt=0)
+    offset_mm: float = Field(default=3, ge=0, description="Distance entre le trait de coupe et le repère")
+    stroke_pt: float = Field(default=0.25, gt=0)
+    slug_mm: float = Field(default=9, ge=0, description="Bande ajoutée autour du fond perdu pour les repères")
+
+
+class LetteringSettings(_Strict):
+    """Formes et placement des bulles, assemblage de la planche (presets/lettering.yaml)."""
+
+    stroke_pt: float = Field(default=1.0, gt=0, description="Contour des bulles")
+    narration_stroke_pt: float = Field(default=0.8, gt=0)
+    padding_mm: dict[str, Padding] = Field(
+        default_factory=lambda: {
+            "speech": Padding(x=2.5, y=2),
+            "thought": Padding(x=3, y=2.5),
+            "shout": Padding(x=3, y=2.5),
+            "narration": Padding(x=2, y=1.5),
+            "off": Padding(x=2.5, y=2),
+        }
+    )
+    # Ellipse circonscrite au bloc de texte : rayon = demi-côté × ce facteur (√2 = coins jamais coupés).
+    ellipse_factor: float = Field(default=1.25, ge=1, le=2)
+    speech_shape: Literal["ellipse", "rounded"] = "ellipse"
+    rounded_radius_mm: float = Field(default=3, ge=0)
+    preferred_aspect: float = Field(default=1.5, gt=0, description="Rapport largeur/hauteur visé des bulles")
+    cloud: CloudShape = Field(default_factory=CloudShape)
+    shout: ShoutShape = Field(default_factory=ShoutShape)
+    tail: TailSettings = Field(default_factory=TailSettings)
+    spacing_mm: float = Field(default=1.5, ge=0, description="Écart minimal entre deux bulles")
+    panel_margin_mm: float = Field(default=1.5, ge=0, description="Écart minimal bulle ↔ bord de case")
+    face_margin_mm: float = Field(default=1.5, ge=0, description="Écart minimal bulle ↔ visage détecté")
+    grid_mm: float = Field(default=1, gt=0, description="Pas de recherche des positions de bulle")
+    bubble_fill: str = Field(default="#ffffff", pattern=HEX_COLOR)
+    bubble_stroke: str = Field(default="#000000", pattern=HEX_COLOR)
+    narration_fill: str = Field(default="#fff8e1", pattern=HEX_COLOR)
+    # Assemblage
+    page_background: str = Field(default="#ffffff", pattern=HEX_COLOR)
+    panel_border_pt: float = Field(default=1.5, ge=0)
+    panel_border_color: str = Field(default="#000000", pattern=HEX_COLOR)
+    missing_panel_fill: str = Field(default="#9e9e9e", pattern=HEX_COLOR)
+    missing_panel_label: str = "case manquante"
+    crop_marks: CropMarks = Field(default_factory=CropMarks)
+    supersampling: int = Field(default=3, ge=1, le=6, description="Anticrénelage des formes de bulle (PNG)")
+
+    @model_validator(mode="after")
+    def _check(self) -> LetteringSettings:
+        missing = [k for k in BUBBLE_KINDS if k not in self.padding_mm]
+        if missing:
+            raise ValueError(f"padding_mm : types absents : {', '.join(missing)}")
+        if self.tail.length_mm > self.tail.max_length_mm:
+            raise ValueError("tail.length_mm doit être ≤ tail.max_length_mm")
+        return self
+
+
 # --- Prompts LLM --------------------------------------------------------------
 class PromptPreset(_Strict):
     """Gabarits `string.Template` ($variable) d'une étape LLM."""

@@ -78,6 +78,9 @@ export default function ChapterInfoPage() {
           {chapter.panel_count > 0 && (
             <div className="mt-4 flex flex-wrap gap-2">
               <ButtonLink href={`/chapitres/${chapter.id}/atelier`}>Ouvrir l&apos;atelier</ButtonLink>
+              <ButtonLink variant="secondary" href={`/chapitres/${chapter.id}/lettrage`} data-testid="open-lettering">
+                Lettrage et export
+              </ButtonLink>
               <GenerateChapterButton
                 chapterId={chapter.id}
                 onQueued={(m) => {

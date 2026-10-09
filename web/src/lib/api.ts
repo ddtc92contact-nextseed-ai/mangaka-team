@@ -572,6 +572,83 @@ export interface Presets {
   issues: { file: string; message: string }[];
 }
 
+/** Étape 5 : lettrage calculé d'une page (px de la page finie, hors fond perdu). */
+export interface BubbleBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export interface LetteredBubble {
+  id: number;
+  panel_id: number;
+  kind: BubbleKind;
+  text: string;
+  speaker: string;
+  box: BubbleBox;
+  tail: { x: number; y: number } | null;
+  manual: boolean;
+  manual_tail: boolean;
+  overflow: boolean;
+  font: { family: string; size_pt: number; size_px: number; color: string };
+  lines: { text: string; x: number; y: number }[];
+  shape: { path: string; fill: string; stroke: string; stroke_px: number };
+}
+
+export interface LetteringWarning {
+  code: "text_overflow" | "faces_covered" | "missing_image" | "layout_stale" | "no_layout" | string;
+  message: string;
+  panel_id: number | null;
+  bubble_id: number | null;
+  page_number?: number;
+}
+
+export interface PageLettering {
+  page_id: number;
+  page_number: number;
+  chapter_id: number;
+  dpi: number;
+  page_format: string;
+  direction: ReadingDirection | null;
+  width: number;
+  height: number;
+  bleed_mm: number;
+  layout_stale: boolean;
+  styles: Record<BubbleKind, { family: string; url: string; size_pt: number }>;
+  panels: { id: number; index: number; box: Rect; bubble_zone: Rect | null; image_url: string | null; faces: Rect[] }[];
+  bubbles: LetteredBubble[];
+  warnings: LetteringWarning[];
+}
+
+export interface BubbleUpdate {
+  text?: string;
+  kind?: BubbleKind;
+  speaker?: string;
+  position?: BubbleBox | null;
+  tail?: { x: number; y: number } | null;
+}
+
+export interface PageRender {
+  page_id: number;
+  page_number: number;
+  stem: string;
+  bleed: boolean;
+  crop_marks: boolean;
+  width: number;
+  height: number;
+  dpi: number | null;
+  rendered_at: string;
+  warnings: LetteringWarning[];
+  png_url: string;
+  svg_url: string;
+}
+
+export interface ExportOptions {
+  bleed: boolean;
+  crop_marks: boolean;
+}
+
 export class EngineError extends Error {
   constructor(
     message: string,
@@ -698,6 +775,13 @@ export const api = {
   selectPanelImage: (id: number) => request<PanelImage[]>(`/panel-images/${id}/select`, { method: "POST" }),
   deletePanelImage: (id: number) => request<void>(`/panel-images/${id}`, { method: "DELETE" }),
 
+  getLettering: (pageId: number) => request<PageLettering>(`/pages/${pageId}/lettering`),
+  resetLettering: (pageId: number) => request<PageLettering>(`/pages/${pageId}/lettering/reset`, { method: "POST" }),
+  updateBubble: (id: number, body: BubbleUpdate) => request<PageLettering>(`/bubbles/${id}`, json("PATCH", body)),
+  renderPage: (pageId: number, body: ExportOptions) => request<PageRender>(`/pages/${pageId}/render`, json("POST", body)),
+  getRender: (pageId: number) => request<PageRender>(`/pages/${pageId}/render`),
+  exportChapter: (chapterId: number, body: ExportOptions) =>
+    request<Job>(`/chapters/${chapterId}/export`, json("POST", body)),
   qcStatus: () => request<QCStatus>("/qc/status"),
   runPanelQC: (id: number, body: { image_id?: number; vision?: VisionMode } = {}) =>
     request<Job>(`/panels/${id}/qc`, json("POST", body)),
@@ -718,6 +802,9 @@ export const api = {
     request<BenchApplyResult>(`/qc/bench/runs/${id}/apply`, json("POST", { confirm })),
   benchExportUrl: (id: number, format: "json" | "csv") => engineUrl(`/qc/bench/runs/${id}/export?format=${format}`),
 };
+
+/** Lien de téléchargement du ZIP d'un export de chapitre terminé. */
+export const exportFileUrl = (jobId: number) => engineUrl(`/exports/${jobId}/file`);
 
 export interface BenchScope {
   project_id?: number | null;
