@@ -23,7 +23,8 @@ export function CharacterForm({
 }: {
   projectId: number;
   initial?: Character;
-  onSaved: (character: Character) => void;
+  /** `uploadError` : le personnage est enregistré mais les images déposées ont été refusées. */
+  onSaved: (character: Character, uploadError?: string) => void;
 }) {
   const [name, setName] = useState(initial?.name ?? "");
   const [description, setDescription] = useState(initial?.visual_description ?? "");
@@ -55,16 +56,17 @@ export function CharacterForm({
     };
     try {
       let saved = initial ? await api.updateCharacter(initial.id, body) : await api.createCharacter(projectId, body);
+      let uploadError: string | undefined;
       if (pending.length) {
         try {
           saved = await api.uploadReferenceImages(saved.id, pending);
           setPending([]);
         } catch (err) {
-          // Le personnage existe : on y va quand même, l'erreur d'upload sera visible là-bas.
-          setFormError(`Personnage enregistré, mais images refusées : ${describe(err)}`);
+          // Le personnage existe : on y va quand même, en transmettant l'erreur à afficher sur sa fiche.
+          uploadError = describe(err);
         }
       }
-      onSaved(saved);
+      onSaved(saved, uploadError);
     } catch (err) {
       if (err instanceof EngineError) setErrors(err.fieldErrors);
       setFormError(errorMessage(err));
@@ -184,12 +186,14 @@ function PendingImages({ files, onRemove }: { files: File[]; onRemove: (index: n
 export function ReferenceImages({
   character,
   onChange,
+  initialError,
 }: {
   character: Character;
   onChange: (character: Character) => void;
+  initialError?: string | null;
 }) {
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(initialError ?? null);
 
   async function upload(files: File[]) {
     setBusy(true);

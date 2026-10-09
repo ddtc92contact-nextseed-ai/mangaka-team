@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useState } from "react";
 import { CharacterForm, ReferenceImages } from "@/components/character-form";
 import { Alert, Button, Card, Loading, PageHeader } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
@@ -12,6 +12,12 @@ export default function CharacterPage() {
   const id = Number(useParams<{ id: string }>().id);
   const router = useRouter();
   const character = useEngineData(() => api.getCharacter(id), [id]);
+  const searchParams = useSearchParams();
+  // Erreur d'upload transmise par la page de création : figée au montage, puis retirée de l'URL.
+  const [uploadError] = useState(() => searchParams.get("erreur_images"));
+  useEffect(() => {
+    if (uploadError) router.replace(`/personnages/${id}`);
+  }, [uploadError, router, id]);
   const [saved, setSaved] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
@@ -72,7 +78,11 @@ export default function CharacterPage() {
           <p className="mb-4 text-sm text-zinc-500">
             Planche de référence, visage, profil, tenue : elles guideront la génération de chaque case.
           </p>
-          <ReferenceImages character={c} onChange={character.setData} />
+          <ReferenceImages
+            character={c}
+            onChange={character.setData}
+            initialError={uploadError && `Personnage enregistré, mais images refusées : ${uploadError}`}
+          />
         </Card>
       </div>
     </>

@@ -26,7 +26,14 @@ export default function NewCharacterPage() {
         }
       />
       <Card className="max-w-3xl">
-        <CharacterForm projectId={projectId} onSaved={(c) => router.push(`/personnages/${c.id}`)} />
+        <CharacterForm
+          projectId={projectId}
+          onSaved={(c, uploadError) =>
+            router.push(
+              `/personnages/${c.id}${uploadError ? `?erreur_images=${encodeURIComponent(uploadError)}` : ""}`,
+            )
+          }
+        />
       </Card>
     </>
   );

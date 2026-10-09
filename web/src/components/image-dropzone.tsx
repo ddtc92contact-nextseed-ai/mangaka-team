@@ -3,6 +3,8 @@
 import { useRef, useState, type DragEvent } from "react";
 
 const ACCEPTED = ["image/png", "image/jpeg", "image/webp"];
+// Même plafond que le moteur (settings.max_upload_mb, 20 Mo par défaut).
+const MAX_BYTES = 20 * 1024 * 1024;
 
 /** Zone de glisser-déposer d'images (clic = sélecteur de fichiers). */
 export function ImageDropzone({
@@ -17,12 +19,16 @@ export function ImageDropzone({
   const input = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
   const [rejected, setRejected] = useState<string[]>([]);
+  const [tooBig, setTooBig] = useState<string[]>([]);
 
   function accept(list: FileList | null) {
     if (!list) return;
     const files = Array.from(list);
-    const ok = files.filter((f) => ACCEPTED.includes(f.type));
-    setRejected(files.filter((f) => !ACCEPTED.includes(f.type)).map((f) => f.name));
+    const wrongType = files.filter((f) => !ACCEPTED.includes(f.type));
+    const oversized = files.filter((f) => ACCEPTED.includes(f.type) && f.size > MAX_BYTES);
+    const ok = files.filter((f) => ACCEPTED.includes(f.type) && f.size <= MAX_BYTES);
+    setRejected(wrongType.map((f) => f.name));
+    setTooBig(oversized.map((f) => f.name));
     if (ok.length) onFiles(ok);
   }
 
@@ -67,6 +73,11 @@ export function ImageDropzone({
       {rejected.length > 0 && (
         <p className="mt-2 text-xs text-amber-400" role="alert">
           Ignoré (format non accepté) : {rejected.join(", ")}
+        </p>
+      )}
+      {tooBig.length > 0 && (
+        <p className="mt-2 text-xs text-amber-400" role="alert">
+          Ignoré (plus de 20 Mo) : {tooBig.join(", ")}
         </p>
       )}
     </div>
