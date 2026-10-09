@@ -19,7 +19,7 @@ MANGAKA_PID_DIR="$MANGAKA_STATE_DIR/pids"
 LAUNCHER_KEYS=(
   COMFYUI_DIR COMFYUI_PYTHON COMFYUI_URL COMFYUI_ARGS COMFYUI_TIMEOUT
   OLLAMA_URL OLLAMA_BIN OLLAMA_TIMEOUT
-  PORT NPM_BIN APP_TIMEOUT
+  PORT ENGINE_PORT NPM_BIN APP_TIMEOUT
   START_OLLAMA START_COMFYUI OPEN_BROWSER
   MANGAKA_POLL_S STOP_TIMEOUT
 )
@@ -84,6 +84,7 @@ load_config() {
   OLLAMA_BIN="$(expand_home "${OLLAMA_BIN:-ollama}")"
   OLLAMA_TIMEOUT="${OLLAMA_TIMEOUT:-30}"
   PORT="${PORT:-3000}"
+  ENGINE_PORT="${ENGINE_PORT:-8765}"
   NPM_BIN="$(expand_home "${NPM_BIN:-npm}")"
   APP_TIMEOUT="${APP_TIMEOUT:-180}"
   START_OLLAMA="${START_OLLAMA:-true}"
@@ -91,7 +92,8 @@ load_config() {
   OPEN_BROWSER="${OPEN_BROWSER:-true}"
   MANGAKA_POLL_S="${MANGAKA_POLL_S:-1}"
   STOP_TIMEOUT="${STOP_TIMEOUT:-15}"
-  export PORT COMFYUI_URL
+  # Transmis à « npm run dev » : ils priment sur .env, relu par scripts/dev.mjs.
+  export PORT ENGINE_PORT COMFYUI_URL
 }
 
 is_true() {
@@ -148,6 +150,13 @@ http_body() {
 # Le port TCP accepte-t-il des connexions ?
 port_open() {
   timeout 2 bash -c ": >/dev/tcp/$1/$2" 2>/dev/null
+}
+
+# La réponse de GET /health sur le port du moteur vient-elle bien de notre moteur FastAPI ?
+# (corps de la forme {"engine":{"status":"ok",…},…}, que les fournisseurs soient verts ou non).
+ENGINE_HEALTH_RE='"engine"[[:space:]]*:[[:space:]]*\{[[:space:]]*"status"'
+engine_is_ours() {
+  http_body "http://127.0.0.1:$ENGINE_PORT/health" "${1:-10}" | grep -Eq "$ENGINE_HEALTH_RE"
 }
 
 pid_file() { printf '%s/%s.pid' "$MANGAKA_PID_DIR" "$1"; }

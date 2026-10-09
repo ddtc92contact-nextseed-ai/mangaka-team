@@ -28,6 +28,8 @@ LAUNCH = ROOT / "scripts" / "launch.sh"
 STOP = ROOT / "scripts" / "stop.sh"
 INSTALL = ROOT / "scripts" / "install-desktop.sh"
 FAKE_SERVER = TESTS_DIR / "fake_server.py"
+# Réponse de GET /health du vrai moteur (abrégée) : c'est ce que le lanceur reconnaît.
+HEALTH = '{"engine":{"status":"ok","version":"0.0.0"},"mock":true}'
 
 
 def free_port() -> int:
@@ -62,7 +64,7 @@ class Env:
             d.mkdir(parents=True)
         (self.comfy_dir / "main.py").write_text("# faux ComfyUI\n")
         self.token = f"mangaka-test-{tmp.name}-{os.getpid()}"
-        self.ports = {"ollama": free_port(), "comfyui": free_port(), "app": free_port()}
+        self.ports = {"ollama": free_port(), "comfyui": free_port(), "app": free_port(), "engine": free_port()}
         self._servers: list = []
         self._procs: list[subprocess.Popen] = []
 
@@ -92,12 +94,22 @@ class Env:
             exec python3 {FAKE_SERVER} "$2" '{{"system":{{}}}}' {self.token}
             """,
         )
+        # « npm run dev » : le moteur sur $ENGINE_PORT puis l'UI sur $PORT. STUB_ENGINE : serve
+        # (défaut), none (ne répond jamais), died (message de scripts/dev.mjs), detach (le moteur
+        # quitte le groupe de processus de npm).
         write_exe(
             self.bin / "npm",
             f"""#!/usr/bin/env bash
-            echo "$PWD $* PORT=$PORT" >> {self.calls}/npm
+            echo "$PWD $* PORT=$PORT ENGINE_PORT=$ENGINE_PORT" >> {self.calls}/npm
             STUB_MODE="${{STUB_APP:-serve}}"
             {behaviour}
+            case "${{STUB_ENGINE:-serve}}" in
+              serve) python3 {FAKE_SERVER} "$ENGINE_PORT" '{HEALTH}' {self.token} & ;;
+              died) echo "[moteur] ERREUR : le moteur n'a pas démarré sur le port $ENGINE_PORT" >&2 ;;
+              detach)
+                python3 -c 'import os, runpy, sys; os.setpgid(0, 0); sys.argv = sys.argv[1:]; runpy.run_path(sys.argv[0], run_name="__main__")' \\
+                  {FAKE_SERVER} "$ENGINE_PORT" '{HEALTH}' {self.token} & ;;
+            esac
             exec python3 {FAKE_SERVER} "$PORT" '<title>mangaka-team</title>' {self.token}
             """,
         )
@@ -114,6 +126,7 @@ class Env:
             "COMFYUI_URL": f"http://127.0.0.1:{self.ports['comfyui']}",
             "OLLAMA_URL": f"http://127.0.0.1:{self.ports['ollama']}",
             "PORT": str(self.ports["app"]),
+            "ENGINE_PORT": str(self.ports["engine"]),
             "OLLAMA_TIMEOUT": "15",
             "COMFYUI_TIMEOUT": "15",
             "APP_TIMEOUT": "15",
@@ -155,6 +168,11 @@ class Env:
         threading.Thread(target=server.serve_forever, daemon=True).start()
         self._servers.append(server)
 
+    def app_already_running(self) -> None:
+        """« npm run dev » lancé à la main : l'interface et le moteur répondent."""
+        self.already_running("app", "mangaka-team")
+        self.already_running("engine", HEALTH)
+
     def external_process(self, name: str, body: str = "ok") -> subprocess.Popen:
         """Un service qui tournait avant le lanceur, dans son propre processus."""
         proc = subprocess.Popen([sys.executable, str(FAKE_SERVER), str(self.ports[name]), body, self.token])
@@ -194,6 +212,7 @@ def test_services_deja_en_ligne_ne_sont_pas_relances(env: Env) -> None:
     env.already_running("ollama")
     env.already_running("comfyui")
     env.already_running("app", "<html><title>mangaka-team</title></html>")
+    env.already_running("engine", HEALTH)
 
     res = env.run(LAUNCH)
 
@@ -212,7 +231,7 @@ def test_services_absents_sont_demarres_avec_la_commande_configuree(env: Env) ->
     assert res.returncode == 0, res.stdout + res.stderr
     assert env.calls_of("ollama") == [f"serve OLLAMA_HOST=127.0.0.1:{env.ports['ollama']}"]
     assert env.calls_of("comfyui") == [f"{env.comfy_dir} main.py --listen 127.0.0.1 --port {env.ports['comfyui']}"]
-    assert env.calls_of("npm") == [f"{ROOT} run dev PORT={env.ports['app']}"]
+    assert env.calls_of("npm") == [f"{ROOT} run dev PORT={env.ports['app']} ENGINE_PORT={env.ports['engine']}"]
     for name in ("ollama", "comfyui", "app"):
         pid = env.pid(name)
         assert pid is not None and alive(pid), name
@@ -247,7 +266,7 @@ def test_arguments_et_desactivation_depuis_launcher_env(env: Env, tmp_path: Path
         )
     )
     env.env.pop("COMFYUI_DIR")
-    env.already_running("app", "mangaka-team")
+    env.app_already_running()
 
     res = env.run(LAUNCH, "--no-browser", MANGAKA_LAUNCHER_ENV_FILES=str(conf))
 
@@ -261,7 +280,7 @@ def test_arguments_et_desactivation_depuis_launcher_env(env: Env, tmp_path: Path
 
 def test_delai_depasse_donne_une_erreur_et_le_journal(env: Env) -> None:
     env.already_running("comfyui")
-    env.already_running("app", "mangaka-team")
+    env.app_already_running()
 
     start = time.time()
     res = env.run(LAUNCH, OLLAMA_TIMEOUT="2", STUB_OLLAMA="hang")
@@ -281,7 +300,7 @@ def test_delai_depasse_donne_une_erreur_et_le_journal(env: Env) -> None:
 
 def test_service_qui_plante_au_demarrage_echoue_sans_attendre(env: Env) -> None:
     env.already_running("ollama")
-    env.already_running("app", "mangaka-team")
+    env.app_already_running()
 
     start = time.time()
     res = env.run(LAUNCH, COMFYUI_TIMEOUT="30", STUB_COMFYUI="crash")
@@ -310,7 +329,7 @@ def test_port_occupe_par_un_autre_programme(env: Env) -> None:
 
 def test_comfyui_introuvable(env: Env) -> None:
     env.already_running("ollama")
-    env.already_running("app", "mangaka-team")
+    env.app_already_running()
 
     res = env.run(LAUNCH, COMFYUI_DIR=str(env.tmp / "absent"))
 
@@ -319,12 +338,108 @@ def test_comfyui_introuvable(env: Env) -> None:
     assert env.calls_of("comfyui") == []
 
 
+def test_port_du_moteur_occupe_par_un_autre_programme(env: Env) -> None:
+    env.already_running("ollama")
+    env.already_running("comfyui")
+    env.already_running("engine", "<title>Open WebUI</title>")
+
+    res = env.run(LAUNCH)
+
+    assert res.returncode == 1
+    port = env.ports["engine"]
+    assert f"le port {port} du moteur est occupé par un autre programme" in res.stdout
+    assert "change ENGINE_PORT dans .env ou launcher.env" in res.stdout
+    assert "Tout est prêt" not in res.stdout
+    assert env.calls_of("npm") == []
+    assert env.calls_of("xdg-open") == []
+    notifications = "\n".join(env.calls_of("notify-send"))
+    assert "échec du moteur" in notifications
+    assert "app.log" in notifications
+
+
+def test_moteur_qui_ne_repond_jamais(env: Env) -> None:
+    env.already_running("ollama")
+    env.already_running("comfyui")
+
+    start = time.time()
+    res = env.run(LAUNCH, APP_TIMEOUT="3", STUB_ENGINE="none")
+
+    assert res.returncode == 1
+    assert time.time() - start < 15
+    assert "Tout est prêt" not in res.stdout
+    assert f"le moteur (port {env.ports['engine']})" in res.stdout
+    assert "pas de réponse après" in res.stdout
+    log = env.state / "logs" / "app.log"
+    notifications = "\n".join(env.calls_of("notify-send"))
+    assert "échec du moteur" in notifications
+    assert str(log) in notifications
+    assert "Tout est prêt" not in notifications
+
+
+def test_moteur_mort_au_demarrage_echoue_sans_attendre(env: Env) -> None:
+    env.already_running("ollama")
+    env.already_running("comfyui")
+
+    start = time.time()
+    res = env.run(LAUNCH, APP_TIMEOUT="60", STUB_ENGINE="died")
+
+    assert res.returncode == 1
+    assert time.time() - start < 15
+    assert "le moteur s'est arrêté au démarrage" in res.stdout
+    assert "Tout est prêt" not in res.stdout
+
+
+def test_interface_lancee_a_la_main_sans_moteur(env: Env) -> None:
+    env.already_running("ollama")
+    env.already_running("comfyui")
+    env.already_running("app", "mangaka-team")
+
+    res = env.run(LAUNCH, APP_TIMEOUT="2")
+
+    assert res.returncode == 1
+    assert env.calls_of("npm") == []
+    assert "pas de réponse après" in res.stdout
+    assert "Tout est prêt" not in res.stdout
+
+
+def test_engine_port_personnalise_transmis_a_npm_et_sonde(env: Env, tmp_path: Path) -> None:
+    custom = free_port()
+    conf = tmp_path / "launcher.env"
+    conf.write_text(f"ENGINE_PORT={custom}\n")
+    env.env.pop("ENGINE_PORT")
+    env.already_running("ollama")
+    env.already_running("comfyui")
+    # Un autre programme sur le port par défaut du test ne gêne pas : il n'est pas sondé.
+    env.already_running("engine", "<title>autre chose</title>")
+
+    res = env.run(LAUNCH, MANGAKA_LAUNCHER_ENV_FILES=str(conf))
+
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert env.calls_of("npm") == [f"{ROOT} run dev PORT={env.ports['app']} ENGINE_PORT={custom}"]
+    assert f"le moteur (port {custom}) en ligne" in res.stdout
+    assert "Tout est prêt" in res.stdout
+
+
+def test_moteur_deja_lance_est_reutilise(env: Env) -> None:
+    env.already_running("ollama")
+    env.already_running("comfyui")
+    env.app_already_running()
+
+    for _ in range(2):
+        res = env.run(LAUNCH)
+        assert res.returncode == 0, res.stdout + res.stderr
+        assert f"Moteur déjà en ligne sur le port {env.ports['engine']}" in res.stdout
+        assert "Tout est prêt" in res.stdout
+    assert env.calls_of("npm") == []
+    assert not list((env.state / "pids").glob("*.pid"))
+
+
 # --- stop.sh ----------------------------------------------------------------------------
 
 
 def test_stop_n_arrete_que_ce_que_le_lanceur_a_demarre(env: Env) -> None:
     external = env.external_process("comfyui")
-    env.already_running("app", "mangaka-team")
+    env.app_already_running()
 
     res = env.run(LAUNCH)
     assert res.returncode == 0, res.stdout + res.stderr
@@ -353,6 +468,43 @@ def test_stop_ignore_un_pid_reutilise_par_un_autre_programme(env: Env) -> None:
     assert res.returncode == 0, res.stdout + res.stderr
     assert external.poll() is None
     assert not (pids / "comfyui.pid").exists()
+
+
+def port_is_open(port: int) -> bool:
+    with socket.socket() as s:
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+
+def test_stop_arrete_le_moteur_sur_engine_port(env: Env) -> None:
+    env.already_running("ollama")
+    env.already_running("comfyui")
+
+    res = env.run(LAUNCH, STUB_ENGINE="detach")
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert port_is_open(env.ports["engine"])
+
+    res = env.run(STOP)
+
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert f"toujours actif sur le port {env.ports['engine']}" in res.stdout
+    assert not port_is_open(env.ports["engine"])
+    assert not port_is_open(env.ports["app"])
+
+
+def test_stop_ne_touche_pas_un_moteur_lance_a_la_main(env: Env) -> None:
+    env.already_running("ollama")
+    env.already_running("comfyui")
+    env.already_running("engine", HEALTH)
+
+    res = env.run(LAUNCH)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "réutilisé" in res.stdout
+
+    res = env.run(STOP)
+
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "non touché" in res.stdout
+    assert port_is_open(env.ports["engine"])
 
 
 def test_stop_sans_rien_a_arreter(env: Env) -> None:
