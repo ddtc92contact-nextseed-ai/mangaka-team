@@ -3,12 +3,14 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { ChapterForm } from "@/components/chapter-form";
-import { Alert, Button, Card } from "@/components/ui";
+import { GenerateChapterButton } from "@/components/generate-chapter";
+import { Alert, Button, ButtonLink, Card } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { useChapter } from "./chapter-context";
 
 export default function ChapterInfoPage() {
-  const { chapter, setChapter } = useChapter();
+  const { chapter, setChapter, reload } = useChapter();
+  const [queued, setQueued] = useState<string | null>(null);
   const router = useRouter();
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -66,6 +68,23 @@ export default function ChapterInfoPage() {
           {error && (
             <div className="mt-3">
               <Alert>{error}</Alert>
+            </div>
+          )}
+          {queued && (
+            <div className="mt-3">
+              <Alert tone="info">{queued}</Alert>
+            </div>
+          )}
+          {chapter.panel_count > 0 && (
+            <div className="mt-4 flex flex-wrap gap-2">
+              <ButtonLink href={`/chapitres/${chapter.id}/atelier`}>Ouvrir l&apos;atelier</ButtonLink>
+              <GenerateChapterButton
+                chapterId={chapter.id}
+                onQueued={(m) => {
+                  setQueued(m);
+                  reload();
+                }}
+              />
             </div>
           )}
           <div className="mt-4">
