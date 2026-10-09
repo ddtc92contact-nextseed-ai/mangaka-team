@@ -10,7 +10,12 @@ import { ChapterStatusBadge, SeriesStatusBadge, formatPlannedDate } from "@/comp
 import { api } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
 
-const PROVIDER_LABELS = { llm: "LLM texte", vision: "Contrôle visuel", comfyui: "ComfyUI" } as const;
+const PROVIDER_LABELS = {
+  llm: "LLM texte",
+  vision: "Contrôle visuel",
+  comfyui: "ComfyUI",
+  embedding: "Embeddings (savoir-faire)",
+} as const;
 
 export default function DashboardPage() {
   const status = useEngineStatus();

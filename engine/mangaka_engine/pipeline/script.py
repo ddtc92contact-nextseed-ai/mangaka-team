@@ -1,6 +1,7 @@
 """Étape 1 — scénario : découpage d'un chapitre en pages → cases par le LLM.
 
-1. contexte : série, personnages, résumés des chapitres précédents (continuité), synopsis ;
+1. contexte : série, personnages, résumés des chapitres précédents (continuité), synopsis, bible de
+   la série et passages du savoir-faire (`pipeline/knowledge.py`, enregistrés dans `llm_runs`) ;
 2. prompt rendu depuis `presets/prompts/script.yaml` (aucun texte de prompt dans ce module) ;
 3. réponse JSON validée par Pydantic ; invalide → nouvel essai avec l'erreur renvoyée au LLM
    (`max_retries` du preset, 2 au maximum) → sinon `ScriptError` lisible ;
@@ -30,12 +31,16 @@ from ..store.models import (
     Chapter,
     ChapterStatus,
     Character,
+    LLMRun,
     Page,
     PageKind,
     Panel,
 )
 from ..validation import format_errors
+from .knowledge import AgentKnowledge, KnowledgeBase
 from .pages import layout_pages
+
+AGENT = "script"  # rôle de l'agent dans presets/knowledge.yaml
 
 SHOT_TYPES = (
     "plan d'ensemble",
@@ -179,6 +184,7 @@ class ScriptContext:
     characters: list[dict[str, str]]
     previous_chapters: list[dict[str, Any]]
     chapter: dict[str, Any]
+    knowledge: AgentKnowledge | None = None
 
     def as_json(self) -> dict[str, Any]:
         return {
@@ -197,7 +203,14 @@ class ScriptContext:
 DIRECTION_LABELS = {"rtl": "de droite à gauche (manga)", "ltr": "de gauche à droite (BD, comics)"}
 
 
-def build_context(session: Session, chapter: Chapter, *, max_previous: int) -> ScriptContext:
+def knowledge_query(chapter: Chapter) -> str:
+    """Requête de recherche du savoir-faire pour un chapitre : titre, synopsis, style de la série."""
+    return "\n".join(p for p in (chapter.title, chapter.synopsis, chapter.project.style) if p and p.strip())
+
+
+def build_context(
+    session: Session, chapter: Chapter, *, max_previous: int, knowledge: KnowledgeBase | None = None
+) -> ScriptContext:
     series = chapter.project
     characters = session.scalars(
         select(Character).where(Character.project_id == series.id).order_by(Character.name)
@@ -225,6 +238,7 @@ def build_context(session: Session, chapter: Chapter, *, max_previous: int) -> S
             "synopsis": chapter.synopsis,
             "target_pages": chapter.target_page_count,
         },
+        knowledge=knowledge.for_agent(session, AGENT, series.id, knowledge_query(chapter)) if knowledge else None,
     )
 
 
@@ -258,6 +272,9 @@ def render_messages(prompt: PromptPreset, ctx: ScriptContext) -> list[ChatMessag
         "intensities": ", ".join(INTENSITIES),
         "rythmes": ", ".join(RYTHMES),
         "context_json": json.dumps(ctx.as_json(), ensure_ascii=False, indent=2),
+        "savoir_faire": (ctx.knowledge.savoir_faire() if ctx.knowledge else "")
+        or "(aucun savoir-faire pour cet agent)",
+        "bible": (ctx.knowledge.bible_text() if ctx.knowledge else "") or "(pas encore de bible pour cette série)",
     }
     return [
         ChatMessage("system", _render(prompt.system, values, "system")),
@@ -356,7 +373,34 @@ def save_script(session: Session, chapter: Chapter, output: ScriptOutput) -> lis
 
 
 # --- job ------------------------------------------------------------------------
-def script_job(db: Database, presets: PresetRegistry, llm: LLMProvider, chapter_id: int) -> Callable[[Progress], str]:
+def record_run(
+    session: Session, chapter: Chapter, knowledge: AgentKnowledge, *, job_id: int | None, model: str | None
+) -> LLMRun:
+    """Garde la trace de ce que l'agent a reçu (« Sources utilisées » de l'écran Scénario)."""
+    run = LLMRun(
+        job_id=job_id,
+        project_id=chapter.project_id,
+        chapter_id=chapter.id,
+        agent=knowledge.role,
+        model=model,
+        query=knowledge.query,
+        passages=[p.as_dict() for p in knowledge.passages],
+        bible=knowledge.bible.as_dict() if knowledge.bible else None,
+        collections=knowledge.collections,
+    )
+    session.add(run)
+    return run
+
+
+def script_job(
+    db: Database,
+    presets: PresetRegistry,
+    llm: LLMProvider,
+    chapter_id: int,
+    *,
+    knowledge: KnowledgeBase | None = None,
+    job_id: int | None = None,
+) -> Callable[[Progress], str]:
     """Fonction exécutée par le `JobRunner` pour « Découper » un chapitre."""
 
     def run(progress: Progress) -> str:
@@ -365,8 +409,11 @@ def script_job(db: Database, presets: PresetRegistry, llm: LLMProvider, chapter_
             chapter = session.get(Chapter, chapter_id)
             if chapter is None:
                 raise ScriptError("Chapitre introuvable (supprimé pendant le découpage ?)")
-            progress(5, "Préparation du contexte (série, personnages, chapitres précédents)…")
-            ctx = build_context(session, chapter, max_previous=prompt.max_previous_chapters)
+            progress(5, "Préparation du contexte (série, personnages, chapitres précédents, bible, savoir-faire)…")
+            ctx = build_context(session, chapter, max_previous=prompt.max_previous_chapters, knowledge=knowledge)
+            if ctx.knowledge is not None:
+                record_run(session, chapter, ctx.knowledge, job_id=job_id, model=getattr(llm, "model", llm.name))
+                session.commit()
         # Pas de session ouverte pendant l'appel au LLM (qui peut durer plusieurs minutes).
         run = run_script(llm, prompt, ctx, progress)
         # (aucun rapport de progression dans la transaction d'écriture : SQLite n'a qu'un écrivain)

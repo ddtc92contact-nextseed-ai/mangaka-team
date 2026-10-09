@@ -7,6 +7,7 @@
 | COMFYUI_PROVIDER    | http, mock                                | mock                                    |
 | QC_DETECTORS_PROVIDER | dghs, mock                              | mock                                    |
 | QC_IDENTITY_PROVIDER  | dghs, mock                              | mock                                    |
+| EMBEDDING_PROVIDER  | ollama, mock                              | mock                                    |
 
 `dghs` demande l'extra optionnel `engine[qc]` (dghs-imgutils) : sans lui, le fournisseur est
 indisponible (« détecteurs non installés ») mais le moteur démarre.
@@ -24,6 +25,7 @@ from dataclasses import dataclass, field
 from ..config import Settings
 from ..presets import PresetError, PresetRegistry
 from .comfyui import ComfyUIClient, HttpComfyUIClient, MockComfyUIClient
+from .embedding import EmbeddingProvider, MockEmbeddingProvider, OllamaEmbeddingProvider
 from .llm import DeepSeekProvider, LLMError, LLMProvider, MockLLMProvider
 from .qc import (
     CcipIdentityProvider,
@@ -40,6 +42,7 @@ LLM_CHOICES = ("deepseek", "ollama", "claude", "mock")
 VISION_CHOICES = ("deepseek", "ollama", "mock")
 COMFYUI_CHOICES = ("http", "mock")
 QC_CHOICES = ("dghs", "mock")
+EMBEDDING_CHOICES = ("ollama", "mock")
 
 
 class ProviderSelectionError(Exception):
@@ -125,6 +128,17 @@ def build_identity(settings: Settings) -> IdentityProvider:
         raise ProviderSelectionError(str(exc)) from exc
 
 
+def build_embedding(settings: Settings, presets: PresetRegistry | None = None) -> EmbeddingProvider:
+    name = _normalize(settings.embedding_provider) or "mock"
+    _check("fournisseur d'embeddings", name, EMBEDDING_CHOICES, EMBEDDING_CHOICES)
+    if name == "mock":
+        return MockEmbeddingProvider()
+    cfg = presets.providers.ollama if presets is not None and presets.providers is not None else None
+    if cfg is None or not cfg.embedding_model:
+        raise ProviderSelectionError("ollama.embedding_model absent de presets/providers.yaml (ex. bge-m3)")
+    return OllamaEmbeddingProvider(base_url=cfg.base_url, model=cfg.embedding_model, timeout_s=cfg.timeout_s)
+
+
 def build_comfyui(settings: Settings) -> ComfyUIClient:
     name = _normalize(settings.comfyui_provider) or "mock"
     _check("client ComfyUI", name, COMFYUI_CHOICES, COMFYUI_CHOICES)
@@ -143,6 +157,8 @@ class Providers:
     # Couches 1-2 du contrôle qualité (None : indisponible, raison dans `errors`).
     detectors: DetectorProvider | None = None
     identity: IdentityProvider | None = None
+    # Savoir-faire (None : indisponible ; la recherche par mots-clés reste possible).
+    embedding: EmbeddingProvider | None = None
 
 
 def build_providers(settings: Settings, presets: PresetRegistry) -> Providers:
@@ -154,6 +170,10 @@ def build_providers(settings: Settings, presets: PresetRegistry) -> Providers:
         "comfyui": (lambda: build_comfyui(settings), lambda: _normalize(settings.comfyui_provider) or "mock"),
         "detectors": (lambda: build_detectors(settings), lambda: _normalize(settings.qc_detectors_provider) or "mock"),
         "identity": (lambda: build_identity(settings), lambda: _normalize(settings.qc_identity_provider) or "mock"),
+        "embedding": (
+            lambda: build_embedding(settings, presets),
+            lambda: _normalize(settings.embedding_provider) or "mock",
+        ),
     }
     for kind, (build, name) in builders.items():
         out.names[kind] = name()
