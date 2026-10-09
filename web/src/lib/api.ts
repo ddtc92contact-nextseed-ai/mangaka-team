@@ -116,7 +116,14 @@ const json = (method: string, body: unknown): RequestInit => ({
 });
 
 export const api = {
-  health: () => request<Health>("/health"),
+  health: async () => {
+    const health = await request<Health>("/health");
+    // Un autre service sur le port du moteur répondrait 200 sans ce contenu : on le traite comme hors ligne.
+    if (!health?.engine || !health.comfyui || !health.providers) {
+      throw new EngineError("Réponse inattendue du moteur", 502, {}, true);
+    }
+    return health;
+  },
   presets: () => request<Presets>("/presets"),
 
   listProjects: () => request<Project[]>("/projects"),
