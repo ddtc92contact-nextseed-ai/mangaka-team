@@ -9,6 +9,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from ..pipeline.jobs import TERMINAL
+from ..pipeline.queue import CancelResult
 from ..store.models import Job
 from .deps import AppContext, get_ctx, get_session
 from .schemas import JobOut
@@ -29,6 +30,8 @@ def job_out(job: Job) -> JobOut:
         error=job.error,
         project_id=job.project_id,
         chapter_id=job.chapter_id,
+        panel_id=job.panel_id,
+        params=dict(job.params or {}),
         created_at=job.created_at,
         started_at=job.started_at,
         finished_at=job.finished_at,
@@ -87,3 +90,24 @@ async def job_events(job_id: int, request: Request, ctx: AppContext = Depends(ge
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.post("/jobs/{job_id}/cancel", response_model=JobOut)
+def cancel_job(job_id: int, ctx: AppContext = Depends(get_ctx)) -> JobOut:
+    """Annule un job : en attente → retiré de la file ; génération en cours → interrompue (`/interrupt`).
+
+    Pour une génération en cours, le job passe à `cancelled` dès que ComfyUI a rendu la main
+    (suivre `GET /jobs/{id}/events`).
+    """
+    with ctx.db.session_scope() as session:
+        job = _get_job(session, job_id)
+        step, status = job.step, job.status
+    if status in TERMINAL:
+        raise HTTPException(status_code=409, detail="Ce job est déjà terminé")
+    if step == ctx.generation.step:
+        if ctx.generation.cancel(job_id) == CancelResult.finished:
+            raise HTTPException(status_code=409, detail="Ce job est déjà terminé")
+    elif not ctx.jobs.cancel(job_id):
+        raise HTTPException(status_code=409, detail="Ce job est déjà en cours et ne peut pas être interrompu")
+    with ctx.db.session_scope() as session:
+        return job_out(_get_job(session, job_id))

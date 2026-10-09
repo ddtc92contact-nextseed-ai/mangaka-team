@@ -104,6 +104,13 @@ def page_out(page: Page) -> PageOut:
                 ],
                 bbox=p.bbox,
                 bubble_zone=p.bubble_zone,
+                state=p.state.value,
+                final_prompt=p.final_prompt,
+                final_prompt_manual=p.final_prompt_manual,
+                generation_preset=p.generation_preset,
+                image_count=len(p.images),
+                selected_image_id=next((i.id for i in p.images if i.selected), None),
+                selected_image_url=next((f"/panel-images/{i.id}/file" for i in p.images if i.selected), None),
             )
             for p in page.panels
         ],
@@ -129,7 +136,10 @@ def _load_pages(session: Session, chapter_id: int) -> list[Page]:
         session.scalars(
             select(Page)
             .where(Page.chapter_id == chapter_id)
-            .options(selectinload(Page.panels).selectinload(Panel.bubbles))
+            .options(
+                selectinload(Page.panels).selectinload(Panel.bubbles),
+                selectinload(Page.panels).selectinload(Panel.images),
+            )
             .order_by(Page.number)
         ).all()
     )

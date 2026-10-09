@@ -1,0 +1,397 @@
+"""Étape 3 : génération des cases (file ComfyUI unique), versions d'image, file d'attente."""
+
+from __future__ import annotations
+
+import statistics
+from datetime import UTC, datetime
+
+from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi.responses import FileResponse
+from sqlalchemy import select
+from sqlalchemy.orm import Session, selectinload
+
+from ..pipeline.generation import (
+    ACTIVE,
+    STEP,
+    GenerationError,
+    enqueue_panel,
+    panel_characters,
+    panel_label,
+    panel_target,
+    panels_to_generate,
+    refresh_states,
+    resolve_preset_id,
+    update_panel_prompt,
+)
+from ..presets import PresetError
+from ..store.models import Job, JobStatus, Page, Panel, PanelImage
+from .chapters import get_chapter_or_404, get_page_or_404
+from .deps import AppContext, get_ctx, get_session
+from .errors import FieldError
+from .jobs import job_out
+from .schemas import (
+    BatchGenerateIn,
+    BatchGenerateOut,
+    GenerateIn,
+    JobOut,
+    PanelDetailOut,
+    PanelImageOut,
+    PanelUpdate,
+    QueueItemOut,
+    QueueOut,
+    WorkflowPresetOut,
+)
+
+router = APIRouter(tags=["génération"])
+
+MEDIAN_SAMPLE = 20
+
+
+# --- sorties --------------------------------------------------------------------------
+def image_url(img: PanelImage) -> str:
+    return f"/panel-images/{img.id}/file"
+
+
+def panel_image_out(img: PanelImage) -> PanelImageOut:
+    params = img.params or {}
+    return PanelImageOut(
+        id=img.id,
+        panel_id=img.panel_id,
+        version=img.version,
+        url=image_url(img),
+        seed=img.seed,
+        selected=img.selected,
+        width=params.get("image_width"),
+        height=params.get("image_height"),
+        preset=params.get("preset"),
+        params=params,
+        qc_score=img.qc_score,
+        qc_reasons=list(img.qc_reasons or []),
+        created_at=img.created_at,
+    )
+
+
+def get_panel_or_404(session: Session, panel_id: int) -> Panel:
+    panel = session.get(Panel, panel_id)
+    if panel is None:
+        raise HTTPException(status_code=404, detail="Case introuvable")
+    return panel
+
+
+def _get_image_or_404(session: Session, image_id: int) -> PanelImage:
+    img = session.get(PanelImage, image_id)
+    if img is None:
+        raise HTTPException(status_code=404, detail="Version introuvable")
+    return img
+
+
+def _active_jobs(session: Session, panel_id: int) -> list[Job]:
+    return list(
+        session.scalars(
+            select(Job).where(Job.panel_id == panel_id, Job.step == STEP, Job.status.in_(ACTIVE)).order_by(Job.id)
+        )
+    )
+
+
+def panel_detail(session: Session, ctx: AppContext, panel: Panel) -> PanelDetailOut:
+    page = panel.page
+    characters = panel_characters(session, panel)
+    resolved = resolve_preset_id(ctx.presets, panel, characters)
+    return PanelDetailOut(
+        id=panel.id,
+        page_id=page.id,
+        page_number=page.number,
+        chapter_id=page.chapter_id,
+        project_id=page.chapter.project_id,
+        index=panel.index,
+        label=panel_label(panel),
+        description=panel.description,
+        characters=list(panel.character_names or []),
+        character_ids=list(panel.character_ids or []),
+        shot_type=panel.shot_type,
+        state=panel.state.value,
+        bbox=panel.bbox,
+        final_prompt=panel.final_prompt,
+        final_prompt_manual=panel.final_prompt_manual,
+        generation_preset=panel.generation_preset,
+        resolved_preset=resolved if resolved in ctx.presets.workflows else None,
+        target=panel_target(ctx.presets, page, panel),
+        images=[panel_image_out(i) for i in panel.images],
+        active_jobs=[job_out(j) for j in _active_jobs(session, panel.id)],
+    )
+
+
+def _require_comfyui(ctx: AppContext) -> None:
+    if ctx.providers.comfyui is None:
+        detail = ctx.providers.errors.get("comfyui", "client non configuré")
+        raise HTTPException(status_code=503, detail=f"ComfyUI indisponible : {detail}")
+
+
+def _enqueue(session: Session, ctx: AppContext, panel: Panel, **kwargs: object) -> list[Job]:
+    try:
+        return enqueue_panel(session, ctx.presets, panel, **kwargs)  # type: ignore[arg-type]
+    except PresetError as exc:
+        raise FieldError("preset", str(exc)) from None
+    except GenerationError as exc:
+        raise FieldError("panel", f"case {panel.index + 1} de la page {panel.page.number} : {exc}") from None
+
+
+# --- cases ------------------------------------------------------------------------------
+@router.get("/panels/{panel_id}", response_model=PanelDetailOut)
+def get_panel(
+    panel_id: int, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
+) -> PanelDetailOut:
+    return panel_detail(session, ctx, get_panel_or_404(session, panel_id))
+
+
+@router.patch("/panels/{panel_id}", response_model=PanelDetailOut)
+def update_panel(
+    panel_id: int, body: PanelUpdate, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
+) -> PanelDetailOut:
+    """Édite le prompt final (conservé tel quel ensuite) et/ou impose un workflow à la case."""
+    panel = get_panel_or_404(session, panel_id)
+    changes = body.model_dump(exclude_unset=True)
+    if "generation_preset" in changes:
+        preset = changes["generation_preset"]
+        if preset is not None and preset not in ctx.presets.workflows:
+            raise FieldError("generation_preset", f"workflow inconnu : « {preset} »")
+        panel.generation_preset = preset
+    if "final_prompt" in changes:
+        text = (changes["final_prompt"] or "").strip()
+        panel.final_prompt = text or None
+        panel.final_prompt_manual = bool(text)
+        update_panel_prompt(ctx.presets, session, panel)
+    session.commit()
+    return panel_detail(session, ctx, panel)
+
+
+@router.post("/panels/{panel_id}/prompt/rebuild", response_model=PanelDetailOut)
+def rebuild_prompt(
+    panel_id: int, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
+) -> PanelDetailOut:
+    """Abandonne l'édition manuelle et reconstruit le prompt final depuis la case et les fiches."""
+    panel = get_panel_or_404(session, panel_id)
+    panel.final_prompt_manual = False
+    update_panel_prompt(ctx.presets, session, panel)
+    session.commit()
+    return panel_detail(session, ctx, panel)
+
+
+@router.post("/panels/{panel_id}/generate", response_model=list[JobOut], status_code=202)
+def generate_panel(
+    panel_id: int,
+    body: GenerateIn | None = None,
+    session: Session = Depends(get_session),
+    ctx: AppContext = Depends(get_ctx),
+) -> list[JobOut]:
+    """Met en file `count` variantes (1–4) de la case ; progression via GET /jobs/{id}/events."""
+    body = body or GenerateIn()
+    _require_comfyui(ctx)
+    panel = get_panel_or_404(session, panel_id)
+    jobs = _enqueue(
+        session, ctx, panel, count=body.count, seed=body.seed, preset=body.preset, prompt_override=body.prompt_override
+    )
+    session.commit()
+    ctx.generation.notify()
+    return [job_out(j) for j in jobs]
+
+
+def _generate_pages(session: Session, ctx: AppContext, pages: list[Page], body: BatchGenerateIn) -> BatchGenerateOut:
+    _require_comfyui(ctx)
+    total = sum(len(p.panels) for p in pages)
+    panels = panels_to_generate(session, pages, force=body.force)
+    jobs: list[Job] = []
+    for panel in panels:
+        jobs += _enqueue(session, ctx, panel, count=body.count, preset=body.preset)
+    session.commit()
+    ctx.generation.notify()
+    return BatchGenerateOut(
+        jobs=[job_out(j) for j in jobs], panel_ids=[p.id for p in panels], skipped=total - len(panels)
+    )
+
+
+@router.post("/pages/{page_id}/generate", response_model=BatchGenerateOut, status_code=202)
+def generate_page(
+    page_id: int,
+    body: BatchGenerateIn | None = None,
+    session: Session = Depends(get_session),
+    ctx: AppContext = Depends(get_ctx),
+) -> BatchGenerateOut:
+    """Génère les cases de la page sans version choisie (toutes avec `force`) ; ignore celles déjà en file."""
+    page = get_page_or_404(session, page_id)
+    return _generate_pages(session, ctx, [page], body or BatchGenerateIn())
+
+
+@router.post("/chapters/{chapter_id}/generate", response_model=BatchGenerateOut, status_code=202)
+def generate_chapter(
+    chapter_id: int,
+    body: BatchGenerateIn | None = None,
+    session: Session = Depends(get_session),
+    ctx: AppContext = Depends(get_ctx),
+) -> BatchGenerateOut:
+    """Génère les cases du chapitre sans version choisie (toutes avec `force`), page par page."""
+    get_chapter_or_404(session, chapter_id)
+    pages = list(
+        session.scalars(
+            select(Page).where(Page.chapter_id == chapter_id).options(selectinload(Page.panels)).order_by(Page.number)
+        )
+    )
+    return _generate_pages(session, ctx, pages, body or BatchGenerateIn())
+
+
+# --- versions ---------------------------------------------------------------------------
+@router.get("/panels/{panel_id}/images", response_model=list[PanelImageOut])
+def list_panel_images(panel_id: int, session: Session = Depends(get_session)) -> list[PanelImageOut]:
+    panel = get_panel_or_404(session, panel_id)
+    return [panel_image_out(i) for i in panel.images]
+
+
+@router.get("/panel-images/{image_id}/file")
+def get_panel_image_file(
+    image_id: int, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
+) -> FileResponse:
+    img = _get_image_or_404(session, image_id)
+    path = ctx.files.absolute(img.path)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Fichier image manquant dans data/")
+    media_type = (img.params or {}).get("content_type") or {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".webp": "image/webp",
+    }.get(path.suffix.lower(), "application/octet-stream")
+    return FileResponse(path, media_type=media_type, headers={"Cache-Control": "private, max-age=31536000, immutable"})
+
+
+@router.post("/panel-images/{image_id}/select", response_model=list[PanelImageOut])
+def select_panel_image(image_id: int, session: Session = Depends(get_session)) -> list[PanelImageOut]:
+    """Choisit cette version pour la case (une seule version choisie par case)."""
+    img = _get_image_or_404(session, image_id)
+    panel = img.panel
+    for other in panel.images:
+        other.selected = other.id == img.id
+    session.commit()
+    return [panel_image_out(i) for i in panel.images]
+
+
+@router.delete("/panel-images/{image_id}", status_code=204)
+def delete_panel_image(
+    image_id: int, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
+) -> Response:
+    """Supprime une version (et son fichier). Si c'était la version choisie, aucune ne l'est plus."""
+    img = _get_image_or_404(session, image_id)
+    panel_id, path = img.panel_id, img.path
+    session.delete(img)
+    session.flush()
+    refresh_states(session, [panel_id])
+    session.commit()
+    ctx.files.delete(path)
+    return Response(status_code=204)
+
+
+# --- file d'attente ---------------------------------------------------------------------
+def _median_durations(session: Session) -> tuple[dict[str, float], float | None]:
+    rows = session.execute(
+        select(Job.params, Job.duration_ms)
+        .where(Job.step == STEP, Job.status == JobStatus.succeeded, Job.duration_ms.is_not(None))
+        .order_by(Job.id.desc())
+        .limit(500)
+    ).all()
+    by_preset: dict[str, list[float]] = {}
+    overall: list[float] = []
+    for params, duration_ms in rows:
+        seconds = duration_ms / 1000
+        preset = (params or {}).get("preset")
+        if isinstance(preset, str) and len(by_preset.setdefault(preset, [])) < MEDIAN_SAMPLE:
+            by_preset[preset].append(seconds)
+        if len(overall) < MEDIAN_SAMPLE:
+            overall.append(seconds)
+    medians = {k: statistics.median(v) for k, v in by_preset.items() if v}
+    return medians, statistics.median(overall) if overall else None
+
+
+def _elapsed_s(started: datetime | None) -> float:
+    if started is None:
+        return 0.0
+    now = datetime.now(UTC)
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=UTC)
+    return max(0.0, (now - started).total_seconds())
+
+
+@router.get("/queue", response_model=QueueOut)
+def get_queue(session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)) -> QueueOut:
+    """Générations en cours et en attente (ordre d'exécution), avec une estimation du temps restant."""
+    jobs = list(
+        session.scalars(
+            select(Job)
+            .where(Job.step == STEP, Job.status.in_(ACTIVE))
+            .order_by((Job.status == JobStatus.running).desc(), Job.id)
+        )
+    )
+    medians, overall = _median_durations(session)
+    items: list[QueueItemOut] = []
+    cumulative: float | None = 0.0
+    for position, job in enumerate(jobs, start=0 if jobs and jobs[0].status == JobStatus.running else 1):
+        params = job.params or {}
+        preset = params.get("preset")
+        estimate = medians.get(preset, overall) if isinstance(preset, str) else overall
+        if estimate is None or cumulative is None:
+            cumulative = None
+        else:
+            remaining = estimate
+            if job.status == JobStatus.running:
+                remaining = max(0.0, estimate - _elapsed_s(job.started_at))
+            cumulative += remaining
+        panel = session.get(Panel, job.panel_id) if job.panel_id is not None else None
+        page = panel.page if panel else None
+        chapter = page.chapter if page else None
+        items.append(
+            QueueItemOut(
+                job=job_out(job),
+                position=position,
+                label=panel_label(panel) if panel else f"Job {job.id}",
+                panel_id=panel.id if panel else None,
+                panel_index=panel.index if panel else None,
+                page_id=page.id if page else None,
+                page_number=page.number if page else None,
+                chapter_id=chapter.id if chapter else None,
+                chapter_number=chapter.number if chapter else None,
+                chapter_title=chapter.title if chapter else None,
+                project_id=chapter.project_id if chapter else None,
+                series_title=chapter.project.title if chapter else None,
+                preset=preset if isinstance(preset, str) else None,
+                variant=params.get("variant"),
+                count=params.get("count"),
+                estimated_duration_s=round(estimate, 1) if estimate is not None else None,
+                eta_s=round(cumulative, 1) if cumulative is not None else None,
+            )
+        )
+    running = items[0] if items and items[0].job.status == "running" else None
+    pending = items[1:] if running else items
+    return QueueOut(
+        running=running,
+        pending=pending,
+        total_eta_s=items[-1].eta_s if items else 0.0,
+        comfyui=ctx.providers.names.get("comfyui"),
+    )
+
+
+# --- presets ----------------------------------------------------------------------------
+@router.get("/presets/workflows", response_model=list[WorkflowPresetOut])
+def list_workflow_presets(ctx: AppContext = Depends(get_ctx)) -> list[WorkflowPresetOut]:
+    defaults = ctx.presets.defaults
+    return [
+        WorkflowPresetOut(
+            id=w.preset.id,
+            name=w.preset.name,
+            description=w.preset.description,
+            params=sorted(w.preset.mapping),
+            reference_slots=len(w.preset.reference_images),
+            supports_lora=w.preset.lora_chain is not None,
+            lora_loader=w.preset.lora_chain.class_type if w.preset.lora_chain else None,
+            timeout_s=w.preset.timeout_s,
+            is_default=bool(defaults and defaults.workflow == w.preset.id),
+            is_reference_default=bool(defaults and defaults.workflow_with_references == w.preset.id),
+        )
+        for w in ctx.presets.workflows.values()
+    ]
