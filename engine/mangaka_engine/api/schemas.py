@@ -16,6 +16,7 @@ SeriesStatusName = Literal["ongoing", "paused", "completed", "cancelled"]
 ChapterStatusName = Literal["draft", "script", "layout", "generation", "lettering", "ready", "published"]
 PageKindName = Literal["story", "bonus", "chapter_cover"]
 BubbleKindName = Literal["speech", "thought", "shout", "narration", "off"]
+QCVerdictName = Literal["ok", "review", "reject"]
 LoraName = Annotated[str, StringConstraints(strip_whitespace=True, max_length=255)]
 LoraWeight = Annotated[float, Field(ge=0, le=2)]
 
@@ -161,6 +162,12 @@ class PanelOut(BaseModel):
     image_count: int = 0
     selected_image_id: int | None = None
     selected_image_url: str | None = None
+    # QC de la version choisie (None : pas encore contrôlée).
+    qc_verdict: QCVerdictName | None = None
+    qc_score: int | None = None
+    qc_reasons: list[str] = Field(default_factory=list)
+    qc_override: bool = False  # verdict forcé à ok par un humain
+    detections: dict[str, Any] | None = None  # boîtes de la version choisie
 
 
 class PageOut(BaseModel):
@@ -242,6 +249,11 @@ class PanelImageOut(BaseModel):
     params: dict[str, Any]
     qc_score: int | None
     qc_reasons: list[str]
+    qc_verdict: QCVerdictName | None = None
+    # Détail du dernier QC : couches (statut, score, durée, raisons), décision humaine, historique.
+    qc: dict[str, Any] = Field(default_factory=dict)
+    # Boîtes détectées en px de l'image : {"width", "height", "faces": [...], "hands": [...], "text": [...]}.
+    detections: dict[str, Any] | None = None
     created_at: datetime
 
 
@@ -313,6 +325,58 @@ class WorkflowPresetOut(BaseModel):
     timeout_s: float
     is_default: bool
     is_reference_default: bool
+
+
+# --- Contrôle qualité (étape 4) ------------------------------------------------
+# auto : la vision ne tourne que si les couches 1-2 hésitent ; force : toujours ; skip : jamais.
+VisionModeName = Literal["auto", "force", "skip"]
+
+
+class PanelQCIn(_In):
+    image_id: int | None = None  # absent : la version choisie (sinon la plus récente)
+    vision: VisionModeName = "auto"
+
+
+class ChapterQCIn(_In):
+    force: bool = False  # True : recontrôle aussi les cases déjà contrôlées
+    vision: VisionModeName = "auto"
+
+
+class QCOverrideIn(_In):
+    note: Annotated[str, StringConstraints(strip_whitespace=True, max_length=500)] | None = None
+
+
+class QCSummaryOut(BaseModel):
+    ok: int
+    review: int
+    reject: int
+    unchecked: int
+    no_image: int
+    total: int
+
+
+class ChapterQCOut(BaseModel):
+    job: JobOut | None
+    panel_ids: list[int]
+    skipped: int
+    summary: QCSummaryOut
+
+
+class QCLayerStatusOut(BaseModel):
+    provider: str | None
+    available: bool
+    detail: str | None
+
+
+class QCStatusOut(BaseModel):
+    available: bool  # preset valide et au moins une couche disponible
+    detail: str | None
+    auto_after_generation: bool
+    max_auto_retries: int
+    ok_min: int | None
+    reject_below: int | None
+    vision_mode: str | None
+    layers: dict[str, QCLayerStatusOut]
 
 
 # --- Personnages -----------------------------------------------------------

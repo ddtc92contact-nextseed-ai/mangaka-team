@@ -3,6 +3,9 @@
 Sert à la génération ComfyUI (une seule génération à la fois, spec §1), séparée du pool de
 threads des étapes LLM. La base fait foi : les jobs `pending` de l'étape sont pris par id
 croissant ; le worker ne garde en mémoire que le job en cours et son signal d'annulation.
+
+D'autres étapes peuvent partager le même worker (`add_step`) : le contrôle qualité y passe, ce
+qui garantit que sa couche vision (Ollama) ne tourne jamais pendant une génération ComfyUI.
 """
 
 from __future__ import annotations
@@ -39,6 +42,17 @@ class CancelResult(enum.StrEnum):
 class _Current:
     job_id: int
     cancel: threading.Event
+    step: str = ""
+
+
+@dataclass
+class QueueStep:
+    """Une étape exécutée par la file : exécution, message d'erreur, interruption, mise à jour des états."""
+
+    execute: Executor
+    describe_error: DescribeError = lambda exc: None
+    interrupt: Callable[[int], None] | None = None
+    after: Callable[[int], None] | None = None
 
 
 class SerialJobQueue:
@@ -54,11 +68,10 @@ class SerialJobQueue:
         idle_poll_s: float = 1.0,
     ) -> None:
         self._db = db
-        self.step = step
-        self._execute = execute
-        self._describe_error = describe_error
-        self._interrupt = interrupt
-        self._after = after
+        self.step = step  # étape principale (génération)
+        self._steps: dict[str, QueueStep] = {
+            step: QueueStep(execute=execute, describe_error=describe_error, interrupt=interrupt, after=after)
+        }
         self._idle_poll_s = idle_poll_s
         self._lock = threading.Lock()
         self._wake = threading.Condition()
@@ -67,6 +80,17 @@ class SerialJobQueue:
         self._idle.set()
         self._current: _Current | None = None
         self._thread: threading.Thread | None = None
+
+    def add_step(self, step: str, spec: QueueStep) -> None:
+        """Fait passer une autre étape par le même worker (avant `start`)."""
+        self._steps[step] = spec
+
+    def handles(self, step: str) -> bool:
+        return step in self._steps
+
+    @property
+    def steps(self) -> tuple[str, ...]:
+        return tuple(self._steps)
 
     # --- cycle de vie -------------------------------------------------------
     def start(self) -> None:
@@ -95,6 +119,11 @@ class SerialJobQueue:
         current = self._current
         return current.job_id if current else None
 
+    @property
+    def current_step(self) -> str | None:
+        current = self._current
+        return current.step if current else None
+
     def wait_idle(self, timeout: float = 10) -> bool:
         """Attend que la file soit vide et le worker au repos (tests)."""
         deadline = time.monotonic() + timeout
@@ -108,9 +137,9 @@ class SerialJobQueue:
         with self._lock:
             with self._db.session_scope() as session:
                 job = session.get(Job, job_id)
-                if job is None or job.step != self.step:
+                if job is None or job.step not in self._steps:
                     return CancelResult.not_found
-                status = job.status
+                status, step = job.status, job.step
                 if status == JobStatus.pending:
                     session.execute(
                         update(Job)
@@ -132,13 +161,14 @@ class SerialJobQueue:
                     session.commit()
                 status = JobStatus.pending  # traité comme un retrait de la file
         if status == JobStatus.pending:
-            self._run_after(job_id)
+            self._run_after(job_id, step)
             return CancelResult.cancelled
         assert current is not None
         current.cancel.set()
-        if self._interrupt is not None:
+        interrupt = self._steps[step].interrupt
+        if interrupt is not None:
             try:
-                self._interrupt(job_id)
+                interrupt(job_id)
             except Exception as exc:  # noqa: BLE001 — l'annulation reste demandée côté moteur
                 log.warning("interruption du job %s : %s", job_id, exc)
         return CancelResult.cancelling
@@ -146,7 +176,7 @@ class SerialJobQueue:
     # --- worker ---------------------------------------------------------------
     def _pending_ids(self, limit: int | None = None) -> list[int]:
         with self._db.session_scope() as session:
-            q = select(Job.id).where(Job.step == self.step, Job.status == JobStatus.pending).order_by(Job.id)
+            q = select(Job.id).where(Job.step.in_(list(self._steps)), Job.status == JobStatus.pending).order_by(Job.id)
             if limit is not None:
                 q = q.limit(limit)
             return list(session.scalars(q))
@@ -161,8 +191,9 @@ class SerialJobQueue:
                         .values(status=JobStatus.running, started_at=utcnow(), progress=0, message="Démarrage…")
                     )
                     session.commit()
+                    step = session.scalar(select(Job.step).where(Job.id == job_id)) or self.step
                 if res.rowcount:  # type: ignore[attr-defined]
-                    self._current = _Current(job_id, threading.Event())
+                    self._current = _Current(job_id, threading.Event(), step)
                     return self._current
         return None
 
@@ -184,19 +215,20 @@ class SerialJobQueue:
             finally:
                 with self._lock:
                     self._current = None
-                self._run_after(current.job_id)
+                self._run_after(current.job_id, current.step)
 
     def _run(self, current: _Current) -> None:
         job_id = current.job_id
+        spec = self._steps.get(current.step) or self._steps[self.step]
         reporter = JobReporter(self._db, job_id)
         t0 = time.monotonic()
         try:
-            message = self._execute(job_id, reporter, current.cancel)
+            message = spec.execute(job_id, reporter, current.cancel)
         except Exception as exc:  # noqa: BLE001 — un job ne doit jamais rester « en cours »
             if current.cancel.is_set():
                 finish_job(reporter, t0, JobStatus.cancelled, message="Annulé")
                 return
-            described = self._safe_describe(exc)
+            described = self._safe_describe(spec, exc)
             if described is None:
                 log.exception("job %s : erreur interne", job_id, exc_info=exc)
                 described = f"Erreur interne du moteur ({exc.__class__.__name__})"
@@ -204,16 +236,17 @@ class SerialJobQueue:
         else:
             finish_job(reporter, t0, JobStatus.succeeded, message=message or "Terminé")
 
-    def _safe_describe(self, exc: Exception) -> str | None:
+    def _safe_describe(self, spec: QueueStep, exc: Exception) -> str | None:
         try:
-            return self._describe_error(exc)
+            return spec.describe_error(exc)
         except Exception:  # noqa: BLE001
             return None
 
-    def _run_after(self, job_id: int) -> None:
-        if self._after is None:
+    def _run_after(self, job_id: int, step: str) -> None:
+        spec = self._steps.get(step)
+        if spec is None or spec.after is None:
             return
         try:
-            self._after(job_id)
+            spec.after(job_id)
         except Exception:  # noqa: BLE001
             log.exception("job %s : mise à jour des états impossible", job_id)

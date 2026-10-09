@@ -2,9 +2,11 @@
 
 import { useState } from "react";
 import { Modal } from "@/components/modal";
+import { DetectionOverlay, QCBadge } from "@/components/qc";
 import { Alert, Button, Select } from "@/components/ui";
 import { engineUrl, fullErrorMessage, type PanelImage } from "@/lib/api";
 import { formatDuration, imageDurationS } from "@/lib/generation";
+import { QC_VERDICT } from "@/lib/qc";
 
 function caption(img: PanelImage): string {
   return `v${img.version} · seed ${img.seed ?? "—"} · ${formatDuration(imageDurationS(img))}`;
@@ -81,7 +83,9 @@ export function VersionsStrip({
               className={`group relative block w-full overflow-hidden rounded-md bg-zinc-950 text-left ring-inset focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-400 ${
                 img.selected ? "ring-2 ring-rose-400" : "ring-1 ring-zinc-800 hover:ring-zinc-500"
               }`}
-              aria-label={`Version ${img.version}, seed ${img.seed ?? "inconnue"}${img.selected ? ", choisie" : ""} : agrandir`}
+              aria-label={`Version ${img.version}, seed ${img.seed ?? "inconnue"}${img.selected ? ", choisie" : ""}${
+                img.qc_verdict ? `, QC ${QC_VERDICT[img.qc_verdict].toLowerCase()}` : ""
+              } : agrandir`}
               data-testid="version-thumb"
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -94,6 +98,11 @@ export function VersionsStrip({
               {img.selected && (
                 <span className="absolute right-1 top-1 rounded bg-rose-500 px-1.5 py-0.5 text-[10px] font-semibold text-white">
                   Choisie
+                </span>
+              )}
+              {img.qc_verdict && (
+                <span className="absolute left-1 top-1">
+                  <QCBadge verdict={img.qc_verdict} score={img.qc_score} override={Boolean(img.qc.override)} />
                 </span>
               )}
               <span className="block px-1.5 py-1 text-[10px] leading-tight text-zinc-400">
@@ -216,22 +225,27 @@ export function VersionsStrip({
 
 function VersionLarge({ img }: { img: PanelImage }) {
   const p = img.params;
+  const [boxes, setBoxes] = useState(false);
   const rows: [string, string][] = [
     ["Seed", String(img.seed ?? "—")],
     ["Durée", formatDuration(imageDurationS(img))],
     ["Workflow", img.preset ?? "—"],
     ["Taille", img.width && img.height ? `${img.width} × ${img.height} px` : "—"],
     ["Créée le", new Date(img.created_at).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })],
+    ["QC", img.qc_verdict ? `${QC_VERDICT[img.qc_verdict]}${img.qc_score !== null ? ` · ${img.qc_score}/100` : ""}` : "pas encore contrôlée"],
   ];
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={engineUrl(img.url)}
-        alt={`Version ${img.version}`}
-        className="max-h-[68vh] w-full rounded-md bg-zinc-950 object-contain"
-        data-testid="version-large"
-      />
+      <div className="relative">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={engineUrl(img.url)}
+          alt={`Version ${img.version}`}
+          className="max-h-[68vh] w-full rounded-md bg-zinc-950 object-contain"
+          data-testid="version-large"
+        />
+        {boxes && img.detections && <DetectionOverlay detections={img.detections} fit="contain" />}
+      </div>
       <div className="space-y-3 text-sm">
         <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1">
           {rows.map(([k, v]) => (
@@ -241,6 +255,19 @@ function VersionLarge({ img }: { img: PanelImage }) {
             </div>
           ))}
         </dl>
+        {img.qc_reasons.length > 0 && (
+          <ul className="space-y-0.5 text-xs text-zinc-400">
+            {img.qc_reasons.map((r, i) => (
+              <li key={i}>• {r}</li>
+            ))}
+          </ul>
+        )}
+        {img.detections && (
+          <label className="flex items-center gap-1.5 text-xs text-zinc-400">
+            <input type="checkbox" checked={boxes} onChange={(e) => setBoxes(e.target.checked)} className="accent-rose-500" />
+            Afficher les boîtes détectées
+          </label>
+        )}
         {typeof p.prompt === "string" && (
           <details>
             <summary className="cursor-pointer text-zinc-400 hover:text-zinc-200">Prompt utilisé</summary>

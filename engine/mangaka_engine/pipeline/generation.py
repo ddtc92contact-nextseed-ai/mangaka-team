@@ -5,7 +5,8 @@
 - `GenerationExecutor` : exécuté par la file sérielle (`pipeline/queue.py`) pour un job :
   envoi des images de référence, construction du workflow (références + LoRA via le preset),
   file ComfyUI, progression, récupération de l'image → nouvelle `PanelImage` (version n+1) ;
-- `refresh_states` : états des cases et des pages (queued → generating → review).
+- `refresh_states` : états des cases et des pages (queued → generating → review, puis selon le
+  verdict QC de la version choisie : approved / flagged ; `qc` pendant un contrôle).
 
 Aucun nom de modèle, de LoRA ni de nœud ici : tout vient des presets et des fiches.
 """
@@ -16,7 +17,7 @@ import contextlib
 import logging
 import threading
 import time
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Any
@@ -47,6 +48,7 @@ from ..store.models import (
     Panel,
     PanelImage,
     PanelState,
+    QCVerdict,
 )
 from .jobs import JobReporter
 from .layout import target_size
@@ -55,6 +57,7 @@ from .prompt import PromptCharacter, build_negative_prompt, build_prompt
 log = logging.getLogger("mangaka_engine")
 
 STEP = "generation"
+QC_STEP = "qc"
 ACTIVE = (JobStatus.pending, JobStatus.running)
 MAX_VARIANTS = 4
 UPLOAD_SUBFOLDER = "mangaka"
@@ -165,6 +168,7 @@ def enqueue_panel(
     seed: int | None = None,
     preset: str | None = None,
     prompt_override: str | None = None,
+    extra_params: dict[str, Any] | None = None,
 ) -> list[Job]:
     """Crée `count` jobs de génération en attente pour une case (sans commit)."""
     if not 1 <= count <= MAX_VARIANTS:
@@ -197,6 +201,7 @@ def enqueue_panel(
                 "seed": seed + i if seed is not None else None,
                 "variant": i + 1,
                 "count": count,
+                **(extra_params or {}),
             },
         )
         session.add(job)
@@ -223,25 +228,43 @@ def panels_to_generate(session: Session, pages: Iterable[Page], *, force: bool) 
 
 
 # --- états ------------------------------------------------------------------------------
+QC_STATES = {
+    None: PanelState.review,
+    QCVerdict.ok: PanelState.approved,
+    QCVerdict.review: PanelState.flagged,
+    QCVerdict.reject: PanelState.flagged,
+}
+
+
 def refresh_states(session: Session, panel_ids: Iterable[int]) -> None:
-    """Recalcule l'état des cases (et de leurs pages) d'après leurs jobs et leurs versions."""
+    """Recalcule l'état des cases (et de leurs pages) d'après leurs jobs, leurs versions et le QC.
+
+    Génération en cours > en file > contrôle qualité en cours > verdict de la version choisie.
+    """
     panels = list(session.scalars(select(Panel).where(Panel.id.in_(list(panel_ids)))))
     pages: dict[int, Page] = {}
     for panel in panels:
-        active = set(
-            session.scalars(
-                select(Job.status).where(Job.panel_id == panel.id, Job.step == STEP, Job.status.in_(ACTIVE))
+        active = {
+            (step, status)
+            for step, status in session.execute(
+                select(Job.step, Job.status).where(
+                    Job.panel_id == panel.id, Job.step.in_([STEP, QC_STEP]), Job.status.in_(ACTIVE)
+                )
             )
-        )
+        }
         n_images = session.scalar(select(func.count()).where(PanelImage.panel_id == panel.id)) or 0
-        if JobStatus.running in active:
+        chosen = session.scalar(select(PanelImage).where(PanelImage.panel_id == panel.id, PanelImage.selected))
+        panel.qc_score = chosen.qc_score if chosen is not None else None
+        if (STEP, JobStatus.running) in active:
             panel.state = PanelState.generating
-        elif JobStatus.pending in active:
+        elif (STEP, JobStatus.pending) in active:
             panel.state = PanelState.queued
+        elif (QC_STEP, JobStatus.running) in active:
+            panel.state = PanelState.qc
         elif n_images == 0:
             panel.state = PanelState.draft
-        elif panel.state in (PanelState.draft, PanelState.queued, PanelState.generating):
-            panel.state = PanelState.review
+        else:
+            panel.state = QC_STATES[chosen.qc_verdict if chosen is not None else None]
         pages[panel.page_id] = panel.page
     for page in pages.values():
         states = [p.state for p in page.panels]
@@ -260,7 +283,9 @@ def recover_states(db: Database) -> None:
     """Au démarrage, après `JobRunner.recover()` : plus aucun job actif, on remet les états d'aplomb."""
     with db.session_scope() as session:
         stuck = list(
-            session.scalars(select(Panel.id).where(Panel.state.in_([PanelState.queued, PanelState.generating])))
+            session.scalars(
+                select(Panel.id).where(Panel.state.in_([PanelState.queued, PanelState.generating, PanelState.qc]))
+            )
         )
         if stuck:
             refresh_states(session, stuck)
@@ -306,8 +331,11 @@ class GenerationExecutor:
         *,
         comfyui_error: str | None = None,
         poll_s: float = 1.0,
+        on_generated: Callable[[Session, Job, PanelImage], None] | None = None,
     ) -> None:
         self.db = db
+        # Appelé avec la nouvelle version, avant le commit (mise en file du QC automatique).
+        self.on_generated = on_generated
         self.presets = presets
         self.files = files
         self.comfyui = comfyui
@@ -476,5 +504,12 @@ class GenerationExecutor:
                 },
             )
             session.add(image)
+            session.flush()
+            job = session.get(Job, job_id)
+            if self.on_generated is not None and job is not None:
+                try:
+                    self.on_generated(session, job, image)
+                except Exception:  # noqa: BLE001 — la version est gardée même si le QC ne peut être mis en file
+                    log.exception("job %s : mise en file du contrôle qualité impossible", job_id)
             session.commit()
         return f"Version {version} — {stored.width}×{stored.height}, seed {built.params['seed']}"

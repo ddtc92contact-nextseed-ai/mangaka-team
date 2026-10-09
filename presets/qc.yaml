@@ -1,0 +1,83 @@
+# Contrôle qualité des cases (étape 4, engine/mangaka_engine/pipeline/qc.py).
+# Tous les seuils, poids, règles et nombres d'essais vivent ici : le code n'en contient aucun.
+# Le fichier est validé au démarrage ; invalide → QC indisponible, erreur visible dans GET /presets.
+#
+# Trois couches, de la plus rapide à la plus lente :
+#   1. detectors : visages, mains, texte parasite (détecteurs anime ONNX deepghs, CPU) ;
+#   2. identity  : ressemblance de chaque personnage à sa fiche (CCIP deepghs) ;
+#   3. vision    : « la case colle-t-elle à sa description ? » (Qwen3-VL 4B via Ollama), seulement
+#                  si les couches 1-2 hésitent, ou à la demande. Jamais pendant une génération ComfyUI.
+# Chaque couche donne un score 0–100 ; le score combiné est leur moyenne pondérée (poids
+# renormalisés sur les couches qui ont tourné), puis les règles imposent un verdict minimal.
+
+# QC automatique après chaque génération réussie.
+auto_after_generation: true
+# Après un « rejet » du QC automatique : nombre de nouveaux essais (nouvelle seed) avant de
+# signaler la case « à revoir ». Rien n'est supprimé : toutes les versions restent.
+max_auto_retries: 1
+
+verdict:
+  ok_min: 70        # score combiné ≥ 70 → ok
+  reject_below: 40  # score combiné < 40 → rejet ; entre les deux → à revoir
+
+weights:
+  detectors: 0.4
+  identity: 0.35
+  vision: 0.25
+
+# --- Couche 1 : détecteurs ------------------------------------------------------
+detectors:
+  # Une boîte n'est comptée qu'au-dessus de `min_confidence`. `options` est passé tel quel au
+  # détecteur deepghs (imgutils.detect.detect_faces / detect_hands / detect_text).
+  face:
+    min_confidence: 0.35
+    options: { level: s }
+  hand:
+    min_confidence: 0.3
+    suspect_below: 0.5   # main détectée avec une confiance plus faible = probablement mal dessinée
+    options: { level: m }
+  text:
+    min_confidence: 0.3
+    options: {}
+  rules:
+    # Moins de visages que de personnages dans la case (par visage manquant).
+    missing_face: { penalty: 35, at_least: review }
+    # Plus de visages que de personnages, au-delà de la tolérance (par visage en trop).
+    extra_face: { penalty: 10, tolerance: 1 }
+    # Texte détecté : le modèle d'image ne doit jamais écrire (le lettrage est vectoriel).
+    text: { penalty: 60, at_least: reject }
+    # Main suspecte (par main, plafonné à max_penalty).
+    suspect_hand: { penalty: 10, max_penalty: 30 }
+  # Plans où les visages peuvent manquer légitimement : le nombre de visages n'est pas vérifié.
+  face_count_ignored_for_shots: [insert, plan d'ensemble]
+
+# --- Couche 2 : cohérence des personnages (CCIP) --------------------------------
+identity:
+  # Similarité (1 − différence CCIP) minimale entre le personnage dessiné et sa fiche.
+  # Le seuil « même personnage » de CCIP est une différence ≈ 0,18, soit une similarité ≈ 0,82.
+  min_similarity: 0.82
+  below: { penalty: 0, at_least: review }
+  max_references: 3   # images de référence comparées par personnage
+  crop_scale: 2.5     # recadrage autour de chaque visage détecté (× la taille de la boîte)
+
+# --- Couche 3 : vision (lente, à la demande) ------------------------------------
+vision:
+  # never : jamais automatiquement (seulement « avec la vision » dans l'atelier)
+  # on_doubt : seulement si le score des couches 1-2 tombe dans doubt_band (ou si elles n'ont pas tourné)
+  # always : à chaque QC
+  mode: on_doubt
+  doubt_band: { min: 40, max: 80 }
+  max_retries: 1      # réponse JSON invalide → 1 nouvel essai → erreur lisible
+  wait_idle_s: 600    # si une génération ComfyUI tourne, attendre au plus ce délai (s) avant de renoncer
+  max_reasons: 5
+  # Variables : $description, $characters, $shot. Réponse attendue : JSON {"score": 0-100, "raisons": [...]}.
+  prompt: |
+    Tu es contrôleur qualité pour un studio de manga. Regarde cette case et dis si elle correspond
+    à sa description.
+    Description de la case : $description
+    Personnages attendus : $characters
+    Type de plan : $shot
+    Vérifie : présence et nombre des personnages, action, cadrage, anatomie (mains, visages),
+    absence de tout texte ou lettre dessiné dans l'image.
+    Réponds uniquement en JSON : {"score": <entier 0-100>, "raisons": ["<raison courte en français>", …]}.
+    100 = parfaitement conforme ; moins de 40 = à refaire.

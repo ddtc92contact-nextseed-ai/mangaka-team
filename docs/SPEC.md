@@ -104,8 +104,13 @@ Une base du jalon #1 est migrée au démarrage : les projets deviennent des sér
    rejouable ; déplacer une gouttière recalcule ses deux voisines.
 3. **Génération** — ComfyUI, Qwen-Image 2.1 avec images de référence, LoRA d'identité, seed
    enregistrée, variantes.
-4. **Contrôle qualité** — YOLO visages/mains + SAM → FaceDetailer (denoise 0,35–0,45) ; score
-   visuel 0–100 + raisons ; nouvel essai automatique puis signalement.
+4. **Contrôle qualité** (`pipeline/qc.py`, seuils dans `presets/qc.yaml`) — en couches, pour ne
+   relire que les cases douteuses : détecteurs anime ONNX deepghs (visages, mains, texte parasite ;
+   boîtes gardées par version pour le lettrage), cohérence des personnages (CCIP vs images de
+   référence), vision Qwen3-VL 4B via Ollama seulement en cas de doute ou à la demande, jamais
+   pendant une génération ComfyUI (même file). Score 0–100 + raisons → ok / à revoir / rejet ;
+   QC automatique après génération, rejet → nouvel essai (nouvelle seed) puis « à revoir » ;
+   « valider quand même » tracé. Retouche FaceDetailer (YOLO + SAM) : jalon 4.
 5. **Lettrage / assemblage** — Pillow + Cairo/SVG ; bulles placées dans les zones réservées en
    évitant les visages ; export PNG 300 DPI + SVG.
 
@@ -120,7 +125,9 @@ Une base du jalon #1 est migrée au démarrage : les projets deviennent des sér
   éditable (pages, cases, description, personnages, plan, dialogues ; ajout / suppression / ordre).
 - **Mise en page** (par chapitre) : page à l'échelle avec cases, gouttières, zones de bulles et
   numéros d'ordre de lecture ; gouttières déplaçables ; « Recalculer ».
-- **Atelier de page** : clic sur une case → versions, QC, « régénérer cette case ».
+- **Atelier de page** : clic sur une case → versions, QC (badge, raisons, boîtes détectées,
+  relancer, « valider quand même »), « régénérer cette case » ; filtre « seulement les cases à
+  revoir » et compteur QC du chapitre.
 - **Presets**.
 
 Sombre, moderne, rapide.
