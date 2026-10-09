@@ -12,6 +12,7 @@ step_label: Scénario
 providers: [llm]
 llm: { provider: provider, model: model }
 job_steps: [script]
+knowledge_role: script   # savoir-faire livré : presets/knowledge.yaml › agents.script
 summary: [provider, model]
 trial: script
 trial_description: >-
@@ -77,6 +78,8 @@ settings:
       - shot_types
       - bubble_kinds
       - context_json
+      - bible
+      - savoir_faire
   - key: user
     label: Gabarit du chapitre
     group: Prompts

@@ -11,6 +11,7 @@ step: 3
 step_label: Génération
 providers: [comfyui]
 job_steps: [generation]
+knowledge_role: image_prompt   # savoir-faire livré : presets/knowledge.yaml › agents.image_prompt
 summary: [workflow]
 trial: image_prompt
 trial_description: >-
@@ -71,7 +72,7 @@ settings:
     group: Prompt
     type: prompt_list
     source: image_prompt.yaml#parts
-    variables: [shot, description, characters, style]
+    variables: [shot, description, characters, style, savoir_faire, bible]
     help: Un morceau dont une variable est vide est omis.
   - key: character
     label: Présentation d'un personnage

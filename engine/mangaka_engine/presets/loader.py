@@ -10,6 +10,7 @@ Arborescence attendue :
       fonts.yaml + fonts/      # polices de lettrage (OFL) et style de texte par type de bulle
       lettering.yaml           # formes et placement des bulles, assemblage, repères de coupe
       qc.yaml                  # contrôle qualité des cases (étape 4) : seuils, poids, règles
+      knowledge.yaml           # savoir-faire : découpage, recherche hybride, collections par agent
       page_formats/*.yaml      # formats de page
       layouts/*.yaml           # gabarits de planche
       prompts/*.yaml           # prompts des étapes LLM
@@ -35,6 +36,7 @@ from .schemas import (
     Defaults,
     FontsPreset,
     ImagePromptSettings,
+    KnowledgeSettings,
     LayoutSettings,
     LayoutTemplate,
     LayoutTemplateFile,
@@ -78,6 +80,7 @@ class PresetRegistry:
     lettering: LetteringSettings = field(default_factory=LetteringSettings)
     providers: ProvidersPreset | None = None
     qc: QCSettings | None = None
+    knowledge: KnowledgeSettings = field(default_factory=KnowledgeSettings)
     defaults: Defaults | None = None
     agents: dict[str, AgentPreset] = field(default_factory=dict)
     issues: list[PresetIssue] = field(default_factory=list)
@@ -208,6 +211,12 @@ class PresetRegistry:
             reg.qc = reg._parse(qc_path, QCSettings)
         else:
             reg.issues.append(PresetIssue(reg._rel(qc_path), "fichier absent : contrôle qualité indisponible"))
+
+        knowledge_path = root / "knowledge.yaml"
+        if knowledge_path.exists():
+            knowledge = reg._parse(knowledge_path, KnowledgeSettings)
+            if knowledge is not None:
+                reg.knowledge = knowledge
 
         providers_path = root / "providers.yaml"
         if providers_path.exists():

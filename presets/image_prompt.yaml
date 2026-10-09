@@ -4,12 +4,16 @@
 
 # Morceaux assemblés dans l'ordre, séparés par une espace. Un morceau dont une variable
 # est vide est omis. Variables : $shot (type de plan), $description (description de la
-# case), $characters (personnages, voir `character`), $style (style de la série).
+# case), $characters (personnages, voir `character`), $style (style de la série),
+# $bible (notes de la bible sur les personnages de la case), $savoir_faire (passages des
+# collections de l'agent « image_prompt », voir knowledge.yaml ; budget de jetons serré).
 parts:
   - "$shot."
   - "$description."
   - "Personnages : $characters."
+  - "Repères de la bible : $bible."
   - "Style : $style."
+  - "Notes de style : $savoir_faire."
   - "Case de manga, dessin encré, sans aucun texte ni bulle."
 
 # Un personnage : $name, $details (description visuelle + mots-clés de prompt).

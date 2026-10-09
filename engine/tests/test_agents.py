@@ -74,11 +74,8 @@ def test_agent_detail_shows_settings_with_their_preset_source(c: TestClient) -> 
     assert temp["value"] == 0.7 and temp["origin"] == "preset" and temp["source"].startswith("presets/prompts/script")
     system = _setting(d, "system")
     assert system["type"] == "prompt" and "series_title" in system["variables"]
-    assert d["knowledge"] == {
-        "value": {"collections": [], "top_k": 5},
-        "origin": "preset",
-        "inherited": {"collections": [], "top_k": 5},
-    }
+    shipped = {"collections": ["Écriture de scénario", "Rythme et découpage", "Humour jeunesse"], "top_k": 6}
+    assert d["knowledge"] == {"value": shipped, "origin": "preset", "inherited": shipped}  # knowledge.yaml
     assert d["secrets"] == [{"env": "DEEPSEEK_API_KEY", "label": "Clé d'API DeepSeek", "present": True}]
     templates = _setting(c.get("/agents/metteur-en-page").json(), "templates")
     assert templates["type"] == "yaml" and "1-pleine-page" in templates["value"]
@@ -394,3 +391,24 @@ def test_qc_vision_model_from_profile_is_used(make_settings: Callable[..., Setti
         vision = ctx.qc.vision_provider(presets.providers.ollama.vision_model)
         assert vision.model == "qwen3-vl:8b" and ctx.providers.vision.model == "qwen3-vl:4b"
         assert build_providers(settings, ctx.presets).vision.model == "qwen3-vl:4b"
+
+
+def test_knowledge_profile_drives_the_rag_per_series(c: TestClient) -> None:
+    ctx = _ctx(c)
+    a, b = _series(c, "A"), _series(c, "B")
+    for name in ("Rythme et découpage", "Gags maison"):
+        assert c.post("/knowledge/collections", json={"name": name}).status_code in (200, 201)
+    with ctx.db.session_scope() as s:
+        assert ctx.knowledge.for_agent(s, "script", a, "rythme").collections == ["Rythme et découpage"]
+    knowledge = {"collections": ["gags MAISON"], "top_k": 3}
+    assert _save(c, "scenariste", {}, a, knowledge=knowledge).status_code == 200
+    with ctx.db.session_scope() as s:
+        assert ctx.knowledge.for_agent(s, "script", a, "gag").collections == ["Gags maison"]
+        assert ctx.agents.knowledge_top_k(s, "script", a) == 3
+        assert ctx.knowledge.for_agent(s, "script", b, "rythme").collections == ["Rythme et découpage"]
+    status = c.get("/knowledge/status").json()
+    script = next(a for a in status["agents"] if a["role"] == "script")
+    assert script["source"] == "preset"  # profil global inchangé
+    _save(c, "scenariste", {}, knowledge=knowledge)
+    script = next(a for a in c.get("/knowledge/status").json()["agents"] if a["role"] == "script")
+    assert (script["source"], script["collections"], script["top_k"]) == ("profile", ["gags MAISON"], 3)

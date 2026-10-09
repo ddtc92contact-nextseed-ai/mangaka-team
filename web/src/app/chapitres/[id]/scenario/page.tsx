@@ -1,8 +1,9 @@
 "use client";
 
 import { useMemo, useState, type ComponentProps } from "react";
+import { PassageList, formatTokens } from "@/components/knowledge";
 import { Alert, Button, ButtonLink, Card, EmptyState, Field, Input, Loading, Select, Textarea } from "@/components/ui";
-import { api, EngineError, errorMessage, type Job } from "@/lib/api";
+import { api, EngineError, errorMessage, type Job, type ScriptSources } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
 import { isFinished, useJob } from "@/lib/jobs";
 import {
@@ -27,6 +28,7 @@ export default function ScenarioPage() {
   const pages = useEngineData(() => api.listPages(chapter.id), [chapter.id]);
   const characters = useEngineData(() => api.listCharacters(chapter.project_id), [chapter.project_id]);
   const lastJob = useEngineData(() => api.chapterJobs(chapter.id, "script").then((j) => j[0] ?? null), [chapter.id]);
+  const sources = useEngineData(() => api.chapterSources(chapter.id), [chapter.id]);
 
   const [synopsis, setSynopsis] = useState(chapter.synopsis);
   const [startError, setStartError] = useState<string | null>(null);
@@ -44,6 +46,7 @@ export default function ScenarioPage() {
 
   const current = started ?? lastJob.data ?? null;
   const job = useJob(current, (done) => {
+    sources.reload();
     if (done.status === "succeeded") {
       setEdited(null);
       pages.reload();
@@ -108,7 +111,7 @@ export default function ScenarioPage() {
         <Field
           label="Synopsis ou script brut du chapitre"
           htmlFor="synopsis"
-          hint="Le LLM reçoit aussi la fiche de la série, les personnages et le résumé des chapitres précédents."
+          hint="Le LLM reçoit aussi la fiche de la série, les personnages, le résumé des chapitres précédents, la bible de la série et les passages du savoir-faire."
         >
           <Textarea
             id="synopsis"
@@ -134,6 +137,8 @@ export default function ScenarioPage() {
         )}
         {job && <JobProgress job={job} onRetry={decouper} />}
       </Card>
+
+      {sources.data && <UsedSources sources={sources.data} />}
 
       <section aria-label="Découpage">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
@@ -214,6 +219,49 @@ export default function ScenarioPage() {
         )}
       </section>
     </div>
+  );
+}
+
+/** Ce que le scénariste a reçu : bible de la série et passages du savoir-faire (titres + extraits). */
+function UsedSources({ sources }: { sources: ScriptSources }) {
+  const [open, setOpen] = useState(false);
+  const count = sources.passages.length;
+  return (
+    <Card data-testid="used-sources">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="font-semibold text-zinc-100">Sources utilisées</h2>
+          <p className="text-xs text-zinc-500">
+            Dernier découpage du {new Date(sources.created_at).toLocaleString("fr-FR")} ·{" "}
+            {count} passage{count > 1 ? "s" : ""} du savoir-faire
+            {sources.collections.length > 0 && ` (${sources.collections.join(", ")})`} ·{" "}
+            {sources.bible ? `bible de la série (${formatTokens(sources.bible.tokens)})` : "pas de bible pour cette série"}
+          </p>
+        </div>
+        <Button variant="secondary" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+          {open ? "Masquer" : "Voir les sources"}
+        </Button>
+      </div>
+      {open && (
+        <div className="mt-4 space-y-4">
+          {sources.bible && (
+            <details className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+              <summary className="cursor-pointer text-sm font-medium text-zinc-200">
+                Bible de la série{sources.bible.truncated ? " (raccourcie au budget)" : ""}
+              </summary>
+              <p className="mt-2 whitespace-pre-line text-sm text-zinc-300">{sources.bible.text}</p>
+            </details>
+          )}
+          {count ? (
+            <PassageList passages={sources.passages} excerpt={400} showScores testId="used-passages" />
+          ) : (
+            <p className="text-sm text-zinc-500">
+              Aucun passage : ajoute des fiches dans la bibliothèque de savoir-faire (collections lues par le scénariste).
+            </p>
+          )}
+        </div>
+      )}
+    </Card>
   );
 }
 

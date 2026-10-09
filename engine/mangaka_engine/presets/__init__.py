@@ -1,6 +1,8 @@
 from .loader import LoadedWorkflow, PresetError, PresetIssue, PresetRegistry
 from .schemas import (
     ImagePromptSettings,
+    KnowledgeAgent,
+    KnowledgeSettings,
     LayoutSettings,
     LayoutTemplate,
     LoraChain,
@@ -17,6 +19,8 @@ from .workflow import BuiltWorkflow, LoraSpec, build_workflow
 __all__ = [
     "BuiltWorkflow",
     "ImagePromptSettings",
+    "KnowledgeAgent",
+    "KnowledgeSettings",
     "LayoutSettings",
     "LayoutTemplate",
     "LoraChain",

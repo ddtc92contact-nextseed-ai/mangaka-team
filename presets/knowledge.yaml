@@ -1,0 +1,40 @@
+# Savoir-faire injecté dans les agents (RAG local) : découpage des documents, recherche hybride
+# (vecteurs + mots-clés FTS5) et collections lues par chaque agent.
+#
+# Le modèle d'embeddings est dans providers.yaml (ollama.embedding_model) ; EMBEDDING_PROVIDER=mock|ollama
+# dans .env. Les jetons sont estimés (≈ 4 caractères par jeton), sans tokenizer.
+
+chunking:
+  max_tokens: 350        # taille maximale d'un passage (découpe aux titres, puis aux paragraphes)
+  min_tokens: 40         # un passage plus court est fusionné au suivant de la même section
+
+retrieval:
+  top_k: 6               # passages au plus, par défaut (surchargé par agent)
+  vector_weight: 0.6     # score hybride = 0,6 × similarité cosinus + 0,4 × score mots-clés (BM25 normalisé)
+  keyword_weight: 0.4
+  min_score: 0.05        # passages sous ce score : écartés
+
+# Petite collection (moins de jetons que ce seuil) : injectée entière au lieu d'une recherche.
+small_collection_tokens: 1200
+
+# Bible de série : toujours injectée dans les agents de la série. Au-delà de ce budget, les plus
+# anciens résumés de chapitres sont retirés en premier.
+bible_max_tokens: 2500
+
+# Collections lues par agent (noms des collections, sans tenir compte de la casse). Si l'agent a
+# un profil avec un champ « Savoir-faire » (écran « L'équipe »), le profil prime sur cette liste.
+# series_collections : ajoute les collections rattachées à la série du chapitre (jamais celles d'une autre série).
+agents:
+  script:
+    label: Scénariste (étape 1)
+    collections: [Écriture de scénario, Rythme et découpage, Humour jeunesse]
+    series_collections: true
+    budget_tokens: 2500
+    top_k: 6
+  image_prompt:
+    label: Prompts image (étape 3)
+    collections: [Design de personnages, Mise en page]
+    series_collections: false
+    budget_tokens: 160    # le prompt d'une case reste court
+    top_k: 2
+    bible_max_tokens: 120 # notes de la bible sur les personnages de la case

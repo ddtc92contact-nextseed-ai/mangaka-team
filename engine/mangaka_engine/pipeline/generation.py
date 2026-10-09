@@ -51,6 +51,7 @@ from ..store.models import (
     QCVerdict,
 )
 from .jobs import JobReporter
+from .knowledge import KnowledgeBase
 from .layout import target_size
 from .prompt import PromptCharacter, build_negative_prompt, build_prompt
 
@@ -82,13 +83,35 @@ def panel_characters(session: Session, panel: Panel) -> list[Character]:
     return [found[i] for i in dict.fromkeys(ids) if i in found]
 
 
-def build_panel_prompt(presets: PresetRegistry, panel: Panel, characters: Sequence[Character]) -> str:
+def panel_knowledge(
+    session: Session, knowledge: KnowledgeBase | None, panel: Panel, characters: Sequence[Character]
+) -> tuple[str, str]:
+    """($savoir_faire, $bible) du prompt image ; une panne du savoir-faire ne bloque jamais une génération."""
+    if knowledge is None:
+        return "", ""
+    query = " ".join(p for p in (panel.shot_type or "", panel.description, *(c.name for c in characters)) if p)
+    try:
+        return knowledge.for_panel(session, panel.page.chapter.project_id, query, [c.id for c in characters])
+    except Exception:  # noqa: BLE001 — le prompt se construit sans notes plutôt que d'échouer
+        log.warning("savoir-faire indisponible pour le prompt de la case %s", panel.id, exc_info=True)
+        return "", ""
+
+
+def build_panel_prompt(
+    presets: PresetRegistry,
+    panel: Panel,
+    characters: Sequence[Character],
+    notes: tuple[str, str] = ("", ""),
+) -> str:
     series = panel.page.chapter.project
+    savoir_faire, bible = notes
     return build_prompt(
         description=panel.description,
         shot_type=panel.shot_type,
         characters=[PromptCharacter(c.name, c.visual_description, tuple(c.prompt_keywords or [])) for c in characters],
         style=series.style,
+        savoir_faire=savoir_faire,
+        bible=bible,
         settings=presets.image_prompt,
     )
 
@@ -164,10 +187,14 @@ def panel_label(panel: Panel) -> str:
 
 
 # --- mise en file ---------------------------------------------------------------------
-def update_panel_prompt(presets: PresetRegistry, session: Session, panel: Panel) -> str:
+def update_panel_prompt(
+    presets: PresetRegistry, session: Session, panel: Panel, knowledge: KnowledgeBase | None = None
+) -> str:
     """Reconstruit le prompt final, sauf s'il a été édité à la main."""
     if not panel.final_prompt_manual or not (panel.final_prompt or "").strip():
-        panel.final_prompt = build_panel_prompt(presets, panel, panel_characters(session, panel))
+        characters = panel_characters(session, panel)
+        notes = panel_knowledge(session, knowledge, panel, characters)
+        panel.final_prompt = build_panel_prompt(presets, panel, characters, notes)
         panel.final_prompt_manual = False
     return panel.final_prompt or ""
 
@@ -182,6 +209,7 @@ def enqueue_panel(
     preset: str | None = None,
     prompt_override: str | None = None,
     extra_params: dict[str, Any] | None = None,
+    knowledge: KnowledgeBase | None = None,
 ) -> list[Job]:
     """Crée `count` jobs de génération en attente pour une case (sans commit)."""
     if not 1 <= count <= MAX_VARIANTS:
@@ -195,7 +223,7 @@ def enqueue_panel(
     if prompt_override is not None and prompt_override.strip():
         panel.final_prompt = prompt_override.strip()
         panel.final_prompt_manual = True
-    prompt = update_panel_prompt(presets, session, panel)
+    prompt = update_panel_prompt(presets, session, panel, knowledge)
     if not prompt.strip():
         raise GenerationError("prompt vide : décris la case ou écris son prompt final")
 
@@ -346,8 +374,10 @@ class GenerationExecutor:
         poll_s: float = 1.0,
         on_generated: Callable[[Session, Job, PanelImage], None] | None = None,
         presets_for: Callable[[int | None], PresetRegistry] | None = None,
+        knowledge: KnowledgeBase | None = None,
     ) -> None:
         self.db = db
+        self.knowledge = knowledge
         # Presets effectifs d'une série (profils des agents, écran « L'équipe ») ; sans profil : `presets`.
         self.presets_for = presets_for or (lambda _project_id: presets)
         # Appelé avec la nouvelle version, avant le commit (mise en file du QC automatique).
@@ -387,7 +417,7 @@ class GenerationExecutor:
             presets = self.presets_for(chapter.project_id)
             preset_id = str(job.params.get("preset") or resolve_preset_id(presets, panel, characters))
             loaded = presets.workflow(preset_id)
-            prompt = update_panel_prompt(presets, session, panel)
+            prompt = update_panel_prompt(presets, session, panel, self.knowledge)
             size = panel_target(presets, page, panel)
             if size is None:
                 raise GenerationError(f"la page {page.number} n'est pas mise en page")

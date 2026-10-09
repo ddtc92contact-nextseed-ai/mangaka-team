@@ -564,3 +564,196 @@ class BenchApplyOut(BaseModel):
     changes: list[dict[str, Any]]
     preset_changed: bool  # le preset a changé depuis ce run
     message: str
+
+
+# --- Savoir-faire et bible ----------------------------------------------------
+KnowledgeText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500_000)]
+BibleField = Annotated[str, StringConstraints(strip_whitespace=True, max_length=20_000)]
+Tag = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=40)]
+
+
+class CollectionCreate(_In):
+    name: Name
+    description: LongText = ""
+    project_id: int | None = None  # None : collection globale
+
+
+class CollectionUpdate(_In):
+    name: Name | None = None
+    description: LongText | None = None
+    project_id: int | None = None
+
+
+class CollectionOut(BaseModel):
+    id: int
+    name: str
+    description: str
+    project_id: int | None
+    project_title: str | None
+    document_count: int
+    chunk_count: int
+    token_count: int
+    whole: bool  # sous le seuil « petite collection » : injectée entière
+    created_at: datetime
+    updated_at: datetime
+
+
+class DocumentCreate(_In):
+    title: Title
+    content: KnowledgeText
+    tags: list[Tag] = Field(default_factory=list, max_length=20)
+
+
+class DocumentUpdate(_In):
+    title: Title | None = None
+    content: KnowledgeText | None = None
+    tags: list[Tag] | None = Field(default=None, max_length=20)
+
+
+class ChunkOut(BaseModel):
+    id: int
+    index: int
+    heading: str
+    text: str
+    token_count: int
+    embedded: bool
+
+
+class DocumentSummaryOut(BaseModel):
+    id: int
+    collection_id: int
+    title: str
+    source: str
+    original_name: str | None
+    tags: list[str]
+    token_count: int
+    chunk_count: int
+    index_error: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class DocumentOut(DocumentSummaryOut):
+    content: str
+    collection_name: str
+    chunks: list[ChunkOut]
+
+
+class SearchIn(_In):
+    query: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)]
+    collection_ids: list[int] | None = None
+    project_id: int | None = None  # collections de la série + collections globales
+    top_k: int | None = Field(default=None, ge=1, le=50)
+    budget_tokens: int | None = Field(default=None, ge=0, le=32000)
+
+
+class PassageOut(BaseModel):
+    chunk_id: int
+    document_id: int
+    document_title: str
+    collection_id: int
+    collection_name: str
+    heading: str
+    text: str
+    tokens: int
+    score: float | None
+    vector_score: float | None
+    keyword_score: float | None
+    mode: Literal["retrieved", "whole"]
+    selected: bool = False
+
+
+class BibleSummary(BaseModel):
+    text: str
+    tokens: int
+    truncated: bool
+    chapter_summaries: int
+
+
+class SearchOut(BaseModel):
+    query: str
+    collections: list[str]
+    passages: list[PassageOut]  # classement complet
+    selected_tokens: int
+    budget_tokens: int
+    top_k: int
+    bible: BibleSummary | None = None
+    warning: str | None = None
+
+
+class BibleCharacter(BaseModel):
+    id: int
+    name: str
+    visual_description: str
+    note: str
+
+
+class ChapterSummaryEntry(BaseModel):
+    chapter_id: int | None = None
+    number: int | None = None
+    title: str = ""
+    summary: Annotated[str, StringConstraints(strip_whitespace=True, max_length=4000)]
+    added_at: str | None = None
+
+
+class BibleUpdate(_In):
+    world: BibleField | None = None
+    tone: BibleField | None = None
+    rules: BibleField | None = None
+    motifs: BibleField | None = None
+    character_notes: dict[int, Annotated[str, StringConstraints(strip_whitespace=True, max_length=4000)]] | None = None
+    chapter_summaries: list[ChapterSummaryEntry] | None = Field(default=None, max_length=1000)
+
+
+class BibleOut(BaseModel):
+    project_id: int
+    world: str
+    tone: str
+    rules: str
+    motifs: str
+    characters: list[BibleCharacter]
+    chapter_summaries: list[ChapterSummaryEntry]
+    rendered: BibleSummary | None
+    updated_at: datetime | None
+
+
+class SourcesOut(BaseModel):
+    run_id: int
+    job_id: int | None
+    agent: str
+    model: str | None
+    collections: list[str]
+    passages: list[PassageOut]
+    bible: BibleSummary | None
+    created_at: datetime
+
+
+class KnowledgeAgentOut(BaseModel):
+    role: str
+    label: str
+    collections: list[str]  # noms demandés (profil ou knowledge.yaml)
+    source: Literal["profile", "preset"]
+    series_collections: bool
+    budget_tokens: int
+    top_k: int
+    bible: bool
+
+
+class KnowledgeStatusOut(BaseModel):
+    provider: str | None
+    model: str | None
+    available: bool
+    detail: str | None
+    collections: int
+    documents: int
+    chunks: int
+    stale_chunks: int  # sans vecteur, ou vecteur d'un autre modèle : à réindexer
+    small_collection_tokens: int
+    vector_backend: str
+    agents: list[KnowledgeAgentOut]
+
+
+class ReindexOut(BaseModel):
+    documents: int
+    chunks: int
+    errors: list[str]

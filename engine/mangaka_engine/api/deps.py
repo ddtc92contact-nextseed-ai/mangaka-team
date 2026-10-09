@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from ..agents import AgentService
 from ..config import Settings
 from ..pipeline.jobs import JobRunner
+from ..pipeline.knowledge import KnowledgeBase
 from ..pipeline.qc import QCExecutor
 from ..pipeline.queue import SerialJobQueue
 from ..presets import PresetRegistry
@@ -30,6 +31,7 @@ class AppContext:
     generation: SerialJobQueue  # file ComfyUI : une génération à la fois (et les contrôles qualité)
     qc: QCExecutor
     agents: AgentService  # profils des agents (écran « L'équipe ») : presets effectifs par série
+    knowledge: KnowledgeBase  # savoir-faire et bible injectés dans les agents
 
 
 def get_ctx(request: Request) -> AppContext:

@@ -4,6 +4,8 @@
 #   $series_title $series_style $reading_direction $characters $previous_chapters
 #   $chapter_number $chapter_title $synopsis $target_pages $shot_types $bubble_kinds
 #   $context_json  (le même contexte, en JSON)
+#   $bible         (bible de la série : univers, ton, personnages, règles, gags, résumés validés)
+#   $savoir_faire  (passages du savoir-faire de l'agent « script », avec leur source ; voir knowledge.yaml)
 # Gabarit de relance après une réponse invalide : $error (erreurs de validation).
 id: script
 description: Découpage d'un chapitre en pages et cases, avec dialogues et résumé.
@@ -28,6 +30,12 @@ user: |
 
   Résumé des chapitres précédents :
   $previous_chapters
+
+  Bible de la série (à respecter strictement) :
+  $bible
+
+  Savoir-faire de l'équipe (fiches de méthode : applique-les sans les citer) :
+  $savoir_faire
 
   Chapitre $chapter_number — « $chapter_title »
   Synopsis ou script brut :

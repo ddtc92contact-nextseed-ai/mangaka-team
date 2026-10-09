@@ -71,9 +71,10 @@ LAYOUTS = "layouts/*.yaml"
 
 
 class Knowledge(BaseModel):
-    """« Savoir-faire » d'un agent : collections de la base de connaissances et nombre d'extraits (top-k).
+    """« Savoir-faire » d'un agent : collections de la base de connaissances (par nom) et nombre de passages.
 
-    Stocké dès maintenant, même sans base de connaissances : le RAG le lira quand il existera.
+    Valeur livrée : `presets/knowledge.yaml` (rôle `knowledge_role` de l'agent). Un profil qui le modifie
+    prime sur ce fichier (`KnowledgeBase.profile_lookup`), série comprise.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -507,7 +508,7 @@ class AgentService:
                 value, origin = preset, "preset"
             inherited = parent if editing == "series" else preset
             out.append(ResolvedSetting(s, value, origin, preset, inherited))  # type: ignore[arg-type]
-        default_k = Knowledge().model_dump()
+        default_k = self.knowledge_default(agent)
         parent_k = global_values.get(KNOWLEDGE_KEY, default_k)
         if KNOWLEDGE_KEY in series_values:
             k_value, k_origin = series_values[KNOWLEDGE_KEY], "series"
@@ -517,6 +518,30 @@ class AgentService:
             k_value, k_origin = default_k, "preset"
         k_inherited = parent_k if editing == "series" else default_k
         return out, {"value": k_value, "origin": k_origin, "inherited": k_inherited}
+
+    def knowledge_default(self, agent: AgentPreset) -> dict[str, Any]:
+        """Savoir-faire livré : collections et top-k de `knowledge.yaml` pour le rôle de l'agent."""
+        settings = self.base.knowledge
+        if agent.knowledge_role is None or settings is None or agent.knowledge_role not in settings.agents:
+            return Knowledge().model_dump()
+        k = settings.agents[agent.knowledge_role]
+        return Knowledge(collections=list(k.collections)[:20], top_k=k.top_k or settings.retrieval.top_k).model_dump()
+
+    def knowledge_profile(self, session: Session, role: str, project_id: int | None = None) -> dict[str, Any] | None:
+        """Savoir-faire du profil de l'agent qui tient ce rôle (None : pas modifié, knowledge.yaml s'applique)."""
+        agent = next((a for a in self.agents() if a.knowledge_role == role), None)
+        if agent is None:
+            return None
+        _, k = self.resolved_for(session, agent, project_id)
+        return None if k["origin"] == "preset" else k["value"]
+
+    def knowledge_collections(self, session: Session, role: str, project_id: int | None = None) -> list[str] | None:
+        k = self.knowledge_profile(session, role, project_id)
+        return list(k["collections"]) if k else None
+
+    def knowledge_top_k(self, session: Session, role: str, project_id: int | None = None) -> int | None:
+        k = self.knowledge_profile(session, role, project_id)
+        return int(k["top_k"]) if k else None
 
     def resolved_for(
         self, session: Session, agent: AgentPreset, project_id: int | None

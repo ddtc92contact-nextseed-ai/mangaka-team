@@ -285,12 +285,16 @@ function AgentForm({
           <fieldset className="mb-6 border-b border-zinc-800 pb-6">
             <legend className="mb-1 text-sm font-semibold text-zinc-100">Savoir-faire</legend>
             <p className="mb-4 text-xs text-zinc-500">
-              Collections de la base de connaissances consultées par l&apos;agent. La base n&apos;existe pas encore :
-              ces réglages sont conservés et serviront dès qu&apos;elle sera disponible.
+              Collections de la{" "}
+              <Link href="/savoir-faire" className="text-rose-300 hover:underline">
+                bibliothèque de savoir-faire
+              </Link>{" "}
+              lues par l&apos;agent (par nom, sans tenir compte de la casse) et nombre de passages. Valeur livrée :
+              presets/knowledge.yaml ; ce profil prime dessus.
             </p>
             <div className="grid gap-5 md:grid-cols-[2fr_1fr]">
               <Field
-                label="Collections (identifiants, séparés par des virgules)"
+                label="Collections (noms, séparés par des virgules)"
                 htmlFor="knowledge-collections"
                 error={errors["knowledge.collections"]}
               >
@@ -298,10 +302,10 @@ function AgentForm({
                   id="knowledge-collections"
                   value={knowledge.collections}
                   onChange={(e) => setKnowledge((k) => ({ ...k, collections: e.target.value }))}
-                  placeholder="ex. style-shonen, anatomie"
+                  placeholder="ex. Rythme et découpage, Humour jeunesse"
                 />
               </Field>
-              <Field label="Extraits par requête (top-k)" htmlFor="knowledge-top-k" error={errors["knowledge.top_k"]}>
+              <Field label="Passages au plus (top-k)" htmlFor="knowledge-top-k" error={errors["knowledge.top_k"]}>
                 <Input
                   id="knowledge-top-k"
                   inputMode="numeric"

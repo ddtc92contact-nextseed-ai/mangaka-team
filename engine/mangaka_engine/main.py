@@ -14,7 +14,20 @@ from fastapi import FastAPI
 
 from . import __version__
 from .agents import AgentService
-from .api import agents, chapters, characters, comfyui, generation, jobs, lettering, projects, qc, qc_bench, system
+from .api import (
+    agents,
+    chapters,
+    characters,
+    comfyui,
+    generation,
+    jobs,
+    knowledge,
+    lettering,
+    projects,
+    qc,
+    qc_bench,
+    system,
+)
 from .api.deps import AppContext
 from .api.errors import install_error_handlers
 from .config import Settings, get_settings
@@ -23,6 +36,7 @@ from .pipeline.comfy_trial import TrialExecutor
 from .pipeline.generation import STEP as GENERATION_STEP
 from .pipeline.generation import GenerationExecutor, describe_error, recover_states
 from .pipeline.jobs import JobRunner
+from .pipeline.knowledge import KnowledgeBase
 from .pipeline.qc import STEP as QC_STEP
 from .pipeline.qc import AutoQC, QCExecutor
 from .pipeline.qc import describe_error as describe_qc_error
@@ -52,6 +66,10 @@ def build_context(settings: Settings, providers: Providers | None = None) -> App
         log.warning("%s job(s) interrompu(s) par l'arrêt précédent marqué(s) en échec", interrupted)
     recover_states(db)
     files = FileStore(settings.data_dir)
+    kb = KnowledgeBase(presets.knowledge, providers.embedding)
+    # « Savoir-faire » des profils d'agents (écran « L'équipe ») : prime sur knowledge.yaml.
+    kb.profile_lookup = agents_service.knowledge_collections
+    kb.profile_top_k = agents_service.knowledge_top_k
     executor = GenerationExecutor(
         db,
         presets,
@@ -61,6 +79,7 @@ def build_context(settings: Settings, providers: Providers | None = None) -> App
         poll_s=settings.comfyui_poll_s,
         on_generated=AutoQC(presets, providers, presets_for=agents_service.presets_for),
         presets_for=agents_service.presets_for,
+        knowledge=kb,
     )
     comfy = providers.comfyui
 
@@ -115,6 +134,7 @@ def build_context(settings: Settings, providers: Providers | None = None) -> App
         generation=queue,
         qc=qc_executor,
         agents=agents_service,
+        knowledge=kb,
     )
 
 
@@ -141,6 +161,7 @@ def create_app(settings: Settings | None = None, providers: Providers | None = N
     app.include_router(lettering.router)
     app.include_router(qc.router)
     app.include_router(qc_bench.router)
+    app.include_router(knowledge.router)
     app.include_router(agents.router)
     return app
 

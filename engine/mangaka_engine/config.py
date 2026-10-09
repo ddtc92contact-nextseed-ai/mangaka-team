@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     # Contrôle qualité : détecteurs (visages/mains/texte) et cohérence des personnages (CCIP).
     qc_detectors_provider: str | None = None
     qc_identity_provider: str | None = None
+    # Savoir-faire : embeddings des passages (mock | ollama).
+    embedding_provider: str | None = None
 
     deepseek_api_key: SecretStr | None = None
     deepseek_base_url: str | None = None

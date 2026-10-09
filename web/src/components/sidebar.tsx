@@ -17,6 +17,7 @@ const NAV = [
     match: (p: string) => p.startsWith("/personnages") || p.includes("/personnages"),
   },
   { href: "/equipe", label: "L'équipe", match: (p: string) => p.startsWith("/equipe") },
+  { href: "/savoir-faire", label: "Savoir-faire", match: (p: string) => p.startsWith("/savoir-faire") },
   { href: "/banc-essai-qc", label: "Banc d'essai QC", match: (p: string) => p.startsWith("/banc-essai-qc") },
 ];
 

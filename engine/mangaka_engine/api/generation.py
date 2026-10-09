@@ -157,7 +157,7 @@ def _require_comfyui(ctx: AppContext) -> None:
 
 def _enqueue(session: Session, ctx: AppContext, panel: Panel, **kwargs: object) -> list[Job]:
     try:
-        return enqueue_panel(session, _presets(ctx, panel), panel, **kwargs)  # type: ignore[arg-type]
+        return enqueue_panel(session, _presets(ctx, panel), panel, knowledge=ctx.knowledge, **kwargs)  # type: ignore[arg-type]
     except PresetError as exc:
         raise FieldError("preset", str(exc)) from None
     except GenerationError as exc:
@@ -188,7 +188,7 @@ def update_panel(
         text = (changes["final_prompt"] or "").strip()
         panel.final_prompt = text or None
         panel.final_prompt_manual = bool(text)
-        update_panel_prompt(_presets(ctx, panel), session, panel)
+        update_panel_prompt(_presets(ctx, panel), session, panel, ctx.knowledge)
     session.commit()
     return panel_detail(session, ctx, panel)
 
@@ -200,7 +200,7 @@ def rebuild_prompt(
     """Abandonne l'édition manuelle et reconstruit le prompt final depuis la case et les fiches."""
     panel = get_panel_or_404(session, panel_id)
     panel.final_prompt_manual = False
-    update_panel_prompt(_presets(ctx, panel), session, panel)
+    update_panel_prompt(_presets(ctx, panel), session, panel, ctx.knowledge)
     session.commit()
     return panel_detail(session, ctx, panel)
 
