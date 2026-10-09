@@ -1,7 +1,7 @@
 """Étape 3 — prompt final d'une case (fonctions pures, sans base ni réseau).
 
 description + type de plan + fiches des personnages (description visuelle, mots-clés)
-+ style de la série → prompt positif ; le prompt négatif contient toujours les termes qui
++ style de la série (+ notes de la bible sur les personnages et passages du savoir-faire) → prompt positif ; le prompt négatif contient toujours les termes qui
 interdisent au modèle de dessiner du texte (bulles et lettrage sont vectoriels).
 Le gabarit vit dans `presets/image_prompt.yaml`.
 """
@@ -24,7 +24,9 @@ class PromptCharacter:
 
 
 # Répliques entre guillemets français, anglais ou droits.
-_QUOTES = re.compile(r"«[^»]*»|“[^”]*”|\"[^\"]*\"")
+# Le plus intérieur d'abord : « Elle dit « ça cloche ! ». » disparaît en entier.
+_QUOTES = re.compile(r"«[^«»]*»|“[^“”]*”|\"[^\"]*\"")
+_STRAY_QUOTES = re.compile(r"[«»“”\"]")
 _SPACES = re.compile(r"\s+")
 
 
@@ -35,8 +37,12 @@ def _clean(text: str | None) -> str:
 
 def strip_quoted(text: str) -> str:
     """Retire les répliques entre guillemets d'une description (« Fuyez ! » cria-t-elle → cria-t-elle)."""
-    out = _QUOTES.sub(" ", text)
-    out = re.sub(r"\s+([,.;:!?])", r"\1", out)
+    out, previous = text, None
+    while out != previous:
+        previous, out = out, _QUOTES.sub(" ", out)
+    out = _STRAY_QUOTES.sub(" ", out)  # guillemet orphelin : jamais transmis au modèle d'image
+    # Espace laissée par la réplique avant « , » ou « . » ; l'espace française avant « : ; ! ? » reste.
+    out = re.sub(r"\s+([,.])", r"\1", out)
     return _SPACES.sub(" ", out).strip(" ,;:")
 
 
@@ -55,13 +61,16 @@ def build_prompt(
     shot_type: str | None = None,
     characters: Sequence[PromptCharacter] = (),
     style: str = "",
+    savoir_faire: str = "",
+    bible: str = "",
     settings: ImagePromptSettings | None = None,
 ) -> str:
     """Assemble le prompt positif d'une case à partir des morceaux du preset."""
     settings = settings or ImagePromptSettings()
-    desc = description or ""
+    desc, savoir_faire, bible = description or "", savoir_faire or "", bible or ""
     if settings.strip_quotes:
-        desc = strip_quoted(desc)
+        # Notes de la bible et savoir-faire aussi : le texte n'est jamais dessiné par le modèle.
+        desc, savoir_faire, bible = strip_quoted(desc), strip_quoted(savoir_faire), strip_quoted(bible)
     shot = _clean(shot_type)
     values = {
         "shot": shot[:1].upper() + shot[1:] if shot else "",
@@ -70,6 +79,8 @@ def build_prompt(
             d for d in (describe_character(c, settings) for c in characters) if d
         ),
         "style": _clean(style),
+        "savoir_faire": _clean(savoir_faire),
+        "bible": _clean(bible),
     }
     parts: list[str] = []
     for part in settings.parts:

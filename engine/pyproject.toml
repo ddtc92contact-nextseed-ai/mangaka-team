@@ -16,6 +16,9 @@ dependencies = [
   "websockets>=13",
   "pyphen>=0.15",
   "fonttools>=4.50",
+  # Savoir-faire : vecteurs comparés en numpy (pas de sqlite-vec), texte des PDF extrait par pypdf.
+  "numpy>=1.26",
+  "pypdf>=4.2",
 ]
 
 [project.optional-dependencies]

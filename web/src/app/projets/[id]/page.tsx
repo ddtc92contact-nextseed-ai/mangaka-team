@@ -6,6 +6,7 @@ import { useState } from "react";
 import { Avatar } from "@/components/avatar";
 import { ChapterList } from "@/components/chapter-list";
 import { ProjectForm } from "@/components/project-form";
+import { SeriesBible } from "@/components/series-bible";
 import { DIRECTIONS, DirectionBadge } from "@/components/reading-direction";
 import { SeriesStatusBadge } from "@/components/status";
 import { Alert, Button, ButtonLink, Card, Loading, PageHeader } from "@/components/ui";
@@ -106,6 +107,9 @@ export default function ProjectPage() {
             <p className="text-sm text-zinc-500">Aucun personnage.</p>
           )}
         </Card>
+      </div>
+      <div className="mt-6">
+        <SeriesBible projectId={id} />
       </div>
     </>
   );

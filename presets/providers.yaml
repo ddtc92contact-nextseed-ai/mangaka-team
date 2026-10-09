@@ -12,5 +12,8 @@ deepseek:
 ollama:
   base_url: http://127.0.0.1:11434
   vision_model: qwen3-vl:4b
+  # Embeddings du savoir-faire (EMBEDDING_PROVIDER=ollama). Suggestion : bge-m3, multilingue, bon en
+  # français (≈ 1,2 Go). Rien n'est téléchargé automatiquement : `ollama pull bge-m3` une fois validé.
+  embedding_model: bge-m3
   keep_alive: 0
   timeout_s: 120
