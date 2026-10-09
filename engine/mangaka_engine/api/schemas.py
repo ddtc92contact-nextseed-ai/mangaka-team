@@ -165,6 +165,9 @@ class PanelOut(BaseModel):
     # QC de la version choisie (None : pas encore contrôlée).
     qc_verdict: QCVerdictName | None = None
     qc_score: int | None = None
+    qc_reasons: list[str] = Field(default_factory=list)
+    qc_override: bool = False  # verdict forcé à ok par un humain
+    detections: dict[str, Any] | None = None  # boîtes de la version choisie
 
 
 class PageOut(BaseModel):
