@@ -1,22 +1,23 @@
-# Qwen-Image 2.1 · Qualité — texte → image (bf16).
-# JSON au format API, construit d'après le workflow de référence de la GX10
-# (~/ComfyUI/user/default/workflows/image_qwen_image_2_1_image_edit.json, sous-graphe
-# « Image Edit (Qwen Image 2.1) ») : mêmes chargeurs, mêmes options, même échantillonneur.
-# Voir presets/README.md (paliers Qualité / Rapide, ré-export).
-id: qwen-image-base
-name: "Qwen-Image 2.1 · Qualité — texte → image"
+# Qwen-Image 2.1 · Turbo — texte → image (version distillée officielle, int8 convrot).
+# Turbo = poids distillés publiés par Qwen (dépôt Comfy-Org/Qwen-Image-2.1, diffusion_models/),
+# déjà fusionnés dans le modèle : ni LoRA d'accélération ni nœud personnalisé. Même graphe, même
+# encodeur (int8) et même VAE que le palier Rapide ; seuls le fichier du modèle et l'échantillonnage
+# changent. Alternative bf16 documentée dans presets/README.md.
+# Voir presets/README.md (paliers Turbo / Rapide / Qualité, ré-export).
+id: qwen-image-turbo
+name: "Qwen-Image 2.1 · Turbo — texte → image"
 description: >-
-  Palier Qualité : modèle et encodeur bf16, 50 étapes. Case générée à partir du prompt final, sans image de référence (LoRA de style et d'identité possibles).
-workflow_file: qwen-image-base.json
+  Palier Turbo (production) : modèle distillé officiel int8 « convrot », 8 étapes. Case générée à partir du prompt final, sans image de référence (LoRA possibles).
+workflow_file: qwen-image-turbo.json
 output_node: "11"
-timeout_s: 1200   # au-delà, la génération est interrompue et le job passe en échec
-with_references: qwen-image-edit-ref   # cases avec images de référence
+timeout_s: 300   # au-delà, la génération est interrompue et le job passe en échec
+with_references: qwen-image-edit-ref-turbo   # même palier pour les cases avec références
 tier:
-  name: Qualité
-  choice: "Qualité (finitions)"   # libellé du palier dans la fiche série
-  order: 3
+  name: Turbo
+  choice: "Turbo (rapide, production)"   # libellé du palier dans la fiche série
+  order: 1
 # Durée d'une case (s) tant qu'il y a moins de 3 générations terminées avec ce preset.
-estimated_s: 70
+estimated_s: 20
 mapping:
   # TextEncodeQwenImage21 encode les deux prompts : sorties 0 (positif) et 1 (négatif).
   positive_prompt: { node: "6", input: prompt }
@@ -36,9 +37,11 @@ lora_chain:
   name_input: lora_name
   strength_input: strength_model
 defaults:
-  # cfg 1 = chemin officiel de Qwen-Image 2.1 : le prompt négatif est alors ignoré par le modèle.
+  # À CONFIRMER avec le vrai export ComfyUI du manager (~/mangaka-comfy-exports/) : 8 étapes,
+  # cfg 1, euler + simple, denoise 1 (ces deux derniers dans le JSON, nœud 9). Une correction ne
+  # touche que ce preset (et son JSON), jamais le code.
   negative_prompt: "texte, lettres, bulles, filigrane, signature, flou, mains déformées"
-  steps: 50
+  steps: 8
   cfg: 1
   width: 1024
   height: 1024
@@ -50,5 +53,5 @@ trial:
     rooftop at dusk, wind in her hair, dynamic angle
   width: 512
   height: 512
-  steps: 12
+  steps: 8
   filename_prefix: mangaka/essai

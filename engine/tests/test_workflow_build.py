@@ -17,7 +17,7 @@ from tests.conftest import PRESETS_DIR
 REG = PresetRegistry.load(PRESETS_DIR)
 EDIT = REG.workflow("qwen-image-edit-ref")
 BASE = REG.workflow("qwen-image-base")
-EDIT_TIERS = ["qwen-image-edit-ref", "qwen-image-edit-ref-rapide"]
+EDIT_TIERS = ["qwen-image-edit-ref", "qwen-image-edit-ref-rapide", "qwen-image-edit-ref-turbo"]
 PARAMS = {"positive_prompt": "Aiko sur un toit", "width": 832, "height": 1216, "seed": 1234}
 SLOTS = ["20", "21", "22"]  # LoadImage du preset, branchés sur images.image_1…3 de l'encodeur (nœud 6)
 LORAS = [LoraSpec("encre-seinen.safetensors", 0.7, "style"), LoraSpec("aiko-v3.safetensors", 0.9, "Aiko")]
@@ -37,7 +37,7 @@ def test_edit_preset_is_valid_and_declares_slots_and_chain() -> None:
     assert all(not s.remove for s in preset.reference_images)
     assert preset.lora_chain is not None and preset.lora_chain.class_type == "LoraLoaderModelOnly"
     assert preset.timeout_s == 1500
-    assert REG.defaults is not None and REG.defaults.workflow_with_references == "qwen-image-edit-ref"
+    assert REG.defaults is not None and REG.defaults.workflow_with_references == "qwen-image-edit-ref-turbo"
 
 
 @pytest.mark.parametrize("preset_id", EDIT_TIERS)
@@ -127,20 +127,20 @@ def presets_copy(tmp_path: Path) -> Path:
 
 
 def test_invalid_reference_slot_and_chain_are_reported(presets_copy: Path) -> None:
-    path = presets_copy / "workflows" / "qwen-image-edit-ref.yaml"
+    path = presets_copy / "workflows" / "qwen-image-edit-ref-turbo.yaml"
     data = yaml.safe_load(path.read_text())
     data["reference_images"][0] = {"node": "99", "input": "image"}
     data["reference_images"][1]["remove"] = ["6"]  # nœud mappé : interdit
     data["lora_chain"]["model_from"] = {"node": "77"}
     path.write_text(yaml.safe_dump(data))
     reg = PresetRegistry.load(presets_copy)
-    assert "qwen-image-edit-ref" not in reg.workflows
-    msg = next(i.message for i in reg.issues if i.file.endswith("qwen-image-edit-ref.yaml"))
+    assert "qwen-image-edit-ref-turbo" not in reg.workflows
+    msg = next(i.message for i in reg.issues if i.file.endswith("qwen-image-edit-ref-turbo.yaml"))
     assert "référence 1 : nœud 99 absent" in msg
     assert "le nœud 6 est mappé" in msg
     assert "lora_chain.model_from : nœud 77 absent" in msg
     # le défaut « avec références » pointe vers un workflow écarté → signalé, ignoré
     assert reg.defaults is not None and reg.defaults.workflow_with_references is None
-    # le workflow Qualité qui l'appariait reste chargé, avec un avertissement (pas de repli)
-    assert reg.workflow("qwen-image-base").preset.with_references == "qwen-image-edit-ref"
-    assert any(i.file.endswith("qwen-image-base.yaml") and "with_references" in i.message for i in reg.issues)
+    # le workflow Turbo qui l'appariait reste chargé, avec un avertissement (pas de repli)
+    assert reg.workflow("qwen-image-turbo").preset.with_references == "qwen-image-edit-ref-turbo"
+    assert any(i.file.endswith("qwen-image-turbo.yaml") and "with_references" in i.message for i in reg.issues)

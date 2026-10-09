@@ -1,20 +1,21 @@
-# Qwen-Image 2.1 · Rapide — avec images de référence (int8 convrot).
+# Qwen-Image 2.1 · Turbo — avec images de référence (version distillée officielle, int8 convrot).
 # L'édition / la référence est intégrée au modèle 2.1 : pas de modèle « edit » séparé.
-# JSON au format API, construit d'après le workflow de référence de la GX10
-# (~/ComfyUI/user/default/workflows/image_qwen_image_2_1_image_edit.json, sous-graphe
-# « Image Edit (Qwen Image 2.1) ») : mêmes chargeurs, mêmes options, même échantillonneur.
-# Voir presets/README.md (paliers Qualité / Rapide, ré-export).
-id: qwen-image-edit-ref-rapide
-name: "Qwen-Image 2.1 · Rapide — avec images de référence"
+# Turbo = poids distillés publiés par Qwen (dépôt Comfy-Org/Qwen-Image-2.1, diffusion_models/),
+# déjà fusionnés dans le modèle : ni LoRA d'accélération ni nœud personnalisé. Même graphe, même
+# encodeur (int8) et même VAE que le palier Rapide ; seuls le fichier du modèle et l'échantillonnage
+# changent. Alternative bf16 documentée dans presets/README.md.
+# Voir presets/README.md (paliers Turbo / Rapide / Qualité, ré-export).
+id: qwen-image-edit-ref-turbo
+name: "Qwen-Image 2.1 · Turbo — avec images de référence"
 description: >-
-  Palier Rapide (int8 convrot, 25 étapes) guidé par jusqu'à 3 images de référence des personnages (une par emplacement, dans l'ordre), avec LoRA de style et d'identité.
-workflow_file: qwen-image-edit-ref-rapide.json
+  Palier Turbo (distillé int8 convrot, 8 étapes) guidé par jusqu'à 3 images de référence des personnages (une par emplacement, dans l'ordre), avec LoRA de style et d'identité.
+workflow_file: qwen-image-edit-ref-turbo.json
 output_node: "11"
-timeout_s: 900   # au-delà, la génération est interrompue et le job passe en échec
+timeout_s: 600   # au-delà, la génération est interrompue et le job passe en échec
 tier:
-  name: Rapide
+  name: Turbo
 # Durée d'une case (s) tant qu'il y a moins de 3 générations terminées avec ce preset.
-estimated_s: 240
+estimated_s: 80
 mapping:
   # TextEncodeQwenImage21 encode les deux prompts : sorties 0 (positif) et 1 (négatif).
   positive_prompt: { node: "6", input: prompt }
@@ -41,9 +42,11 @@ lora_chain:
   name_input: lora_name
   strength_input: strength_model
 defaults:
-  # cfg 1 = chemin officiel de Qwen-Image 2.1 : le prompt négatif est alors ignoré par le modèle.
+  # À CONFIRMER avec le vrai export ComfyUI du manager (~/mangaka-comfy-exports/) : 8 étapes,
+  # cfg 1, euler + simple, denoise 1 (ces deux derniers dans le JSON, nœud 9). Une correction ne
+  # touche que ce preset (et son JSON), jamais le code.
   negative_prompt: "texte, lettres, bulles, filigrane, signature, flou, mains déformées"
-  steps: 25
+  steps: 8
   cfg: 1
   width: 1024
   height: 1024

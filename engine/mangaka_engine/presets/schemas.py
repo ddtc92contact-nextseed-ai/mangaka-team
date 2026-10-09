@@ -109,6 +109,15 @@ class LoraChain(_Strict):
 REQUIRED_WORKFLOW_PARAMS = ("positive_prompt", "negative_prompt", "seed", "width", "height")
 
 
+class WorkflowTier(_Strict):
+    """Palier d'un workflow (Turbo, Rapide, Qualité) : affiché sur les versions et dans la fiche série."""
+
+    name: str = Field(min_length=1, description="Nom court affiché sur les versions (« Turbo »)")
+    # Libellé dans la fiche série ; absent = workflow non proposé comme palier (ex. « avec références »).
+    choice: str | None = None
+    order: int = 0
+
+
 class WorkflowPreset(_Strict):
     id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
     name: str
@@ -129,6 +138,9 @@ class WorkflowPreset(_Strict):
     )
     # Case d'essai (« Générer une case d'essai ») : paramètres mappés, prompt positif compris.
     trial: dict[str, Any] = Field(default_factory=dict)
+    tier: WorkflowTier | None = None
+    # Durée estimée d'une case (s), utilisée tant que les vraies durées de ce preset sont trop peu nombreuses.
+    estimated_s: float | None = Field(default=None, gt=0)
 
     @model_validator(mode="after")
     def _check_mapping(self) -> WorkflowPreset:
@@ -180,6 +192,8 @@ class Defaults(_Strict):
     workflow_with_references: str | None = None
     # Style de mise en page des nouvelles séries (presets/layout_styles/).
     layout_style: str | None = None
+    # Palier de « Régénérer en Qualité » (atelier) ; son `with_references` sert aux cases avec références.
+    workflow_quality: str | None = None
 
 
 # --- Découpage (étape 2) ------------------------------------------------------

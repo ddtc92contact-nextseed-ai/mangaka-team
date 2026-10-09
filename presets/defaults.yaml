@@ -1,8 +1,11 @@
 # Presets appliqués aux nouveaux projets (modifiables projet par projet).
 page_format: a4-300dpi
-workflow: qwen-image-base
+# Palier des nouvelles séries : Turbo (production en volume). Les séries existantes gardent le leur.
+workflow: qwen-image-turbo
 # Workflow choisi automatiquement pour une case dont un personnage a des images de référence
 # (sinon : le workflow de la série). Une case peut imposer le sien (`generation_preset`).
-workflow_with_references: qwen-image-edit-ref
+workflow_with_references: qwen-image-edit-ref-turbo
+# Palier « Régénérer en Qualité » de l'atelier (son `with_references` sert aux cases avec références).
+workflow_quality: qwen-image-base
 # Style de mise en page des nouvelles séries (presets/layout_styles/) : sage, dynamique, nerveuse.
 layout_style: dynamique

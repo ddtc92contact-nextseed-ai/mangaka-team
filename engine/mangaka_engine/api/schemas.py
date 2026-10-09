@@ -317,6 +317,7 @@ class PanelImageOut(BaseModel):
     width: int | None
     height: int | None
     preset: str | None
+    tier: str | None = None  # palier du preset qui a produit la version (Turbo, Rapide, Qualité)
     params: dict[str, Any]
     qc_score: int | None
     qc_reasons: list[str]
@@ -400,6 +401,27 @@ class WorkflowPresetOut(BaseModel):
     is_reference_default: bool
     with_references: str | None = None  # workflow du même palier pour les cases avec références
     has_trial: bool = False
+    tier: str | None = None  # Turbo, Rapide, Qualité
+    tier_choice: str | None = None  # libellé dans la fiche série (absent : pas proposé comme palier)
+    tier_order: int | None = None
+    estimated_s: float | None = None
+    is_quality: bool = False  # palier de « Régénérer en Qualité »
+
+
+class PresetEstimateOut(BaseModel):
+    preset: str
+    tier: str | None
+    panels: int
+    per_panel_s: float | None
+    measured: bool  # médiane de vraies durées (≥ 3) ; sinon `estimated_s` du preset
+    samples: int
+
+
+class EstimateOut(BaseModel):
+    remaining_panels: int
+    total_s: float | None  # None : un preset sans durée connue ni `estimated_s`
+    measured: bool  # False : au moins une partie vient des estimations des presets (« estimation »)
+    by_preset: list[PresetEstimateOut]
 
 
 # --- Contrôle qualité (étape 4) ------------------------------------------------

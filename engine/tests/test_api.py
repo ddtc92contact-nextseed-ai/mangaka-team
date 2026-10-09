@@ -44,8 +44,9 @@ def test_presets_endpoint(client: TestClient) -> None:
     data = client.get("/presets").json()
     assert data["defaults"] == {
         "page_format": "a4-300dpi",
-        "workflow": "qwen-image-base",
-        "workflow_with_references": "qwen-image-edit-ref",
+        "workflow": "qwen-image-turbo",
+        "workflow_with_references": "qwen-image-edit-ref-turbo",
+        "workflow_quality": "qwen-image-base",
         "layout_style": "dynamique",
     }
     assert {st["id"] for st in data["layout_styles"]} >= {"sage", "dynamique", "nerveuse"}
@@ -63,7 +64,7 @@ def test_presets_endpoint(client: TestClient) -> None:
 def test_project_crud(client: TestClient) -> None:
     created = _project(client, style="encre, trames", reading_direction="ltr")
     assert created["page_format"] == "a4-300dpi"
-    assert created["workflow_preset"] == "qwen-image-base"
+    assert created["workflow_preset"] == "qwen-image-turbo"  # Turbo par défaut pour les nouvelles séries
     assert created["reading_direction"] == "ltr"
     pid = created["id"]
 
