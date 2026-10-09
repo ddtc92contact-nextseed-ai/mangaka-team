@@ -412,6 +412,24 @@ class QCVerdictThresholds(_Strict):
         return self
 
 
+class QCBenchGoal(_Strict):
+    min: int = Field(ge=1, le=10000)
+    max: int = Field(ge=1, le=10000)
+
+    @model_validator(mode="after")
+    def _check(self) -> QCBenchGoal:
+        if self.min > self.max:
+            raise ValueError("min doit être inférieur ou égal à max")
+        return self
+
+
+class QCBenchSettings(_Strict):
+    """Banc d'essai du QC (pipeline/qc_bench.py) : objectif de rappel et taille visée de l'ensemble annoté."""
+
+    target_recall: float = Field(gt=0, le=1, description="Part des mauvaises cases que le QC doit attraper")
+    annotation_goal: QCBenchGoal
+
+
 class QCSettings(_Strict):
     """Contrôle qualité des cases (`presets/qc.yaml`) : seuils, poids, règles, nombre d'essais."""
 
@@ -422,3 +440,4 @@ class QCSettings(_Strict):
     detectors: QCDetectorsSettings
     identity: QCIdentitySettings
     vision: QCVisionSettings
+    bench: QCBenchSettings

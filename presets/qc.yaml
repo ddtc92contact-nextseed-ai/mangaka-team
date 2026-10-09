@@ -81,3 +81,12 @@ vision:
     absence de tout texte ou lettre dessiné dans l'image.
     Réponds uniquement en JSON : {"score": <entier 0-100>, "raisons": ["<raison courte en français>", …]}.
     100 = parfaitement conforme ; moins de 40 = à refaire.
+
+# --- Banc d'essai du QC (écran « Banc d'essai QC ») -----------------------------
+# Mesure chaque couche sur les cases annotées à la main (bonne / mauvaise) dans l'atelier.
+bench:
+  # Objectif « ne laisser passer presque aucune mauvaise case » : le seuil suggéré est celui qui
+  # attrape au moins cette part des mauvaises cases (rappel) avec le moins de fausses alertes.
+  target_recall: 0.95
+  # Taille visée de l'ensemble annoté, affichée sur l'écran.
+  annotation_goal: { min: 50, max: 100 }

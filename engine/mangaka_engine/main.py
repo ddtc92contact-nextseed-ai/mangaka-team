@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from . import __version__
-from .api import chapters, characters, generation, jobs, projects, qc, system
+from .api import chapters, characters, generation, jobs, projects, qc, qc_bench, system
 from .api.deps import AppContext
 from .api.errors import install_error_handlers
 from .config import Settings, get_settings
@@ -23,6 +23,8 @@ from .pipeline.jobs import JobRunner
 from .pipeline.qc import STEP as QC_STEP
 from .pipeline.qc import AutoQC, QCExecutor
 from .pipeline.qc import describe_error as describe_qc_error
+from .pipeline.qc_bench import STEP as QC_BENCH_STEP
+from .pipeline.qc_bench import QCBenchExecutor
 from .pipeline.queue import QueueStep, SerialJobQueue
 from .presets import PresetRegistry
 from .providers.factory import Providers, build_providers
@@ -75,6 +77,10 @@ def build_context(settings: Settings, providers: Providers | None = None) -> App
     )
     # Le contrôle qualité partage le worker de la génération : jamais de vision pendant ComfyUI.
     queue.add_step(QC_STEP, QueueStep(execute=qc_executor, describe_error=describe_qc_error, after=qc_executor.after))
+    # Le banc d'essai du QC aussi (sa couche vision suit la même règle).
+    queue.add_step(
+        QC_BENCH_STEP, QueueStep(execute=QCBenchExecutor(db, presets, qc_executor), describe_error=describe_qc_error)
+    )
     queue.start()
     return AppContext(
         settings=settings,
@@ -108,6 +114,7 @@ def create_app(settings: Settings | None = None, providers: Providers | None = N
     app.include_router(jobs.router)
     app.include_router(generation.router)
     app.include_router(qc.router)
+    app.include_router(qc_bench.router)
     return app
 
 

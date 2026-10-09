@@ -24,13 +24,15 @@ from ..pipeline.generation import (
     resolve_preset_id,
     update_panel_prompt,
 )
+from ..pipeline.qc_bench import STEP as BENCH_STEP
 from ..presets import PresetError
-from ..store.models import Chapter, Job, JobStatus, Page, Panel, PanelImage
+from ..store.models import Chapter, Job, JobStatus, Page, Panel, PanelImage, PanelImageAnnotation
 from .chapters import get_chapter_or_404, get_page_or_404
 from .deps import AppContext, get_ctx, get_session
 from .errors import FieldError
 from .jobs import job_out
 from .schemas import (
+    AnnotationOut,
     BatchGenerateIn,
     BatchGenerateOut,
     GenerateIn,
@@ -71,7 +73,16 @@ def panel_image_out(img: PanelImage) -> PanelImageOut:
         qc_verdict=img.qc_verdict.value if img.qc_verdict else None,
         qc=dict(img.qc_details or {}),
         detections=img.detections,
+        annotation=annotation_out(img.annotation),
         created_at=img.created_at,
+    )
+
+
+def annotation_out(ann: PanelImageAnnotation | None) -> AnnotationOut | None:
+    if ann is None:
+        return None
+    return AnnotationOut(
+        label=ann.label.value, defects=list(ann.defects or []), note=ann.note, updated_at=ann.updated_at
     )
 
 
@@ -345,7 +356,7 @@ def get_queue(session: Session = Depends(get_session), ctx: AppContext = Depends
     jobs = list(
         session.scalars(
             select(Job)
-            .where(Job.step.in_([STEP, QC_STEP]), Job.status.in_(ACTIVE))
+            .where(Job.step.in_([STEP, QC_STEP, BENCH_STEP]), Job.status.in_(ACTIVE))
             .order_by((Job.status == JobStatus.running).desc(), Job.id)
         )
     )
@@ -355,8 +366,11 @@ def get_queue(session: Session = Depends(get_session), ctx: AppContext = Depends
     for position, job in enumerate(jobs, start=0 if jobs and jobs[0].status == JobStatus.running else 1):
         params = job.params or {}
         preset = params.get("preset")
-        is_qc = job.step == QC_STEP
-        if is_qc:
+        is_qc = job.step in (QC_STEP, BENCH_STEP)
+        if job.step == BENCH_STEP:
+            n_cases = int(params.get("sample_count") or 1)
+            estimate = qc_median * n_cases if qc_median is not None else None
+        elif is_qc:
             estimate = qc_median * (len(params.get("image_ids") or []) or 1) if qc_median is not None else None
         else:
             estimate = medians.get(preset, overall) if isinstance(preset, str) else overall
@@ -376,7 +390,10 @@ def get_queue(session: Session = Depends(get_session), ctx: AppContext = Depends
             label = f"{chapter.project.title} · ch. {chapter.number}"
         else:
             label = f"Job {job.id}"
-        if is_qc:
+        if job.step == BENCH_STEP:
+            n = int(params.get("sample_count") or 0)
+            label = f"Banc d'essai QC · {params.get('scope') or 'toutes les séries'} ({n} case{'s' if n > 1 else ''})"
+        elif is_qc:
             n = len(params.get("image_ids") or [])
             label = f"Contrôle qualité · {label}" + (f" ({n} cases)" if not panel and n > 1 else "")
         items.append(

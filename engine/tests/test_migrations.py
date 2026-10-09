@@ -61,6 +61,11 @@ def _version(path: Path) -> int:
     return v
 
 
+def _drop_v5_tables(con: sqlite3.Connection) -> None:
+    con.execute("DROP TABLE qc_bench_runs")
+    con.execute("DROP TABLE panel_image_annotations")
+
+
 def test_fresh_database_is_created_at_latest_version(tmp_path: Path) -> None:
     db = tmp_path / "fresh.db"
     create_db_engine(db).dispose()
@@ -126,6 +131,7 @@ def test_v2_database_gets_generation_columns(make_settings: Callable[..., Settin
     create_db_engine(settings.database_path).dispose()
     # retour à un schéma v2 (avant la génération), avec un job existant
     con = sqlite3.connect(settings.database_path)
+    _drop_v5_tables(con)
     con.execute("ALTER TABLE jobs DROP COLUMN params")
     con.execute("ALTER TABLE panels DROP COLUMN final_prompt_manual")
     for column in ("qc_verdict", "qc_details", "detections"):
@@ -142,7 +148,7 @@ def test_v2_database_gets_generation_columns(make_settings: Callable[..., Settin
         assert c.get("/jobs/5").json()["params"] == {}
         panel = c.get("/panels/3").json()
         assert panel["final_prompt_manual"] is False and panel["images"] == []
-    assert _version(settings.database_path) == SCHEMA_VERSION == 4
+    assert _version(settings.database_path) == SCHEMA_VERSION == 5
 
 
 def test_v3_database_gets_qc_columns(make_settings: Callable[..., Settings]) -> None:
@@ -151,6 +157,7 @@ def test_v3_database_gets_qc_columns(make_settings: Callable[..., Settings]) -> 
     create_db_engine(settings.database_path).dispose()
     # retour à un schéma v3 (avant le contrôle qualité), avec une version d'image existante
     con = sqlite3.connect(settings.database_path)
+    _drop_v5_tables(con)
     for column in ("qc_verdict", "qc_details", "detections"):
         con.execute(f"ALTER TABLE panel_images DROP COLUMN {column}")
     con.execute(
@@ -166,3 +173,31 @@ def test_v3_database_gets_qc_columns(make_settings: Callable[..., Settings]) -> 
         img = c.get("/panels/3").json()["images"][0]
         assert img["qc_verdict"] is None and img["qc"] == {} and img["detections"] is None
     assert _version(settings.database_path) == SCHEMA_VERSION
+
+
+def test_v4_database_gets_bench_tables(make_settings: Callable[..., Settings]) -> None:
+    settings = make_settings()
+    _v1_db(settings.database_path, with_pages=True)
+    create_db_engine(settings.database_path).dispose()
+    # retour à un schéma v4 (avant le banc d'essai du QC), avec une version d'image contrôlée
+    con = sqlite3.connect(settings.database_path)
+    _drop_v5_tables(con)
+    con.execute(
+        "INSERT INTO panel_images (id, panel_id, version, path, params, qc_reasons, qc_verdict, qc_details, selected,"
+        " created_at) VALUES (1, 3, 1, 'x.png', '{}', '[]', 'ok', '{}', 1, ?)",
+        (NOW,),
+    )
+    con.execute("PRAGMA user_version = 4")
+    con.commit()
+    con.close()
+
+    with TestClient(create_app(settings)) as c:
+        img = c.get("/panels/3").json()["images"][0]
+        assert img["qc_verdict"] == "ok" and img["annotation"] is None
+        ann = c.put("/panel-images/1/annotation", json={"label": "bad", "defects": ["hands"]}).json()
+        assert ann["label"] == "bad" and ann["defects"] == ["hands"]
+        assert c.get("/qc/bench/runs").json() == []
+    assert _version(settings.database_path) == SCHEMA_VERSION
+    fresh = settings.database_path.parent / "fresh.db"
+    create_db_engine(fresh).dispose()
+    assert _columns(settings.database_path) == _columns(fresh)
