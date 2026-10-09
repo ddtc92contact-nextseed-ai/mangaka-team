@@ -223,7 +223,12 @@ def lettering_json(page: Page, inputs: PageInputs, fonts: FontBook) -> dict[str,
     """Ce que l'écran Lettrage affiche : planche, cases, bulles calculées, avertissements."""
     art = inputs.art
     styles = {
-        kind: {"family": fonts.family(st), "url": f"/lettering/fonts/{kind}.ttf", "size_pt": st.size_pt}
+        kind: {
+            "family": fonts.family(st),
+            "name": fonts.name(st),
+            "url": f"/lettering/fonts/{kind}.ttf",
+            "size_pt": st.size_pt,
+        }
         for kind, st in fonts.preset.styles.items()
     }
     return {

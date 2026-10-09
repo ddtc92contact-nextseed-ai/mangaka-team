@@ -87,5 +87,14 @@ def list_presets(ctx: AppContext = Depends(get_ctx)) -> dict[str, Any]:
             }
             for w in reg.workflows.values()
         ],
+        "fonts": [
+            {
+                "id": font_id,
+                "name": f.name,
+                "bold": f.bold is not None,
+                "italic": f.italic is not None,
+            }
+            for font_id, f in (reg.fonts.fonts.items() if reg.fonts else [])
+        ],
         "issues": [{"file": i.file, "message": i.message} for i in reg.issues],
     }

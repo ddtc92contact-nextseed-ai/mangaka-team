@@ -211,6 +211,7 @@ function Lettering() {
             <BubbleEditor
               key={`${selected.id}:${selected.text}:${selected.kind}:${selected.speaker}`}
               bubble={selected}
+              fontName={data.styles[selected.kind]?.name}
               index={selectedIndex}
               warnings={data.warnings}
               busy={busy}
