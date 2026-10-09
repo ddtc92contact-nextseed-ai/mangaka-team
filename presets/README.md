@@ -22,6 +22,7 @@ Après modification d'un preset, redémarre le moteur (`npm run dev`).
 | `workflows/*.yaml` + `*.json` | Workflows ComfyUI : le JSON API exporté + le mapping des paramètres |
 | `fonts.yaml` + `fonts/` | Polices de lettrage (OFL, licences dans `fonts/OFL*.txt`) et style de texte par type de bulle |
 | `lettering.yaml` | Formes et placement des bulles, queues, bordures de case, repères de coupe |
+| `knowledge.yaml` | Savoir-faire (RAG local) : découpage des documents, recherche hybride, seuil « petite collection », budget de la bible, collections lues par chaque agent |
 
 ## Format de page
 
@@ -193,7 +194,9 @@ version de ComfyUI et des fichiers présents sur le GX10. Pour les remplacer par
 ## Prompt final des cases (`image_prompt.yaml`)
 
 `parts` est une liste de morceaux `string.Template` assemblés dans l'ordre (`$shot`,
-`$description`, `$characters`, `$style`) ; un morceau dont une variable est vide est omis.
+`$description`, `$characters`, `$style`, `$bible` = notes de la bible sur les personnages de la
+case, `$savoir_faire` = passages du savoir-faire de l'agent `image_prompt`) ; un morceau dont une
+variable est vide est omis.
 `character` met en forme un personnage (`$name`, `$details` = description visuelle + mots-clés).
 `forbidden_text_terms` est toujours ajouté au prompt négatif du workflow (le texte est posé au
 lettrage, jamais dessiné par le modèle) et `strip_quotes` retire les répliques entre guillemets
@@ -287,3 +290,48 @@ donc rester écrites sur une ligne à part (`ok_min: 70`), pas en style `{ ... }
 Installation des vraies couches sur la GX10 : `engine/.venv/bin/pip install -e "engine[qc]"` (détecteurs
 et CCIP deepghs) et `ollama pull qwen3-vl:4b` (vision), puis `QC_DETECTORS_PROVIDER=dghs`,
 `QC_IDENTITY_PROVIDER=dghs`, `VISION_PROVIDER=ollama` dans `.env`.
+
+## Savoir-faire et bible de série (`knowledge.yaml`)
+
+Les fiches de méthode (synthèses et notes personnelles, pas des livres entiers) sont rangées dans
+la **Bibliothèque de savoir-faire** (menu « Savoir-faire ») : collections globales ou rattachées à
+une série, documents `.md` / `.txt` / `.pdf` (texte extrait par pypdf) ou texte collé.
+
+- **Découpage** (`chunking`) : aux titres Markdown d'abord (un passage ne mélange jamais deux
+  sections), puis aux paragraphes, phrases et mots pour tenir dans `max_tokens`. Jetons estimés à
+  ≈ 4 caractères.
+- **Index** : chaque passage a un vecteur (float32 en BLOB dans SQLite) et une entrée dans l'index
+  plein texte FTS5. La comparaison des vecteurs se fait en **numpy** (force brute) : sqlite-vec
+  n'est pas utilisé — aux volumes visés (quelques milliers de passages) c'est instantané, et cela
+  évite de charger une extension SQLite dans chaque connexion. Modifier un document le réindexe.
+- **Recherche hybride** (`retrieval`) : score = `vector_weight` × cosinus + `keyword_weight` ×
+  BM25 normalisé (le meilleur passage par mots-clés vaut 1), `top_k` passages au plus, dans le
+  `budget_tokens` de l'agent. Une collection de moins de `small_collection_tokens` jetons est
+  injectée **entière**, sans recherche.
+- **Agents** (`agents`) : `script` (étape 1, variable `$savoir_faire` de `prompts/script.yaml`) et
+  `image_prompt` (étape 3, `$savoir_faire` / `$bible` de `image_prompt.yaml`). Collections par nom
+  (casse ignorée) ; `series_collections: true` ajoute celles de la série du chapitre — jamais
+  celles d'une autre série. Quand l'écran « L'équipe » fournira un profil d'agent avec un champ
+  « Savoir-faire », ce profil prime sur cette liste (`KnowledgeBase.profile_lookup`).
+- **Bible de série** (page de la série) : univers, ton, règles, gags et motifs, notes par fiche
+  personnage, et le résumé de chaque chapitre passé à « Prêt » ou « Publié ». Toujours injectée
+  dans les agents de sa série (`$bible`), coupée à `bible_max_tokens` en retirant d'abord les plus
+  anciens résumés.
+- Chaque appel du LLM garde les passages et la bible reçus (table `llm_runs`) : l'écran Scénario
+  les affiche sous « Sources utilisées ». Le panneau « Tester la recherche » montre le classement
+  avec les scores (vecteurs, mots-clés, hybride).
+
+### Embeddings : mode réel
+
+Par défaut (`EMBEDDING_PROVIDER` vide ou `mock`), les vecteurs sont factices et déterministes (sac
+de mots haché) : aucun appel réseau, c'est le mode de la CI et de la QA. En réel :
+
+```bash
+ollama pull bge-m3            # suggestion : multilingue, bon en français (≈ 1,2 Go) — à valider avant
+```
+
+puis `EMBEDDING_PROVIDER=ollama` dans `.env` ; le modèle se règle dans `providers.yaml`
+(`ollama.embedding_model`). Rien n'est téléchargé automatiquement. Après un changement de modèle,
+les passages déjà indexés sont signalés « à réindexer » : bouton « Réindexer » de la bibliothèque
+(ou `POST /knowledge/reindex`). Ollama éteint : les documents s'enregistrent quand même (recherche
+par mots-clés seule), avec l'erreur affichée sur le document.

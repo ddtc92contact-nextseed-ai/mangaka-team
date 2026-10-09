@@ -550,7 +550,7 @@ export interface Health {
     detail: string | null;
   };
   providers: Record<
-    "llm" | "vision" | "comfyui" | "detectors" | "identity",
+    "llm" | "vision" | "comfyui" | "detectors" | "identity" | "embedding",
     { name: string | null; ok: boolean; detail: string | null }
   >;
   mock: boolean;
@@ -706,6 +706,156 @@ const json = (method: string, body: unknown): RequestInit => ({
   body: JSON.stringify(body),
 });
 
+// --- Savoir-faire et bible ---------------------------------------------------
+export interface KnowledgeCollection {
+  id: number;
+  name: string;
+  description: string;
+  /** null : collection globale. */
+  project_id: number | null;
+  project_title: string | null;
+  document_count: number;
+  chunk_count: number;
+  token_count: number;
+  /** Sous le seuil « petite collection » : injectée entière dans les agents. */
+  whole: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export type CollectionInput = { name: string; description?: string; project_id?: number | null };
+
+export interface KnowledgeChunk {
+  id: number;
+  index: number;
+  heading: string;
+  text: string;
+  token_count: number;
+  embedded: boolean;
+}
+
+export interface KnowledgeDocumentSummary {
+  id: number;
+  collection_id: number;
+  title: string;
+  source: "text" | "md" | "txt" | "pdf";
+  original_name: string | null;
+  tags: string[];
+  token_count: number;
+  chunk_count: number;
+  index_error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface KnowledgeDocument extends KnowledgeDocumentSummary {
+  content: string;
+  collection_name: string;
+  chunks: KnowledgeChunk[];
+}
+
+export type DocumentInput = { title: string; content: string; tags: string[] };
+
+export interface Passage {
+  chunk_id: number;
+  document_id: number;
+  document_title: string;
+  collection_id: number;
+  collection_name: string;
+  heading: string;
+  text: string;
+  tokens: number;
+  score: number | null;
+  vector_score: number | null;
+  keyword_score: number | null;
+  mode: "retrieved" | "whole";
+  selected: boolean;
+}
+
+export interface BibleSummary {
+  text: string;
+  tokens: number;
+  truncated: boolean;
+  chapter_summaries: number;
+}
+
+export interface SearchResult {
+  query: string;
+  collections: string[];
+  passages: Passage[];
+  selected_tokens: number;
+  budget_tokens: number;
+  top_k: number;
+  bible: BibleSummary | null;
+  warning: string | null;
+}
+
+export interface SearchInput {
+  query: string;
+  collection_ids?: number[];
+  project_id?: number;
+  top_k?: number;
+  budget_tokens?: number;
+}
+
+export interface ChapterSummaryEntry {
+  chapter_id: number | null;
+  number: number | null;
+  title: string;
+  summary: string;
+  added_at: string | null;
+}
+
+export interface Bible {
+  project_id: number;
+  world: string;
+  tone: string;
+  rules: string;
+  motifs: string;
+  characters: { id: number; name: string; visual_description: string; note: string }[];
+  chapter_summaries: ChapterSummaryEntry[];
+  rendered: BibleSummary | null;
+  updated_at: string | null;
+}
+
+export type BibleInput = Partial<Pick<Bible, "world" | "tone" | "rules" | "motifs" | "chapter_summaries">> & {
+  character_notes?: Record<number, string>;
+};
+
+export interface ScriptSources {
+  run_id: number;
+  job_id: number | null;
+  agent: string;
+  model: string | null;
+  collections: string[];
+  passages: Passage[];
+  bible: BibleSummary | null;
+  created_at: string;
+}
+
+export interface KnowledgeStatus {
+  provider: string | null;
+  model: string | null;
+  available: boolean;
+  detail: string | null;
+  collections: number;
+  documents: number;
+  chunks: number;
+  stale_chunks: number;
+  small_collection_tokens: number;
+  vector_backend: string;
+  agents: {
+    role: string;
+    label: string;
+    collections: string[];
+    source: "profile" | "preset";
+    series_collections: boolean;
+    budget_tokens: number;
+    top_k: number;
+    bible: boolean;
+  }[];
+}
+
 export const api = {
   health: async () => {
     const health = await request<Health>("/health");
@@ -804,7 +954,42 @@ export const api = {
   applyBenchThresholds: (id: number, confirm: boolean) =>
     request<BenchApplyResult>(`/qc/bench/runs/${id}/apply`, json("POST", { confirm })),
   benchExportUrl: (id: number, format: "json" | "csv") => engineUrl(`/qc/bench/runs/${id}/export?format=${format}`),
+
+  knowledgeStatus: () => request<KnowledgeStatus>("/knowledge/status"),
+  listCollections: (projectId?: number) =>
+    request<KnowledgeCollection[]>(`/knowledge/collections${projectId ? `?project_id=${projectId}` : ""}`),
+  getCollection: (id: number) => request<KnowledgeCollection>(`/knowledge/collections/${id}`),
+  createCollection: (body: CollectionInput) =>
+    request<KnowledgeCollection>("/knowledge/collections", json("POST", body)),
+  updateCollection: (id: number, body: Partial<CollectionInput>) =>
+    request<KnowledgeCollection>(`/knowledge/collections/${id}`, json("PATCH", body)),
+  deleteCollection: (id: number) => request<void>(`/knowledge/collections/${id}`, { method: "DELETE" }),
+  listDocuments: (collectionId: number) =>
+    request<KnowledgeDocumentSummary[]>(`/knowledge/collections/${collectionId}/documents`),
+  createDocument: (collectionId: number, body: DocumentInput) =>
+    request<KnowledgeDocument>(`/knowledge/collections/${collectionId}/documents`, json("POST", body)),
+  uploadDocuments: (collectionId: number, files: File[], tags: string[] = []) => {
+    const form = new FormData();
+    for (const f of files) form.append("files", f);
+    form.append("tags", tags.join(","));
+    return request<KnowledgeDocument[]>(`/knowledge/collections/${collectionId}/upload`, { method: "POST", body: form });
+  },
+  getDocument: (id: number) => request<KnowledgeDocument>(`/knowledge/documents/${id}`),
+  updateDocument: (id: number, body: Partial<DocumentInput>) =>
+    request<KnowledgeDocument>(`/knowledge/documents/${id}`, json("PATCH", body)),
+  deleteDocument: (id: number) => request<void>(`/knowledge/documents/${id}`, { method: "DELETE" }),
+  reindexKnowledge: () =>
+    request<{ documents: number; chunks: number; errors: string[] }>("/knowledge/reindex", { method: "POST" }),
+  searchKnowledge: (body: SearchInput) => request<SearchResult>("/knowledge/search", json("POST", body)),
+  getBible: (projectId: number) => request<Bible>(`/projects/${projectId}/bible`),
+  saveBible: (projectId: number, body: BibleInput) => request<Bible>(`/projects/${projectId}/bible`, json("PUT", body)),
+  chapterSources: (chapterId: number) => request<ScriptSources | null>(`/chapters/${chapterId}/sources`),
 };
+
+/** « a, b ,c » → ["a", "b", "c"] (sans doublons ni vides). */
+export function parseTags(value: string): string[] {
+  return [...new Set(value.split(",").map((t) => t.trim()).filter(Boolean))];
+}
 
 /** Lien de téléchargement du ZIP d'un export de chapitre terminé. */
 export const exportFileUrl = (jobId: number) => engineUrl(`/exports/${jobId}/file`);

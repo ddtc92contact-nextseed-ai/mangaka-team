@@ -72,6 +72,9 @@ chapitre par chapitre sur le site manga du manager. Le travail s'organise donc e
 | **Case** (*panel*) | description, personnages (noms + fiches reliées), type de plan, importance 1–3, coordonnées, zone réservée aux bulles, prompt final, preset de génération, versions d'image, score QC, état |
 | **Bulle** | locuteur (nom + fiche reliée), texte, type (`speech` parole / `thought` pensée / `shout` cri / `narration` récitatif / `off` hors-champ), position, queue |
 | **Job** | étape, série, chapitre, case, statut, progression 0–100 + message, durée, erreur |
+| **Collection de savoir-faire** | nom, description, globale ou rattachée à une série ; documents (titre, source md/txt/pdf/texte, étiquettes, texte) → passages (section, texte, jetons, vecteur + modèle, index FTS5) |
+| **Bible de série** | une par série : univers, ton, règles, gags et motifs, notes par fiche personnage, résumés des chapitres validés (« Prêt » / « Publié ») |
+| **Appel LLM** (`llm_runs`) | agent, job, chapitre, modèle, requête, passages reçus (sources, extraits, scores), bible reçue |
 
 **Statuts d'une série** : `ongoing` en cours · `paused` en pause · `completed` terminée · `cancelled` arrêtée.
 
