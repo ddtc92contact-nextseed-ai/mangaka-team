@@ -65,10 +65,25 @@ ShotType = Literal[
 ]
 BUBBLE_KINDS = tuple(k.value for k in BubbleKind)
 BubbleKindName = Literal["speech", "thought", "shout", "narration", "off"]
+# Indices de direction artistique (facultatifs) lus par la grammaire de mise en page (layout_style.py).
+INTENSITIES = ("calme", "normal", "choc")
+RYTHMES = ("lent", "normal", "rapide")
+IntensityName = Literal["calme", "normal", "choc"]
+RythmeName = Literal["lent", "normal", "rapide"]
 MAX_PANELS_PER_PAGE = 9
 MAX_PAGES = 60
 
 Short = Annotated[str, StringConstraints(strip_whitespace=True, max_length=120)]
+
+
+def _hint(value: Any) -> Any:
+    """« Choc », « CALME » → minuscules ; une chaîne vide ou null = non précisé."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        v = value.strip().lower()
+        return v or None
+    return value
 
 
 def normalize_shot_type(value: Any) -> Any:
@@ -100,8 +115,10 @@ class ScriptPanel(_LLMModel):
     shot_type: ShotType
     dialogues: list[ScriptDialogue] = Field(default_factory=list, max_length=12)
     importance: int = Field(default=2, ge=1, le=3)
+    intensity: IntensityName | None = None
 
     _shot = field_validator("shot_type", mode="before")(normalize_shot_type)
+    _intensity = field_validator("intensity", mode="before")(_hint)
 
     @field_validator("characters")
     @classmethod
@@ -115,6 +132,9 @@ class ScriptPanel(_LLMModel):
 
 class ScriptPage(_LLMModel):
     panels: list[ScriptPanel] = Field(min_length=1, max_length=MAX_PANELS_PER_PAGE)
+    rythme: RythmeName | None = None
+
+    _rythme = field_validator("rythme", mode="before")(_hint)
 
 
 class ScriptOutput(_LLMModel):
@@ -169,6 +189,8 @@ class ScriptContext:
             "chapter": self.chapter,
             "shot_types": list(SHOT_TYPES),
             "bubble_kinds": list(BUBBLE_KINDS),
+            "intensities": list(INTENSITIES),
+            "rythmes": list(RYTHMES),
         }
 
 
@@ -233,6 +255,8 @@ def render_messages(prompt: PromptPreset, ctx: ScriptContext) -> list[ChatMessag
         "target_pages": str(ctx.chapter["target_pages"]),
         "shot_types": ", ".join(SHOT_TYPES),
         "bubble_kinds": ", ".join(BUBBLE_KINDS),
+        "intensities": ", ".join(INTENSITIES),
+        "rythmes": ", ".join(RYTHMES),
         "context_json": json.dumps(ctx.as_json(), ensure_ascii=False, indent=2),
     }
     return [
@@ -298,7 +322,7 @@ def save_script(session: Session, chapter: Chapter, output: ScriptOutput) -> lis
 
     created: list[Page] = []
     for p_index, sp in enumerate(output.pages):
-        page = Page(chapter_id=chapter.id, number=p_index + 1, kind=PageKind.story)
+        page = Page(chapter_id=chapter.id, number=p_index + 1, kind=PageKind.story, rythme=sp.rythme)
         for i, sc in enumerate(sp.panels):
             panel = Panel(
                 index=i,
@@ -307,6 +331,7 @@ def save_script(session: Session, chapter: Chapter, output: ScriptOutput) -> lis
                 character_ids=[by_name[n.casefold()] for n in sc.characters if n.casefold() in by_name],
                 shot_type=sc.shot_type,
                 importance=sc.importance,
+                intensity=sc.intensity,
             )
             for j, d in enumerate(sc.dialogues):
                 panel.bubbles.append(

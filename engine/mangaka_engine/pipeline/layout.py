@@ -313,6 +313,8 @@ def _place(
             next_edge = start + length if k == len(centers) - 1 else centers[k + 1] + slants[k + 1][j] - g / 2
             end_lo.append(prev_edge + _min_extent(children[k], axis, frame) + g / 2)
             end_hi.append(next_edge - _min_extent(children[k + 1], axis, frame) - g / 2)
+        if any(not end_lo[j] - 1 <= c + s[j] <= end_hi[j] + 1 for j in (0, 1)):
+            raise LayoutError("découpe trop inclinée : une case voisine passerait sous la taille minimale")
         lo = max(end_lo[0] - s[0], end_lo[1] - s[1])
         hi = min(end_hi[0] - s[0], end_hi[1] - s[1])
         cut = _Cut(
@@ -472,7 +474,10 @@ def compute_layout(
 
     panels_out: list[dict[str, Any]] = []
     for i, (leaf, spec) in enumerate(zip(leaves, panels, strict=True)):
-        poly = _out_poly(leaf, direction, frame)
+        # Sommets arrondis au dixième de px : la boîte, la zone de bulles et le rendu partent du même polygone.
+        poly = [(float(x), float(y)) for x, y in (geo.round_point(p) for p in _out_poly(leaf, direction, frame))]
+        top = min(range(len(poly)), key=lambda k: (poly[k][1], poly[k][0]))
+        poly = poly[top:] + poly[:top]  # contour horaire depuis le sommet en haut à gauche
         rect = bounding_rect(poly)
         if rect.w < 1 or rect.h < 1:
             raise LayoutError("découpe trop inclinée : une case disparaît (réduis le biais)")
