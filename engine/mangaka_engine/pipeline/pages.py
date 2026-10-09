@@ -17,7 +17,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from ..presets import PresetError, PresetRegistry
-from ..presets.schemas import count_panels
+from ..presets.schemas import LayoutStyle, count_panels
 from ..store.models import BubbleKind, Page, PageState, Panel, Project, ReadingDirection
 from .layout import (
     LayoutError,
@@ -74,8 +74,23 @@ def effective_style(page: Page) -> str:
     return page.layout_style or page.chapter.project.layout_style
 
 
-def layout_signature(page: Page) -> str:
-    """Ce dont dépend la mise en page : si cela change, elle est obsolète."""
+def shots_matter(style: LayoutStyle | None, panel_count: int, *, allow_insets: bool = True) -> bool:
+    """Le plan des cases (`shot_type`) peut-il changer les incrustations tirées par ce style ?"""
+    if style is None or not allow_insets:
+        return False
+    rule = style.frames.inset
+    if not rule.shot_types or rule.max_per_page == 0 or panel_count < rule.min_page_panels:
+        return False
+    rules = [*style.frames.by_importance.values(), *style.frames.by_intensity.values()]
+    return any(r.inset > 0 for r in rules)
+
+
+def layout_signature(page: Page, *, shots: bool | None = None) -> str:
+    """Ce dont dépend la mise en page : si cela change, elle est obsolète.
+
+    `shots` : le plan des cases compte (incrustations tirées selon `shot_types` du style) ; par défaut,
+    ce qu'en dit la mise en page stockée (`SHOTS_KEY`).
+    """
     specs = [[s.panel_id, s.importance, s.dialogue_chars, s.intensity] for s in panel_specs(page)]
     # Options de cadre imposées et plan des cases (incrustations) : ajoutées seulement si présentes,
     # pour que les mises en page d'avant restent à jour.
@@ -98,6 +113,10 @@ def layout_signature(page: Page) -> str:
         sig.append([template, choc])
     if frames:  # options de cadre imposées (absentes : signature inchangée)
         sig.append({"frames": frames})
+    if shots is None:
+        shots = bool((page.layout or {}).get(SHOTS_KEY))
+    if shots:  # plan des cases : seulement si le style en tient compte (sinon signature inchangée)
+        sig.append({"shots": [[s.panel_id, s.shot_type] for s in panel_specs(page)]})
     return json.dumps(sig, separators=(",", ":"))
 
 
@@ -105,8 +124,14 @@ def is_stale(page: Page) -> bool:
     return page.layout is None or page.layout.get("signature") != layout_signature(page)
 
 
-def _store(page: Page, layout: dict[str, Any]) -> dict[str, Any]:
-    layout = {**layout, "signature": layout_signature(page)}
+def _store(page: Page, layout: dict[str, Any], *, shots: bool | None = None) -> dict[str, Any]:
+    """`shots` : le plan des cases compte pour cette mise en page (None : comme la mise en page stockée)."""
+    if shots is None:
+        shots = bool((page.layout or {}).get(SHOTS_KEY))
+    layout = {k: v for k, v in layout.items() if k != SHOTS_KEY}
+    if shots:
+        layout[SHOTS_KEY] = True
+    layout["signature"] = layout_signature(page, shots=shots)
     if REROLL_KEY not in layout and page.layout and REROLL_KEY in page.layout:
         layout[REROLL_KEY] = page.layout[REROLL_KEY]  # gouttière, biais, miroir : le tirage est gardé
     page.layout = layout
@@ -121,6 +146,8 @@ def _store(page: Page, layout: dict[str, Any]) -> dict[str, Any]:
 # Gabarits écartés par « Nouvelle mise en page » : réappliqués à chaque recalcul de la page tant que
 # son nombre de cases ne change pas, sinon la même graine retomberait sur un autre gabarit.
 REROLL_KEY = "reroll_exclude"
+# Mise en page dont les incrustations dépendent du plan des cases : le plan entre dans sa signature.
+SHOTS_KEY = "shot_sensitive"
 
 
 def _rerolled_out(page: Page, panel_count: int) -> list[str]:
@@ -183,7 +210,7 @@ def layout_page(presets: PresetRegistry, page: Page, *, reroll: bool = False) ->
             template_id=template_id,
             frames=frames,
         )
-        return _store(page, layout)
+        return _store(page, layout, shots=False)
 
     rerolled_out = _rerolled_out(page, len(specs))
     if reroll:
@@ -218,7 +245,8 @@ def layout_page(presets: PresetRegistry, page: Page, *, reroll: bool = False) ->
     )
     if rerolled_out:
         layout[REROLL_KEY] = {"panels": len(specs), "templates": rerolled_out}
-    return _store(page, layout)
+    allow_insets = not (forced and count_panels(forced[1]) == len(specs))
+    return _store(page, layout, shots=shots_matter(style, len(specs), allow_insets=allow_insets))
 
 
 def apply_frame_change(presets: PresetRegistry, page: Page, *, was_fresh: bool) -> dict[str, Any] | None:
@@ -232,9 +260,8 @@ def apply_frame_change(presets: PresetRegistry, page: Page, *, was_fresh: bool) 
         return layout_page(presets, page)
     tree = tree_from_json(layout["tree"])
     forced = (layout["template_id"], tree) if page.grid_template else None
-    frames = decide_frames(
-        style, specs, page.layout_seed, allow_insets=not (forced and count_panels(tree) == len(specs))
-    )
+    allow_insets = not (forced and count_panels(tree) == len(specs))
+    frames = decide_frames(style, specs, page.layout_seed, allow_insets=allow_insets)
     before = [f["inset"] for f in normalize_frames(layout.get("frames"), len(specs))]
     if [f["inset"] for f in frames] != before:
         return layout_page(presets, page)
@@ -250,7 +277,7 @@ def apply_frame_change(presets: PresetRegistry, page: Page, *, was_fresh: bool) 
         style=layout.get("style"),
         frames=frames,
     )
-    return _store(page, new)
+    return _store(page, new, shots=shots_matter(style, len(specs), allow_insets=allow_insets))
 
 
 def layout_pages(presets: PresetRegistry, pages: Sequence[Page]) -> None:

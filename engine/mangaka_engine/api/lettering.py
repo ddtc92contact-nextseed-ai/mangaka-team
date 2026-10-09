@@ -105,7 +105,7 @@ def update_bubble(
         if key in changes and changes[key] is None:
             raise FieldError(key, "ne peut pas être vide")
     if bubble.kind == BubbleKind.sfx:
-        _update_sfx(bubble, body, changes)
+        _update_sfx(bubble, body, changes, fonts=_fonts(ctx, _presets(ctx, page)).preset.sfx_choices())
         session.commit()
         return _lettering(ctx, page)
     if "sfx" in changes:
@@ -134,7 +134,7 @@ def update_bubble(
     return _lettering(ctx, page)
 
 
-def _update_sfx(bubble: Bubble, body: BubbleUpdate, changes: dict[str, Any]) -> None:
+def _update_sfx(bubble: Bubble, body: BubbleUpdate, changes: dict[str, Any], *, fonts: list[str]) -> None:
     for key in ("kind", "position", "tail", "speaker"):
         if key in changes:
             raise FieldError(key, "une onomatopée n'a ni type de bulle, ni cadre, ni queue, ni locuteur")
@@ -149,6 +149,8 @@ def _update_sfx(bubble: Bubble, body: BubbleUpdate, changes: dict[str, Any]) -> 
         return
     params = dict(bubble.sfx or {})
     sent = body.sfx.model_fields_set
+    if "font" in sent and body.sfx.font is not None and body.sfx.font not in fonts:
+        raise FieldError("sfx", f"police d'onomatopée inconnue : « {body.sfx.font} » (au choix : {', '.join(fonts)})")
     for key in ("intensity", "font", "size_pt", "angle", "skew"):
         if key in sent:
             value = getattr(body.sfx, key)

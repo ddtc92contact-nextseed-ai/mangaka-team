@@ -94,6 +94,8 @@ def test_add_move_rotate_resize_and_delete_sfx(client: TestClient) -> None:
     font = client.get(let["sfx_fonts"]["bowlby-one"]["url"])
     assert font.status_code == 200 and font.headers["content-type"] == "font/ttf"
     assert client.get("/lettering/sfx-fonts/inconnue.ttf").status_code == 404
+    bad = client.patch(f"/bubbles/{fx['id']}", json={"sfx": {"font": "inconnue"}})
+    assert bad.status_code == 422, bad.text
     # déplacer, tourner, agrandir
     x, y = fx["center"]["x"] + 30, fx["center"]["y"] - 20
     let = _ok(
