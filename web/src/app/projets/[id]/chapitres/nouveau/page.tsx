@@ -2,12 +2,12 @@
 
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { CharacterForm } from "@/components/character-form";
+import { ChapterForm } from "@/components/chapter-form";
 import { Alert, Card, Loading, PageHeader } from "@/components/ui";
 import { api } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
 
-export default function NewCharacterPage() {
+export default function NewChapterPage() {
   const projectId = Number(useParams<{ id: string }>().id);
   const router = useRouter();
   const project = useEngineData(() => api.getProject(projectId), [projectId]);
@@ -18,7 +18,7 @@ export default function NewCharacterPage() {
   return (
     <>
       <PageHeader
-        title="Nouveau personnage"
+        title="Nouveau chapitre"
         subtitle={
           <Link href={`/projets/${projectId}`} className="hover:text-zinc-200">
             ← {project.data.title}
@@ -26,13 +26,10 @@ export default function NewCharacterPage() {
         }
       />
       <Card className="max-w-3xl">
-        <CharacterForm
+        <ChapterForm
           projectId={projectId}
-          onSaved={(c, uploadError) =>
-            router.push(
-              `/personnages/${c.id}${uploadError ? `?erreur_images=${encodeURIComponent(uploadError)}` : ""}`,
-            )
-          }
+          submitLabel="Créer le chapitre"
+          onSaved={(c) => router.push(`/chapitres/${c.id}/scenario`)}
         />
       </Card>
     </>

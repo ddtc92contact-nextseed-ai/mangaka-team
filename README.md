@@ -63,6 +63,7 @@ configuration incomplète (ex. clé absente) y apparaît en rouge sans empêcher
 | `COMFYUI_URL` | `http://127.0.0.1:8188` | Adresse de ComfyUI |
 | `MANGAKA_DATA_DIR` | `./data` | Dossier de la base et des images |
 | `MAX_UPLOAD_MB` | `20` | Taille max d'une image de référence |
+| `MOCK_LLM_INVALID_ATTEMPTS` | `0` | Mode mock : nombre de réponses invalides du LLM factice avant une valide (test des relances ; `[mock:invalide:N]` dans un synopsis fait de même pour un chapitre) |
 
 ## Commandes
 

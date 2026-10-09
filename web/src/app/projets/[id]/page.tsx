@@ -4,7 +4,9 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 import { Avatar } from "@/components/avatar";
+import { ChapterList } from "@/components/chapter-list";
 import { ProjectForm } from "@/components/project-form";
+import { SeriesStatusBadge } from "@/components/status";
 import { Alert, Button, ButtonLink, Card, Loading, PageHeader } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
@@ -19,7 +21,7 @@ export default function ProjectPage() {
 
   async function remove() {
     if (!project.data) return;
-    if (!window.confirm(`Supprimer « ${project.data.title} » et tous ses personnages ? Action définitive.`)) return;
+    if (!window.confirm(`Supprimer « ${project.data.title} », ses chapitres et ses personnages ? Action définitive.`)) return;
     try {
       await api.deleteProject(id);
       router.push("/projets");
@@ -29,16 +31,19 @@ export default function ProjectPage() {
   }
 
   if (project.loading) return <Loading />;
-  if (project.error || !project.data) return <Alert>{project.error ?? "Projet introuvable"}</Alert>;
+  if (project.error || !project.data) return <Alert>{project.error ?? "Série introuvable"}</Alert>;
 
   return (
     <>
       <PageHeader
         title={project.data.title}
         subtitle={
-          <Link href="/projets" className="hover:text-zinc-200">
-            ← Tous les projets
-          </Link>
+          <span className="flex items-center gap-3">
+            <Link href="/projets" className="hover:text-zinc-200">
+              ← Toutes les séries
+            </Link>
+            <SeriesStatusBadge status={project.data.status} />
+          </span>
         }
         actions={
           <Button variant="danger" onClick={remove}>
@@ -51,12 +56,15 @@ export default function ProjectPage() {
           <Alert>{deleteError}</Alert>
         </div>
       )}
+      <div className="mb-6">
+        <ChapterList projectId={id} />
+      </div>
       <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
         <Card>
           <h2 className="mb-4 font-semibold text-zinc-100">Paramètres</h2>
           {saved && (
             <div className="mb-4">
-              <Alert tone="info">Projet enregistré.</Alert>
+              <Alert tone="info">Série enregistrée.</Alert>
             </div>
           )}
           <ProjectForm

@@ -55,15 +55,15 @@ export default function CharactersPage() {
       {projects.loading ? (
         <Loading />
       ) : projects.error ? (
-        <Alert>Impossible de charger les projets : {projects.error}</Alert>
+        <Alert>Impossible de charger les séries : {projects.error}</Alert>
       ) : !list?.length ? (
-        <EmptyState title="Crée d'abord un projet : les personnages appartiennent à une série.">
-          <ButtonLink href="/projets/nouveau">Nouveau projet</ButtonLink>
+        <EmptyState title="Crée d'abord une série : les personnages lui appartiennent.">
+          <ButtonLink href="/projets/nouveau">Nouvelle série</ButtonLink>
         </EmptyState>
       ) : (
         <>
           <div className="mb-6 max-w-sm">
-            <Field label="Projet" htmlFor="project">
+            <Field label="Série" htmlFor="project">
               <Select id="project" value={projectId ?? ""} onChange={(e) => setSelected(Number(e.target.value))}>
                 {list.map((p) => (
                   <option key={p.id} value={p.id}>
@@ -101,7 +101,7 @@ export default function CharactersPage() {
               ))}
             </ul>
           ) : (
-            <EmptyState title="Aucun personnage dans ce projet">
+            <EmptyState title="Aucun personnage dans cette série">
               <ButtonLink href={`/projets/${projectId}/personnages/nouveau`}>Créer un personnage</ButtonLink>
             </EmptyState>
           )}

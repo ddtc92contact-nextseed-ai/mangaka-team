@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from "react";
 import { api, EngineError, errorMessage, type Project, type ProjectInput } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
+import { SERIES_STATUS } from "./status";
 import { Alert, Button, Field, Input, Select, Textarea } from "./ui";
 
 export const DIRECTIONS = {
@@ -23,9 +24,12 @@ export function ProjectForm({
   const [form, setForm] = useState<Partial<ProjectInput>>({
     title: initial?.title ?? "",
     style: initial?.style ?? "",
+    status: initial?.status ?? "ongoing",
     reading_direction: initial?.reading_direction ?? "rtl",
     page_format: initial?.page_format,
     workflow_preset: initial?.workflow_preset,
+    style_lora_name: initial?.style_lora_name ?? "",
+    style_lora_weight: initial?.style_lora_weight ?? 0.8,
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
@@ -49,6 +53,7 @@ export function ProjectForm({
       ...form,
       page_format: pageFormat || undefined,
       workflow_preset: workflow || undefined,
+      style_lora_name: form.style_lora_name?.trim() || null,
     };
     try {
       const saved = initial ? await api.updateProject(initial.id, body) : await api.createProject(body);
@@ -89,6 +94,47 @@ export function ProjectForm({
           aria-invalid={Boolean(errors.style)}
         />
       </Field>
+      <div className="grid gap-5 md:grid-cols-3">
+        <Field label="Statut de la série" htmlFor="status" error={errors.status}>
+          <Select
+            id="status"
+            value={form.status}
+            onChange={(e) => set("status", e.target.value as ProjectInput["status"])}
+          >
+            {Object.entries(SERIES_STATUS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field
+          label="LoRA de style (optionnel)"
+          htmlFor="style_lora_name"
+          error={errors.style_lora_name}
+          hint="Fichier dans ComfyUI/models/loras, appliqué à toutes les cases."
+        >
+          <Input
+            id="style_lora_name"
+            value={form.style_lora_name ?? ""}
+            onChange={(e) => set("style_lora_name", e.target.value)}
+            placeholder="encre-seinen-v2.safetensors"
+            maxLength={255}
+          />
+        </Field>
+        <Field label="Poids du LoRA de style" htmlFor="style_lora_weight" error={errors.style_lora_weight}>
+          <Input
+            id="style_lora_weight"
+            type="number"
+            min={0}
+            max={2}
+            step={0.05}
+            value={form.style_lora_weight ?? 0.8}
+            onChange={(e) => set("style_lora_weight", Number(e.target.value))}
+            aria-invalid={Boolean(errors.style_lora_weight)}
+          />
+        </Field>
+      </div>
       <div className="grid gap-5 md:grid-cols-3">
         <Field label="Sens de lecture" htmlFor="reading_direction" error={errors.reading_direction}>
           <Select
