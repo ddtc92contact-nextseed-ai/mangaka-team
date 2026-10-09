@@ -48,10 +48,15 @@ FAILURES=()
 declare -A STARTED=()
 APP_OK=true
 
+# « de Ollama », « de l'application », mais « du moteur ».
+de() {
+  if [[ "$1" == "le "* ]]; then printf 'du %s' "${1#le }"; else printf 'de %s' "$1"; fi
+}
+
 fail() {
   local name="$1" reason="$2"
   FAILURES+=("$name")
-  notify critical "Mangaka Team : échec de $name" "$reason — journal : $(log_file "$3")"
+  notify critical "Mangaka Team : échec $(de "$name")" "$reason — journal : $(log_file "$3")"
 }
 
 # Démarre une commande en arrière-plan, détachée (nouvelle session : survit au lanceur et
@@ -73,11 +78,15 @@ start_service() {
 }
 
 # Attend qu'une sonde réponde. $1 nom affiché, $2 clé du service, $3 délai, $4… sonde.
+# DEAD_CHECK (facultatif) : fonction qui réussit si le service est mort au démarrage alors que
+# son processus tourne encore (le moteur sous « npm run dev »), DEAD_REASON : message associé.
+DEAD_CHECK=""
+DEAD_REASON=""
 wait_healthy() {
   local label="$1" name="$2" timeout="$3"
   shift 3
   local start=$SECONDS
-  notify normal "Mangaka Team" "Attente de $label…"
+  notify normal "Mangaka Team" "Attente $(de "$label")…"
   while true; do
     if "$@"; then
       say "$label en ligne ($((SECONDS - start)) s)"
@@ -86,6 +95,10 @@ wait_healthy() {
     # Un service lancé par nous qui meurt pendant l'attente : inutile d'attendre la fin du délai.
     if [[ -n "${STARTED[$name]:-}" ]] && ! owned_pid "$name" >/dev/null; then
       fail "$label" "le processus s'est arrêté au démarrage" "$name"
+      return 1
+    fi
+    if [[ -n "$DEAD_CHECK" ]] && "$DEAD_CHECK"; then
+      fail "$label" "$DEAD_REASON" "$name"
       return 1
     fi
     if ((SECONDS - start >= timeout)); then
@@ -103,6 +116,15 @@ APP_URL="http://127.0.0.1:$PORT"
 app_up() { [[ "$(http_code "$APP_URL/" 10)" != 000 ]]; }
 # Une page qui répond sur le port est-elle bien la nôtre (lancée à la main avec npm run dev) ?
 app_is_ours() { http_body "$APP_URL/" 30 | grep -q "mangaka-team"; }
+# Le moteur compte comme prêt dès que /health répond, fournisseurs verts ou non.
+# shellcheck disable=SC2317,SC2329 # appelée via wait_healthy
+engine_up() { engine_is_ours 5; }
+# scripts/dev.mjs écrit cette ligne dans app.log quand le moteur meurt au démarrage ; seules les
+# lignes écrites depuis notre lancement comptent (le journal est en ajout).
+APP_LOG_OFFSET=0
+# shellcheck disable=SC2317,SC2329 # appelée via wait_healthy
+engine_died() { tail -c "+$((APP_LOG_OFFSET + 1))" "$(log_file app)" 2>/dev/null | grep -q "le moteur n'a pas démarré"; }
+ENGINE_PORT_HINT="change ENGINE_PORT dans .env ou launcher.env"
 
 # --- Ollama -----------------------------------------------------------------------------
 WAIT_OLLAMA=false
@@ -143,30 +165,65 @@ if is_true "$START_COMFYUI"; then
 fi
 
 # --- Application (moteur + UI) ----------------------------------------------------------
+# « npm run dev » sert l'interface sur $PORT et le moteur sur $ENGINE_PORT : les deux ports
+# sont vérifiés avant de démarrer quoi que ce soit.
 WAIT_APP=false
+WAIT_ENGINE=false
 if owned_pid app >/dev/null; then
   WAIT_APP=true
-elif port_open 127.0.0.1 "$PORT"; then
-  if app_is_ours; then
-    say "Application déjà en ligne sur $APP_URL"
-  else
-    fail "l'application" "le port $PORT est occupé par un autre programme (change PORT dans launcher.env)" app
+  WAIT_ENGINE=true
+else
+  ui_busy=false
+  engine_busy=false
+  port_open 127.0.0.1 "$PORT" && ui_busy=true
+  port_open 127.0.0.1 "$ENGINE_PORT" && engine_busy=true
+  if $ui_busy && ! app_is_ours; then
+    fail "l'application" "le port $PORT est occupé par un autre programme (change PORT dans .env ou launcher.env)" app
     APP_OK=false
   fi
-elif ! command -v "$NPM_BIN" >/dev/null 2>&1; then
-  fail "l'application" "commande « $NPM_BIN » introuvable (NPM_BIN)" app
-  APP_OK=false
-else
-  notify normal "Mangaka Team" "Démarrage de l'atelier…"
-  start_service app "$MANGAKA_ROOT" "$NPM_BIN" run dev
-  WAIT_APP=true
+  if $engine_busy && ! engine_is_ours; then
+    fail "le moteur (port $ENGINE_PORT)" "le port $ENGINE_PORT du moteur est occupé par un autre programme ($ENGINE_PORT_HINT)" app
+    APP_OK=false
+  fi
+  if ! $APP_OK; then
+    :
+  elif $ui_busy; then
+    say "Application déjà en ligne sur $APP_URL"
+    if $engine_busy; then
+      say "Moteur déjà en ligne sur le port $ENGINE_PORT"
+    else
+      # Interface lancée à la main mais moteur absent (ou encore en train de démarrer).
+      WAIT_ENGINE=true
+    fi
+  elif ! command -v "$NPM_BIN" >/dev/null 2>&1; then
+    fail "l'application" "commande « $NPM_BIN » introuvable (NPM_BIN)" app
+    APP_OK=false
+  else
+    $engine_busy && say "Moteur déjà en ligne sur le port $ENGINE_PORT : réutilisé"
+    APP_LOG_OFFSET="$(stat -c %s "$(log_file app)" 2>/dev/null || echo 0)"
+    notify normal "Mangaka Team" "Démarrage de l'atelier…"
+    start_service app "$MANGAKA_ROOT" "$NPM_BIN" run dev
+    WAIT_APP=true
+    WAIT_ENGINE=true
+  fi
 fi
 
 # --- Attente des sondes -----------------------------------------------------------------
 $WAIT_OLLAMA && wait_healthy "Ollama" ollama "$OLLAMA_TIMEOUT" ollama_up
 $WAIT_COMFYUI && wait_healthy "ComfyUI" comfyui "$COMFYUI_TIMEOUT" comfyui_up
+# L'application n'est prête que si l'interface ET le moteur (/health) répondent, le tout dans
+# APP_TIMEOUT. Moteur absent : échec, mais l'interface s'ouvre (« moteur hors ligne » y est affiché).
+app_start=$SECONDS
 if $WAIT_APP; then
-  wait_healthy "l'application" app "$APP_TIMEOUT" app_up || APP_OK=false
+  wait_healthy "l'application" app "$APP_TIMEOUT" app_up || { APP_OK=false; WAIT_ENGINE=false; }
+fi
+if $WAIT_ENGINE; then
+  remaining=$((APP_TIMEOUT - (SECONDS - app_start)))
+  ((remaining < 1)) && remaining=1
+  DEAD_CHECK=engine_died
+  DEAD_REASON="le moteur s'est arrêté au démarrage (port $ENGINE_PORT déjà pris ? $ENGINE_PORT_HINT)"
+  wait_healthy "le moteur (port $ENGINE_PORT)" app "$remaining" engine_up
+  DEAD_CHECK=""
 fi
 
 # --- Navigateur -------------------------------------------------------------------------

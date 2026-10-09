@@ -81,19 +81,32 @@ relance l'installation (le chemin est absolu).
 Ce que fait l'icône (`scripts/launch.sh`, utilisable aussi dans un terminal) :
 
 - chaque service est d'abord **sondé** — Ollama sur `$OLLAMA_URL/api/version`, ComfyUI sur
-  `$COMFYUI_URL/system_stats`, l'application sur `http://127.0.0.1:$PORT/` — et n'est démarré
+  `$COMFYUI_URL/system_stats`, l'application sur `http://127.0.0.1:$PORT/` (interface) **et**
+  `http://127.0.0.1:$ENGINE_PORT/health` (moteur) — et n'est démarré
   que s'il ne répond pas. Un Ollama géré par systemd ou un ComfyUI lancé à la main est
   simplement réutilisé ; le lanceur n'appelle jamais `sudo` ni `systemctl` ;
 - Ollama : `ollama serve` ; ComfyUI : `$COMFYUI_PYTHON main.py --listen 127.0.0.1 --port 8188`
-  depuis `$COMFYUI_DIR` ; application : `npm run dev` à la racine du dépôt ;
+  depuis `$COMFYUI_DIR` ; application : `npm run dev` à la racine du dépôt, avec `PORT` et
+  `ENGINE_PORT` transmis ;
 - une notification suit la progression ; dès que l'interface répond, elle s'ouvre (`xdg-open`) ;
-- si le port de l'interface est pris par **un autre programme**, le lanceur le dit et s'arrête ;
+- l'application n'est « prête » que si l'interface **et** le moteur (`/health`, fournisseurs verts
+  ou non) répondent dans `APP_TIMEOUT` ; sinon : notification d'échec, code de sortie ≠ 0 et
+  pointeur vers `app.log`, jamais « Tout est prêt » ;
+- si le port de l'interface (`PORT`) ou du moteur (`ENGINE_PORT`) est pris par **un autre
+  programme**, le lanceur le dit (« le port 8765 du moteur est occupé par un autre programme… »)
+  et s'arrête sans rien démarrer ;
 - en cas d'échec (délai dépassé, processus mort au démarrage, ComfyUI introuvable…), une
   notification nomme le service et son journal. Deux clics rapides ne lancent rien en double.
 
+**Ports.** Par défaut l'interface écoute sur `PORT=3000` et le moteur sur `ENGINE_PORT=8765`. Si
+l'un d'eux est déjà utilisé (Open WebUI sur 3000, un autre service sur 8765…), choisis un port
+libre — `ss -ltn` liste ceux qui sont pris — et mets-le dans `.env` ou `launcher.env`, par exemple
+`ENGINE_PORT=8766`. `npm run dev` signale aussi dans le terminal un moteur qui n'a pas pu démarrer,
+en nommant le port.
+
 Configuration : `launcher.env` (gitignoré, modèle `launcher.env.example`), sinon `.env`, sinon
 les valeurs par défaut : `COMFYUI_DIR=$HOME/ComfyUI`, `COMFYUI_PYTHON=$HOME/comfyui-env/bin/python`,
-`COMFYUI_URL`, `OLLAMA_URL=http://127.0.0.1:11434`, `PORT=3000`, `START_OLLAMA` / `START_COMFYUI`
+`COMFYUI_URL`, `OLLAMA_URL=http://127.0.0.1:11434`, `PORT=3000`, `ENGINE_PORT=8765`, `START_OLLAMA` / `START_COMFYUI`
 (`true`/`false`), délais d'attente `*_TIMEOUT`. Une variable d'environnement prime sur les fichiers.
 
 Journaux : `~/.local/state/mangaka-team/logs/` — `launcher.log` (le lanceur lui-même),
@@ -102,7 +115,9 @@ Journaux : `~/.local/state/mangaka-team/logs/` — `launcher.log` (le lanceur lu
 
 Arrêter : clic droit sur l'icône → « Arrêter », ou `scripts/stop.sh`. Seul ce que le lanceur a
 démarré est arrêté (PID enregistrés, vérifiés contre leur date de démarrage) : un Ollama ou un
-ComfyUI qui tournait déjà avant n'est jamais touché.
+ComfyUI qui tournait déjà avant n'est jamais touché. Le moteur est arrêté avec `npm run dev` ; si
+un processus de cette session écoute encore sur `ENGINE_PORT`, il est arrêté lui aussi (un moteur
+lancé autrement n'est jamais touché).
 
 ### Contrôle qualité réel (étape 4)
 
