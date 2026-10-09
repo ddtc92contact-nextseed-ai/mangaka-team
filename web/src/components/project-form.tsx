@@ -1,0 +1,150 @@
+"use client";
+
+import { useState, type FormEvent } from "react";
+import { api, EngineError, errorMessage, type Project, type ProjectInput } from "@/lib/api";
+import { useEngineData } from "@/lib/hooks";
+import { Alert, Button, Field, Input, Select, Textarea } from "./ui";
+
+export const DIRECTIONS = {
+  rtl: "Droite → gauche (manga)",
+  ltr: "Gauche → droite (BD, comics)",
+} as const;
+
+export function ProjectForm({
+  initial,
+  submitLabel,
+  onSaved,
+}: {
+  initial?: Project;
+  submitLabel: string;
+  onSaved: (project: Project) => void;
+}) {
+  const presets = useEngineData(() => api.presets());
+  const [form, setForm] = useState<Partial<ProjectInput>>({
+    title: initial?.title ?? "",
+    style: initial?.style ?? "",
+    reading_direction: initial?.reading_direction ?? "rtl",
+    page_format: initial?.page_format,
+    workflow_preset: initial?.workflow_preset,
+  });
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [formError, setFormError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const defaults = presets.data?.defaults;
+  const pageFormat = form.page_format ?? defaults?.page_format ?? "";
+  const workflow = form.workflow_preset ?? defaults?.workflow ?? "";
+
+  const set = <K extends keyof ProjectInput>(key: K, value: ProjectInput[K]) => {
+    setForm((f) => ({ ...f, [key]: value }));
+    setErrors((e) => ({ ...e, [key]: "" }));
+  };
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setFormError(null);
+    setErrors({});
+    const body = {
+      ...form,
+      page_format: pageFormat || undefined,
+      workflow_preset: workflow || undefined,
+    };
+    try {
+      const saved = initial ? await api.updateProject(initial.id, body) : await api.createProject(body);
+      onSaved(saved);
+    } catch (err) {
+      if (err instanceof EngineError && Object.keys(err.fieldErrors).length) setErrors(err.fieldErrors);
+      setFormError(errorMessage(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-5" noValidate>
+      {formError && <Alert>{formError}</Alert>}
+      <Field label="Titre" htmlFor="title" error={errors.title}>
+        <Input
+          id="title"
+          value={form.title ?? ""}
+          onChange={(e) => set("title", e.target.value)}
+          placeholder="Les Lames de Kyoto"
+          aria-invalid={Boolean(errors.title)}
+          required
+          maxLength={200}
+        />
+      </Field>
+      <Field
+        label="Style graphique"
+        htmlFor="style"
+        error={errors.style}
+        hint="Repris dans chaque prompt : encrage, trames, ambiance, références…"
+      >
+        <Textarea
+          id="style"
+          value={form.style ?? ""}
+          onChange={(e) => set("style", e.target.value)}
+          placeholder="Manga seinen noir et blanc, encrage épais, trames, décors détaillés"
+          aria-invalid={Boolean(errors.style)}
+        />
+      </Field>
+      <div className="grid gap-5 md:grid-cols-3">
+        <Field label="Sens de lecture" htmlFor="reading_direction" error={errors.reading_direction}>
+          <Select
+            id="reading_direction"
+            value={form.reading_direction}
+            onChange={(e) => set("reading_direction", e.target.value as ProjectInput["reading_direction"])}
+          >
+            {Object.entries(DIRECTIONS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Format de page" htmlFor="page_format" error={errors.page_format}>
+          <Select
+            id="page_format"
+            value={pageFormat}
+            onChange={(e) => set("page_format", e.target.value)}
+            aria-invalid={Boolean(errors.page_format)}
+            disabled={!presets.data}
+          >
+            {presets.data?.page_formats.map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.name} ({f.width_px}×{f.height_px} px)
+              </option>
+            ))}
+            {pageFormat && !presets.data?.page_formats.some((f) => f.id === pageFormat) && (
+              <option value={pageFormat}>{pageFormat} (preset introuvable)</option>
+            )}
+          </Select>
+        </Field>
+        <Field label="Workflow ComfyUI" htmlFor="workflow_preset" error={errors.workflow_preset}>
+          <Select
+            id="workflow_preset"
+            value={workflow}
+            onChange={(e) => set("workflow_preset", e.target.value)}
+            aria-invalid={Boolean(errors.workflow_preset)}
+            disabled={!presets.data}
+          >
+            {presets.data?.workflows.map((w) => (
+              <option key={w.id} value={w.id}>
+                {w.name}
+              </option>
+            ))}
+            {workflow && !presets.data?.workflows.some((w) => w.id === workflow) && (
+              <option value={workflow}>{workflow} (preset introuvable)</option>
+            )}
+          </Select>
+        </Field>
+      </div>
+      <div className="flex justify-end">
+        <Button type="submit" disabled={saving}>
+          {saving ? "Enregistrement…" : submitLabel}
+        </Button>
+      </div>
+    </form>
+  );
+}

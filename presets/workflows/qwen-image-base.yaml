@@ -1,0 +1,26 @@
+# Workflow texte → image de base (Qwen-Image 2.1, encodeur Qwen3-VL 8B).
+# Le JSON est exporté depuis ComfyUI via « Save (API Format) ».
+# Voir presets/README.md pour le fonctionnement du mapping.
+id: qwen-image-base
+name: Qwen-Image 2.1 — texte → image
+description: >-
+  Génération d'une case à partir du prompt final. Pas encore d'images de référence
+  ni de LoRA (jalon 2).
+workflow_file: qwen-image-base.json
+output_node: "11"
+mapping:
+  positive_prompt: { node: "6", input: text }
+  negative_prompt: { node: "7", input: text }
+  seed: { node: "9", input: seed }
+  steps: { node: "9", input: steps }
+  cfg: { node: "9", input: cfg }
+  width: { node: "8", input: width }
+  height: { node: "8", input: height }
+  filename_prefix: { node: "11", input: filename_prefix }
+defaults:
+  negative_prompt: "texte, lettres, bulles, filigrane, signature, flou, mains déformées"
+  steps: 20
+  cfg: 2.5
+  width: 1328
+  height: 1328
+  filename_prefix: mangaka/case
