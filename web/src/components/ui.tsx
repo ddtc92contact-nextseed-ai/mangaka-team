@@ -115,3 +115,19 @@ export function Loading() {
 export function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" });
 }
+
+export function ProgressBar({ value, label, className = "" }: { value: number; label?: string; className?: string }) {
+  const pct = Math.max(0, Math.min(100, Math.round(value)));
+  return (
+    <div
+      role="progressbar"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={pct}
+      aria-label={label}
+      className={`h-1.5 w-full overflow-hidden rounded-full bg-zinc-800 ${className}`}
+    >
+      <div className="h-full rounded-full bg-rose-400 transition-[width] duration-500" style={{ width: `${pct}%` }} />
+    </div>
+  );
+}
