@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from ..pipeline.comfy_trial import STEP as TRIAL_STEP
 from ..pipeline.generation import (
     ACTIVE,
     QC_STEP,
@@ -359,7 +360,7 @@ def get_queue(session: Session = Depends(get_session), ctx: AppContext = Depends
     jobs = list(
         session.scalars(
             select(Job)
-            .where(Job.step.in_([STEP, QC_STEP, BENCH_STEP]), Job.status.in_(ACTIVE))
+            .where(Job.step.in_([STEP, QC_STEP, BENCH_STEP, TRIAL_STEP]), Job.status.in_(ACTIVE))
             .order_by((Job.status == JobStatus.running).desc(), Job.id)
         )
     )
@@ -393,7 +394,9 @@ def get_queue(session: Session = Depends(get_session), ctx: AppContext = Depends
             label = f"{chapter.project.title} · ch. {chapter.number}"
         else:
             label = f"Job {job.id}"
-        if job.step == BENCH_STEP:
+        if job.step == TRIAL_STEP:
+            label = f"Case d'essai ComfyUI · {params.get('preset_name') or preset}"
+        elif job.step == BENCH_STEP:
             n = int(params.get("sample_count") or 0)
             label = f"Banc d'essai QC · {params.get('scope') or 'toutes les séries'} ({n} case{'s' if n > 1 else ''})"
         elif is_qc:
@@ -446,6 +449,8 @@ def list_workflow_presets(ctx: AppContext = Depends(get_ctx)) -> list[WorkflowPr
             timeout_s=w.preset.timeout_s,
             is_default=bool(defaults and defaults.workflow == w.preset.id),
             is_reference_default=bool(defaults and defaults.workflow_with_references == w.preset.id),
+            with_references=w.preset.with_references,
+            has_trial=bool(w.preset.trial),
         )
         for w in ctx.presets.workflows.values()
     ]

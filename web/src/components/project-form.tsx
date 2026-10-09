@@ -1,15 +1,26 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
-import { api, EngineError, errorMessage, type Project, type ProjectInput } from "@/lib/api";
+import { useRef, useState, type FormEvent } from "react";
+import { api, EngineError, errorMessage, type Presets, type Project, type ProjectInput } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
+import { Modal } from "./modal";
+import { DIRECTIONS, DirectionPicker } from "./reading-direction";
 import { SERIES_STATUS } from "./status";
 import { Alert, Button, Field, Input, Select, Textarea } from "./ui";
 
-export const DIRECTIONS = {
-  rtl: "Droite → gauche (manga)",
-  ltr: "Gauche → droite (BD, comics)",
-} as const;
+const DIRECTION_REQUIRED = "Choisis le sens de lecture : manga (droite → gauche) ou BD (gauche → droite).";
+
+/** Rappelle quel workflow du même palier sert aux cases avec images de référence. */
+function WorkflowHint({ presets, workflow }: { presets?: Presets["workflows"]; workflow: string }) {
+  const current = presets?.find((w) => w.id === workflow);
+  if (!current?.with_references) return null;
+  const refs = presets?.find((w) => w.id === current.with_references);
+  return (
+    <p className="mt-1 text-xs text-zinc-500">
+      Cases avec images de référence : {refs?.name ?? `${current.with_references} (preset introuvable)`}
+    </p>
+  );
+}
 
 export function ProjectForm({
   initial,
@@ -25,7 +36,8 @@ export function ProjectForm({
     title: initial?.title ?? "",
     style: initial?.style ?? "",
     status: initial?.status ?? "ongoing",
-    reading_direction: initial?.reading_direction ?? "rtl",
+    // À la création rien n'est présélectionné : le sens de lecture est un choix explicite.
+    reading_direction: initial?.reading_direction,
     page_format: initial?.page_format,
     workflow_preset: initial?.workflow_preset,
     style_lora_name: initial?.style_lora_name ?? "",
@@ -35,6 +47,8 @@ export function ProjectForm({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
 
   const defaults = presets.data?.defaults;
   const pageFormat = form.page_format ?? defaults?.page_format ?? "";
@@ -49,8 +63,21 @@ export function ProjectForm({
     setErrors((e) => ({ ...e, [key]: "" }));
   };
 
-  async function submit(e: FormEvent) {
+  function submit(e: FormEvent) {
     e.preventDefault();
+    if (!form.reading_direction) {
+      setErrors({ reading_direction: DIRECTION_REQUIRED });
+      setFormError(null);
+      formRef.current?.querySelector<HTMLInputElement>('input[name="reading_direction"]')?.focus();
+      return;
+    }
+    const relayout = initial && form.reading_direction !== initial.reading_direction && initial.laid_out_page_count > 0;
+    if (relayout) setConfirming(true);
+    else void save();
+  }
+
+  async function save() {
+    setConfirming(false);
     setSaving(true);
     setFormError(null);
     setErrors({});
@@ -73,8 +100,36 @@ export function ProjectForm({
   }
 
   return (
-    <form onSubmit={submit} className="space-y-5" noValidate>
+    <form ref={formRef} onSubmit={submit} className="space-y-5" noValidate>
       {formError && <Alert>{formError}</Alert>}
+      <DirectionPicker
+        value={form.reading_direction}
+        onChange={(v) => set("reading_direction", v)}
+        error={errors.reading_direction}
+      />
+      <Field
+        label="Style de mise en page"
+        htmlFor="layout_style"
+        error={errors.layout_style}
+        hint={styleInfo?.description || "Découpes, biais et gouttières de toutes les pages de la série."}
+      >
+        <Select
+          id="layout_style"
+          value={layoutStyle}
+          onChange={(e) => set("layout_style", e.target.value)}
+          aria-invalid={Boolean(errors.layout_style)}
+          disabled={!presets.data}
+        >
+          {styles.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
+            </option>
+          ))}
+          {layoutStyle && presets.data && !styles.some((s) => s.id === layoutStyle) && (
+            <option value={layoutStyle}>{layoutStyle} (preset introuvable)</option>
+          )}
+        </Select>
+      </Field>
       <Field label="Titre" htmlFor="title" error={errors.title}>
         <Input
           id="title"
@@ -142,42 +197,6 @@ export function ProjectForm({
         </Field>
       </div>
       <div className="grid gap-5 md:grid-cols-2">
-        <Field label="Sens de lecture" htmlFor="reading_direction" error={errors.reading_direction}>
-          <Select
-            id="reading_direction"
-            value={form.reading_direction}
-            onChange={(e) => set("reading_direction", e.target.value as ProjectInput["reading_direction"])}
-          >
-            {Object.entries(DIRECTIONS).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <Field
-          label="Style de mise en page"
-          htmlFor="layout_style"
-          error={errors.layout_style}
-          hint={styleInfo?.description || "Découpes, biais et gouttières de toutes les pages de la série."}
-        >
-          <Select
-            id="layout_style"
-            value={layoutStyle}
-            onChange={(e) => set("layout_style", e.target.value)}
-            aria-invalid={Boolean(errors.layout_style)}
-            disabled={!presets.data}
-          >
-            {styles.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-            {layoutStyle && presets.data && !styles.some((s) => s.id === layoutStyle) && (
-              <option value={layoutStyle}>{layoutStyle} (preset introuvable)</option>
-            )}
-          </Select>
-        </Field>
         <Field label="Format de page" htmlFor="page_format" error={errors.page_format}>
           <Select
             id="page_format"
@@ -213,6 +232,7 @@ export function ProjectForm({
               <option value={workflow}>{workflow} (preset introuvable)</option>
             )}
           </Select>
+          <WorkflowHint presets={presets.data?.workflows} workflow={workflow} />
         </Field>
       </div>
       <div className="flex justify-end">
@@ -220,6 +240,39 @@ export function ProjectForm({
           {saving ? "Enregistrement…" : submitLabel}
         </Button>
       </div>
+      {initial && form.reading_direction && (
+        <Modal
+          open={confirming}
+          onClose={() => setConfirming(false)}
+          title="Changer le sens de lecture ?"
+          footer={
+            <>
+              <Button type="button" variant="secondary" onClick={() => setConfirming(false)}>
+                Annuler
+              </Button>
+              <Button type="button" onClick={() => void save()}>
+                Changer et recalculer
+              </Button>
+            </>
+          }
+        >
+          <div className="space-y-3 text-sm text-zinc-300">
+            <p>
+              La série passe en <strong className="text-zinc-100">{DIRECTIONS[form.reading_direction]}</strong>.
+            </p>
+            <p>
+              {initial.laid_out_page_count === 1
+                ? "La page déjà mise en page va être mise en miroir et recalculée"
+                : `Les ${initial.laid_out_page_count} pages déjà mises en page vont être mises en miroir et recalculées`}{" "}
+              : ordre de lecture des cases, gouttières et bulles placées à la main passent de l&apos;autre côté.
+            </p>
+            <p>
+              Les images de cases déjà générées sont conservées telles quelles (elles ne sont pas retournées) : regénère
+              celles dont la composition ne colle plus au nouveau sens.
+            </p>
+          </div>
+        </Modal>
+      )}
     </form>
   );
 }

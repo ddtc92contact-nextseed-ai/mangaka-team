@@ -122,6 +122,13 @@ class WorkflowPreset(_Strict):
     )
     lora_chain: LoraChain | None = None
     timeout_s: float = Field(default=600, gt=0, le=24 * 3600, description="Durée max d'une génération")
+    # Workflow du même palier (mêmes modèles) pour une case qui a des images de référence : une
+    # série « Rapide » ne retombe jamais sur le workflow de référence « Qualité » de defaults.yaml.
+    with_references: str | None = Field(
+        default=None, description="Id du workflow utilisé quand la case a des images de référence"
+    )
+    # Case d'essai (« Générer une case d'essai ») : paramètres mappés, prompt positif compris.
+    trial: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _check_mapping(self) -> WorkflowPreset:
@@ -131,6 +138,13 @@ class WorkflowPreset(_Strict):
         unknown = [k for k in self.defaults if k not in self.mapping]
         if unknown:
             raise ValueError(f"valeurs par défaut sans mapping : {', '.join(unknown)}")
+        unknown = [k for k in self.trial if k not in self.mapping]
+        if unknown:
+            raise ValueError(f"trial : paramètres sans mapping : {', '.join(unknown)}")
+        if self.trial and not str(self.trial.get("positive_prompt") or "").strip():
+            raise ValueError("trial : positive_prompt est obligatoire")
+        if self.with_references == self.id:
+            raise ValueError("with_references ne peut pas désigner le workflow lui-même")
         nodes = [s.node for s in self.reference_images]
         if len(set(nodes)) != len(nodes):
             raise ValueError("reference_images : un même nœud est déclaré deux fois")

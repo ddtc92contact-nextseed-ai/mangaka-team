@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { ComfyConnection } from "@/components/comfy-check";
 import { ComfyBadge, useEngineStatus } from "@/components/engine-status";
 import { QueueList } from "@/components/queue";
 import { Alert, ButtonLink, Card, EmptyState, Loading, PageHeader, formatDate } from "@/components/ui";
-import { DIRECTIONS } from "@/components/project-form";
+import { DIRECTIONS } from "@/components/reading-direction";
 import { ChapterStatusBadge, SeriesStatusBadge, formatPlannedDate } from "@/components/status";
 import { api } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
@@ -91,6 +92,10 @@ export default function DashboardPage() {
               <Alert>{p.detail}</Alert>
             </div>
           ))}
+
+      <section className="mb-10" aria-label="Connexion ComfyUI">
+        <ComfyConnection />
+      </section>
 
       <section id="file-attente" className="mb-10 scroll-mt-16" aria-labelledby="queue-title">
         <h2 id="queue-title" className="mb-4 text-lg font-semibold text-zinc-100">

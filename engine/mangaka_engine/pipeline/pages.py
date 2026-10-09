@@ -14,9 +14,18 @@ import secrets
 from collections.abc import Sequence
 from typing import Any
 
-from ..presets import PresetRegistry
-from ..store.models import Page, PageState, Panel
-from .layout import LayoutError, PanelSpec, choose_template, compute_layout, move_gutter, set_cut_slant
+from ..presets import PresetError, PresetRegistry
+from ..presets.schemas import count_panels
+from ..store.models import Page, PageState, Panel, Project, ReadingDirection
+from .layout import (
+    LayoutError,
+    PanelSpec,
+    choose_template,
+    compute_layout,
+    move_gutter,
+    set_cut_slant,
+    tree_from_json,
+)
 from .layout_style import default_seed, styled_layout
 
 
@@ -186,3 +195,73 @@ def regeneration_advised(panel: Panel, layout_panel: dict[str, Any] | None, thre
         return False
     box_ratio = layout_panel["width"] / max(1, layout_panel["height"])
     return abs(math.log(box_ratio / (w / h))) > math.log(1 + threshold)
+
+
+def _mirror_x(x: float, w: float, old: dict[str, Any], new: dict[str, Any]) -> float:
+    """Abscisse d'un cadre de largeur `w` dans la case `old`, mise en miroir dans la case `new`."""
+    fx = (new["x2"] - new["x1"]) / max(old["x2"] - old["x1"], 1)
+    return new["x1"] + (old["x2"] - (x + w)) * fx
+
+
+def _mirror_lettering(page: Page, old_boxes: dict[int, dict[str, Any] | None]) -> None:
+    """Bulles et queues placées à la main : même place relative dans la case, côté opposé."""
+    for panel in page.panels:
+        old, new = old_boxes.get(panel.id), panel.bbox
+        if not old or not new:
+            continue
+        fy = (new["y2"] - new["y1"]) / max(old["y2"] - old["y1"], 1)
+        for b in panel.bubbles:
+            pos = b.position
+            if pos and pos.get("manual") and {"x", "y", "w"} <= pos.keys():
+                x = _mirror_x(float(pos["x"]), float(pos["w"]), old, new)
+                b.position = {**pos, "x": round(x), "y": round(new["y1"] + (float(pos["y"]) - old["y1"]) * fy)}
+            tail = b.tail
+            if tail and tail.get("manual") and {"x", "y"} <= tail.keys():
+                x = _mirror_x(float(tail["x"]), 0, old, new)
+                b.tail = {**tail, "x": round(x), "y": round(new["y1"] + (float(tail["y"]) - old["y1"]) * fy)}
+
+
+def change_reading_direction(presets: PresetRegistry, project: Project, direction: ReadingDirection) -> int:
+    """Change le sens de lecture d'une série et remet ses pages déjà mises en page dans le bon sens.
+
+    Une page à jour est mise en miroir : même gabarit, mêmes gouttières (y compris déplacées à la main),
+    ordre de lecture inversé, bulles placées à la main reportées du côté opposé de leur case. Une page
+    déjà obsolète est recalculée depuis son gabarit. Les images générées ne sont pas touchées.
+    Renvoie le nombre de pages recalculées ; une page impossible à recalculer reste « obsolète ».
+    """
+    if project.reading_direction == direction:
+        return 0
+    pages = [p for ch in project.chapters for p in ch.pages if p.layout is not None and p.panels]
+    fresh = {p.id for p in pages if not is_stale(p)}
+    old_boxes = {p.id: {panel.id: panel.bbox for panel in p.panels} for p in pages}
+    project.reading_direction = direction
+    done = 0
+    for page in pages:
+        try:
+            layout = page.layout or {}
+            if page.id in fresh and layout.get("tree") is not None:
+                tree = tree_from_json(layout["tree"])
+                specs = panel_specs(page)
+                if count_panels(tree) != len(specs):
+                    raise LayoutError("gabarit incohérent")
+                fmt = presets.page_format(project.page_format)
+                _store(
+                    page,
+                    compute_layout(
+                        fmt,
+                        presets.layout,
+                        tree,
+                        specs,
+                        direction=direction.value,
+                        page_number=page.number,
+                        template_id=layout["template_id"],
+                        style=layout.get("style"),  # mêmes gouttières, mêmes biais (en miroir)
+                    ),
+                )
+                _mirror_lettering(page, old_boxes[page.id])
+            else:
+                layout_page(presets, page)
+            done += 1
+        except (LayoutError, PresetError, KeyError, ValueError):
+            continue
+    return done

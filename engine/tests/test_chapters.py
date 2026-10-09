@@ -302,18 +302,92 @@ def test_layout_endpoints(app_client: TestClient) -> None:
     r = app_client.post(f"/pages/{page['id']}/gutters", json={"path": [7], "index": 0, "position": 1})
     assert r.status_code == 422
 
-    # changement du sens de lecture de la série → mise en page obsolète, « Recalculer » la refait
-    app_client.patch(f"/projects/{sid}", json={"reading_direction": "rtl"})
+    # changement du format de la série → mise en page obsolète, « Recalculer » la refait
+    app_client.patch(f"/projects/{sid}", json={"page_format": "b4-300dpi"})
     pages = app_client.get(f"/chapters/{ch['id']}/pages").json()
     assert all(p["layout_stale"] for p in pages)
     r = app_client.post(f"/pages/{page['id']}/gutters", json={"path": g["path"], "index": g["index"], "position": 1})
     assert r.status_code == 422 and "Recalculer" in r.json()["errors"][0]["message"]
+    app_client.patch(f"/projects/{sid}", json={"reading_direction": "rtl"})
     pages = app_client.post(f"/chapters/{ch['id']}/layout").json()
     assert not any(p["layout_stale"] for p in pages)
     assert pages[0]["layout"]["direction"] == "rtl"
     # null = retour au choix automatique
     r = app_client.post(f"/pages/{page['id']}/layout", json={"template_id": None})
     assert r.json()["grid_template"] is None
+
+
+def _first_row(layout: dict) -> list[dict]:
+    """Cases de la première bande (même y1 que la case 1), dans l'ordre de lecture."""
+    panels = sorted(layout["panels"], key=lambda p: p["reading_order"])
+    top = min(p["y1"] for p in panels)
+    return [p for p in panels if p["y1"] == top]
+
+
+def test_ltr_series_lays_out_left_to_right_end_to_end(app_client: TestClient) -> None:
+    """Mock : une série BD donne un script prévenu du sens et des pages lues de gauche à droite."""
+    sid = _series(app_client, reading_direction="ltr")["id"]
+    ch = _chapter(app_client, sid, synopsis="Un duel sous la pluie.", target_page_count=3)
+    llm: MockLLMProvider = app_client.app.state.ctx.providers.llm  # type: ignore[attr-defined]
+    llm.calls.clear()
+    assert _script(app_client, ch["id"])["status"] == "succeeded"
+    assert "de gauche à droite" in llm.calls[0][1].content
+    pages = app_client.get(f"/chapters/{ch['id']}/pages").json()
+    rows = [_first_row(p["layout"]) for p in pages]
+    assert all(p["layout"]["direction"] == "ltr" for p in pages)
+    assert any(len(r) > 1 for r in rows)
+    for row in rows:
+        assert [p["x1"] for p in row] == sorted(p["x1"] for p in row)
+
+
+def test_switching_rtl_to_ltr_mirrors_existing_layouts(app_client: TestClient) -> None:
+    sid = _series(app_client, reading_direction="rtl")["id"]
+    ch = _chapter(app_client, sid, synopsis="Un duel.", target_page_count=2)
+    _script(app_client, ch["id"])
+    page = app_client.get(f"/chapters/{ch['id']}/pages").json()[0]
+    # une gouttière déplacée et une bulle placée à la main doivent survivre au changement de sens
+    g = next(g for g in page["layout"]["gutters"] if g["orientation"] == "vertical")
+    page = app_client.post(
+        f"/pages/{page['id']}/gutters", json={"path": g["path"], "index": g["index"], "position": g["position"] - 90}
+    ).json()
+    panel = page["panels"][0]
+    bubble = panel["dialogues"][0]
+    box = panel["bbox"]
+    pos = {"x": box["x2"] - 260, "y": box["y1"] + 40, "w": 200, "h": 120}  # coin haut droit (début en manga)
+    assert app_client.patch(f"/bubbles/{bubble['id']}", json={"position": pos}).status_code == 200
+    before = app_client.get(f"/chapters/{ch['id']}/pages").json()
+    assert all(p["layout"]["direction"] == "rtl" for p in before)
+    for row in (_first_row(p["layout"]) for p in before):
+        assert [p["x1"] for p in row] == sorted((p["x1"] for p in row), reverse=True)
+    assert app_client.get(f"/projects/{sid}").json()["laid_out_page_count"] == len(before)
+
+    r = app_client.patch(f"/projects/{sid}", json={"reading_direction": "ltr"})
+    assert r.status_code == 200 and r.json()["reading_direction"] == "ltr"
+    after = app_client.get(f"/chapters/{ch['id']}/pages").json()
+    for b, a in zip(before, after, strict=True):
+        assert a["layout"]["direction"] == "ltr" and not a["layout_stale"]
+        assert a["layout"]["template_id"] == b["layout"]["template_id"]
+        assert a["layout"]["tree"] == b["layout"]["tree"]  # gouttière déplacée conservée
+        width = a["layout"]["page"]["width"]
+        for pb, pa in zip(b["layout"]["panels"], a["layout"]["panels"], strict=True):
+            # même case, même ordre de lecture, position en miroir sur la page
+            assert pa["reading_order"] == pb["reading_order"] and pa["panel_id"] == pb["panel_id"]
+            assert (pa["x1"], pa["x2"]) == (width - pb["x2"], width - pb["x1"])
+            assert (pa["y1"], pa["y2"]) == (pb["y1"], pb["y2"])
+        row = _first_row(a["layout"])
+        assert [p["x1"] for p in row] == sorted(p["x1"] for p in row)
+        for pb, pa in zip(b["panels"], a["panels"], strict=True):
+            assert pa["bbox"]["x1"] == width - pb["bbox"]["x2"]
+    # la bulle placée à la main passe dans le coin haut gauche de sa case
+    new_box = after[0]["panels"][0]["bbox"]
+    lettering = app_client.get(f"/pages/{after[0]['id']}/lettering").json()
+    moved = next(x for x in lettering["bubbles"] if x["id"] == bubble["id"])
+    assert moved["manual"] and moved["box"]["x"] == new_box["x1"] + 60 and moved["box"]["y"] == pos["y"]
+
+    # aller-retour : on retombe exactement sur la mise en page d'origine
+    app_client.patch(f"/projects/{sid}", json={"reading_direction": "rtl"})
+    back = app_client.get(f"/chapters/{ch['id']}/pages").json()
+    assert [p["layout"]["panels"] for p in back] == [p["layout"]["panels"] for p in before]
 
 
 def test_series_page_format_drives_layout(app_client: TestClient) -> None:

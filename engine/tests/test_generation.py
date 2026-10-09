@@ -28,7 +28,7 @@ from mangaka_engine.providers.comfyui import (
 from mangaka_engine.providers.factory import Providers
 from mangaka_engine.providers.llm import MockLLMProvider
 from mangaka_engine.store.models import Job, JobStatus, Panel, PanelState
-from tests.conftest import PRESETS_DIR, png_bytes
+from tests.conftest import COMFY_FIXTURES, PRESETS_DIR, png_bytes
 
 
 # --- outillage ------------------------------------------------------------------------
@@ -169,6 +169,32 @@ def _target(page: dict[str, Any], panel_id: int) -> tuple[int, int]:
 
 
 # --- génération d'une case ------------------------------------------------------------
+def test_rapide_series_keeps_its_tier_for_reference_panels(make_client: Callable[..., TestClient]) -> None:
+    comfy = MockComfyUIClient()
+    c = make_client(comfy)
+    data = setup_chapter(c)
+    _ok(c.patch(f"/projects/{data['series']['id']}", json={"workflow_preset": "qwen-image-base-rapide"}))
+    p1, p2, _ = data["panels"]
+    [job1] = _ok(c.post(f"/panels/{p1['id']}/generate"), 202)  # Aiko a une planche de référence
+    [job2] = _ok(c.post(f"/panels/{p2['id']}/generate"), 202)
+    assert job1["params"]["preset"] == "qwen-image-edit-ref-rapide"
+    assert job2["params"]["preset"] == "qwen-image-base-rapide"
+    _wait(c)
+    reg = c.app.state.ctx.presets  # type: ignore[attr-defined]
+    expected = {
+        reg.workflow(pid).workflow["1"]["inputs"]["unet_name"]
+        for pid in ("qwen-image-edit-ref-rapide", "qwen-image-base-rapide")
+    }
+    qualite = reg.workflow("qwen-image-edit-ref").workflow["1"]["inputs"]["unet_name"]
+    sent = {
+        n["inputs"]["unet_name"]
+        for wf in comfy.prompts.values()
+        for n in wf.values()
+        if n["class_type"] == "UNETLoader"
+    }
+    assert sent == expected and qualite not in sent  # jamais le modèle bf16 pour une série Rapide
+
+
 def test_generate_panel_mock_end_to_end(make_client: Callable[..., TestClient]) -> None:
     comfy = MockComfyUIClient()
     c = make_client(comfy)
@@ -490,28 +516,15 @@ def test_comfyui_offline_during_reference_upload(make_client: Callable[..., Test
 
 
 def test_workflow_refused_gives_node_errors(make_client: Callable[..., TestClient]) -> None:
+    # Réponse 400 enregistrée sur un vrai ComfyUI (UNETLoader avec un fichier absent).
+    recorded = json.loads((COMFY_FIXTURES / "prompt_400_missing_model.json").read_text())
+
     def handler(req: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            400,
-            json={
-                "error": {"type": "prompt_outputs_failed_validation", "message": "Prompt outputs failed validation"},
-                "node_errors": {
-                    "1": {
-                        "class_type": "UNETLoader",
-                        "errors": [
-                            {
-                                "message": "Value not in list",
-                                "details": "unet_name: 'qwen_image_2.1_fp8_e4m3fn.safetensors' not in []",
-                            }
-                        ],
-                    }
-                },
-            },
-        )
+        return httpx.Response(400, json=recorded)
 
     job = _generate_and_fail(make_client(_http(handler)))
-    assert job["error"].startswith("Workflow refusé par ComfyUI : Prompt outputs failed validation")
-    assert "nœud 1 (UNETLoader) : Value not in list : unet_name" in job["error"]
+    assert job["error"].startswith("Workflow refusé par ComfyUI : le workflow ne passe pas la validation de ComfyUI")
+    assert "nœud 1 (UNETLoader) : modèle introuvable dans ComfyUI : absent.safetensors" in job["error"]
 
 
 def test_generation_timeout_from_preset(make_client: Callable[..., TestClient], tmp_path: Path) -> None:
@@ -598,4 +611,7 @@ def test_workflow_presets_endpoint(make_client: Callable[..., TestClient]) -> No
     assert presets["qwen-image-base"]["is_default"] and presets["qwen-image-base"]["reference_slots"] == 0
     edit = presets["qwen-image-edit-ref"]
     assert edit["is_reference_default"] and edit["reference_slots"] == 3 and edit["supports_lora"]
-    assert edit["lora_loader"] == "LoraLoaderModelOnly" and edit["timeout_s"] == 900
+    assert edit["lora_loader"] == "LoraLoaderModelOnly" and edit["timeout_s"] == 1500
+    assert presets["qwen-image-base"]["with_references"] == "qwen-image-edit-ref"
+    assert presets["qwen-image-base-rapide"]["with_references"] == "qwen-image-edit-ref-rapide"
+    assert all(p["has_trial"] for p in presets.values())

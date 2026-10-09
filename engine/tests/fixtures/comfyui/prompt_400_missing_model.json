@@ -1,0 +1,46 @@
+{
+ "error": {
+  "type": "prompt_outputs_failed_validation",
+  "message": "Prompt outputs failed validation",
+  "details": "",
+  "extra_info": {}
+ },
+ "node_errors": {
+  "1": {
+   "errors": [
+    {
+     "type": "value_not_in_list",
+     "message": "Value not in list",
+     "details": "unet_name: 'absent.safetensors' not in ['flux1-dev.safetensors', 'flux2_dev_fp8mixed.safetensors', 'krea2_raw_bf16.safetensors', 'ltx-2.3-22b-distilled-1.1_transformer_only_fp8_scaled.safetensors', 'ltx-2.5-22b-distilled-transformer-bf16.safetensors', 'ming_image_0.1_design_int8_convrot.safetensors', 'ming_image_0.1_design_layer_int8_convrot.safetensors', 'minimax_h3_fl2va_pruned_int8_convrot.safetensors', 'pixal3d_int8_convrot.safetensors', 'qwen_image_2.1_bf16.safetensors', 'qwen_image_2.1_int8_convrot.safetensors', 'seedvr2_7b_int8_convrot.safetensors', 'seedvr2_7b_sharp_int8_convrot.safetensors', 'trellis_2_int8_convrot.safetensors']",
+     "extra_info": {
+      "input_name": "unet_name",
+      "input_config": [
+       [
+        "flux1-dev.safetensors",
+        "flux2_dev_fp8mixed.safetensors",
+        "krea2_raw_bf16.safetensors",
+        "ltx-2.3-22b-distilled-1.1_transformer_only_fp8_scaled.safetensors",
+        "ltx-2.5-22b-distilled-transformer-bf16.safetensors",
+        "ming_image_0.1_design_int8_convrot.safetensors",
+        "ming_image_0.1_design_layer_int8_convrot.safetensors",
+        "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+        "pixal3d_int8_convrot.safetensors",
+        "qwen_image_2.1_bf16.safetensors",
+        "qwen_image_2.1_int8_convrot.safetensors",
+        "seedvr2_7b_int8_convrot.safetensors",
+        "seedvr2_7b_sharp_int8_convrot.safetensors",
+        "trellis_2_int8_convrot.safetensors"
+       ],
+       {}
+      ],
+      "received_value": "absent.safetensors"
+     }
+    }
+   ],
+   "dependent_outputs": [
+    "11"
+   ],
+   "class_type": "UNETLoader"
+  }
+ }
+}

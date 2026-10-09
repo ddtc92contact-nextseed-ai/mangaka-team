@@ -375,7 +375,7 @@ def test_http_comfyui_workflow_rejected() -> None:
             },
         )
 
-    with pytest.raises(ComfyUIWorkflowError, match="failed validation") as info:
+    with pytest.raises(ComfyUIWorkflowError, match="ne passe pas la validation de ComfyUI") as info:
         http_client(handler).queue_prompt({})
     assert "1" in info.value.node_errors
 

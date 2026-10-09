@@ -94,6 +94,9 @@ def list_presets(ctx: AppContext = Depends(get_ctx)) -> dict[str, Any]:
                 "name": w.preset.name,
                 "description": w.preset.description,
                 "params": sorted(w.preset.mapping),
+                "reference_slots": len(w.preset.reference_images),
+                "with_references": w.preset.with_references,
+                "has_trial": bool(w.preset.trial),
             }
             for w in reg.workflows.values()
         ],

@@ -6,7 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..store.models import Chapter, Character, Project, ReadingDirection, SeriesStatus
+from ..pipeline.pages import change_reading_direction
+from ..store.models import Chapter, Character, Page, Project, ReadingDirection, SeriesStatus
 from .deps import AppContext, get_ctx, get_session
 from .errors import FieldError
 from .schemas import ProjectCreate, ProjectOut, ProjectUpdate
@@ -14,7 +15,7 @@ from .schemas import ProjectCreate, ProjectOut, ProjectUpdate
 router = APIRouter(prefix="/projects", tags=["projets"])
 
 
-def project_out(project: Project, character_count: int, chapter_count: int) -> ProjectOut:
+def project_out(project: Project, character_count: int, chapter_count: int, laid_out: int = 0) -> ProjectOut:
     return ProjectOut(
         id=project.id,
         title=project.title,
@@ -28,6 +29,7 @@ def project_out(project: Project, character_count: int, chapter_count: int) -> P
         layout_style=project.layout_style,
         character_count=character_count,
         chapter_count=chapter_count,
+        laid_out_page_count=laid_out,
         created_at=project.created_at,
         updated_at=project.updated_at,
     )
@@ -40,10 +42,19 @@ def get_project_or_404(session: Session, project_id: int) -> Project:
     return project
 
 
-def _counts(session: Session, project_id: int) -> tuple[int, int]:
+def _counts(session: Session, project_id: int) -> tuple[int, int, int]:
     chars = session.scalar(select(func.count()).where(Character.project_id == project_id)) or 0
     chapters = session.scalar(select(func.count()).where(Chapter.project_id == project_id)) or 0
-    return chars, chapters
+    laid_out = (
+        session.scalar(
+            select(func.count())
+            .select_from(Page)
+            .join(Chapter, Page.chapter_id == Chapter.id)
+            .where(Chapter.project_id == project_id, func.json_type(Page.layout) == "object")  # JSON null ≠ NULL
+        )
+        or 0
+    )
+    return chars, chapters, laid_out
 
 
 def _check_presets(
@@ -124,14 +135,16 @@ def update_project(
         if key in changes and changes[key] is None:
             raise FieldError(key, "ne peut pas être vide")
     _check_presets(ctx, changes.get("page_format"), changes.get("workflow_preset"), changes.get("layout_style"))
-    if "reading_direction" in changes:
-        changes["reading_direction"] = ReadingDirection(changes["reading_direction"])
+    direction = changes.pop("reading_direction", None)
     if "status" in changes:
         changes["status"] = SeriesStatus(changes["status"])
     if "style_lora_name" in changes:
         changes["style_lora_name"] = changes["style_lora_name"] or None
     for key, value in changes.items():
         setattr(project, key, value)
+    if direction is not None:
+        # Après les autres champs : un changement de format en même temps fait tout recalculer.
+        change_reading_direction(ctx.presets, project, ReadingDirection(direction))
     session.commit()
     return project_out(project, *_counts(session, project_id))
 

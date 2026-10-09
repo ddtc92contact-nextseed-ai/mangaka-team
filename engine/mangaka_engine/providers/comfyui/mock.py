@@ -121,6 +121,12 @@ class MockComfyUIClient:
             return ComfyStatus(online=False, provider=self.name, detail="ComfyUI factice hors ligne")
         return ComfyStatus(online=True, provider=self.name, detail="ComfyUI factice (mode mock)")
 
+    def system_stats(self) -> dict[str, Any]:
+        raise ComfyUIError("ComfyUI simulé : aucun serveur à interroger")
+
+    def object_info(self) -> dict[str, Any]:
+        raise ComfyUIError("ComfyUI simulé : aucun serveur à interroger")
+
     def upload_image(self, data: bytes, filename: str, *, subfolder: str = "mangaka") -> str:
         self._check_online()
         name = f"{subfolder}/{filename}" if subfolder else filename
