@@ -36,7 +36,10 @@ class Settings(BaseSettings):
     mock_llm_invalid_attempts: int = 0
 
     comfyui_url: str = "http://127.0.0.1:8188"
-    comfyui_timeout_s: float = 5.0
+    comfyui_timeout_s: float = 5.0  # par requête HTTP ; la durée max d'une génération est dans le preset
+    comfyui_poll_s: float = 1.0  # sondage de /history (et lecture du websocket) pendant une génération
+    # Mode mock : durée simulée d'une génération (progression factice étape par étape).
+    mock_comfyui_seconds: float = 4.0
 
     mangaka_data_dir: Path = REPO_ROOT / "data"
     mangaka_presets_dir: Path = REPO_ROOT / "presets"

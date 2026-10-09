@@ -4,10 +4,11 @@
 id: qwen-image-base
 name: Qwen-Image 2.1 — texte → image
 description: >-
-  Génération d'une case à partir du prompt final. Pas encore d'images de référence
-  ni de LoRA (jalon 2).
+  Génération d'une case à partir du prompt final, sans image de référence
+  (LoRA de style et d'identité possibles).
 workflow_file: qwen-image-base.json
 output_node: "11"
+timeout_s: 600   # au-delà, la génération est interrompue et le job passe en échec
 mapping:
   positive_prompt: { node: "6", input: text }
   negative_prompt: { node: "7", input: text }
@@ -17,6 +18,14 @@ mapping:
   width: { node: "8", input: width }
   height: { node: "8", input: height }
   filename_prefix: { node: "11", input: filename_prefix }
+# LoRA (style de la série puis identité de chaque personnage) chaînés après le modèle :
+# chaque LoRA devient un nœud `class_type` inséré entre le nœud 1 et ses consommateurs.
+lora_chain:
+  class_type: LoraLoaderModelOnly
+  model_from: { node: "1", output: 0 }
+  model_input: model
+  name_input: lora_name
+  strength_input: strength_model
 defaults:
   negative_prompt: "texte, lettres, bulles, filigrane, signature, flou, mains déformées"
   steps: 20

@@ -1,0 +1,25 @@
+# Construction du prompt final d'une case (étape 3, pipeline/prompt.py).
+# Le prompt est stocké sur la case ; une édition manuelle est conservée tant qu'on ne
+# demande pas de le reconstruire.
+
+# Morceaux assemblés dans l'ordre, séparés par une espace. Un morceau dont une variable
+# est vide est omis. Variables : $shot (type de plan), $description (description de la
+# case), $characters (personnages, voir `character`), $style (style de la série).
+parts:
+  - "$shot."
+  - "$description."
+  - "Personnages : $characters."
+  - "Style : $style."
+  - "Case de manga, dessin encré, sans aucun texte ni bulle."
+
+# Un personnage : $name, $details (description visuelle + mots-clés de prompt).
+character: "$name ($details)"
+character_separator: " ; "
+
+# Le modèle d'image ne dessine jamais de texte (bulles et lettrage sont vectoriels) :
+# ces termes sont toujours ajoutés au prompt négatif s'ils n'y sont pas déjà.
+forbidden_text_terms: [texte, lettres, bulles, phylactères, onomatopées, filigrane, signature]
+
+# Retire de la description les répliques entre guillemets (« … », "…") pour ne pas
+# inciter le modèle à les écrire.
+strip_quotes: true

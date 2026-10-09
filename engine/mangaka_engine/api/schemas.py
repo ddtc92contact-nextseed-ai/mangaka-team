@@ -154,6 +154,13 @@ class PanelOut(BaseModel):
     dialogues: list[BubbleOut]
     bbox: dict[str, int] | None
     bubble_zone: dict[str, int] | None
+    state: str = "draft"
+    final_prompt: str | None = None
+    final_prompt_manual: bool = False
+    generation_preset: str | None = None
+    image_count: int = 0
+    selected_image_id: int | None = None
+    selected_image_url: str | None = None
 
 
 class PageOut(BaseModel):
@@ -189,10 +196,123 @@ class JobOut(BaseModel):
     error: str | None
     project_id: int | None
     chapter_id: int | None
+    panel_id: int | None = None
+    params: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     started_at: datetime | None
     finished_at: datetime | None
     duration_ms: int | None
+
+
+# --- Génération (étape 3) ------------------------------------------------------
+MAX_SEED = 2**63 - 1
+VariantCount = Annotated[int, Field(ge=1, le=4)]
+FinalPrompt = Annotated[str, StringConstraints(strip_whitespace=True, max_length=4000)]
+
+
+class GenerateIn(_In):
+    count: VariantCount = 1
+    seed: Annotated[int, Field(ge=0, le=MAX_SEED)] | None = None
+    preset: PresetId | None = None
+    prompt_override: FinalPrompt | None = None
+
+
+class BatchGenerateIn(_In):
+    force: bool = False
+    count: VariantCount = 1
+    preset: PresetId | None = None
+
+
+class BatchGenerateOut(BaseModel):
+    jobs: list[JobOut]
+    panel_ids: list[int]
+    skipped: int
+
+
+class PanelImageOut(BaseModel):
+    id: int
+    panel_id: int
+    version: int
+    url: str
+    seed: int | None
+    selected: bool
+    width: int | None
+    height: int | None
+    preset: str | None
+    params: dict[str, Any]
+    qc_score: int | None
+    qc_reasons: list[str]
+    created_at: datetime
+
+
+class PanelUpdate(_In):
+    # final_prompt : texte = édition manuelle conservée ; null ou "" = revenir au prompt automatique.
+    final_prompt: FinalPrompt | None = None
+    # generation_preset : null = choix automatique.
+    generation_preset: PresetId | None = None
+
+
+class PanelDetailOut(BaseModel):
+    id: int
+    page_id: int
+    page_number: int
+    chapter_id: int
+    project_id: int
+    index: int
+    label: str
+    description: str
+    characters: list[str]
+    character_ids: list[int]
+    shot_type: str | None
+    state: str
+    bbox: dict[str, int] | None
+    final_prompt: str | None
+    final_prompt_manual: bool
+    generation_preset: str | None
+    resolved_preset: str | None
+    target: dict[str, int] | None
+    images: list[PanelImageOut]
+    active_jobs: list[JobOut]
+
+
+class QueueItemOut(BaseModel):
+    job: JobOut
+    position: int  # 0 = en cours, 1 = prochain…
+    label: str
+    panel_id: int | None
+    panel_index: int | None
+    page_id: int | None
+    page_number: int | None
+    chapter_id: int | None
+    chapter_number: int | None
+    chapter_title: str | None
+    project_id: int | None
+    series_title: str | None
+    preset: str | None
+    variant: int | None
+    count: int | None
+    estimated_duration_s: float | None  # médiane des générations réussies du même preset
+    eta_s: float | None  # temps restant avant la fin de ce job
+
+
+class QueueOut(BaseModel):
+    running: QueueItemOut | None
+    pending: list[QueueItemOut]
+    total_eta_s: float | None
+    comfyui: str | None  # http | mock
+
+
+class WorkflowPresetOut(BaseModel):
+    id: str
+    name: str
+    description: str
+    params: list[str]
+    reference_slots: int
+    supports_lora: bool
+    lora_loader: str | None
+    timeout_s: float
+    is_default: bool
+    is_reference_default: bool
 
 
 # --- Personnages -----------------------------------------------------------

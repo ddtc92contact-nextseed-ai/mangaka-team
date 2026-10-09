@@ -80,7 +80,7 @@ def build_comfyui(settings: Settings) -> ComfyUIClient:
     _check("client ComfyUI", name, COMFYUI_CHOICES, COMFYUI_CHOICES)
     if name == "http":
         return HttpComfyUIClient(settings.comfyui_url, timeout_s=settings.comfyui_timeout_s)
-    return MockComfyUIClient()
+    return MockComfyUIClient(seconds_per_image=settings.mock_comfyui_seconds)
 
 
 @dataclass

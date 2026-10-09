@@ -11,7 +11,9 @@ from PIL import Image
 from mangaka_engine.config import Settings
 from mangaka_engine.presets import PresetRegistry, build_workflow
 from mangaka_engine.providers.comfyui import (
+    ComfyUIError,
     ComfyUIExecutionError,
+    ComfyUIInterruptedError,
     ComfyUITimeoutError,
     ComfyUIUnavailableError,
     ComfyUIWorkflowError,
@@ -39,7 +41,7 @@ from mangaka_engine.providers.llm import (
     MockLLMProvider,
 )
 from mangaka_engine.providers.vision import MockVisionProvider
-from tests.conftest import PRESETS_DIR
+from tests.conftest import PRESETS_DIR, png_bytes
 
 PRESETS = PresetRegistry.load(PRESETS_DIR)
 MESSAGES = [ChatMessage("system", "Tu es scénariste."), ChatMessage("user", "Écris une page.")]
@@ -289,7 +291,7 @@ def test_http_comfyui_health_offline() -> None:
         raise httpx.ConnectError("refusé", request=req)
 
     status = http_client(handler).health()
-    assert not status.online and "injoignable" in (status.detail or "")
+    assert not status.online and "hors ligne (comfy.test:8188)" in (status.detail or "")
 
 
 def test_http_comfyui_full_cycle() -> None:
@@ -357,3 +359,139 @@ def test_http_comfyui_unreachable_on_prompt() -> None:
 
     with pytest.raises(ComfyUIUnavailableError):
         http_client(handler).queue_prompt({})
+
+
+# --- ComfyUI : websocket de progression, upload, interruption ------------------------
+class FakeWs:
+    """Websocket ComfyUI simulé : renvoie les messages prévus puis expire."""
+
+    def __init__(self, messages: list[str | bytes], fail_after: bool = False) -> None:
+        self.messages = list(messages)
+        self.fail_after = fail_after
+        self.closed = False
+
+    def recv(self, timeout: float | None = None) -> str | bytes:
+        if self.messages:
+            return self.messages.pop(0)
+        if self.fail_after:
+            raise ConnectionError("fermé")
+        raise TimeoutError
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def _ws_msg(kind: str, **data: object) -> str:
+    return json.dumps({"type": kind, "data": data})
+
+
+def test_http_comfyui_progress_over_websocket() -> None:
+    fake = FakeComfy(polls_before_done=1)
+    ws = FakeWs(
+        [
+            _ws_msg("status", status={}),
+            b"\x00\x01preview",
+            _ws_msg("progress", value=1, max=4, prompt_id="p-1"),
+            _ws_msg("progress", value=9, max=9, prompt_id="autre"),
+            _ws_msg("progress", value=4, max=4, prompt_id="p-1"),
+            _ws_msg("executing", node=None, prompt_id="p-1"),
+        ]
+    )
+    urls: list[str] = []
+
+    def connect(url: str) -> FakeWs:
+        urls.append(url)
+        return ws
+
+    client = http_client(fake, ws_connect=connect, sleep=lambda s: None)
+    progress: list[tuple[int, int]] = []
+    refs = client.wait_for_images("p-1", "11", on_progress=lambda v, m: progress.append((v, m)))
+    assert refs == [ImageRef("case_0001.png", "mangaka", "output")]
+    assert progress == [(1, 4), (4, 4)]
+    assert urls == ["ws://comfy.test:8188/ws?clientId=cid"] and ws.closed
+
+
+def test_http_comfyui_websocket_falls_back_to_polling() -> None:
+    sleeps: list[float] = []
+    # connexion impossible
+    client = http_client(
+        FakeComfy(polls_before_done=2),
+        ws_connect=lambda url: (_ for _ in ()).throw(OSError("refus")),
+        sleep=sleeps.append,
+    )
+    assert client.wait_for_images("p-1", "11", poll_s=0.5, on_progress=lambda v, m: None)
+    assert sleeps == [0.5, 0.5]
+    # websocket coupé en cours de route
+    sleeps.clear()
+    ws = FakeWs([_ws_msg("progress", value=1, max=2, prompt_id="p-1")], fail_after=True)
+    client = http_client(FakeComfy(polls_before_done=3), ws_connect=lambda url: ws, sleep=sleeps.append)
+    progress: list[tuple[int, int]] = []
+    assert client.wait_for_images("p-1", "11", poll_s=0.5, on_progress=lambda v, m: progress.append((v, m)))
+    assert progress == [(1, 2)] and ws.closed and sleeps == [0.5, 0.5]
+
+
+def test_http_comfyui_stop_and_interrupted_history() -> None:
+    client = http_client(FakeComfy(polls_before_done=99), sleep=lambda s: None)
+    with pytest.raises(ComfyUIInterruptedError):
+        client.wait_for_images("p-1", "11", should_stop=lambda: True)
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "p-1": {"outputs": {}, "status": {"status_str": "error", "messages": [["execution_interrupted", {}]]}}
+            },
+        )
+
+    with pytest.raises(ComfyUIInterruptedError):
+        http_client(handler).wait_for_images("p-1", "11")
+
+
+def test_http_comfyui_upload_and_interrupt() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append(req)
+        if req.url.path == "/upload/image":
+            return httpx.Response(200, json={"name": "perso1_img2.png", "subfolder": "mangaka", "type": "input"})
+        if req.url.path == "/interrupt":
+            return httpx.Response(200)
+        return httpx.Response(404)
+
+    client = http_client(handler)
+    assert client.upload_image(b"\x89PNG", "perso1_img2.png") == "mangaka/perso1_img2.png"
+    body = seen[0].content
+    assert b'name="image"; filename="perso1_img2.png"' in body and b"image/png" in body
+    assert b'name="subfolder"' in body and b"mangaka" in body and b'name="overwrite"' in body
+    client.interrupt("p-1")
+    assert seen[1].url.path == "/interrupt" and json.loads(seen[1].content) == {"prompt_id": "p-1"}
+
+    with pytest.raises(ComfyUIError, match="refusé"):
+        http_client(lambda req: httpx.Response(500)).upload_image(b"x", "a.png")
+
+
+def test_mock_comfyui_progress_upload_and_missing_reference() -> None:
+    reg_wf = PRESETS.workflow("qwen-image-edit-ref")
+    client = MockComfyUIClient()
+    name = client.upload_image(png_bytes(), "perso1_img1.png")
+    built = build_workflow(
+        reg_wf, {"positive_prompt": "x", "width": 256, "height": 384, "seed": 3, "steps": 5}, reference_images=[name]
+    )
+    prompt_id = client.queue_prompt(built.workflow)
+    progress: list[tuple[int, int]] = []
+    [ref] = client.wait_for_images(prompt_id, built.output_node, on_progress=lambda v, m: progress.append((v, m)))
+    assert progress == [(i, 5) for i in range(1, 6)]
+    assert Image.open(io.BytesIO(client.fetch_image(ref))).size == (256, 384)
+
+    missing = build_workflow(
+        reg_wf, {"positive_prompt": "x", "width": 256, "height": 256}, reference_images=["absent.png"]
+    )
+    with pytest.raises(ComfyUIWorkflowError, match="nœud 20 \\(LoadImage\\)"):
+        client.queue_prompt(missing.workflow)
+
+    client.interrupt()
+    prompt_id = client.queue_prompt(built.workflow)  # une nouvelle génération repart de zéro
+    client.interrupt(prompt_id)
+    with pytest.raises(ComfyUIInterruptedError):
+        client.wait_for_images(prompt_id, built.output_node)
+    assert client.interrupts == [None, prompt_id]

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from ..config import Settings
 from ..pipeline.jobs import JobRunner
+from ..pipeline.queue import SerialJobQueue
 from ..presets import PresetRegistry
 from ..providers.factory import Providers
 from ..store.db import Database
@@ -24,6 +25,7 @@ class AppContext:
     db: Database
     files: FileStore
     jobs: JobRunner
+    generation: SerialJobQueue  # file ComfyUI : une génération à la fois
 
 
 def get_ctx(request: Request) -> AppContext:

@@ -1,7 +1,8 @@
 """Migrations du schéma SQLite, suivies par `PRAGMA user_version`.
 
 - 0 : schéma du jalon #1 (Projet → Page, sans chapitres) ;
-- 2 : Série → Chapitre → Page (statuts, types de page, mise en page stockée, progression des jobs).
+- 2 : Série → Chapitre → Page (statuts, types de page, mise en page stockée, progression des jobs) ;
+- 3 : génération (paramètres des jobs, prompt final édité à la main).
 
 Une base neuve est créée directement à la dernière version. Chaque migration tourne dans une
 transaction unique, clés étrangères désactivées (recette « 12 étapes » de SQLite pour reconstruire
@@ -22,7 +23,7 @@ from .models import Base, Chapter
 
 log = logging.getLogger("mangaka_engine")
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 class MigrationError(RuntimeError):
@@ -92,10 +93,16 @@ def _v0_to_v2(cur: sqlite3.Cursor) -> None:
     cur.execute("CREATE INDEX ix_jobs_chapter_id ON jobs (chapter_id)")
 
 
+def _v2_to_v3(cur: sqlite3.Cursor) -> None:
+    cur.execute("ALTER TABLE jobs ADD COLUMN params JSON NOT NULL DEFAULT '{}'")
+    cur.execute("ALTER TABLE panels ADD COLUMN final_prompt_manual BOOLEAN NOT NULL DEFAULT 0")
+
+
 MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     # version de départ → (version d'arrivée, fonction)
     0: (2, _v0_to_v2),
     1: (2, _v0_to_v2),
+    2: (3, _v2_to_v3),
 }
 
 

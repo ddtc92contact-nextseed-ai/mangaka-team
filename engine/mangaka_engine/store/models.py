@@ -69,6 +69,7 @@ class PanelState(enum.StrEnum):
     draft = "draft"
     queued = "queued"
     generating = "generating"
+    review = "review"  # au moins une version générée, à valider
     qc = "qc"
     flagged = "flagged"
     approved = "approved"
@@ -209,6 +210,8 @@ class Panel(TimestampMixin, Base):
     bbox: Mapped[dict[str, int] | None] = mapped_column(JSON, default=None)
     bubble_zone: Mapped[dict[str, int] | None] = mapped_column(JSON, default=None)
     final_prompt: Mapped[str | None] = mapped_column(Text, default=None)
+    # True : prompt final édité à la main, conservé tant qu'on ne demande pas de le reconstruire.
+    final_prompt_manual: Mapped[bool] = mapped_column(default=False)
     generation_preset: Mapped[str | None] = mapped_column(String(100), default=None)
     qc_score: Mapped[int | None] = mapped_column(Integer, default=None)
     state: Mapped[PanelState] = mapped_column(_enum(PanelState), default=PanelState.draft)
@@ -274,3 +277,5 @@ class Job(Base):
     started_at: Mapped[datetime | None] = mapped_column(default=None)
     finished_at: Mapped[datetime | None] = mapped_column(default=None)
     duration_ms: Mapped[int | None] = mapped_column(Integer, default=None)
+    # Paramètres de la demande (génération : preset, prompt, seed, variante…).
+    params: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)

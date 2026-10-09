@@ -11,12 +11,13 @@ Après modification d'un preset, redémarre le moteur (`npm run dev`).
 
 | Fichier | Rôle |
 | --- | --- |
-| `defaults.yaml` | Format de page et workflow appliqués aux nouvelles séries |
+| `defaults.yaml` | Format de page et workflow appliqués aux nouvelles séries ; workflow choisi quand une case a des images de référence (`workflow_with_references`) |
 | `providers.yaml` | Paramètres des fournisseurs (URL, modèle LLM, timeouts). **Aucune clé d'API ici** : elles vont dans `.env` |
 | `page_formats/*.yaml` | Formats de page (dimensions en mm, DPI, marges, gouttières) : A4 (défaut) et B4 JIS à 300 DPI |
 | `layout.yaml` | Découpage : taille mini d'une case, taille cible de génération, zones de bulles |
 | `layouts/*.yaml` | Bibliothèque de gabarits de planche (arbres de découpes) |
 | `prompts/*.yaml` | Prompts des étapes LLM (`script` : découpage d'un chapitre) |
+| `image_prompt.yaml` | Construction du prompt final des cases (étape 3) et termes « pas de texte » du prompt négatif |
 | `workflows/*.yaml` + `*.json` | Workflows ComfyUI : le JSON API exporté + le mapping des paramètres |
 
 ## Format de page
@@ -60,8 +61,8 @@ même contexte en JSON (le LLM factice du mode mock s'en sert pour produire un d
 
 ## Workflow ComfyUI
 
-1. Dans ComfyUI, construis le workflow puis exporte-le via **Workflow → Export (API)**.
-   Copie le JSON dans `presets/workflows/<id>.json`.
+1. Dans ComfyUI, construis le workflow puis exporte-le au format API (**Workflow → Export (API)**,
+   « Save (API Format) » selon les versions). Copie le JSON dans `presets/workflows/<id>.json`.
 2. Crée `presets/workflows/<id>.yaml` qui décrit comment le moteur remplit ce JSON :
 
 ```yaml
@@ -77,6 +78,9 @@ mapping:                              # paramètre moteur → workflow[node].inp
   height:          { node: "8", input: height }
 defaults:                             # valeurs appliquées si le pipeline ne les fournit pas
   steps: 20
+timeout_s: 600                        # durée max d'une génération (sinon interruption + job en échec)
+reference_images: []                  # emplacements d'images de référence (voir plus bas)
+lora_chain: { … }                     # point d'insertion des LoRA (voir plus bas)
 ```
 
 ### Mapping des nœuds (`qwen-image-base`)
@@ -102,3 +106,93 @@ Règles vérifiées au chargement :
 Les noms de fichiers de modèles (`unet_name`, `clip_name`, `vae_name`) vivent
 **uniquement** dans le JSON : adapte-les aux fichiers présents dans
 `ComfyUI/models/` sur le GX10. Le code Python ne connaît aucun nom de modèle.
+
+## Images de référence et LoRA (étape 3)
+
+Deux workflows sont livrés :
+
+| Preset | Usage | Emplacements de référence | LoRA |
+| --- | --- | --- | --- |
+| `qwen-image-base` | texte → image (workflow de la série par défaut) | 0 | oui |
+| `qwen-image-edit-ref` | Qwen-Image 2.1 guidé par des images de référence (l'édition est intégrée au modèle 2.1, pas de modèle « edit » séparé) — choisi automatiquement quand un personnage de la case a une planche de référence | 3 | oui |
+
+### Emplacements de référence (`reference_images`)
+
+Liste **ordonnée** d'emplacements, chacun étant un nœud qui charge une image (`LoadImage`) :
+
+```yaml
+reference_images:
+  - { node: "20", input: image, remove: ["21"] }   # 1er emplacement
+  - { node: "22", input: image, remove: ["23"] }
+  - { node: "24", input: image, remove: ["25"] }
+```
+
+- Le moteur envoie les images de référence des personnages de la case à ComfyUI
+  (`POST /upload/image`, sous-dossier `input/mangaka/`) et écrit le nom obtenu dans
+  `workflow[node].inputs[input]`. Ordre : 1re image de chaque personnage (dans l'ordre de la
+  case), puis 2e image de chacun, etc., jusqu'à remplir les emplacements.
+- Un emplacement **inutilisé est retiré** : son nœud et ceux listés dans `remove` (ex. son
+  redimensionnement) sont supprimés, puis toute entrée d'un autre nœud qui pointait vers un nœud
+  retiré est effacée. Exemple : avec une seule référence, `image2`/`image3` disparaissent des
+  encodeurs `TextEncodeQwenImageEditPlus` (entrées optionnelles).
+- `remove` doit donc lister **tous** les nœuds propres à l'emplacement : une entrée obligatoire
+  qui pointerait encore vers un nœud retiré ferait refuser le workflow par ComfyUI.
+- Vérifié au chargement : chaque nœud existe, l'entrée existe, et aucun nœud mappé (prompt,
+  seed, sortie…) n'est retiré.
+
+### Chaîne LoRA (`lora_chain`)
+
+```yaml
+lora_chain:
+  class_type: LoraLoaderModelOnly          # classe du chargeur (aucun nom codé dans le moteur)
+  model_from: { node: "1", output: 0 }     # sortie MODEL après laquelle insérer la chaîne
+  model_input: model                       # entrée MODEL du chargeur
+  name_input: lora_name                    # entrée « nom du fichier »
+  strength_input: strength_model           # entrée « poids »
+  # Optionnel, pour un chargeur qui modifie aussi l'encodeur (ex. LoraLoader) :
+  # clip_from: { node: "2", output: 0 }
+  # clip_input: clip
+  # clip_strength_input: strength_clip
+  # clip_output: 1
+  # extra_inputs: {}                       # entrées constantes du chargeur
+```
+
+LoRA appliqués, dans l'ordre : **LoRA de style de la série** puis **LoRA d'identité de chaque
+personnage** de la case (nom de fichier + poids saisis dans la série / la fiche). Chaque LoRA
+devient un nœud `class_type` (identifiant numérique après le plus grand du JSON) :
+`model_from → LoRA 1 → LoRA 2 → …`, et tous les nœuds qui consommaient `model_from` (ici le nœud
+`5`, `ModelSamplingAuraFlow`) reçoivent la sortie du dernier LoRA. Sans LoRA, le workflow est
+inchangé. Un preset sans `lora_chain` refuse une génération qui demande des LoRA (message lisible).
+
+Les fichiers LoRA vont dans `ComfyUI/models/loras/` ; le nom saisi doit être exactement celui que
+ComfyUI liste (sous-dossier compris, ex. `mangaka/aiko-v3.safetensors`).
+
+### Ré-exporter un workflow depuis ComfyUI
+
+Les JSON livrés sont une base « au mieux » : les noms de nœuds et de modèles dépendent de ta
+version de ComfyUI et des fichiers présents sur le GX10. Pour les remplacer par ton workflow :
+
+1. Ouvre le workflow dans ComfyUI, vérifie qu'il tourne (avec 3 `LoadImage` de référence pour
+   `qwen-image-edit-ref`), puis exporte-le au **format API** (« Save (API Format) »).
+2. Remplace `presets/workflows/<id>.json` par ce fichier.
+3. Dans `presets/workflows/<id>.yaml`, mets à jour les numéros de nœuds :
+   - `mapping` : nœuds du prompt positif/négatif (`text` pour `CLIPTextEncode`, `prompt` pour
+     `TextEncodeQwenImageEditPlus`), du `KSampler` (`seed`, `steps`, `cfg`), de la taille
+     (`EmptySD3LatentImage` ou équivalent) et du `SaveImage` (`filename_prefix`) ;
+   - `output_node` : le `SaveImage` ;
+   - `reference_images` : les `LoadImage` dans l'ordre, avec dans `remove` les nœuds qui ne
+     servent qu'à cet emplacement ;
+   - `lora_chain.model_from` : la sortie du chargeur de modèle (`UNETLoader`), **sans** LoRA dans
+     le JSON exporté (le moteur les insère lui-même).
+4. Redémarre le moteur : `GET /presets` (et `GET /presets/workflows`) affiche les erreurs de
+   mapping éventuelles ; puis lance une case de test.
+
+## Prompt final des cases (`image_prompt.yaml`)
+
+`parts` est une liste de morceaux `string.Template` assemblés dans l'ordre (`$shot`,
+`$description`, `$characters`, `$style`) ; un morceau dont une variable est vide est omis.
+`character` met en forme un personnage (`$name`, `$details` = description visuelle + mots-clés).
+`forbidden_text_terms` est toujours ajouté au prompt négatif du workflow (le texte est posé au
+lettrage, jamais dessiné par le modèle) et `strip_quotes` retire les répliques entre guillemets
+de la description. Le prompt est stocké sur la case ; une édition manuelle est conservée jusqu'à
+« reconstruire le prompt ».

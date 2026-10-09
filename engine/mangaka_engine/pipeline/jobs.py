@@ -82,28 +82,42 @@ class JobRunner:
         try:
             message = fn(reporter)
         except EXPECTED_ERRORS as exc:
-            self._finish(reporter, t0, JobStatus.failed, error=str(exc))
+            finish_job(reporter, t0, JobStatus.failed, error=str(exc))
         except Exception as exc:  # noqa: BLE001 — un job ne doit jamais rester « en cours »
             log.exception("job %s : erreur interne", job_id, exc_info=exc)
-            self._finish(reporter, t0, JobStatus.failed, error=f"Erreur interne du moteur ({exc.__class__.__name__})")
+            finish_job(reporter, t0, JobStatus.failed, error=f"Erreur interne du moteur ({exc.__class__.__name__})")
         else:
-            self._finish(reporter, t0, JobStatus.succeeded, message=message or "Terminé")
+            finish_job(reporter, t0, JobStatus.succeeded, message=message or "Terminé")
 
-    @staticmethod
-    def _finish(
-        reporter: JobReporter, t0: float, status: JobStatus, *, error: str | None = None, message: str | None = None
-    ) -> None:
-        finished: datetime = utcnow()
-        values: dict[str, object] = {
-            "status": status,
-            "finished_at": finished,
-            "duration_ms": int((time.monotonic() - t0) * 1000),
-            "error": error,
-        }
-        if status == JobStatus.succeeded:
-            values["progress"] = 100
-        if message is not None:
-            values["message"] = message
-        elif error is not None:
-            values["message"] = "Échec"
-        reporter._update(**values)
+    def cancel(self, job_id: int) -> bool:
+        """Annule un job LLM pas encore démarré ; False s'il tourne déjà (non interruptible)."""
+        future = self._futures.get(job_id)
+        if future is None or not future.cancel():
+            return False
+        with self._db.session_scope() as session:
+            res = session.execute(
+                update(Job)
+                .where(Job.id == job_id, Job.status == JobStatus.pending)
+                .values(status=JobStatus.cancelled, message="Annulé", finished_at=utcnow())
+            )
+            session.commit()
+            return bool(res.rowcount)  # type: ignore[attr-defined]
+
+
+def finish_job(
+    reporter: JobReporter, t0: float, status: JobStatus, *, error: str | None = None, message: str | None = None
+) -> None:
+    finished: datetime = utcnow()
+    values: dict[str, object] = {
+        "status": status,
+        "finished_at": finished,
+        "duration_ms": int((time.monotonic() - t0) * 1000),
+        "error": error,
+    }
+    if status == JobStatus.succeeded:
+        values["progress"] = 100
+    if message is not None:
+        values["message"] = message
+    elif error is not None:
+        values["message"] = "Échec"
+    reporter._update(**values)
