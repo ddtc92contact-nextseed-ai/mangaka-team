@@ -14,7 +14,8 @@ dans [`docs/SPEC.md`](docs/SPEC.md).
 | `engine/` | Moteur Python 3.12 + FastAPI : store SQLite, fournisseurs (LLM, vision, ComfyUI), API REST |
 | `presets/` | Formats de page, workflows ComfyUI, paramètres des fournisseurs — voir [`presets/README.md`](presets/README.md) |
 | `data/` | Base SQLite et images (créé au premier lancement, **jamais commité**) |
-| `scripts/` | Scripts npm : installation du moteur, lancement conjoint web + moteur |
+| `scripts/` | Scripts npm : installation du moteur, lancement conjoint web + moteur ; lanceur en un clic (`launch.sh`, `stop.sh`, `install-desktop.sh`) |
+| `assets/icon/` | Icône de l'application (SVG + PNG 256/512) |
 | `docs/` | Spécification |
 
 ## Installation sur le GX10
@@ -58,6 +59,50 @@ passe en échec avec le détail par nœud (ex. « nœud 1 (UNETLoader) : Value n
 ComfyUI éteint → « ComfyUI hors ligne (127.0.0.1:8188) » immédiatement, jamais de job bloqué
 « en cours ». La progression arrive par le websocket de ComfyUI (`/ws`), avec repli sur un
 sondage de `/history`.
+
+### Lancer en un clic
+
+Une icône « Mangaka Team » sur le bureau démarre tout ce qui manque — Ollama, ComfyUI, puis le
+moteur et l'interface (`npm run dev`) — et ouvre l'atelier dans le navigateur.
+
+Installation (une fois) :
+
+```bash
+cp launcher.env.example launcher.env   # facultatif : chemins, ports, services à démarrer
+scripts/install-desktop.sh             # menu des applications + ~/Bureau
+```
+
+L'icône est copiée dans `~/.local/share/applications/` et dans le dossier du bureau
+(`xdg-user-dir DESKTOP`, `~/Bureau` en français), exécutable et marquée de confiance : GNOME la
+lance sans avertissement. Relancer le script met l'icône à jour sans doublon ;
+`scripts/install-desktop.sh --uninstall` retire les deux copies. Si le dépôt change de place,
+relance l'installation (le chemin est absolu).
+
+Ce que fait l'icône (`scripts/launch.sh`, utilisable aussi dans un terminal) :
+
+- chaque service est d'abord **sondé** — Ollama sur `$OLLAMA_URL/api/version`, ComfyUI sur
+  `$COMFYUI_URL/system_stats`, l'application sur `http://127.0.0.1:$PORT/` — et n'est démarré
+  que s'il ne répond pas. Un Ollama géré par systemd ou un ComfyUI lancé à la main est
+  simplement réutilisé ; le lanceur n'appelle jamais `sudo` ni `systemctl` ;
+- Ollama : `ollama serve` ; ComfyUI : `$COMFYUI_PYTHON main.py --listen 127.0.0.1 --port 8188`
+  depuis `$COMFYUI_DIR` ; application : `npm run dev` à la racine du dépôt ;
+- une notification suit la progression ; dès que l'interface répond, elle s'ouvre (`xdg-open`) ;
+- si le port de l'interface est pris par **un autre programme**, le lanceur le dit et s'arrête ;
+- en cas d'échec (délai dépassé, processus mort au démarrage, ComfyUI introuvable…), une
+  notification nomme le service et son journal. Deux clics rapides ne lancent rien en double.
+
+Configuration : `launcher.env` (gitignoré, modèle `launcher.env.example`), sinon `.env`, sinon
+les valeurs par défaut : `COMFYUI_DIR=$HOME/ComfyUI`, `COMFYUI_PYTHON=$HOME/comfyui-env/bin/python`,
+`COMFYUI_URL`, `OLLAMA_URL=http://127.0.0.1:11434`, `PORT=3000`, `START_OLLAMA` / `START_COMFYUI`
+(`true`/`false`), délais d'attente `*_TIMEOUT`. Une variable d'environnement prime sur les fichiers.
+
+Journaux : `~/.local/state/mangaka-team/logs/` — `launcher.log` (le lanceur lui-même),
+`ollama.log`, `comfyui.log`, `app.log`. Les PID des services démarrés par le lanceur sont dans
+`~/.local/state/mangaka-team/pids/`.
+
+Arrêter : clic droit sur l'icône → « Arrêter », ou `scripts/stop.sh`. Seul ce que le lanceur a
+démarré est arrêté (PID enregistrés, vérifiés contre leur date de démarrage) : un Ollama ou un
+ComfyUI qui tournait déjà avant n'est jamais touché.
 
 ### Contrôle qualité réel (étape 4)
 
@@ -110,6 +155,7 @@ configuration incomplète (ex. clé absente) y apparaît en rouge sans empêcher
 | `npm run lint` / `npm run typecheck` / `npm run build` | Contrôles de l'interface web |
 | `npm run test:engine` | Tests du moteur (pytest, tout simulé) |
 | `npm run lint:engine` | Ruff sur le moteur |
+| `npm run test:launcher` | Tests du lanceur en un clic (faux serveurs HTTP, aucun service réel) ; `shellcheck -x scripts/*.sh` pour le lint |
 | `npm run setup:engine` | (Ré)installe le venv du moteur |
 
 ## API du moteur
