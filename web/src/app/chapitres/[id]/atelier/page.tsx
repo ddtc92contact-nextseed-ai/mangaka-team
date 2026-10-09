@@ -190,6 +190,11 @@ function Workshop() {
         </p>
         <div className="ml-auto flex flex-wrap gap-2">
           {page.layout && page.panels.length > 0 && (
+            <ButtonLink variant="ghost" href={`/chapitres/${chapter.id}/lettrage?page=${page.id}`} data-testid="open-lettering">
+              Lettrage de la page
+            </ButtonLink>
+          )}
+          {page.layout && page.panels.length > 0 && (
             <Button onClick={() => generateMissing(page)} disabled={busy || missing === 0} data-testid="generate-page">
               Générer les cases manquantes{missing ? ` (${missing})` : ""}
             </Button>

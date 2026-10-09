@@ -1,0 +1,63 @@
+# Lettrage et assemblage de la planche (étape 5). Distances en mm, épaisseurs en points.
+# Le fond perdu (bleed_mm) est dans le format de page (page_formats/*.yaml).
+
+stroke_pt: 1.0              # contour des bulles
+narration_stroke_pt: 0.8    # contour des cartouches de récitatif
+
+# Marge intérieure texte ↔ contour, par type de bulle.
+padding_mm:
+  speech: { x: 2.5, y: 2 }
+  thought: { x: 3, y: 2.5 }
+  shout: { x: 3, y: 2.5 }
+  narration: { x: 2, y: 1.5 }
+  "off": { x: 2.5, y: 2 }   # guillemets : sinon YAML lit un booléen
+
+# Bulle de parole : ellipse circonscrite au bloc de texte (rayon = demi-côté × ellipse_factor)
+# ou rectangle arrondi.
+ellipse_factor: 1.25
+speech_shape: ellipse       # ellipse | rounded
+rounded_radius_mm: 3
+preferred_aspect: 1.5       # rapport largeur / hauteur visé quand on choisit le retour à la ligne
+
+cloud:                      # pensée : nuage + petites bulles de queue
+  bump_mm: 5
+  amplitude_mm: 1.2
+  tail_bubbles: 3
+
+shout:                      # cri : contour en pointes
+  spike_mm: 2.5
+  spike_every_mm: 4
+  jitter: 0.35
+
+tail:                       # queue orientée vers le locuteur (visage détecté) ou par défaut
+  length_mm: 7
+  max_length_mm: 18
+  base_mm: 4
+  default_direction: panel_center   # panel_center | down
+  face_gap_mm: 1.5
+
+spacing_mm: 1.5             # écart minimal entre deux bulles
+panel_margin_mm: 1.5        # écart minimal bulle ↔ bord de case
+face_margin_mm: 1.5         # écart minimal bulle ↔ visage détecté par le QC
+grid_mm: 1                  # pas de recherche des positions
+
+bubble_fill: "#ffffff"
+bubble_stroke: "#000000"
+narration_fill: "#fff8e1"
+
+# Assemblage de la planche
+page_background: "#ffffff"
+panel_border_pt: 1.5
+panel_border_color: "#000000"
+missing_panel_fill: "#9e9e9e"
+missing_panel_label: case manquante
+
+# Repères de coupe (option de l'export avec fond perdu) : une bande `slug_mm` est ajoutée
+# autour du fond perdu pour les accueillir.
+crop_marks:
+  length_mm: 5
+  offset_mm: 3
+  stroke_pt: 0.25
+  slug_mm: 9
+
+supersampling: 3            # anticrénelage des formes de bulle dans le PNG

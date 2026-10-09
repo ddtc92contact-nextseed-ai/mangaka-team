@@ -266,8 +266,10 @@ class Bubble(TimestampMixin, Base):
     speaker_name: Mapped[str] = mapped_column(String(120), default="")
     text: Mapped[str] = mapped_column(Text)
     kind: Mapped[BubbleKind] = mapped_column(_enum(BubbleKind), default=BubbleKind.speech)
-    position: Mapped[dict[str, int] | None] = mapped_column(JSON, default=None)  # {"x","y","w","h"}
-    tail: Mapped[dict[str, int] | None] = mapped_column(JSON, default=None)  # {"x","y"} pointe de la queue
+    # Cadre {"x","y","w","h"} et pointe de la queue {"x","y"} en px de la page, avec "manual": true quand
+    # ils ont été ajustés à la main dans l'écran Lettrage ; None = placement automatique (étape 5).
+    position: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
+    tail: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
 
     panel: Mapped[Panel] = relationship(back_populates="bubbles")
 
