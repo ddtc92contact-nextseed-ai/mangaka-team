@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { api, EngineError, errorMessage, type Project, type ProjectInput } from "@/lib/api";
+import { api, EngineError, errorMessage, type Presets, type Project, type ProjectInput } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
 import { SERIES_STATUS } from "./status";
 import { Alert, Button, Field, Input, Select, Textarea } from "./ui";
@@ -10,6 +10,18 @@ export const DIRECTIONS = {
   rtl: "Droite → gauche (manga)",
   ltr: "Gauche → droite (BD, comics)",
 } as const;
+
+/** Rappelle quel workflow du même palier sert aux cases avec images de référence. */
+function WorkflowHint({ presets, workflow }: { presets?: Presets["workflows"]; workflow: string }) {
+  const current = presets?.find((w) => w.id === workflow);
+  if (!current?.with_references) return null;
+  const refs = presets?.find((w) => w.id === current.with_references);
+  return (
+    <p className="mt-1 text-xs text-zinc-500">
+      Cases avec images de référence : {refs?.name ?? `${current.with_references} (preset introuvable)`}
+    </p>
+  );
+}
 
 export function ProjectForm({
   initial,
@@ -184,6 +196,7 @@ export function ProjectForm({
               <option value={workflow}>{workflow} (preset introuvable)</option>
             )}
           </Select>
+          <WorkflowHint presets={presets.data?.workflows} workflow={workflow} />
         </Field>
       </div>
       <div className="flex justify-end">

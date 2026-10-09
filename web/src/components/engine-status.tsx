@@ -97,7 +97,7 @@ export function ComfyBadge() {
   const queue = comfyui.queue_running + comfyui.queue_pending;
   return (
     <Badge tone={mock ? "warn" : "ok"} title={comfyui.url ?? comfyui.detail ?? undefined}>
-      ComfyUI {mock ? "(mock)" : "OK"}
+      {mock ? "ComfyUI simulé" : "ComfyUI OK"}
       {queue > 0 ? ` · file ${queue}` : ""}
     </Badge>
   );
