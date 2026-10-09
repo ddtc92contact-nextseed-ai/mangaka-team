@@ -21,7 +21,7 @@ from ..pipeline.render import (
     render_page_to_files,
 )
 from ..pipeline.render import export_job as make_export_job
-from ..presets import PresetError
+from ..presets import PresetError, PresetRegistry
 from ..store.models import Bubble, BubbleKind, Job, JobStatus, Page
 from .chapters import get_chapter_or_404, get_page_or_404
 from .deps import AppContext, get_ctx, get_session
@@ -32,17 +32,23 @@ from .schemas import BubbleUpdate, ExportIn, JobOut, RenderIn
 router = APIRouter(tags=["lettrage"])
 
 
-def _fonts(ctx: AppContext) -> FontBook:
+def _presets(ctx: AppContext, page: Page) -> PresetRegistry:
+    """Presets de la série de la page, avec les réglages du lettreur (écran « L'équipe »)."""
+    return ctx.agents.presets_for(page.chapter.project_id)
+
+
+def _fonts(ctx: AppContext, presets: PresetRegistry | None = None) -> FontBook:
     try:
-        return FontBook(ctx.presets)
+        return FontBook(presets or ctx.presets)
     except PresetError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from None
 
 
 def _lettering(ctx: AppContext, page: Page) -> dict[str, Any]:
-    fonts = _fonts(ctx)
+    presets = _presets(ctx, page)
+    fonts = _fonts(ctx, presets)
     try:
-        return lettering_json(page, page_inputs(ctx.presets, ctx.files, page, fonts), fonts)
+        return lettering_json(page, page_inputs(presets, ctx.files, page, fonts), fonts)
     except (LetteringError, PresetError) as exc:
         raise FieldError("lettering", str(exc)) from None
 
@@ -117,9 +123,9 @@ def update_bubble(
 
 
 @router.get("/lettering/fonts/{kind}.ttf")
-def lettering_font(kind: str, ctx: AppContext = Depends(get_ctx)) -> Response:
+def lettering_font(kind: str, project_id: int | None = None, ctx: AppContext = Depends(get_ctx)) -> Response:
     """Police (instance statique) d'un type de bulle, pour l'aperçu de l'écran Lettrage."""
-    fonts = _fonts(ctx)
+    fonts = _fonts(ctx, ctx.agents.presets_for(project_id))
     if kind not in fonts.preset.styles:
         raise HTTPException(status_code=404, detail="Type de bulle inconnu")
     return Response(
@@ -139,7 +145,7 @@ def render_page(
     body = body or RenderIn()
     page = get_page_or_404(session, page_id)
     try:
-        info = render_page_to_files(ctx.presets, ctx.files, page, bleed=body.bleed, crop_marks=body.crop_marks)
+        info = render_page_to_files(_presets(ctx, page), ctx.files, page, bleed=body.bleed, crop_marks=body.crop_marks)
     except (LetteringError, PresetError) as exc:
         raise FieldError("render", str(exc)) from None
     return _render_out(info)
@@ -195,7 +201,8 @@ def export_chapter(
     """Lance l'export du chapitre (ZIP de PNG + SVG numérotés) ; progression via GET /jobs/{id}/events."""
     body = body or ExportIn()
     chapter = get_chapter_or_404(session, chapter_id)
-    _fonts(ctx)
+    presets = ctx.agents.presets_for(chapter.project_id)
+    _fonts(ctx, presets)
     if not any(p.layout and p.panels for p in chapter.pages):
         raise FieldError("export", "aucune page mise en page dans ce chapitre : rien à exporter")
     running = session.scalar(
@@ -216,9 +223,7 @@ def export_chapter(
     session.commit()
     ctx.jobs.submit(
         job.id,
-        make_export_job(
-            ctx.db, ctx.presets, ctx.files, chapter_id, job.id, bleed=body.bleed, crop_marks=body.crop_marks
-        ),
+        make_export_job(ctx.db, presets, ctx.files, chapter_id, job.id, bleed=body.bleed, crop_marks=body.crop_marks),
     )
     return job_out(job)
 

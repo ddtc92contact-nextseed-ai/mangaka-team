@@ -231,7 +231,7 @@ def lettering_json(page: Page, inputs: PageInputs, fonts: FontBook) -> dict[str,
         kind: {
             "family": fonts.family(st),
             "name": fonts.name(st),
-            "url": f"/lettering/fonts/{kind}.ttf",
+            "url": f"/lettering/fonts/{kind}.ttf?project_id={page.chapter.project_id}",
             "size_pt": st.size_pt,
         }
         for kind, st in fonts.preset.styles.items()

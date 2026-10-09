@@ -7,7 +7,8 @@
 - 5 : banc d'essai du QC (annotations bonne / mauvaise des versions, historique des runs) ;
 - 6 : savoir-faire (collections, documents, passages + index FTS5), bible de série, passages reçus par
   chaque appel du LLM ;
-- 7 : mise en page dynamique (style de mise en page de la série, graine / style / rythme par page,
+- 7 : profils des agents du pipeline (réglages édités dans l'UI « L'équipe », versionnés) ;
+- 8 : mise en page dynamique (style de mise en page de la série, graine / style / rythme par page,
   intensité par case). Les séries existantes passent en style « sage » (cases droites : leur
   mise en page ne change pas) et la signature des mises en page stockées est réécrite au nouveau
   format, pour qu'elles ne deviennent pas « obsolètes ».
@@ -29,6 +30,8 @@ from sqlalchemy.dialects import sqlite
 from sqlalchemy.schema import CreateIndex, CreateTable
 
 from .models import (
+    AgentProfile,
+    AgentProfileVersion,
     Base,
     Chapter,
     KnowledgeChunk,
@@ -42,7 +45,7 @@ from .models import (
 
 log = logging.getLogger("mangaka_engine")
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 
 class MigrationError(RuntimeError):
@@ -159,6 +162,12 @@ FTS_DDL = (
 
 
 def _v6_to_v7(cur: sqlite3.Cursor) -> None:
+    for table in (AgentProfile.__table__, AgentProfileVersion.__table__):
+        for stmt in _ddl(table):
+            cur.execute(stmt)
+
+
+def _v7_to_v8(cur: sqlite3.Cursor) -> None:
     cur.execute("ALTER TABLE projects ADD COLUMN layout_style VARCHAR(100) NOT NULL DEFAULT 'dynamique'")
     cur.execute("UPDATE projects SET layout_style = 'sage'")
     cur.execute("ALTER TABLE pages ADD COLUMN layout_seed INTEGER")
@@ -189,6 +198,7 @@ MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     4: (5, _v4_to_v5),
     5: (6, _v5_to_v6),
     6: (7, _v6_to_v7),
+    7: (8, _v7_to_v8),
 }
 
 

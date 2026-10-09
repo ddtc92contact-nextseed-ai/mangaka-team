@@ -62,7 +62,7 @@ def _version(path: Path) -> int:
     return v
 
 
-def _drop_v7_columns(con: sqlite3.Connection) -> None:
+def _drop_v8_columns(con: sqlite3.Connection) -> None:
     con.execute("ALTER TABLE projects DROP COLUMN layout_style")
     for column in ("layout_seed", "layout_style", "rythme"):
         con.execute(f"ALTER TABLE pages DROP COLUMN {column}")
@@ -70,10 +70,16 @@ def _drop_v7_columns(con: sqlite3.Connection) -> None:
 
 
 def _drop_v6_tables(con: sqlite3.Connection) -> None:
-    _drop_v7_columns(con)
+    _drop_v7_tables(con)
     con.execute("DROP TABLE knowledge_fts")  # (ses triggers partent avec knowledge_chunks)
     for table in ("llm_runs", "series_bibles", "knowledge_chunks", "knowledge_documents", "knowledge_collections"):
         con.execute(f"DROP TABLE {table}")
+
+
+def _drop_v7_tables(con: sqlite3.Connection) -> None:
+    _drop_v8_columns(con)
+    con.execute("DROP TABLE agent_profile_versions")
+    con.execute("DROP TABLE agent_profiles")
 
 
 def _drop_v5_tables(con: sqlite3.Connection) -> None:
@@ -245,11 +251,32 @@ def test_v5_database_gets_knowledge_tables(make_settings: Callable[..., Settings
     assert _columns(settings.database_path) == _columns(fresh)
 
 
-def test_v6_database_keeps_its_layouts_straight_and_fresh(make_settings: Callable[..., Settings]) -> None:
-    """v6 → v7 : la série existante passe en style « sage », ses mises en page restent à jour et identiques."""
+def test_v6_database_gets_agent_profile_tables(make_settings: Callable[..., Settings]) -> None:
+    settings = make_settings()
+    _v1_db(settings.database_path, with_pages=True)
+    create_db_engine(settings.database_path).dispose()
+    # retour à un schéma v6 (savoir-faire, avant les profils d'agents)
+    con = sqlite3.connect(settings.database_path)
+    _drop_v7_tables(con)
+    con.execute("PRAGMA user_version = 6")
+    con.commit()
+    con.close()
+
+    with TestClient(create_app(settings)) as c:
+        assert c.get("/projects/1/agents").json() == []
+        res = c.put("/agents/scenariste/profile", json={"values": {"temperature": 0.3}})
+        assert res.status_code == 200, res.text
+    assert _version(settings.database_path) == SCHEMA_VERSION
+    fresh = settings.database_path.parent / "fresh.db"
+    create_db_engine(fresh).dispose()
+    assert _columns(settings.database_path) == _columns(fresh)
+
+
+def test_v7_database_keeps_its_layouts_straight_and_fresh(make_settings: Callable[..., Settings]) -> None:
+    """v7 → v8 : la série existante passe en style « sage », ses mises en page restent à jour et identiques."""
     settings = make_settings()
     with TestClient(create_app(settings)) as c:
-        project = c.post("/projects", json={"title": "Série v6", "layout_style": "sage"}).json()
+        project = c.post("/projects", json={"title": "Série v7", "layout_style": "sage"}).json()
         chapter = c.post(f"/projects/{project['id']}/chapters", json={"title": "Un", "synopsis": "x"}).json()
         pages = c.put(
             f"/chapters/{chapter['id']}/pages",
@@ -257,7 +284,7 @@ def test_v6_database_keeps_its_layouts_straight_and_fresh(make_settings: Callabl
         ).json()
     page_id = pages[0]["id"]
     before = pages[0]["layout"]
-    # Retour à un schéma v6 : colonnes v7 retirées, signature à l'ancien format.
+    # Retour à un schéma v7 : colonnes v8 retirées, signature à l'ancien format.
     con = sqlite3.connect(settings.database_path)
     raw = json.loads(con.execute("SELECT layout FROM pages WHERE id = ?", (page_id,)).fetchone()[0])
     sig = json.loads(raw["signature"])
@@ -265,8 +292,8 @@ def test_v6_database_keeps_its_layouts_straight_and_fresh(make_settings: Callabl
     for key in ("style",):
         raw.pop(key, None)
     con.execute("UPDATE pages SET layout = ? WHERE id = ?", (json.dumps(raw), page_id))
-    _drop_v7_columns(con)
-    con.execute("PRAGMA user_version = 6")
+    _drop_v8_columns(con)
+    con.execute("PRAGMA user_version = 7")
     con.commit()
     con.close()
 

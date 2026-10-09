@@ -265,11 +265,13 @@ def start_script(
     chapter = get_chapter_or_404(session, chapter_id)
     if not chapter.synopsis.strip():
         raise FieldError("synopsis", "écris d'abord le synopsis ou le script brut du chapitre")
-    if ctx.providers.llm is None:
-        detail = ctx.providers.errors.get("llm", "fournisseur LLM indisponible")
-        raise HTTPException(status_code=503, detail=f"LLM indisponible : {detail}")
+    # Réglages du scénariste (écran « L'équipe ») : série > profil global > presets.
+    presets = ctx.agents.presets_for(chapter.project_id)
+    llm, error = ctx.agents.llm_for_job("script", chapter.project_id)
+    if llm is None:
+        raise HTTPException(status_code=503, detail=f"LLM indisponible : {error or 'fournisseur LLM indisponible'}")
     try:
-        ctx.presets.prompt("script")
+        presets.prompt("script")
     except PresetError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from None
     running = session.scalar(
@@ -284,9 +286,7 @@ def start_script(
     job = Job(project_id=chapter.project_id, chapter_id=chapter_id, step="script", message="En attente…")
     session.add(job)
     session.commit()
-    ctx.jobs.submit(
-        job.id, script_job(ctx.db, ctx.presets, ctx.providers.llm, chapter_id, knowledge=ctx.knowledge, job_id=job.id)
-    )
+    ctx.jobs.submit(job.id, script_job(ctx.db, presets, llm, chapter_id, knowledge=ctx.knowledge, job_id=job.id))
     return job_out(job)
 
 
@@ -400,7 +400,7 @@ def replace_pages(
 
     for page in sorted(result, key=lambda p: p.number):
         if page.grid_template:
-            tpl = ctx.presets.layout_templates.get(page.grid_template)
+            tpl = ctx.agents.presets_for(chapter.project_id).layout_templates.get(page.grid_template)
             if tpl is None or tpl.panel_count != len(page.panels):
                 page.grid_template = None
         if page.panels and is_stale(page):
@@ -414,7 +414,7 @@ def replace_pages(
 # --- étape 2 : mise en page -----------------------------------------------------
 def _layout(ctx: AppContext, page: Page, *, reroll: bool = False) -> None:
     try:
-        layout_page(ctx.presets, page, reroll=reroll)
+        layout_page(ctx.agents.presets_for(page.chapter.project_id), page, reroll=reroll)
     except (LayoutError, PresetError) as exc:
         raise FieldError("layout", f"page {page.number} : {exc}") from None
 
@@ -452,7 +452,7 @@ def layout_one_page(
         page.layout_style = body.style
     if body is not None and "template_id" in body.model_fields_set:
         if body.template_id is not None:
-            tpl = ctx.presets.layout_templates.get(body.template_id)
+            tpl = ctx.agents.presets_for(page.chapter.project_id).layout_templates.get(body.template_id)
             if tpl is None:
                 raise FieldError("template_id", f"gabarit inconnu : « {body.template_id} »")
             if tpl.panel_count != len(page.panels):
@@ -472,7 +472,13 @@ def move_gutter(
     """Déplace une gouttière (position de son centre en px de la page) ; ses voisines sont recalculées."""
     page = get_page_or_404(session, page_id)
     try:
-        move_page_gutter(ctx.presets, page, path=body.path, index=body.index, position=body.position)
+        move_page_gutter(
+            ctx.agents.presets_for(page.chapter.project_id),
+            page,
+            path=body.path,
+            index=body.index,
+            position=body.position,
+        )
     except (LayoutError, PresetError) as exc:
         raise FieldError("gutter", str(exc)) from None
     session.commit()
@@ -487,7 +493,9 @@ def slant_cut(
     gardées et recadrées au nouveau polygone (`regeneration_advised` signale un ratio trop changé)."""
     page = get_page_or_404(session, page_id)
     try:
-        slant_page_cut(ctx.presets, page, path=body.path, index=body.index, ends=body.ends)
+        slant_page_cut(
+            ctx.agents.presets_for(page.chapter.project_id), page, path=body.path, index=body.index, ends=body.ends
+        )
     except (LayoutError, PresetError) as exc:
         raise FieldError("cut", str(exc)) from None
     session.commit()
@@ -495,8 +503,9 @@ def slant_cut(
 
 
 @router.get("/layout/templates")
-def list_templates(ctx: AppContext = Depends(get_ctx)) -> list[dict[str, object]]:
-    return [{"id": t.id, "name": t.name, "panel_count": t.panel_count} for t in ctx.presets.layout_templates.values()]
+def list_templates(project_id: int | None = None, ctx: AppContext = Depends(get_ctx)) -> list[dict[str, object]]:
+    templates = ctx.agents.presets_for(project_id).layout_templates
+    return [{"id": t.id, "name": t.name, "panel_count": t.panel_count} for t in templates.values()]
 
 
 @router.get("/layout/styles")

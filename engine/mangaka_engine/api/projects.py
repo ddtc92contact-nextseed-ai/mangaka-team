@@ -80,7 +80,8 @@ def list_projects(session: Session = Depends(get_session)) -> list[ProjectOut]:
 def create_project(
     body: ProjectCreate, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
 ) -> ProjectOut:
-    defaults = ctx.presets.defaults
+    # Formats / workflow des nouvelles séries : profils globaux du metteur en page et du dessinateur.
+    defaults = ctx.agents.presets_for(None).defaults
     page_format = body.page_format or (defaults.page_format if defaults else None)
     workflow = body.workflow_preset or (defaults.workflow if defaults else None)
     if page_format is None:
@@ -144,7 +145,7 @@ def update_project(
         setattr(project, key, value)
     if direction is not None:
         # Après les autres champs : un changement de format en même temps fait tout recalculer.
-        change_reading_direction(ctx.presets, project, ReadingDirection(direction))
+        change_reading_direction(ctx.agents.presets_for(project.id), project, ReadingDirection(direction))
     session.commit()
     return project_out(project, *_counts(session, project_id))
 
@@ -156,5 +157,6 @@ def delete_project(
     project = get_project_or_404(session, project_id)
     session.delete(project)
     session.commit()
+    ctx.agents.invalidate()  # surcharges d'agents de la série supprimées avec elle
     ctx.files.delete_tree(f"projects/{project_id}")
     return Response(status_code=204)

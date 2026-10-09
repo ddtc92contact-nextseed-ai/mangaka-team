@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from fastapi import Request
 from sqlalchemy.orm import Session
 
+from ..agents import AgentService
 from ..config import Settings
 from ..pipeline.jobs import JobRunner
 from ..pipeline.knowledge import KnowledgeBase
@@ -29,6 +30,7 @@ class AppContext:
     jobs: JobRunner
     generation: SerialJobQueue  # file ComfyUI : une génération à la fois (et les contrôles qualité)
     qc: QCExecutor
+    agents: AgentService  # profils des agents (écran « L'équipe ») : presets effectifs par série
     knowledge: KnowledgeBase  # savoir-faire et bible injectés dans les agents
 
 
