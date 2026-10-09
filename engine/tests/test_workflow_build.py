@@ -1,4 +1,4 @@
-"""Construction des workflows : emplacements de référence (0/1/3) et chaîne LoRA (0/2)."""
+"""Construction des workflows : emplacements de référence (0/1/3) et chaîne LoRA (0/2), deux paliers."""
 
 from __future__ import annotations
 
@@ -17,8 +17,9 @@ from tests.conftest import PRESETS_DIR
 REG = PresetRegistry.load(PRESETS_DIR)
 EDIT = REG.workflow("qwen-image-edit-ref")
 BASE = REG.workflow("qwen-image-base")
+EDIT_TIERS = ["qwen-image-edit-ref", "qwen-image-edit-ref-rapide"]
 PARAMS = {"positive_prompt": "Aiko sur un toit", "width": 832, "height": 1216, "seed": 1234}
-SLOTS = [("20", "21"), ("22", "23"), ("24", "25")]  # (LoadImage, mise à l'échelle) du preset
+SLOTS = ["20", "21", "22"]  # LoadImage du preset, branchés sur images.image_1…3 de l'encodeur (nœud 6)
 LORAS = [LoraSpec("encre-seinen.safetensors", 0.7, "style"), LoraSpec("aiko-v3.safetensors", 0.9, "Aiko")]
 
 
@@ -32,17 +33,20 @@ def _dangling(wf: dict) -> list[tuple[str, str]]:
 
 def test_edit_preset_is_valid_and_declares_slots_and_chain() -> None:
     preset = EDIT.preset
-    assert [s.node for s in preset.reference_images] == ["20", "22", "24"]
+    assert [s.node for s in preset.reference_images] == SLOTS
+    assert all(not s.remove for s in preset.reference_images)
     assert preset.lora_chain is not None and preset.lora_chain.class_type == "LoraLoaderModelOnly"
-    assert preset.timeout_s == 900
+    assert preset.timeout_s == 1500
     assert REG.defaults is not None and REG.defaults.workflow_with_references == "qwen-image-edit-ref"
 
 
+@pytest.mark.parametrize("preset_id", EDIT_TIERS)
 @pytest.mark.parametrize("n_refs", [0, 1, 3])
 @pytest.mark.parametrize("n_loras", [0, 2])
-def test_reference_slots_and_lora_chain(n_refs: int, n_loras: int) -> None:
+def test_reference_slots_and_lora_chain(preset_id: str, n_refs: int, n_loras: int) -> None:
+    loaded = REG.workflow(preset_id)
     refs = [f"mangaka/perso{i}.png" for i in range(n_refs)]
-    built = build_workflow(EDIT, PARAMS, reference_images=refs, loras=LORAS[:n_loras])
+    built = build_workflow(loaded, PARAMS, reference_images=refs, loras=LORAS[:n_loras])
     wf = built.workflow
 
     # paramètres mappés + seed enregistrée
@@ -51,19 +55,17 @@ def test_reference_slots_and_lora_chain(n_refs: int, n_loras: int) -> None:
     assert (wf["8"]["inputs"]["width"], wf["8"]["inputs"]["height"]) == (832, 1216)
 
     # emplacements remplis dans l'ordre, les autres retirés avec leurs nœuds propres
-    for i, (load, scale) in enumerate(SLOTS):
+    for i, load in enumerate(SLOTS):
         if i < n_refs:
             assert wf[load]["inputs"]["image"] == refs[i]
-            assert wf[scale]["inputs"]["image"] == [load, 0]
-            assert wf["6"]["inputs"][f"image{i + 1}"] == [scale, 0]
-            assert wf["7"]["inputs"][f"image{i + 1}"] == [scale, 0]
+            assert wf["6"]["inputs"][f"images.image_{i + 1}"] == [load, 0]
         else:
-            assert load not in wf and scale not in wf
-            assert f"image{i + 1}" not in wf["6"]["inputs"] and f"image{i + 1}" not in wf["7"]["inputs"]
-    assert sorted(built.removed_nodes) == sorted(n for slot in SLOTS[n_refs:] for n in slot)
+            assert load not in wf
+            assert f"images.image_{i + 1}" not in wf["6"]["inputs"]
+    assert sorted(built.removed_nodes) == sorted(SLOTS[n_refs:])
     assert _dangling(wf) == []
 
-    # chaîne LoRA : 1 → lora1 → lora2 → consommateurs d'origine (nœud 5)
+    # chaîne LoRA : 1 → lora1 → lora2 → consommateurs d'origine (nœud 4, cache Qwen-Image 2.1)
     loras = [nid for nid, n in wf.items() if n["class_type"] == "LoraLoaderModelOnly"]
     assert len(loras) == n_loras
     if n_loras:
@@ -74,20 +76,20 @@ def test_reference_slots_and_lora_chain(n_refs: int, n_loras: int) -> None:
             "model": ["1", 0],
         }
         assert wf[second]["inputs"] == {"lora_name": "aiko-v3.safetensors", "strength_model": 0.9, "model": [first, 0]}
-        assert wf["5"]["inputs"]["model"] == [second, 0]
+        assert wf["4"]["inputs"]["model"] == [second, 0]
         assert _links_to(wf, "1") == [(first, "model")]
     else:
-        assert wf["5"]["inputs"]["model"] == ["1", 0]
+        assert wf["4"]["inputs"]["model"] == ["1", 0]
     assert [lo.name for lo in built.loras] == [lo.name for lo in LORAS[:n_loras]]
 
     json.dumps(wf)  # sérialisable pour /prompt
-    assert EDIT.workflow["5"]["inputs"]["model"] == ["1", 0]  # le preset chargé n'est pas modifié
+    assert loaded.workflow["4"]["inputs"]["model"] == ["1", 0]  # le preset chargé n'est pas modifié
 
 
 def test_base_preset_supports_loras_but_no_references() -> None:
     built = build_workflow(BASE, PARAMS, loras=LORAS[:1])
     lora = next(nid for nid, n in built.workflow.items() if n["class_type"] == "LoraLoaderModelOnly")
-    assert built.workflow["5"]["inputs"]["model"] == [lora, 0]
+    assert built.workflow["4"]["inputs"]["model"] == [lora, 0]
     with pytest.raises(PresetError, match="au plus 0 image"):
         build_workflow(BASE, PARAMS, reference_images=["x.png"])
 
@@ -114,7 +116,7 @@ def test_lora_chain_with_clip() -> None:
     first, second = [nid for nid, n in wf.items() if n["class_type"] == "LoraLoader"]
     assert wf[first]["inputs"]["clip"] == ["2", 0] and wf[first]["inputs"]["strength_clip"] == 0.7
     assert wf[second]["inputs"]["clip"] == [first, 1]
-    assert wf["6"]["inputs"]["clip"] == [second, 1] and wf["7"]["inputs"]["clip"] == [second, 1]
+    assert wf["6"]["inputs"]["clip"] == [second, 1]
 
 
 @pytest.fixture
@@ -139,3 +141,6 @@ def test_invalid_reference_slot_and_chain_are_reported(presets_copy: Path) -> No
     assert "lora_chain.model_from : nœud 77 absent" in msg
     # le défaut « avec références » pointe vers un workflow écarté → signalé, ignoré
     assert reg.defaults is not None and reg.defaults.workflow_with_references is None
+    # le workflow Qualité qui l'appariait reste chargé, avec un avertissement (pas de repli)
+    assert reg.workflow("qwen-image-base").preset.with_references == "qwen-image-edit-ref"
+    assert any(i.file.endswith("qwen-image-base.yaml") and "with_references" in i.message for i in reg.issues)

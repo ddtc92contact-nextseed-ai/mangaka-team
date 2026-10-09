@@ -28,10 +28,13 @@ from .base import (
     ImageRef,
     ProgressFn,
     StopFn,
+    describe_prompt_error,
     images_from_history,
 )
 
 log = logging.getLogger("mangaka_engine")
+
+OBJECT_INFO_TIMEOUT_S = 60.0
 
 
 class WebSocketLike(Protocol):
@@ -116,15 +119,30 @@ class HttpComfyUIClient:
             queue_pending=len(q.get("queue_pending", []) or []),
         )
 
+    def _get_dict(self, path: str, timeout_s: float | None = None) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {"timeout": timeout_s} if timeout_s is not None else {}
+        resp = self._request("GET", path, **kwargs)
+        if resp.status_code != 200:
+            raise ComfyUIError(f"HTTP {resp.status_code} sur {path}")
+        data = self._json(resp)
+        if not isinstance(data, dict):
+            raise ComfyUIError(f"réponse ComfyUI inattendue sur {path}")
+        return data
+
+    def system_stats(self) -> dict[str, Any]:
+        return self._get_dict("/system_stats")
+
+    def object_info(self) -> dict[str, Any]:
+        # Plusieurs Mo (toutes les classes de nœuds et leurs listes de fichiers) : délai plus large.
+        return self._get_dict("/object_info", timeout_s=OBJECT_INFO_TIMEOUT_S)
+
     def queue_prompt(self, workflow: dict[str, Any]) -> str:
         resp = self._request("POST", "/prompt", json={"prompt": workflow, "client_id": self.client_id})
         data = self._json(resp)
         if resp.status_code != 200:
-            err = data.get("error") if isinstance(data, dict) else None
-            message = err.get("message") if isinstance(err, dict) else None
             node_errors = data.get("node_errors") if isinstance(data, dict) else None
             raise ComfyUIWorkflowError(
-                f"workflow refusé par ComfyUI : {message or f'HTTP {resp.status_code}'}", node_errors
+                f"workflow refusé par ComfyUI : {describe_prompt_error(data, resp.status_code)}", node_errors
             )
         prompt_id = data.get("prompt_id") if isinstance(data, dict) else None
         if not isinstance(prompt_id, str):

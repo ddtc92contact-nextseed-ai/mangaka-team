@@ -1,17 +1,20 @@
-# Workflow texte → image de base (Qwen-Image 2.1, encodeur Qwen3-VL 8B).
-# Le JSON est exporté depuis ComfyUI via « Save (API Format) ».
-# Voir presets/README.md pour le fonctionnement du mapping.
+# Qwen-Image 2.1 · Qualité — texte → image (bf16).
+# JSON au format API, construit d'après le workflow de référence de la GX10
+# (~/ComfyUI/user/default/workflows/image_qwen_image_2_1_image_edit.json, sous-graphe
+# « Image Edit (Qwen Image 2.1) ») : mêmes chargeurs, mêmes options, même échantillonneur.
+# Voir presets/README.md (paliers Qualité / Rapide, ré-export).
 id: qwen-image-base
-name: Qwen-Image 2.1 — texte → image
+name: "Qwen-Image 2.1 · Qualité — texte → image"
 description: >-
-  Génération d'une case à partir du prompt final, sans image de référence
-  (LoRA de style et d'identité possibles).
+  Palier Qualité : modèle et encodeur bf16, 50 étapes. Case générée à partir du prompt final, sans image de référence (LoRA de style et d'identité possibles).
 workflow_file: qwen-image-base.json
 output_node: "11"
-timeout_s: 600   # au-delà, la génération est interrompue et le job passe en échec
+timeout_s: 1200   # au-delà, la génération est interrompue et le job passe en échec
+with_references: qwen-image-edit-ref   # cases avec images de référence
 mapping:
-  positive_prompt: { node: "6", input: text }
-  negative_prompt: { node: "7", input: text }
+  # TextEncodeQwenImage21 encode les deux prompts : sorties 0 (positif) et 1 (négatif).
+  positive_prompt: { node: "6", input: prompt }
+  negative_prompt: { node: "6", input: negative_prompt }
   seed: { node: "9", input: seed }
   steps: { node: "9", input: steps }
   cfg: { node: "9", input: cfg }
@@ -19,7 +22,7 @@ mapping:
   height: { node: "8", input: height }
   filename_prefix: { node: "11", input: filename_prefix }
 # LoRA (style de la série puis identité de chaque personnage) chaînés après le modèle :
-# chaque LoRA devient un nœud `class_type` inséré entre le nœud 1 et ses consommateurs.
+# chaque LoRA devient un nœud `class_type` inséré entre le nœud 1 (UNETLoader) et le cache (nœud 4).
 lora_chain:
   class_type: LoraLoaderModelOnly
   model_from: { node: "1", output: 0 }
@@ -27,9 +30,19 @@ lora_chain:
   name_input: lora_name
   strength_input: strength_model
 defaults:
+  # cfg 1 = chemin officiel de Qwen-Image 2.1 : le prompt négatif est alors ignoré par le modèle.
   negative_prompt: "texte, lettres, bulles, filigrane, signature, flou, mains déformées"
-  steps: 20
-  cfg: 2.5
-  width: 1328
-  height: 1328
+  steps: 50
+  cfg: 1
+  width: 1024
+  height: 1024
   filename_prefix: mangaka/case
+# « Générer une case d'essai » (tableau de bord) : petite image, peu d'étapes.
+trial:
+  positive_prompt: >-
+    manga panel, black and white ink, screentone shading, a young swordswoman standing on a
+    rooftop at dusk, wind in her hair, dynamic angle
+  width: 512
+  height: 512
+  steps: 12
+  filename_prefix: mangaka/essai

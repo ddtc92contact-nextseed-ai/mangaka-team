@@ -11,7 +11,7 @@ Après modification d'un preset, redémarre le moteur (`npm run dev`).
 
 | Fichier | Rôle |
 | --- | --- |
-| `defaults.yaml` | Format de page et workflow appliqués aux nouvelles séries ; workflow choisi quand une case a des images de référence (`workflow_with_references`) |
+| `defaults.yaml` | Format de page et workflow appliqués aux nouvelles séries (palier **Qualité**) ; workflow « avec références » de repli pour un preset qui ne déclare pas `with_references` (`workflow_with_references`) |
 | `providers.yaml` | Paramètres des fournisseurs (URL, modèle LLM, timeouts). **Aucune clé d'API ici** : elles vont dans `.env` |
 | `page_formats/*.yaml` | Formats de page (dimensions en mm, DPI, marges, gouttières) : A4 (défaut) et B4 JIS à 300 DPI |
 | `layout.yaml` | Découpage : taille mini d'une case, taille cible de génération, zones de bulles |
@@ -86,38 +86,92 @@ reference_images: []                  # emplacements d'images de référence (vo
 lora_chain: { … }                     # point d'insertion des LoRA (voir plus bas)
 ```
 
-### Mapping des nœuds (`qwen-image-base`)
+### Mapping des nœuds (presets Qwen-Image 2.1)
+
+Les quatre presets livrés partagent le même graphe et les mêmes numéros de nœuds :
 
 | Paramètre | Nœud | Type ComfyUI | Entrée | Obligatoire |
 | --- | --- | --- | --- | --- |
-| `positive_prompt` | `6` | `CLIPTextEncode` | `text` | oui |
-| `negative_prompt` | `7` | `CLIPTextEncode` | `text` | oui (défaut fourni) |
+| `positive_prompt` | `6` | `TextEncodeQwenImage21` | `prompt` | oui |
+| `negative_prompt` | `6` | `TextEncodeQwenImage21` | `negative_prompt` | oui (défaut fourni) |
 | `seed` | `9` | `KSampler` | `seed` | oui (tirée au hasard puis enregistrée si absente) |
 | `steps` | `9` | `KSampler` | `steps` | non |
 | `cfg` | `9` | `KSampler` | `cfg` | non |
-| `width` | `8` | `EmptySD3LatentImage` | `width` | oui |
-| `height` | `8` | `EmptySD3LatentImage` | `height` | oui |
+| `width` | `8` | `EmptyLatentImage` | `width` | oui |
+| `height` | `8` | `EmptyLatentImage` | `height` | oui |
 | `filename_prefix` | `11` | `SaveImage` | `filename_prefix` | non |
+
+Graphe : `1 UNETLoader` → `4 QwenImage21Cache` → `9 KSampler` ; `2 CLIPLoader` (`type: qwen_image`) →
+`6 TextEncodeQwenImage21` (sorties 0 = positif, 1 = négatif ; `vae` = `3 VAELoader`) ; `8 EmptyLatentImage` →
+`9` → `10 VAEDecode` → `11 SaveImage`. `cfg: 1` est le chemin officiel de Qwen-Image 2.1 : à cfg 1 le prompt
+négatif est ignoré par le modèle (le monter n'a de sens qu'avec un prompt négatif utile, et double le coût).
 
 Règles vérifiées au chargement :
 
 - `positive_prompt`, `negative_prompt`, `seed`, `width`, `height` doivent être mappés ;
 - chaque `node` doit exister dans le JSON et posséder l'entrée `input` ;
 - `output_node` doit exister ;
-- chaque clé de `defaults` doit être mappée.
+- chaque clé de `defaults` et de `trial` doit être mappée ;
+- `with_references` doit désigner un workflow chargé qui a des emplacements de référence (sinon
+  avertissement dans `GET /presets`, et les cases avec références de ce palier échouent avec un
+  message clair : jamais de repli sur un autre palier).
 
 Les noms de fichiers de modèles (`unet_name`, `clip_name`, `vae_name`) vivent
-**uniquement** dans le JSON : adapte-les aux fichiers présents dans
-`ComfyUI/models/` sur le GX10. Le code Python ne connaît aucun nom de modèle.
+**uniquement** dans le JSON. Le code Python ne connaît aucun nom de modèle.
+
+### Fichiers de la GX10 et paliers Qualité / Rapide
+
+Fichiers installés dans `~/ComfyUI/models/` (liens vers le disque T9) et utilisés par les presets :
+
+| Dossier | Qualité | Rapide |
+| --- | --- | --- |
+| `diffusion_models/` | `qwen_image_2.1_bf16.safetensors` (14,2 Go) | `qwen_image_2.1_int8_convrot.safetensors` (7,3 Go) |
+| `text_encoders/` | `qwen3vl_8b_bf16.safetensors` (17,5 Go) | `qwen3vl_8b_int8_convrot.safetensors` (9,4 Go) |
+| `vae/` | `qwen_image_2.1_vae_bf16.safetensors` | idem |
+
+Les fichiers int8 « convrot » se chargent avec les nœuds standard (`UNETLoader` `weight_dtype: default`,
+`CLIPLoader` `type: qwen_image`), comme dans le workflow de référence du manager
+(`~/ComfyUI/user/default/workflows/image_qwen_image_2_1_image_edit.json`).
+
+| Preset | Palier | Usage | Étapes | Délai max |
+| --- | --- | --- | --- | --- |
+| `qwen-image-base` | Qualité (défaut des séries) | texte → image | 50 | 20 min |
+| `qwen-image-edit-ref` | Qualité | avec images de référence | 50 | 25 min |
+| `qwen-image-base-rapide` | Rapide | texte → image | 25 | 10 min |
+| `qwen-image-edit-ref-rapide` | Rapide | avec images de référence | 25 | 15 min |
+
+Le palier se choisit avec le **workflow de la série** (liste « Workflow ComfyUI » de la fiche série).
+Chaque preset texte → image déclare son pendant « avec références » du même palier :
+
+```yaml
+with_references: qwen-image-edit-ref-rapide   # dans qwen-image-base-rapide.yaml
+```
+
+Une case dont un personnage a une planche de référence prend donc `qwen-image-edit-ref-rapide` dans une
+série Rapide, `qwen-image-edit-ref` dans une série Qualité. `defaults.yaml → workflow_with_references`
+ne sert plus qu'aux presets sans `with_references`. La taille de génération reste celle de la mise en page
+(≈ 1 Mpx, `layout.yaml`) pour les deux paliers.
+
+### Case d'essai (`trial`)
+
+Le bloc `trial` d'un preset donne les paramètres de « Générer une case d'essai » (tableau de bord) :
+prompt d'essai, petite taille, peu d'étapes. Une seule vraie génération, qui passe par la file ComfyUI ;
+l'image et sa durée en secondes s'affichent sous le bouton.
+
+### Tester la connexion
+
+`GET /comfyui/check` (bouton « Tester la connexion » du tableau de bord) interroge `/system_stats` et
+`/object_info` du vrai ComfyUI et liste, par preset : les nœuds inconnus (« nœud inconnu : … ») et les
+valeurs fixes absentes des listes de ComfyUI (« modèle introuvable dans ComfyUI : … », encodeur, VAE,
+échantillonneur…), puis les LoRA saisis dans les séries et les fiches absents de `models/loras/`.
+Avec `COMFYUI_PROVIDER=mock`, il répond « ComfyUI simulé ».
 
 ## Images de référence et LoRA (étape 3)
 
-Deux workflows sont livrés :
-
-| Preset | Usage | Emplacements de référence | LoRA |
-| --- | --- | --- | --- |
-| `qwen-image-base` | texte → image (workflow de la série par défaut) | 0 | oui |
-| `qwen-image-edit-ref` | Qwen-Image 2.1 guidé par des images de référence (l'édition est intégrée au modèle 2.1, pas de modèle « edit » séparé) — choisi automatiquement quand un personnage de la case a une planche de référence | 3 | oui |
+Les quatre presets acceptent des LoRA ; les deux presets « avec images de référence » ont 3 emplacements
+(Qwen-Image 2.1 : l'édition / la référence est intégrée au modèle, pas de modèle « edit » séparé). Ils sont
+choisis automatiquement (selon le palier de la série) quand un personnage de la case a une planche de
+référence.
 
 ### Emplacements de référence (`reference_images`)
 
@@ -125,9 +179,10 @@ Liste **ordonnée** d'emplacements, chacun étant un nœud qui charge une image 
 
 ```yaml
 reference_images:
-  - { node: "20", input: image, remove: ["21"] }   # 1er emplacement
-  - { node: "22", input: image, remove: ["23"] }
-  - { node: "24", input: image, remove: ["25"] }
+  - { node: "20", input: image }   # 1er emplacement → images.image_1 de l'encodeur (nœud 6)
+  - { node: "21", input: image }
+  - { node: "22", input: image }
+  # avec un redimensionnement propre à l'emplacement : { node: "20", input: image, remove: ["30"] }
 ```
 
 - Le moteur envoie les images de référence des personnages de la case à ComfyUI
@@ -136,8 +191,9 @@ reference_images:
   case), puis 2e image de chacun, etc., jusqu'à remplir les emplacements.
 - Un emplacement **inutilisé est retiré** : son nœud et ceux listés dans `remove` (ex. son
   redimensionnement) sont supprimés, puis toute entrée d'un autre nœud qui pointait vers un nœud
-  retiré est effacée. Exemple : avec une seule référence, `image2`/`image3` disparaissent des
-  encodeurs `TextEncodeQwenImageEditPlus` (entrées optionnelles).
+  retiré est effacée. Exemple : avec une seule référence, `images.image_2`/`images.image_3` disparaissent
+  de l'encodeur `TextEncodeQwenImage21` (entrées optionnelles). L'encodeur redimensionne lui-même les
+  références (`resolution: 1024`), d'où l'absence de nœud de redimensionnement.
 - `remove` doit donc lister **tous** les nœuds propres à l'emplacement : une entrée obligatoire
   qui pointerait encore vers un nœud retiré ferait refuser le workflow par ComfyUI.
 - Vérifié au chargement : chaque nœud existe, l'entrée existe, et aucun nœud mappé (prompt,
@@ -164,7 +220,7 @@ LoRA appliqués, dans l'ordre : **LoRA de style de la série** puis **LoRA d'ide
 personnage** de la case (nom de fichier + poids saisis dans la série / la fiche). Chaque LoRA
 devient un nœud `class_type` (identifiant numérique après le plus grand du JSON) :
 `model_from → LoRA 1 → LoRA 2 → …`, et tous les nœuds qui consommaient `model_from` (ici le nœud
-`5`, `ModelSamplingAuraFlow`) reçoivent la sortie du dernier LoRA. Sans LoRA, le workflow est
+`4`, `QwenImage21Cache`) reçoivent la sortie du dernier LoRA. Sans LoRA, le workflow est
 inchangé. Un preset sans `lora_chain` refuse une génération qui demande des LoRA (message lisible).
 
 Les fichiers LoRA vont dans `ComfyUI/models/loras/` ; le nom saisi doit être exactement celui que
@@ -172,23 +228,26 @@ ComfyUI liste (sous-dossier compris, ex. `mangaka/aiko-v3.safetensors`).
 
 ### Ré-exporter un workflow depuis ComfyUI
 
-Les JSON livrés sont une base « au mieux » : les noms de nœuds et de modèles dépendent de ta
-version de ComfyUI et des fichiers présents sur le GX10. Pour les remplacer par ton workflow :
+Les JSON livrés ont été construits d'après le sous-graphe « Image Edit (Qwen Image 2.1) » du workflow de
+référence de la GX10, puis validés contre le ComfyUI 0.37 de la machine. Pour repartir d'un export :
 
-1. Ouvre le workflow dans ComfyUI, vérifie qu'il tourne (avec 3 `LoadImage` de référence pour
-   `qwen-image-edit-ref`), puis exporte-le au **format API** (« Save (API Format) »).
-2. Remplace `presets/workflows/<id>.json` par ce fichier.
+1. Ouvre le workflow dans ComfyUI. S'il contient un **sous-graphe**, déplie-le (clic droit → « Unpack
+   subgraph ») : le format API exporte les nœuds réels. Vérifie qu'il tourne (avec 3 `LoadImage` branchés
+   sur `images.image_1…3` de `TextEncodeQwenImage21` pour les presets « avec références ») et retire les
+   LoRA (le moteur les insère).
+2. Exporte-le au **format API** (« Workflow → Export (API) », « Save (API Format) » selon les versions)
+   et remplace `presets/workflows/<id>.json`. Pour l'autre palier, change seulement `unet_name`,
+   `clip_name` et `steps` (le graphe doit rester identique : `test_workflow_golden.py` le vérifie).
 3. Dans `presets/workflows/<id>.yaml`, mets à jour les numéros de nœuds :
-   - `mapping` : nœuds du prompt positif/négatif (`text` pour `CLIPTextEncode`, `prompt` pour
-     `TextEncodeQwenImageEditPlus`), du `KSampler` (`seed`, `steps`, `cfg`), de la taille
-     (`EmptySD3LatentImage` ou équivalent) et du `SaveImage` (`filename_prefix`) ;
+   - `mapping` : prompts (`prompt` / `negative_prompt` de `TextEncodeQwenImage21`), `KSampler`
+     (`seed`, `steps`, `cfg`), taille (`EmptyLatentImage`) et `SaveImage` (`filename_prefix`) ;
    - `output_node` : le `SaveImage` ;
-   - `reference_images` : les `LoadImage` dans l'ordre, avec dans `remove` les nœuds qui ne
-     servent qu'à cet emplacement ;
-   - `lora_chain.model_from` : la sortie du chargeur de modèle (`UNETLoader`), **sans** LoRA dans
-     le JSON exporté (le moteur les insère lui-même).
-4. Redémarre le moteur : `GET /presets` (et `GET /presets/workflows`) affiche les erreurs de
-   mapping éventuelles ; puis lance une case de test.
+   - `reference_images` : les `LoadImage` dans l'ordre, avec dans `remove` les nœuds qui ne servent
+     qu'à cet emplacement ;
+   - `lora_chain.model_from` : la sortie du chargeur de modèle (`UNETLoader`).
+4. Redémarre le moteur : `GET /presets` affiche les erreurs de mapping éventuelles ; puis « Tester la
+   connexion » et « Générer une case d'essai » sur le tableau de bord.
+5. Régénère les JSON de référence des tests : `UPDATE_GOLDEN=1 npm run test:engine`, relis le diff.
 
 ## Prompt final des cases (`image_prompt.yaml`)
 
