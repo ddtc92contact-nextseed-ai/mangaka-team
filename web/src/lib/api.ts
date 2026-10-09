@@ -287,7 +287,143 @@ export interface PanelImage {
   qc_verdict: QCVerdict | null;
   qc: QCDetails;
   detections: Detections | null;
+  /** Jugement humain bonne / mauvaise (banc d'essai du QC), indépendant du verdict QC. */
+  annotation: Annotation | null;
   created_at: string;
+}
+
+export type AnnotationLabel = "good" | "bad";
+export type DefectId = "face" | "hands" | "identity" | "description" | "text" | "other";
+
+export interface Annotation {
+  label: AnnotationLabel;
+  defects: DefectId[];
+  note: string;
+  updated_at: string;
+}
+
+export type AnnotationInput = Pick<Annotation, "label" | "defects" | "note">;
+
+export type BenchLayerName = QCLayerName | "combined";
+
+export interface BenchDataset {
+  good: number;
+  bad: number;
+  total: number;
+  by_defect: Record<DefectId, number>;
+  goal_min: number | null;
+  goal_max: number | null;
+  target_recall: number | null;
+}
+
+export interface BenchConfusion {
+  tp: number;
+  fp: number;
+  fn: number;
+  tn: number;
+}
+
+export interface BenchPoint extends BenchConfusion {
+  threshold: number;
+  precision: number | null;
+  recall: number | null;
+}
+
+export interface BenchLayerMetrics {
+  label: string;
+  evaluated: number;
+  missing: number;
+  good: number;
+  bad: number;
+  confusion: BenchConfusion;
+  precision: number | null;
+  recall: number | null;
+  current_threshold: number | null;
+  threshold_key: string | null;
+  sweep: BenchPoint[];
+  suggested: BenchPoint | null;
+  suggestion_note: string | null;
+  mean_ms: number | null;
+}
+
+export interface BenchMetrics {
+  target_recall: number;
+  samples: number;
+  good: number;
+  bad: number;
+  errors: number;
+  mean_ms_per_case: number | null;
+  layers: Record<BenchLayerName, BenchLayerMetrics>;
+}
+
+export interface BenchItemLayer {
+  status: QCLayer["status"];
+  score: number | null;
+  value: number | null;
+  floor: boolean;
+  flagged: boolean | null;
+  duration_ms: number;
+  message: string | null;
+  reasons: string[];
+  verdict?: QCVerdict | null;
+  vision_used?: boolean;
+}
+
+export interface BenchItem {
+  image_id: number;
+  panel_id: number;
+  page_id: number;
+  chapter_id: number;
+  project_id: number;
+  label: string;
+  bad: boolean;
+  defects: DefectId[];
+  note: string;
+  layers: Partial<Record<BenchLayerName, BenchItemLayer>>;
+  error: string | null;
+}
+
+export interface BenchRunSummary {
+  id: number;
+  job: Job | null;
+  status: JobStatus;
+  error: string | null;
+  project_id: number | null;
+  chapter_id: number | null;
+  scope: string;
+  vision: boolean;
+  preset_hash: string | null;
+  sample_count: number;
+  good: number | null;
+  bad: number | null;
+  created_at: string;
+  finished_at: string | null;
+  applied_at: string | null;
+  layers: Partial<
+    Record<BenchLayerName, { label: string; precision: number | null; recall: number | null; fp: number; fn: number; evaluated: number; mean_ms: number | null }>
+  >;
+}
+
+export interface BenchRun extends BenchRunSummary {
+  metrics: BenchMetrics | null;
+  items: BenchItem[];
+  preset: Record<string, unknown>;
+  previous: BenchRunSummary | null;
+  current_preset_hash: string | null;
+}
+
+export interface BenchChange {
+  key: string;
+  label: string;
+  before: number;
+  after: number;
+}
+
+export interface BenchApplyResult {
+  applied: boolean;
+  changes: BenchChange[];
+  preset_changed: boolean;
+  message: string;
 }
 
 /** Détail d'une case pour l'atelier. */
@@ -654,10 +790,34 @@ export const api = {
   chapterQC: (id: number) => request<QCSummary>(`/chapters/${id}/qc`),
   overrideQC: (imageId: number, note?: string) =>
     request<PanelImage>(`/panel-images/${imageId}/qc/override`, json("POST", note ? { note } : {})),
+
+  annotate: (imageId: number, body: AnnotationInput) =>
+    request<Annotation>(`/panel-images/${imageId}/annotation`, json("PUT", body)),
+  deleteAnnotation: (imageId: number) => request<void>(`/panel-images/${imageId}/annotation`, { method: "DELETE" }),
+  benchDataset: (scope: BenchScope = {}) => request<BenchDataset>(`/qc/bench/dataset${scopeQuery(scope)}`),
+  benchRuns: () => request<BenchRunSummary[]>("/qc/bench/runs"),
+  benchRun: (id: number) => request<BenchRun>(`/qc/bench/runs/${id}`),
+  startBenchRun: (body: BenchScope & { vision?: boolean }) => request<BenchRunSummary>("/qc/bench/runs", json("POST", body)),
+  applyBenchThresholds: (id: number, confirm: boolean) =>
+    request<BenchApplyResult>(`/qc/bench/runs/${id}/apply`, json("POST", { confirm })),
+  benchExportUrl: (id: number, format: "json" | "csv") => engineUrl(`/qc/bench/runs/${id}/export?format=${format}`),
 };
 
 /** Lien de téléchargement du ZIP d'un export de chapitre terminé. */
 export const exportFileUrl = (jobId: number) => engineUrl(`/exports/${jobId}/file`);
+
+export interface BenchScope {
+  project_id?: number | null;
+  chapter_id?: number | null;
+}
+
+function scopeQuery(scope: BenchScope): string {
+  const q = new URLSearchParams();
+  if (scope.project_id) q.set("project_id", String(scope.project_id));
+  if (scope.chapter_id) q.set("chapter_id", String(scope.chapter_id));
+  const s = q.toString();
+  return s ? `?${s}` : "";
+}
 
 export function errorMessage(err: unknown): string {
   if (err instanceof EngineError) return err.offline ? "Moteur hors ligne" : err.message;

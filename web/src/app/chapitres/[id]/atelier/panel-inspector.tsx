@@ -1,11 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import { AnnotationBar } from "@/components/annotation";
 import { useQueue } from "@/components/queue";
 import { Alert, Button, Field, Input, Loading, ProgressBar, Select, Textarea } from "@/components/ui";
 import {
   api,
   fullErrorMessage,
+  type Annotation,
   type GenerateInput,
   type PanelImage,
   type QCStatus,
@@ -28,6 +30,8 @@ export function PanelInspector({
   refreshKey,
   onClose,
   onChanged,
+  onPrev,
+  onNext,
 }: {
   panelId: number;
   view: PanelView | null;
@@ -36,6 +40,9 @@ export function PanelInspector({
   refreshKey: number;
   onClose: () => void;
   onChanged: () => void;
+  /** Case précédente / suivante ayant une version (annotation rapide au clavier). */
+  onPrev?: () => void;
+  onNext?: () => void;
 }) {
   const detail = useEngineData(() => api.getPanel(panelId), [panelId, refreshKey]);
   const { refresh, cancel } = useQueue();
@@ -127,6 +134,12 @@ export function PanelInspector({
       onChanged();
       setNotice("Version validée à la main (décision tracée dans le QC).");
     });
+
+  function annotated(imageId: number, annotation: Annotation | null) {
+    detail.setData((cur) =>
+      cur ? { ...cur, images: cur.images.map((i) => (i.id === imageId ? { ...i, annotation } : i)) } : cur,
+    );
+  }
 
   const qcImage = chosen ?? (d?.images.length ? d.images[d.images.length - 1] : null);
 
@@ -334,6 +347,8 @@ export function PanelInspector({
             </Button>
           </div>
 
+          {qcImage && <AnnotationBar image={qcImage} onChange={annotated} keyboard onPrev={onPrev} onNext={onNext} />}
+
           <PanelQC
             image={qcImage}
             job={view?.qc ?? null}
@@ -347,7 +362,7 @@ export function PanelInspector({
             <h3 className="text-sm font-medium text-zinc-300">
               Versions <span className="text-zinc-500">({d.images.length})</span>
             </h3>
-            <VersionsStrip images={d.images} onSelect={selectImage} onDelete={deleteImage} />
+            <VersionsStrip images={d.images} onSelect={selectImage} onDelete={deleteImage} onAnnotated={annotated} />
           </div>
         </div>
       ) : null}

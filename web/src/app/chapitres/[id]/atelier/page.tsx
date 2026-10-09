@@ -148,6 +148,11 @@ function Workshop() {
   const at = browsable.indexOf(page);
   const prev = at >= 0 ? browsable[at - 1] : list[index - 1];
   const next = at >= 0 ? browsable[at + 1] : list[index + 1];
+  // Annotation rapide : ← / → passent à la case précédente / suivante qui a une version (toutes pages).
+  const annotatable = list.flatMap((p) => p.panels.filter((pa) => pa.image_count > 0).map((pa) => ({ pageId: p.id, panelId: pa.id })));
+  const at2 = annotatable.findIndex((x) => x.panelId === openPanelId);
+  const prevPanel = at2 > 0 ? annotatable[at2 - 1] : null;
+  const nextPanel = at2 >= 0 && at2 < annotatable.length - 1 ? annotatable[at2 + 1] : null;
   const missing = missingPanels([page]).length;
   const done = page.panels.filter((p) => p.selected_image_id !== null).length;
 
@@ -284,6 +289,8 @@ function Workshop() {
                 pages.reload();
                 jobs.reload();
               }}
+              onPrev={prevPanel ? () => navigate(prevPanel.pageId, prevPanel.panelId) : undefined}
+              onNext={nextPanel ? () => navigate(nextPanel.pageId, nextPanel.panelId) : undefined}
             />
           </div>
         )}

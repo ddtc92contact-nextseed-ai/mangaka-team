@@ -290,6 +290,8 @@ class PanelImageOut(BaseModel):
     qc: dict[str, Any] = Field(default_factory=dict)
     # Boîtes détectées en px de l'image : {"width", "height", "faces": [...], "hands": [...], "text": [...]}.
     detections: dict[str, Any] | None = None
+    # Jugement humain « bonne / mauvaise » (banc d'essai du QC), indépendant du verdict QC.
+    annotation: AnnotationOut | None = None
     created_at: datetime
 
 
@@ -476,3 +478,81 @@ class CharacterOut(BaseModel):
     reference_images: list[ReferenceImageOut]
     created_at: datetime
     updated_at: datetime
+
+
+# --- Banc d'essai du QC -----------------------------------------------------------
+AnnotationLabelName = Literal["good", "bad"]
+DefectName = Literal["face", "hands", "identity", "description", "text", "other"]
+
+
+class AnnotationIn(_In):
+    label: AnnotationLabelName
+    defects: list[DefectName] = Field(default_factory=list, max_length=6)
+    note: Annotated[str, StringConstraints(strip_whitespace=True, max_length=1000)] = ""
+
+    @field_validator("defects")
+    @classmethod
+    def _unique(cls, value: list[str]) -> list[str]:
+        return list(dict.fromkeys(value))
+
+
+class AnnotationOut(BaseModel):
+    label: AnnotationLabelName
+    defects: list[str]
+    note: str
+    updated_at: datetime
+
+
+class BenchDatasetOut(BaseModel):
+    good: int
+    bad: int
+    total: int
+    by_defect: dict[str, int]
+    goal_min: int | None
+    goal_max: int | None
+    target_recall: float | None
+
+
+class BenchRunIn(_In):
+    project_id: int | None = None
+    chapter_id: int | None = None
+    vision: bool = True  # False : sans la couche vision (lente)
+
+
+class BenchRunOut(BaseModel):
+    id: int
+    job: JobOut | None
+    status: str  # pending | running | succeeded | failed | cancelled
+    error: str | None
+    project_id: int | None
+    chapter_id: int | None
+    scope: str
+    vision: bool
+    preset_hash: str | None
+    sample_count: int
+    good: int | None
+    bad: int | None
+    created_at: datetime
+    finished_at: datetime | None
+    applied_at: datetime | None
+    # Résumé par couche : précision, rappel, FP, FN, cases évaluées, temps moyen.
+    layers: dict[str, dict[str, Any]] = Field(default_factory=dict)
+
+
+class BenchRunDetailOut(BenchRunOut):
+    metrics: dict[str, Any] | None
+    items: list[dict[str, Any]]
+    preset: dict[str, Any]
+    previous: BenchRunOut | None
+    current_preset_hash: str | None
+
+
+class BenchApplyIn(_In):
+    confirm: bool = False  # False : aperçu des modifications, rien n'est écrit
+
+
+class BenchApplyOut(BaseModel):
+    applied: bool
+    changes: list[dict[str, Any]]
+    preset_changed: bool  # le preset a changé depuis ce run
+    message: str

@@ -1,7 +1,8 @@
 """Modèle de données SQLite (SQLAlchemy 2).
 
 Série (`Project`) → Character (+ images de référence)
-Série → Chapter → Page → Panel (+ versions d'image) → Bubble · Job.
+Série → Chapter → Page → Panel (+ versions d'image → annotation humaine) → Bubble · Job.
+Banc d'essai du QC : `QCBenchRun` (historique des mesures du QC sur les cases annotées).
 Les fichiers binaires (images) vivent dans `data/`, la base ne stocke que leurs chemins relatifs.
 """
 
@@ -254,6 +255,52 @@ class PanelImage(Base):
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
     panel: Mapped[Panel] = relationship(back_populates="images")
+    annotation: Mapped[PanelImageAnnotation | None] = relationship(
+        back_populates="image", cascade="all, delete-orphan", uselist=False
+    )
+
+
+class AnnotationLabel(enum.StrEnum):
+    good = "good"  # bonne
+    bad = "bad"  # mauvaise
+
+
+class PanelImageAnnotation(TimestampMixin, Base):
+    """Jugement humain d'une version (bonne / mauvaise), indépendant du verdict QC : vérité terrain du banc d'essai."""
+
+    __tablename__ = "panel_image_annotations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    image_id: Mapped[int] = mapped_column(ForeignKey("panel_images.id", ondelete="CASCADE"), unique=True, index=True)
+    label: Mapped[AnnotationLabel] = mapped_column(_enum(AnnotationLabel))
+    # Étiquettes de défaut facultatives (voir pipeline/qc_bench.py : DEFECTS).
+    defects: Mapped[list[str]] = mapped_column(JSON, default=list)
+    note: Mapped[str] = mapped_column(Text, default="")
+
+    image: Mapped[PanelImage] = relationship(back_populates="annotation")
+
+
+class QCBenchRun(Base):
+    """Un passage du banc d'essai : métriques par couche sur les cases annotées, avec le preset utilisé."""
+
+    __tablename__ = "qc_bench_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    job_id: Mapped[int | None] = mapped_column(ForeignKey("jobs.id", ondelete="SET NULL"), index=True)
+    # Filtre de l'ensemble annoté (None = toutes les séries / tous les chapitres).
+    project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="SET NULL"))
+    chapter_id: Mapped[int | None] = mapped_column(ForeignKey("chapters.id", ondelete="SET NULL"))
+    vision: Mapped[bool] = mapped_column(default=True)
+    # Version du preset qc.yaml utilisé : empreinte du fichier + valeurs validées.
+    preset_hash: Mapped[str | None] = mapped_column(String(64), default=None)
+    preset: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    sample_count: Mapped[int] = mapped_column(Integer, default=0)
+    # Résultats (None tant que le run n'est pas terminé) : métriques par couche + détail par case.
+    metrics: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
+    items: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    applied_at: Mapped[datetime | None] = mapped_column(default=None)  # seuils suggérés appliqués à qc.yaml
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(default=None)
 
 
 class Bubble(TimestampMixin, Base):
@@ -281,7 +328,7 @@ class Job(Base):
     project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     chapter_id: Mapped[int | None] = mapped_column(ForeignKey("chapters.id", ondelete="CASCADE"), index=True)
     panel_id: Mapped[int | None] = mapped_column(ForeignKey("panels.id", ondelete="CASCADE"), index=True)
-    step: Mapped[str] = mapped_column(String(30))  # script | layout | generation | qc | lettering
+    step: Mapped[str] = mapped_column(String(30))  # script | layout | generation | qc | qc_bench | lettering
     status: Mapped[JobStatus] = mapped_column(_enum(JobStatus), default=JobStatus.pending)
     progress: Mapped[int] = mapped_column(Integer, default=0)  # 0–100
     message: Mapped[str] = mapped_column(Text, default="")

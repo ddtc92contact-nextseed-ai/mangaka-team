@@ -200,6 +200,31 @@ statut, score, durée en ms, raisons ; source auto / manuelle / humaine ; histor
 États de case : `qc` pendant un contrôle, puis `approved` (QC ok) ou `flagged` (à revoir / rejet)
 d'après la version choisie.
 
+### Banc d'essai du QC
+
+Avant tout fine-tuning d'un modèle de vision, on **mesure** le QC sur ses propres cases annotées
+(50 à 100, objectif dans `qc.yaml` → `bench`). Dans l'atelier, chaque version s'annote « bonne » /
+« mauvaise » (+ défauts : visage raté, mains, perso pas reconnaissable, ne colle pas à la
+description, texte parasite, autre ; + note) — au clavier : **B** / **M**, **← / →** case
+précédente / suivante (dans la fenêtre d'une version : version précédente / suivante). L'annotation
+est indépendante du verdict QC.
+
+L'écran **Banc d'essai QC** (barre latérale) lance un job `qc_bench` (file de la génération : la
+vision ne tourne jamais pendant ComfyUI) qui fait tourner chaque couche seule (vision forcée), puis
+rejoue le verdict combiné comme le QC réel. Classe positive = **mauvaise case** : précision, rappel,
+faux positifs / négatifs, matrice de confusion, balayage de seuil 0–100 et seuil suggéré (rappel ≥
+`bench.target_recall` avec la meilleure précision ; à égalité, le plus proche du seuil actuel), temps
+moyen par case et par couche. Chaque run garde la version (empreinte) du preset utilisé.
+
+| Route | Rôle |
+| --- | --- |
+| `PUT /panel-images/{id}/annotation` | `{label: "good"\|"bad", defects?: [...], note?}` ; `DELETE` pour effacer. Aussi exposée dans chaque version (`annotation`). |
+| `GET /qc/bench/dataset` | `?project_id=&chapter_id=` → bonnes / mauvaises / par défaut + objectif. |
+| `POST /qc/bench/runs` | `{project_id?, chapter_id?, vision?: true}` → `202` + run (job SSE). `422` sans case annotée, `409` si un banc tourne déjà. |
+| `GET /qc/bench/runs`, `GET /qc/bench/runs/{id}` | Historique ; détail (métriques par couche, balayage, cases, run précédent). |
+| `GET /qc/bench/runs/{id}/export?format=json\|csv` | Export du run (CSV séparé par « ; », UTF-8 avec BOM). |
+| `POST /qc/bench/runs/{id}/apply` | `{confirm: false}` = aperçu ; `{confirm: true}` écrit `presets/qc.yaml` (`verdict.ok_min`, `identity.min_similarity`), revalidé puis rechargé. |
+
 En mode mock, ComfyUI factice renvoie une image de la taille demandée avec « CASE n », la seed et
 la taille dessinées dessus, après une progression factice (`MOCK_COMFYUI_SECONDS`).
 
