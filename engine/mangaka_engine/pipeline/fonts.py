@@ -1,7 +1,9 @@
 """Polices du lettrage : instances statiques des polices variables, mesures, sous-ensembles SVG.
 
-Chaque style (type de bulle) vise une police du preset `fonts.yaml` et, pour une police variable,
-une graisse. On en tire une police **statique** (fontTools `instancer`) renommée `mk-<police>-<graisse>` :
+Chaque style (type de bulle) vise une police du preset `fonts.yaml` et une graisse : pour une police
+variable, l'instance de cette graisse ; pour une famille statique (ex. Comic Neue), son fichier gras
+(graisse ≥ 600) et/ou italique. On en tire une police **statique** (fontTools `instancer`) renommée
+`mk-<police>-<graisse>[-italic]` :
 la même police sert à mesurer, à dessiner le PNG (Pillow / FreeType, mise en page « basic », donc
 déterministe) et, réduite aux caractères utilisés, à l'embarquer dans le SVG exporté. Le nouveau nom
 respecte la clause 3 de l'OFL (pas de nom réservé sur une version modifiée).
@@ -33,8 +35,8 @@ def pt_to_px(pt: float, dpi: int) -> float:
     return pt / PT_PER_INCH * dpi
 
 
-def family_name(font_id: str, weight: int | None) -> str:
-    return f"mk-{font_id}" + (f"-{weight}" if weight else "")
+def family_name(font_id: str, weight: int | None, italic: bool = False) -> str:
+    return f"mk-{font_id}" + (f"-{weight}" if weight else "") + ("-italic" if italic else "")
 
 
 _lock = threading.Lock()
@@ -85,10 +87,14 @@ class FontBook:
         return self.preset.styles[kind]
 
     def family(self, style: TextStyle) -> str:
-        return family_name(style.font, style.weight)
+        return family_name(style.font, style.weight, style.italic)
+
+    def name(self, style: TextStyle) -> str:
+        """Nom d'affichage de la police (« Comic Neue »…)."""
+        return self.preset.fonts[style.font].name
 
     def data(self, style: TextStyle) -> bytes:
-        path: Path = self.presets.font_path(style.font)
+        path: Path = self.presets.font_path(style.font, style.weight, style.italic)
         return _static_font(str(path), style.weight, self.family(style))
 
     def pil(self, style: TextStyle, size_px: float) -> ImageFont.FreeTypeFont:
