@@ -52,6 +52,9 @@ user: |
     d'action ou de surprise, « calme » pour un moment posé ; la mise en page y place biais et grandes cases ;
   - « rythme » d'une page (facultatif) vaut l'une de ces valeurs : $rythmes — « rapide » pour une
     page d'action, « lent » pour une page d'ambiance ;
+  - « sfx » d'une case (facultatif) : onomatopées en lettrage hors bulle (« VROUM ! », « CLIC », « BIIIP ! »),
+    chacune avec « text » (court, en majuscules) et « intensity » ($intensities) ; jamais dans « description » :
+    le dessinateur ne dessine aucun texte, le lettreur les pose ;
   - « characters » liste les noms des personnages visibles dans la case ;
   - répliques courtes, en français, comme dans un vrai manga ;
   - « summary » : résumé du chapitre en 3 à 6 phrases, pour assurer la continuité des chapitres suivants.
@@ -59,7 +62,8 @@ user: |
   Format de réponse :
   {"pages": [{"rythme": "normal", "panels": [{"description": "…", "characters": ["…"],
      "shot_type": "plan moyen", "importance": 2, "intensity": "normal",
-     "dialogues": [{"speaker": "…", "text": "…", "kind": "speech"}]}]}],
+     "dialogues": [{"speaker": "…", "text": "…", "kind": "speech"}],
+     "sfx": [{"text": "VROUM !", "intensity": "choc"}]}]}],
    "summary": "…"}
 
   <contexte>

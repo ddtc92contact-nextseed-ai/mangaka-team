@@ -346,6 +346,42 @@ class RythmeRule(_Strict):
     size_contrast: float = Field(gt=0, le=10, description="Multiplie le contraste des tailles de case")
 
 
+class FrameRule(_Strict):
+    """Probabilités des options de cadre d'une case (tirées par page, graine de la mise en page)."""
+
+    frameless: float = Field(ge=0, le=1, description="Case sans bord")
+    bleed: float = Field(ge=0, le=1, description="Case au bord de la zone utile → fond perdu")
+    inset: float = Field(ge=0, le=1, description="Case incrustée dans sa voisine (gros plan de réaction)")
+
+
+class InsetRule(_Strict):
+    """Géométrie d'une incrustation : petite case posée dans une case hôte (la précédente, sinon la suivante)."""
+
+    size: float = Field(ge=0.15, le=0.6, description="Côtés de l'incrustation / côtés de l'hôte")
+    margin_mm: float = Field(ge=0, le=30, description="Écart minimal avec les bords de l'hôte")
+    min_side_mm: float = Field(gt=0, le=100, description="Plus petit côté accepté (sinon incrustation refusée)")
+    max_per_page: int = Field(ge=0, le=4, description="Incrustations tirées au plus par page (imposées : sans limite)")
+    min_page_panels: int = Field(ge=2, le=9, description="Pas d'incrustation tirée sur une page plus courte")
+    # Plans éligibles au tirage (vide = tous) : l'incrustation sert aux gros plans de réaction.
+    shot_types: list[str]
+
+
+class FrameTable(_Strict):
+    # La règle d'une case : celle de son intensité si le scénario l'a donnée, sinon celle de son importance.
+    by_importance: dict[Literal[1, 2, 3], FrameRule]
+    by_intensity: dict[Intensity, FrameRule]
+    fade: float = Field(ge=0, le=1, description="Part des cases sans bord dont l'image se fond au papier")
+    inset: InsetRule
+
+    @model_validator(mode="after")
+    def _check(self) -> FrameTable:
+        missing = [str(k) for k in (1, 2, 3) if k not in self.by_importance]
+        missing += [k for k in INTENSITIES if k not in self.by_intensity]
+        if missing:
+            raise ValueError(f"règles absentes : {', '.join(missing)}")
+        return self
+
+
 class LayoutStyle(_Strict):
     """Signature de mise en page d'une série : biais, gouttières, gabarits favoris, contraste."""
 
@@ -367,6 +403,8 @@ class LayoutStyle(_Strict):
     default_template_weight: float = Field(gt=0)
     avoid_repeat: bool = Field(description="Jamais deux mises en page identiques d'affilée")
     rythme: dict[Rythme, RythmeRule]
+    # Cases sans bord, à fond perdu, incrustées.
+    frames: FrameTable
 
     @model_validator(mode="after")
     def _check(self) -> LayoutStyle:
@@ -443,15 +481,46 @@ class Hyphenation(_Strict):
     min_gap: float = Field(default=0.3, ge=0, le=1)
 
 
+class SfxFonts(_Strict):
+    """Polices des onomatopées (lettrage hors bulle) : une par intensité, et celles proposées dans l'UI."""
+
+    by_intensity: dict[Intensity, str]
+    choices: list[str] = Field(default_factory=list, description="Polices au choix dans l'écran Lettrage")
+    uppercase: bool = True
+    line_height: float = Field(default=0.95, gt=0.5, le=3)
+
+
 class FontsPreset(_Strict):
     fonts: dict[str, FontFile] = Field(min_length=1)
     styles: dict[str, TextStyle]
     # Libellé « case manquante » dessiné sur l'aplat gris d'une case sans image.
     missing_panel: TextStyle
     hyphenation: Hyphenation = Field(default_factory=Hyphenation)
+    # Onomatopées ; absent = police du cri pour toutes.
+    sfx: SfxFonts | None = None
+
+    def sfx_font(self, intensity: str | None, font: str | None = None) -> str:
+        """Police d'une onomatopée : celle choisie (si elle existe), sinon celle de son intensité."""
+        if font and font in self.fonts:
+            return font
+        if self.sfx is None:
+            return self.styles["shout"].font
+        return self.sfx.by_intensity.get(intensity or "normal") or self.sfx.by_intensity["normal"]  # type: ignore[index]
+
+    def sfx_choices(self) -> list[str]:
+        if self.sfx is None:
+            return [self.styles["shout"].font]
+        return list(dict.fromkeys([*self.sfx.choices, *self.sfx.by_intensity.values()]))
 
     @model_validator(mode="after")
     def _check(self) -> FontsPreset:
+        if self.sfx is not None:
+            missing = [k for k in INTENSITIES if k not in self.sfx.by_intensity]
+            if missing:
+                raise ValueError(f"sfx.by_intensity : intensités absentes : {', '.join(missing)}")
+            unknown = [f for f in [*self.sfx.by_intensity.values(), *self.sfx.choices] if f not in self.fonts]
+            if unknown:
+                raise ValueError(f"sfx : police inconnue « {unknown[0]} »")
         missing = [k for k in BUBBLE_KINDS if k not in self.styles]
         if missing:
             raise ValueError(f"styles absents : {', '.join(missing)}")
@@ -499,6 +568,48 @@ class CropMarks(_Strict):
     slug_mm: float = Field(default=9, ge=0, description="Bande ajoutée autour du fond perdu pour les repères")
 
 
+class SfxSettings(_Strict):
+    """Onomatopées : grand texte vectoriel hors bulle, contour épais + halo, incliné, taille selon la case."""
+
+    # Taille de base (points) par intensité, pour une case dont le plus petit côté vaut reference_panel_mm.
+    size_pt: dict[Intensity, float] = Field(default_factory=lambda: {"calme": 20.0, "normal": 30.0, "choc": 44.0})
+    reference_panel_mm: float = Field(default=70, gt=0)
+    scale_min: float = Field(default=0.6, gt=0, le=5, description="Facteur minimal (petite case)")
+    scale_max: float = Field(default=1.5, gt=0, le=5, description="Facteur maximal (grande case)")
+    min_size_pt: float = Field(default=12, gt=0, le=200)
+    max_size_pt: float = Field(default=96, gt=0, le=300)
+    max_width: float = Field(default=0.9, gt=0, le=2, description="Largeur maximale / largeur de la case")
+    fill: str = Field(default="#ffffff", pattern=HEX_COLOR)
+    outline: str = Field(default="#111111", pattern=HEX_COLOR)
+    outline_pt: float = Field(default=2.2, ge=0, le=20, description="Contour épais autour des lettres")
+    halo: str = Field(default="#ffffff", pattern=HEX_COLOR)
+    halo_pt: float = Field(default=1.6, ge=0, le=20, description="Halo blanc autour du contour")
+    angle_deg: AngleRange = Field(default_factory=lambda: AngleRange(min=4, max=16))
+    skew_deg: AngleRange = Field(default_factory=lambda: AngleRange(min=0, max=10))
+    # Débordement autorisé hors de la case (mm, perpendiculairement à chaque bord) : peut chevaucher une bordure.
+    max_overflow_mm: float = Field(default=6, ge=0, le=50)
+    face_margin_mm: float = Field(default=1.5, ge=0, description="Écart minimal avec un visage détecté")
+    bubble_gap_mm: float = Field(default=1, ge=0, description="Écart minimal avec une bulle ou une autre onomatopée")
+    grid_mm: float = Field(default=2, gt=0, description="Pas de recherche des positions")
+
+    @model_validator(mode="after")
+    def _check(self) -> SfxSettings:
+        missing = [k for k in INTENSITIES if k not in self.size_pt]
+        if missing:
+            raise ValueError(f"size_pt : intensités absentes : {', '.join(missing)}")
+        if self.min_size_pt > self.max_size_pt or self.scale_min > self.scale_max:
+            raise ValueError("min doit être ≤ max")
+        return self
+
+
+class FrameRender(_Strict):
+    """Rendu des options de cadre (cases sans bord, incrustations)."""
+
+    fade_mm: float = Field(default=6, gt=0, le=50, description="Largeur du fondu au papier d'une case « fondu »")
+    inset_outline_mm: float = Field(default=1.2, ge=0, le=10, description="Liseré blanc autour d'une incrustation")
+    inset_outline_color: str = Field(default="#ffffff", pattern=HEX_COLOR)
+
+
 class LetteringSettings(_Strict):
     """Formes et placement des bulles, assemblage de la planche (presets/lettering.yaml)."""
 
@@ -535,6 +646,8 @@ class LetteringSettings(_Strict):
     missing_panel_fill: str = Field(default="#9e9e9e", pattern=HEX_COLOR)
     missing_panel_label: str = "case manquante"
     crop_marks: CropMarks = Field(default_factory=CropMarks)
+    sfx: SfxSettings = Field(default_factory=SfxSettings)
+    frames: FrameRender = Field(default_factory=FrameRender)
     supersampling: int = Field(default=3, ge=1, le=6, description="Anticrénelage des formes de bulle (PNG)")
 
     @model_validator(mode="after")

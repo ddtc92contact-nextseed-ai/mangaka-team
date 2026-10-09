@@ -62,7 +62,13 @@ def _version(path: Path) -> int:
     return v
 
 
+def _drop_v9_columns(con: sqlite3.Connection) -> None:
+    con.execute("ALTER TABLE panels DROP COLUMN frame")
+    con.execute("ALTER TABLE bubbles DROP COLUMN sfx")
+
+
 def _drop_v8_columns(con: sqlite3.Connection) -> None:
+    _drop_v9_columns(con)
     con.execute("ALTER TABLE projects DROP COLUMN layout_style")
     for column in ("layout_seed", "layout_style", "rythme"):
         con.execute(f"ALTER TABLE pages DROP COLUMN {column}")
@@ -307,3 +313,35 @@ def test_v7_database_keeps_its_layouts_straight_and_fresh(make_settings: Callabl
         assert [p["polygon"] for p in again["panels"]] == [p["polygon"] for p in before["panels"]]
         assert not any(p["slanted"] for p in again["panels"])
     assert _version(settings.database_path) == SCHEMA_VERSION
+
+
+def test_v8_database_gets_frame_and_sfx_columns(make_settings: Callable[..., Settings]) -> None:
+    """v8 → v9 : options de cadre par case et réglages d'onomatopée ; les mises en page restent à jour."""
+    settings = make_settings()
+    with TestClient(create_app(settings)) as c:
+        project = c.post("/projects", json={"title": "Série v8", "layout_style": "sage"}).json()
+        chapter = c.post(f"/projects/{project['id']}/chapters", json={"title": "Un", "synopsis": "x"}).json()
+        pages = c.put(
+            f"/chapters/{chapter['id']}/pages",
+            json={"pages": [{"panels": [{"description": "a", "importance": 3}, {"description": "b"}]}]},
+        ).json()
+    before = pages[0]["layout"]
+    con = sqlite3.connect(settings.database_path)
+    _drop_v9_columns(con)
+    con.execute("PRAGMA user_version = 8")
+    con.commit()
+    con.close()
+
+    with TestClient(create_app(settings)) as c:
+        page = c.get(f"/chapters/{chapter['id']}/pages").json()[0]
+        assert page["layout_stale"] is False
+        assert page["layout"]["panels"] == before["panels"]
+        panel = page["panels"][0]
+        assert panel["frame"] is None and panel["sfx"] == []
+        res = c.put(f"/panels/{panel['id']}/frame", json={"frame": "none"})
+        assert res.status_code == 200, res.text
+        assert res.json()["layout"]["panels"][0]["frame"] == "none"
+    assert _version(settings.database_path) == SCHEMA_VERSION
+    fresh = settings.database_path.parent / "fresh.db"
+    create_db_engine(fresh).dispose()
+    assert _columns(settings.database_path) == _columns(fresh)

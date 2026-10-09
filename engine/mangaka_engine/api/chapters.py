@@ -10,7 +10,16 @@ from sqlalchemy.orm import Session, selectinload
 
 from ..pipeline.knowledge import record_chapter_summary
 from ..pipeline.layout import LayoutError
-from ..pipeline.pages import is_stale, layout_page, move_page_gutter, regeneration_advised, slant_page_cut
+from ..pipeline.pages import (
+    FRAME_KEYS,
+    apply_frame_change,
+    frame_override,
+    is_stale,
+    layout_page,
+    move_page_gutter,
+    regeneration_advised,
+    slant_page_cut,
+)
 from ..pipeline.script import normalize_shot_type, script_job
 from ..presets import PresetError
 from ..store.models import (
@@ -41,7 +50,9 @@ from .schemas import (
     JobOut,
     PageLayoutIn,
     PageOut,
+    PanelFrameIn,
     PanelOut,
+    SfxOut,
 )
 
 router = APIRouter(tags=["chapitres"])
@@ -108,8 +119,16 @@ def page_out(page: Page, regen_threshold: float | None = None) -> PageOut:
                 importance=p.importance,
                 intensity=p.intensity,  # type: ignore[arg-type]
                 dialogues=[
-                    BubbleOut(id=b.id, speaker=b.speaker_name, text=b.text, kind=b.kind.value) for b in p.bubbles
+                    BubbleOut(id=b.id, speaker=b.speaker_name, text=b.text, kind=b.kind.value)
+                    for b in p.bubbles
+                    if b.kind != BubbleKind.sfx
                 ],
+                sfx=[
+                    SfxOut(id=b.id, text=b.text, intensity=(b.sfx or {}).get("intensity"))
+                    for b in p.bubbles
+                    if b.kind == BubbleKind.sfx
+                ],
+                frame=PanelFrameIn(**f) if (f := frame_override(p)) else None,
                 bbox=p.bbox,
                 bubble_zone=p.bubble_zone,
                 state=p.state.value,
@@ -378,7 +397,7 @@ def replace_pages(
             panel.intensity = cin.intensity
             # Les bulles sont recréées ; un cadre ou une queue ajustés à la main au lettrage suivent leur `id`.
             previous = {b.id: b for b in panel.bubbles} if panel.id is not None else {}
-            panel.bubbles = [
+            bubbles = [
                 Bubble(
                     order=j,
                     speaker_name=d.speaker,
@@ -389,7 +408,36 @@ def replace_pages(
                     tail=previous[d.id].tail if d.id in previous else None,
                 )
                 for j, d in enumerate(cin.dialogues)
+                if not (d.id in previous and previous[d.id].kind == BubbleKind.sfx)
             ]
+            # Onomatopées : gardées telles quelles si la case n'en envoie pas ; sinon recréées, leurs réglages
+            # de lettrage (centre, taille, angle, police) suivant leur `id`.
+            old_sfx = [b for b in previous.values() if b.kind == BubbleKind.sfx]
+            if cin.sfx is None:
+                sfx = [
+                    Bubble(order=0, text=b.text, kind=BubbleKind.sfx, sfx=b.sfx, position=b.position)
+                    for b in sorted(old_sfx, key=lambda b: b.order)
+                ]
+            else:
+                kept = {b.id: b for b in old_sfx}
+                sfx = []
+                for x in cin.sfx:
+                    old = kept.get(x.id) if x.id is not None else None
+                    params = dict(old.sfx or {}) if old is not None else {}
+                    if x.intensity is not None:
+                        params["intensity"] = x.intensity
+                    sfx.append(
+                        Bubble(
+                            order=0,
+                            text=x.text,
+                            kind=BubbleKind.sfx,
+                            sfx=params or None,
+                            position=old.position if old is not None else None,
+                        )
+                    )
+            for k, b in enumerate(sfx):
+                b.order = len(bubbles) + k
+            panel.bubbles = bubbles + sfx
         page.panels = ordered  # les cases retirées deviennent orphelines → supprimées
         result.append(page)
 
@@ -498,6 +546,28 @@ def slant_cut(
         )
     except (LayoutError, PresetError) as exc:
         raise FieldError("cut", str(exc)) from None
+    session.commit()
+    return _page_out(ctx, page)
+
+
+@router.put("/panels/{panel_id}/frame", response_model=PageOut)
+def set_panel_frame(
+    panel_id: int, body: PanelFrameIn, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
+) -> PageOut:
+    """Impose (ou rend au style, avec null) les options de cadre d'une case — sans bord / fondu, fond perdu,
+    incrustation — puis met la page à jour (même graine ; retouches gardées si aucune incrustation ne change)."""
+    panel = session.get(Panel, panel_id)
+    if panel is None:
+        raise HTTPException(status_code=404, detail="Case introuvable")
+    page = panel.page
+    was_fresh = not is_stale(page)
+    values = body.model_dump()
+    panel.frame = {k: values[k] for k in FRAME_KEYS if values[k] is not None} or None
+    try:
+        apply_frame_change(ctx.agents.presets_for(page.chapter.project_id), page, was_fresh=was_fresh)
+    except (LayoutError, PresetError) as exc:
+        session.rollback()
+        raise FieldError("frame", f"page {page.number} : {exc}") from None
     session.commit()
     return _page_out(ctx, page)
 

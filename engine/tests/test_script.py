@@ -253,3 +253,38 @@ def test_prompt_documents_layout_hints() -> None:
     _, user = render_messages(PROMPT, _ctx())
     assert "intensity" in user.content and "calme, normal, choc" in user.content
     assert "rythme" in user.content and "lent, normal, rapide" in user.content
+
+
+def test_sfx_per_panel_is_optional_and_validated() -> None:
+    payload = {
+        "pages": [
+            {
+                "panels": [
+                    {
+                        "description": "La moto démarre",
+                        "shot_type": "plan large",
+                        "sfx": [{"text": " VROUM ! ", "intensity": "Choc"}, {"text": "clic"}],
+                    },
+                    {"description": "Silence", "shot_type": "plan moyen"},
+                ]
+            }
+        ],
+        "summary": "Résumé.",
+    }
+    out = parse_script(json.dumps(payload))
+    first, second = out.pages[0].panels
+    assert [(s.text, s.intensity) for s in first.sfx] == [("VROUM !", "choc"), ("clic", None)]
+    assert second.sfx == []
+    bad = {**payload, "pages": [{"panels": [{"description": "x", "shot_type": "insert", "sfx": [{"text": ""}]}]}]}
+    with pytest.raises(ScriptValidationError, match="onomatopée"):
+        parse_script(json.dumps(bad))
+
+
+def test_mock_script_fills_some_sfx_and_prompt_documents_them() -> None:
+    out = parse_script(json.dumps(mock_script(_ctx().as_json())))
+    sfx = [s for p in out.pages for pa in p.panels for s in pa.sfx]
+    assert sfx and all(s.intensity in ("calme", "normal", "choc") for s in sfx)
+    assert any(pa.sfx == [] for p in out.pages for pa in p.panels)  # quelques-unes seulement
+    _, user = render_messages(PROMPT, _ctx())
+    assert "« sfx »" in user.content and '"sfx": [{"text": "VROUM !"' in user.content
+    assert "sfx" not in _ctx().as_json()["bubble_kinds"]  # pas un type de réplique

@@ -1,4 +1,4 @@
-"""Étape 5 : lettrage (bulles), assemblage de la planche, rendu d'une page et export d'un chapitre."""
+"""Étape 5 : lettrage (bulles, onomatopées), assemblage de la planche, rendu d'une page et export d'un chapitre."""
 
 from __future__ import annotations
 
@@ -22,12 +22,15 @@ from ..pipeline.render import (
 )
 from ..pipeline.render import export_job as make_export_job
 from ..presets import PresetError, PresetRegistry
-from ..store.models import Bubble, BubbleKind, Job, JobStatus, Page
+from ..store.models import Bubble, BubbleKind, Job, JobStatus, Page, Panel
 from .chapters import get_chapter_or_404, get_page_or_404
 from .deps import AppContext, get_ctx, get_session
 from .errors import FieldError
 from .jobs import job_out
-from .schemas import BubbleUpdate, ExportIn, JobOut, RenderIn
+from .schemas import BubbleUpdate, ExportIn, JobOut, RenderIn, SfxCreate
+
+SFX_MAX_CHARS = 60
+SFX_PER_PANEL = 8
 
 router = APIRouter(tags=["lettrage"])
 
@@ -48,7 +51,7 @@ def _lettering(ctx: AppContext, page: Page) -> dict[str, Any]:
     presets = _presets(ctx, page)
     fonts = _fonts(ctx, presets)
     try:
-        return lettering_json(page, page_inputs(presets, ctx.files, page, fonts), fonts)
+        return lettering_json(page, page_inputs(presets, ctx.files, page, fonts), fonts, presets)
     except (LetteringError, PresetError) as exc:
         raise FieldError("lettering", str(exc)) from None
 
@@ -71,12 +74,15 @@ def get_lettering(
 def reset_lettering(
     page_id: int, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
 ) -> dict[str, Any]:
-    """« Recalculer le lettrage » : oublie les positions et queues ajustées à la main."""
+    """« Recalculer le lettrage » : oublie les positions et queues ajustées à la main (et, pour une
+    onomatopée, sa taille, son angle et son cisaillement ; son intensité et sa police restent)."""
     page = get_page_or_404(session, page_id)
     for panel in page.panels:
         for bubble in panel.bubbles:
             bubble.position = None
             bubble.tail = None
+            if bubble.kind == BubbleKind.sfx and bubble.sfx:
+                bubble.sfx = {k: v for k, v in bubble.sfx.items() if k in ("intensity", "font")}
     session.commit()
     return _lettering(ctx, page)
 
@@ -98,6 +104,12 @@ def update_bubble(
     for key in ("text", "kind", "speaker"):
         if key in changes and changes[key] is None:
             raise FieldError(key, "ne peut pas être vide")
+    if bubble.kind == BubbleKind.sfx:
+        _update_sfx(bubble, body, changes)
+        session.commit()
+        return _lettering(ctx, page)
+    if "sfx" in changes:
+        raise FieldError("sfx", "réglages réservés aux onomatopées")
     if "text" in changes:
         bubble.text = changes["text"]
     if "kind" in changes:
@@ -120,6 +132,92 @@ def update_bubble(
         bubble.tail = {**tail, "manual": True} if tail is not None else None
     session.commit()
     return _lettering(ctx, page)
+
+
+def _update_sfx(bubble: Bubble, body: BubbleUpdate, changes: dict[str, Any]) -> None:
+    for key in ("kind", "position", "tail", "speaker"):
+        if key in changes:
+            raise FieldError(key, "une onomatopée n'a ni type de bulle, ni cadre, ni queue, ni locuteur")
+    if "text" in changes:
+        if len(changes["text"]) > SFX_MAX_CHARS:
+            raise FieldError("text", f"une onomatopée tient en {SFX_MAX_CHARS} caractères au plus")
+        bubble.text = changes["text"]
+    if body.sfx is None:
+        if "sfx" in changes:  # null : tout redevient automatique (intensité gardée)
+            bubble.sfx = {k: v for k, v in (bubble.sfx or {}).items() if k == "intensity"}
+            bubble.position = None
+        return
+    params = dict(bubble.sfx or {})
+    sent = body.sfx.model_fields_set
+    for key in ("intensity", "font", "size_pt", "angle", "skew"):
+        if key in sent:
+            value = getattr(body.sfx, key)
+            if value is None:
+                params.pop(key, None)
+            else:
+                params[key] = value
+    if "x" in sent or "y" in sent:
+        x, y = body.sfx.x, body.sfx.y
+        if (x is None) != (y is None):
+            raise FieldError("sfx", "x et y vont ensemble (centre de l'onomatopée)")
+        bubble.position = (
+            {"x": round(x, 1), "y": round(y, 1), "manual": True} if x is not None and y is not None else None
+        )
+    bubble.sfx = params
+
+
+@router.post("/panels/{panel_id}/sfx", status_code=201)
+def add_sfx(
+    panel_id: int, body: SfxCreate, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
+) -> dict[str, Any]:
+    """Ajoute une onomatopée à la case (centre facultatif : sinon placement automatique) ; renvoie le lettrage."""
+    panel = session.get(Panel, panel_id)
+    if panel is None:
+        raise HTTPException(status_code=404, detail="Case introuvable")
+    if sum(1 for b in panel.bubbles if b.kind == BubbleKind.sfx) >= SFX_PER_PANEL:
+        raise FieldError("sfx", f"{SFX_PER_PANEL} onomatopées au plus par case")
+    if (body.x is None) != (body.y is None):
+        raise FieldError("sfx", "x et y vont ensemble (centre de l'onomatopée)")
+    position = {"x": round(body.x, 1), "y": round(body.y, 1), "manual": True} if body.x is not None else None
+    panel.bubbles.append(
+        Bubble(
+            order=max((b.order for b in panel.bubbles), default=-1) + 1,
+            text=body.text,
+            kind=BubbleKind.sfx,
+            sfx={"intensity": body.intensity},
+            position=position,
+        )
+    )
+    session.commit()
+    return _lettering(ctx, panel.page)
+
+
+@router.delete("/bubbles/{bubble_id}")
+def delete_sfx(
+    bubble_id: int, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
+) -> dict[str, Any]:
+    """Supprime une onomatopée (les répliques se suppriment dans l'écran Scénario) ; renvoie le lettrage."""
+    bubble = session.get(Bubble, bubble_id)
+    if bubble is None:
+        raise HTTPException(status_code=404, detail="Bulle introuvable")
+    if bubble.kind != BubbleKind.sfx:
+        raise FieldError("bubble", "seules les onomatopées se suppriment ici ; les répliques, dans le Scénario")
+    page = bubble.panel.page
+    session.delete(bubble)
+    session.commit()
+    session.refresh(page)
+    return _lettering(ctx, page)
+
+
+@router.get("/lettering/sfx-fonts/{font_id}.ttf")
+def sfx_font(font_id: str, project_id: int | None = None, ctx: AppContext = Depends(get_ctx)) -> Response:
+    """Police d'onomatopée (instance statique), pour l'aperçu de l'écran Lettrage."""
+    fonts = _fonts(ctx, ctx.agents.presets_for(project_id))
+    if font_id not in fonts.preset.sfx_choices():
+        raise HTTPException(status_code=404, detail="Police d'onomatopée inconnue")
+    return Response(
+        fonts.data(fonts.sfx_style(font_id)), media_type="font/ttf", headers={"Cache-Control": "private, max-age=3600"}
+    )
 
 
 @router.get("/lettering/fonts/{kind}.ttf")

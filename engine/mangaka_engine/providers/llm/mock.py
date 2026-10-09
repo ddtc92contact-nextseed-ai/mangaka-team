@@ -26,6 +26,8 @@ _SHOTS = ["plan large", "plan moyen", "gros plan", "plan américain", "contre-pl
 _PANELS_PER_PAGE = [5, 4, 6, 3, 5, 4]
 _KINDS = ["speech", "speech", "thought", "speech", "shout"]
 _RYTHMES = ["normal", "rapide", "lent", "normal", "rapide"]
+# Onomatopées des cases « choc » (et d'une case calme de temps en temps), accents compris.
+_SFX = ["VROUM !", "CLIC", "BIIIP !", "BAM !", "ÇA CRAQUE !", "BAÏE !"]
 
 
 def _script_context(messages: list[ChatMessage]) -> dict[str, Any] | None:
@@ -75,6 +77,11 @@ def mock_script(ctx: dict[str, Any]) -> dict[str, Any]:
             # Indices de mise en page : une case forte sur deux est un temps d'action, les cases de
             # transition sont calmes.
             intensity = "choc" if importance == 3 and p % 4 != 2 else ("calme" if importance == 1 else "normal")
+            sfx = []
+            if intensity == "choc":
+                sfx.append({"text": _SFX[(p + i) % len(_SFX)], "intensity": "choc"})
+            elif intensity == "calme" and p % 3 == 1:
+                sfx.append({"text": "tic… tac…", "intensity": "calme"})
             panels.append(
                 {
                     "description": f"{text} ({who}{' et ' + other if other != who else ''}, page {p + 1}, case {i + 1})",
@@ -83,6 +90,7 @@ def mock_script(ctx: dict[str, Any]) -> dict[str, Any]:
                     "importance": importance,
                     "intensity": intensity,
                     "dialogues": dialogues,
+                    "sfx": sfx,
                 }
             )
         pages.append({"rythme": _RYTHMES[p % len(_RYTHMES)], "panels": panels})

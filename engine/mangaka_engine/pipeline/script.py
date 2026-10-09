@@ -68,7 +68,8 @@ ShotType = Literal[
     "vue subjective",
     "insert",
 ]
-BUBBLE_KINDS = tuple(k.value for k in BubbleKind)
+# Types de réplique proposés au LLM ; les onomatopées (sfx) ont leur propre liste par case.
+BUBBLE_KINDS = tuple(k.value for k in BubbleKind if k != BubbleKind.sfx)
 BubbleKindName = Literal["speech", "thought", "shout", "narration", "off"]
 # Indices de direction artistique (facultatifs) lus par la grammaire de mise en page (layout_style.py).
 INTENSITIES = ("calme", "normal", "choc")
@@ -114,6 +115,15 @@ class ScriptDialogue(_LLMModel):
         return v.strip().lower() if isinstance(v, str) else v
 
 
+class ScriptSfx(_LLMModel):
+    """Onomatopée de la case (« VROUM ! », « CLIC ») : posée au lettrage, jamais dessinée par le modèle d'image."""
+
+    text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=60)]
+    intensity: IntensityName | None = None
+
+    _intensity = field_validator("intensity", mode="before")(_hint)
+
+
 class ScriptPanel(_LLMModel):
     description: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)]
     characters: list[Short] = Field(default_factory=list, max_length=20)
@@ -121,6 +131,7 @@ class ScriptPanel(_LLMModel):
     dialogues: list[ScriptDialogue] = Field(default_factory=list, max_length=12)
     importance: int = Field(default=2, ge=1, le=3)
     intensity: IntensityName | None = None
+    sfx: list[ScriptSfx] = Field(default_factory=list, max_length=4)
 
     _shot = field_validator("shot_type", mode="before")(normalize_shot_type)
     _intensity = field_validator("intensity", mode="before")(_hint)
@@ -147,7 +158,13 @@ class ScriptOutput(_LLMModel):
     summary: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)]
 
 
-ERROR_LABELS = {"pages": "page", "panels": "case", "dialogues": "réplique", "characters": "personnage"}
+ERROR_LABELS = {
+    "pages": "page",
+    "panels": "case",
+    "dialogues": "réplique",
+    "characters": "personnage",
+    "sfx": "onomatopée",
+}
 
 
 class ScriptError(Exception):
@@ -358,6 +375,15 @@ def save_script(session: Session, chapter: Chapter, output: ScriptOutput) -> lis
                         speaker_id=by_name.get(d.speaker.casefold()),
                         text=d.text,
                         kind=BubbleKind(d.kind),
+                    )
+                )
+            for k, fx in enumerate(sc.sfx):
+                panel.bubbles.append(
+                    Bubble(
+                        order=len(sc.dialogues) + k,
+                        text=fx.text,
+                        kind=BubbleKind.sfx,
+                        sfx={"intensity": fx.intensity} if fx.intensity else None,
                     )
                 )
             page.panels.append(panel)

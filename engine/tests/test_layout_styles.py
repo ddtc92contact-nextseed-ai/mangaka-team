@@ -87,13 +87,57 @@ def _sat_gap(a: geo.Polygon, b: geo.Polygon) -> float:
     return best
 
 
+def _check_frames(layout: dict[str, Any]) -> None:
+    """Fond perdu jusqu'au bord exact de la page ; incrustation contenue dans son hôte."""
+    W, H = layout["page"]["width"], layout["page"]["height"]
+    live = layout["live_area"]
+    panels = layout["panels"]
+    for p in panels:
+        assert p.get("frame", "border") in ("border", "none", "fade")
+        if p.get("bleed"):
+            poly = [(float(x), float(y)) for x, y in p["polygon"]]
+            inner = [(float(x), float(y)) for x, y in p["live_polygon"]]
+            x1, y1, x2, y2 = geo.bbox(inner)
+            bx1, by1, bx2, by2 = geo.bbox(poly)
+            touched = []
+            if abs(y1 - live["y1"]) < 0.05:
+                touched.append(by1 == 0)
+            if abs(y2 - live["y2"]) < 0.05:
+                touched.append(by2 == H)
+            if abs(x1 - live["x1"]) < 0.05 and layout["inner_side"] != "left":
+                touched.append(bx1 == 0)
+            if abs(x2 - live["x2"]) < 0.05 and layout["inner_side"] != "right":
+                touched.append(bx2 == W)
+            assert touched and all(touched), p
+            # la case agrandie contient sa partie dans la zone utile
+            assert all(geo.contains(geo.edges(poly), x, y, tol=0.2) for x, y in inner), p
+        if p.get("inset"):
+            host = panels[p["host_index"]]
+            assert not host.get("inset")
+            hpoly = [(float(x), float(y)) for x, y in (host.get("live_polygon") or host["polygon"])]
+            assert geo.contains_box(geo.edges(hpoly), p["x1"], p["y1"], p["x2"], p["y2"]), (p, host)
+
+
 def _check(layout: dict[str, Any]) -> None:
     """Dans les marges, convexes, sans chevauchement, gouttières perpendiculaires constantes, ordre de lecture."""
     live = layout["live_area"]
     gh, gv = layout["gutters_px"]["horizontal"], layout["gutters_px"]["vertical"]
-    polys = _polys(layout)
-    for p, poly in zip(layout["panels"], polys, strict=True):
+    _check_frames(layout)
+    # Cases de l'arbre, dans la zone utile (fond perdu : leur partie dans la zone utile) ; les
+    # incrustations, posées sur leur hôte, sont vérifiées par _check_frames.
+    tree_panels = [p for p in layout["panels"] if not p.get("inset")]
+    polys = [[(float(x), float(y)) for x, y in (p.get("live_polygon") or p["polygon"])] for p in tree_panels]
+    for p, poly in zip(tree_panels, polys, strict=True):
         assert len(poly) >= 3 and geo.area(poly) > 0, p
+        if p.get("bleed"):
+            x1, y1, x2, y2 = geo.bbox([(float(x), float(y)) for x, y in p["polygon"]])
+            assert (p["x1"], p["y1"], p["x2"], p["y2"]) == (
+                math.floor(x1 + 1e-6),
+                math.floor(y1 + 1e-6),
+                math.ceil(x2 - 1e-6),
+                math.ceil(y2 - 1e-6),
+            )
+            continue
         for x, y in poly:
             assert live["x1"] - 0.05 <= x <= live["x2"] + 0.05 and live["y1"] - 0.05 <= y <= live["y2"] + 0.05, p
         x1, y1, x2, y2 = geo.bbox(poly)
@@ -303,9 +347,9 @@ def test_intensity_and_rythme_drive_slants_and_big_panels() -> None:
 
 def test_no_style_or_angle_constant_in_python() -> None:
     """Les valeurs de style vivent dans presets/layout_styles/ : aucun champ par défaut dans le schéma."""
-    from mangaka_engine.presets.schemas import LayoutStyle, SlantRule
+    from mangaka_engine.presets.schemas import FrameRule, FrameTable, InsetRule, LayoutStyle, SlantRule
 
-    for model in (LayoutStyle, SlantRule):
+    for model in (LayoutStyle, SlantRule, FrameRule, FrameTable, InsetRule):
         defaults = [
             name
             for name, f in model.model_fields.items()

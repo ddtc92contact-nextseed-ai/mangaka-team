@@ -60,4 +60,33 @@ crop_marks:
   stroke_pt: 0.25
   slug_mm: 9
 
+# Onomatopées (type `sfx`) : grand texte vectoriel hors bulle, contour épais + halo blanc, incliné.
+# Taille = size_pt[intensité] × (plus petit côté de la case / reference_panel_mm), facteur borné à
+# [scale_min, scale_max], puis à [min_size_pt, max_size_pt] ; réduite si plus large que max_width × la case.
+sfx:
+  size_pt: { calme: 20, normal: 30, choc: 44 }
+  reference_panel_mm: 70
+  scale_min: 0.6
+  scale_max: 1.5
+  min_size_pt: 12
+  max_size_pt: 96
+  max_width: 0.9
+  fill: "#ffffff"
+  outline: "#111111"
+  outline_pt: 2.2           # contour noir autour des lettres
+  halo: "#ffffff"
+  halo_pt: 1.6              # halo blanc autour du contour
+  angle_deg: { min: 4, max: 16 }   # inclinaison tirée (signe au hasard, graine = l'onomatopée)
+  skew_deg: { min: 0, max: 10 }    # italique (cisaillement)
+  max_overflow_mm: 6        # débordement autorisé hors de la case (peut chevaucher une bordure)
+  face_margin_mm: 1.5       # écart minimal avec un visage détecté par le QC
+  bubble_gap_mm: 1          # écart minimal avec une bulle ou une autre onomatopée
+  grid_mm: 2                # pas de recherche des positions
+
+# Options de cadre des cases (décidées par le style de mise en page, modifiables par case).
+frames:
+  fade_mm: 6                # case « fondu » : largeur du fondu de l'image vers le papier
+  inset_outline_mm: 1.2     # incrustation : liseré blanc qui la détache de la case hôte
+  inset_outline_color: "#ffffff"
+
 supersampling: 3            # anticrénelage des formes de bulle dans le PNG

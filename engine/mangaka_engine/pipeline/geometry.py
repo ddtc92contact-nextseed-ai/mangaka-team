@@ -112,6 +112,58 @@ def inset(poly: Sequence[Point], d: float) -> Polygon:
     return out
 
 
+def offset_edges(poly: Sequence[Point], offsets: Sequence[float]) -> Polygon:
+    """Polygone convexe dont chaque bord i a reculé de `offsets[i]` px (négatif : avancé vers l'extérieur).
+
+    Intersection des demi-plans décalés, partant d'un grand rectangle : un bord avancé ne déplace que
+    lui (les bords voisins gardent leur direction). Vide si le résultat disparaît.
+    """
+    planes = edges(poly)
+    if len(planes) != len(offsets):
+        raise ValueError("un décalage par bord")
+    x1, y1, x2, y2 = bbox(poly)
+    room = (x2 - x1) + (y2 - y1) + 2 * max((abs(o) for o in offsets), default=0) + 10
+    out = rect_polygon(x1 - room, y1 - room, x2 + room, y2 + room)
+    for (a, b, c), d in zip(planes, offsets, strict=True):
+        out = clip(out, a, b, c - d)
+        if len(out) < 3:
+            return []
+    return out
+
+
+def outset(poly: Sequence[Point], d: float) -> Polygon:
+    """Polygone convexe agrandi de `d` px (chaque bord avance parallèlement, coins en onglet)."""
+    return offset_edges(poly, [-d] * len(edges(poly)))
+
+
+def convex_overlap(p: Sequence[Point], q: Sequence[Point], gap: float = 0.0) -> bool:
+    """Deux polygones convexes se recouvrent-ils (ou sont-ils à moins de `gap` px) ? Axes séparateurs."""
+    for poly in (p, q):
+        n = len(poly)
+        for i in range(n):
+            (x1, y1), (x2, y2) = poly[i], poly[(i + 1) % n]
+            nx, ny = y2 - y1, x1 - x2
+            norm = math.hypot(nx, ny)
+            if norm < EPS:
+                continue
+            nx, ny = nx / norm, ny / norm
+            pa = [nx * x + ny * y for x, y in p]
+            pb = [nx * x + ny * y for x, y in q]
+            if max(pa) + gap <= min(pb) or max(pb) + gap <= min(pa):
+                return False
+    return True
+
+
+def overflow(poly_edges: Sequence[tuple[float, float, float]], points: Sequence[Point]) -> float:
+    """Plus grande distance (px) d'un point hors du polygone convexe, mesurée perpendiculairement à un bord."""
+    return max((a * x + b * y - c for a, b, c in poly_edges for x, y in points), default=0.0)
+
+
+def affine(m: tuple[float, float, float, float], tx: float, ty: float, points: Sequence[Point]) -> Polygon:
+    """Image des points par x' = m0·x + m1·y + tx, y' = m2·x + m3·y + ty."""
+    return [(m[0] * x + m[1] * y + tx, m[2] * x + m[3] * y + ty) for x, y in points]
+
+
 def contains(poly_edges: Sequence[tuple[float, float, float]], x: float, y: float, tol: float = 1e-4) -> bool:
     return all(a * x + b * y <= c + tol for a, b, c in poly_edges)
 

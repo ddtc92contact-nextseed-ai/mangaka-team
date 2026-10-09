@@ -13,7 +13,12 @@ du preset. Étapes, pour une page :
 5. biais : chaque découpe, dans l'ordre de lecture, passe en biais avec la probabilité de la case
    voisine la plus « forte » (son intensité si le scénario l'a donnée, sinon son importance) × le
    facteur du rythme de la page ; l'angle est tiré dans la plage du style, puis réduit si une case
-   voisine passerait sous la taille minimale.
+   voisine passerait sous la taille minimale ;
+6. options de cadre (`frames` du style, même règle intensité / importance) : case sans bord (bord
+   franc ou fondu), à fond perdu, incrustée dans sa voisine. Elles sont tirées **avant** le gabarit
+   (une incrustation ne prend pas de case dans l'arbre), par un générateur à part (`cadres:<graine>`) :
+   les tirages des étapes 1–5 ne changent pas. Une option imposée dans l'UI (`PanelSpec.frame`)
+   remplace le tirage.
 
 Un assistant de direction artistique (le LLM du scénario aujourd'hui) ne pilote la mise en page que
 par les champs structurés `importance`, `intensity` (case) et `rythme` (page), et par le choix du
@@ -30,8 +35,19 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from ..presets.schemas import LayoutSettings, LayoutStyle, LayoutTemplate, PageFormat, SlantRule, SplitNode, TreeNode
+from ..presets.schemas import (
+    FrameRule,
+    InsetRule,
+    LayoutSettings,
+    LayoutStyle,
+    LayoutTemplate,
+    PageFormat,
+    SlantRule,
+    SplitNode,
+    TreeNode,
+)
 from .layout import (
+    FRAME_KINDS,
     Direction,
     LayoutError,
     PanelSpec,
@@ -40,6 +56,7 @@ from .layout import (
     _replace_at,
     auto_tree,
     compute_layout,
+    count_panels,
     page_frame,
     template_score,
 )
@@ -50,6 +67,7 @@ class PagePlan:
     template_id: str
     tree: TreeNode
     style: dict[str, Any]  # id, graine, rythme, gouttières (stocké dans le JSON de la mise en page)
+    frames: list[dict[str, Any]] | None = None  # options de cadre de chaque case
 
 
 def default_seed(*parts: object) -> int:
@@ -83,6 +101,98 @@ def slant_rule(style: LayoutStyle, spec: PanelSpec) -> SlantRule:
     if spec.intensity in style.slants.by_intensity:
         return style.slants.by_intensity[spec.intensity]  # type: ignore[index]
     return style.slants.by_importance[min(3, max(1, spec.importance))]  # type: ignore[index]
+
+
+def frame_rule(style: LayoutStyle, spec: PanelSpec) -> FrameRule:
+    table = style.frames
+    if spec.intensity in table.by_intensity:
+        return table.by_intensity[spec.intensity]  # type: ignore[index]
+    return table.by_importance[min(3, max(1, spec.importance))]  # type: ignore[index]
+
+
+def _override(spec: PanelSpec, key: str) -> Any:
+    return (spec.frame or {}).get(key)
+
+
+NO_FRAMES = FrameRule(frameless=0, bleed=0, inset=0)
+
+
+def decide_frames(
+    style: LayoutStyle | None,
+    specs: Sequence[PanelSpec],
+    seed: int,
+    *,
+    allow_insets: bool = True,
+    inset_rule: InsetRule | None = None,
+) -> list[dict[str, Any]]:
+    """Options de cadre de chaque case : imposées dans l'UI, sinon tirées selon le style (aucune sans style).
+
+    Quatre tirages par case, toujours (incrustation, sans bord, fondu, fond perdu) : la suite aléatoire
+    ne dépend pas des décisions. Une incrustation demande une case hôte voisine non incrustée (la
+    précédente, sinon la suivante), une seule incrustation par hôte, et au moins une case dans l'arbre ;
+    les incrustations tirées respectent `max_per_page`, `min_page_panels` et `shot_types` du style.
+    Sans style, seules les options imposées comptent (géométrie d'incrustation : `inset_rule`).
+    """
+    rng = random.Random(f"cadres:{seed}")
+    draws = [(rng.random(), rng.random(), rng.random(), rng.random()) for _ in specs]
+    rule_in = style.frames.inset if style else inset_rule
+    if rule_in is None:
+        allow_insets = False
+    shots = {s.casefold() for s in (rule_in.shot_types if rule_in else [])}
+    n = len(specs)
+    out: list[dict[str, Any]] = []
+    for spec, (u_inset, u_frame, u_fade, u_bleed) in zip(specs, draws, strict=True):
+        rule = frame_rule(style, spec) if style else NO_FRAMES
+        kind = _override(spec, "frame")
+        if kind not in FRAME_KINDS:
+            kind = "border"
+            if u_frame < rule.frameless:
+                kind = "fade" if style and u_fade < style.frames.fade else "none"
+        bleed = _override(spec, "bleed")
+        if not isinstance(bleed, bool):
+            bleed = u_bleed < rule.bleed
+        inset = _override(spec, "inset")
+        forced = isinstance(inset, bool)
+        if not forced:
+            eligible = (
+                rule_in is not None
+                and n >= rule_in.min_page_panels
+                and (not shots or (spec.shot_type or "").casefold() in shots)
+            )
+            inset = eligible and u_inset < rule.inset
+        out.append({"frame": kind, "bleed": bleed, "inset": bool(inset and allow_insets), "forced": forced})
+
+    hosts_used: set[int] = set()
+    drawn = 0
+    for i, f in enumerate(out):
+        if not f["inset"]:
+            continue
+        assert rule_in is not None
+        if not f["forced"] and drawn >= rule_in.max_per_page:
+            f["inset"] = False
+            continue
+        host = next(
+            (h for h in (i - 1, i + 1) if 0 <= h < n and h not in hosts_used and not out[h]["inset"]),
+            None,
+        )
+        if host is None:
+            f["inset"] = False
+            continue
+        hosts_used.add(host)
+        if not f["forced"]:
+            drawn += 1
+        f.update(
+            host=host,
+            bleed=False,
+            size=rule_in.size,
+            margin_mm=rule_in.margin_mm,
+            min_side_mm=rule_in.min_side_mm,
+        )
+        if _override(specs[i], "frame") not in FRAME_KINDS:
+            f["frame"] = "border"  # liseré blanc + bordure : l'incrustation se détache de l'hôte
+    for f in out:
+        f.pop("forced", None)
+    return out
 
 
 def choose_styled_template(
@@ -158,7 +268,11 @@ def plan_page(
 ) -> PagePlan:
     """Arbre de découpes (gabarit, proportions, biais) et gouttières d'une page, pour ce style et cette graine."""
     rng = random.Random(seed)
-    weights = panel_weights(style, specs, rythme)
+    frames = decide_frames(style, specs, seed)
+    if forced is not None and count_panels(forced[1]) == len(specs):
+        frames = decide_frames(style, specs, seed, allow_insets=False)  # gabarit imposé sans incrustation
+    tree_specs = [s for s, f in zip(specs, frames, strict=True) if not f["inset"]]
+    weights = panel_weights(style, tree_specs, rythme)
     if forced is not None:
         template_id, tree = forced
     else:
@@ -174,7 +288,7 @@ def plan_page(
             # Géométrie recalculée après chaque biais : les bornes tiennent compte des voisines.
             _, current = _geometry(tree, frame)
             cut = next(c for c in current if (c.path, c.index) == ref)
-            neighbours = [specs[i] for i in cut.before + cut.after]
+            neighbours = [tree_specs[i] for i in cut.before + cut.after]
             rule = max((slant_rule(style, s) for s in neighbours), key=lambda r: r.probability)
             # Trois tirages par découpe, toujours : la suite aléatoire ne dépend pas des décisions.
             u, t, sign = rng.random(), rng.random(), rng.choice((-1.0, 1.0))
@@ -199,6 +313,7 @@ def plan_page(
         template_id=template_id,
         tree=tree,
         style={"id": style.id, "seed": seed, "rythme": rythme, "gutters_mm": gutters},
+        frames=frames,
     )
 
 
@@ -238,4 +353,5 @@ def styled_layout(
         page_number=page_number,
         template_id=plan.template_id,
         style=plan.style,
+        frames=plan.frames,
     )

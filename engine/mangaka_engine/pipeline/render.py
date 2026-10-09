@@ -10,6 +10,11 @@ retenue. Elles sont lues dans les paramètres de la version (`PanelImage.params`
 d'origine (ou normalisées 0–1) : `faces`, ou `qc.faces` / `qc.boxes.faces` / `detections.faces`,
 chaque boîte au format `{x1, y1, x2, y2}`, `{x, y, w, h}`, `[x1, y1, x2, y2]` ou `{"box": …}`.
 Sans boîte, seule la zone réservée aux bulles compte.
+
+Onomatopées : bulles `kind = sfx` ; leurs réglages imposés (`Bubble.sfx` : intensité, police, taille,
+angle, cisaillement) et leur centre placé à la main (`Bubble.position` : {"x", "y", "manual"}).
+Cases à fond perdu : le lettrage reste dans la partie de la case dans la zone utile (`live_polygon`) ;
+une incrustation est un obstacle pour les bulles et onomatopées de sa case hôte.
 """
 
 from __future__ import annotations
@@ -31,11 +36,11 @@ from sqlalchemy.orm import Session, selectinload
 from ..presets import PresetError, PresetRegistry
 from ..store.db import Database
 from ..store.files import FileStore
-from ..store.models import Chapter, Job, Page, Panel, PanelImage
+from ..store.models import Bubble, BubbleKind, Chapter, Job, Page, Panel, PanelImage
 from .assembly import Canvas, PageArt, PanelArt, canvas_geometry, cover_transform, png_bytes, render_png, render_svg
 from .fonts import FontBook
 from .jobs import JobReporter
-from .lettering import Box, BubbleSpec, Letterer, LetteringError, LetteringWarning, PanelSpec
+from .lettering import Box, BubbleSpec, Letterer, LetteringError, LetteringWarning, PanelSpec, SfxSpec
 from .pages import is_stale
 
 STEP = "export"
@@ -146,6 +151,35 @@ def _manual_tail(tail: dict[str, Any] | None) -> tuple[float, float] | None:
         return None
 
 
+def _num(value: Any) -> float | None:
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    return v if v == v and abs(v) != float("inf") else None
+
+
+def sfx_spec(b: Bubble) -> SfxSpec:
+    """Onomatopée en base → spec du lettrage (valeurs absentes ou illisibles = calculées)."""
+    params = b.sfx or {}
+    pos = b.position or {}
+    center = None
+    if pos.get("manual") and _num(pos.get("x")) is not None and _num(pos.get("y")) is not None:
+        center = (float(pos["x"]), float(pos["y"]))
+    size = _num(params.get("size_pt"))
+    return SfxSpec(
+        id=b.id,
+        text=b.text,
+        order=b.order,
+        intensity=params.get("intensity") if params.get("intensity") in ("calme", "normal", "choc") else None,
+        font=params.get("font") if isinstance(params.get("font"), str) else None,
+        size_pt=size if size and size > 0 else None,
+        angle=_num(params.get("angle")),
+        skew=_num(params.get("skew")),
+        center=center,
+    )
+
+
 def page_inputs(presets: PresetRegistry, files: FileStore, page: Page, fonts: FontBook) -> PageInputs:
     if not page.panels:
         raise LetteringError(f"page {page.number} sans case : rien à assembler")
@@ -161,12 +195,23 @@ def page_inputs(presets: PresetRegistry, files: FileStore, page: Page, fonts: Fo
     specs: list[PanelSpec] = []
     faces_by_panel: dict[int, list[Box]] = {}
     urls: dict[int, str | None] = {}
-    polygons = {lp.get("panel_id"): lp.get("polygon") for lp in page.layout.get("panels", [])}
+    layout_panels = {lp.get("panel_id"): lp for lp in page.layout.get("panels", [])}
+    index_to_id = {lp.get("index"): lp.get("panel_id") for lp in page.layout.get("panels", [])}
+    # Incrustations : obstacles pour le lettrage de leur case hôte.
+    insets: dict[int, list[Box]] = {}
+    for lp in layout_panels.values():
+        host = index_to_id.get(lp.get("host_index")) if lp.get("inset") else None
+        rect = Box.parse(lp)
+        if host is not None and rect is not None:
+            insets.setdefault(host, []).append(rect)
     for panel in page.panels:
         box = Box.parse(panel.bbox)
+        lp = layout_panels.get(panel.id) or {}
         # Polygone de la case (mise en page ≥ v2) ; une ancienne mise en page n'a que la boîte.
-        raw_poly = polygons.get(panel.id)
+        raw_poly = lp.get("polygon")
         polygon = [(float(x), float(y)) for x, y in raw_poly] if raw_poly else None
+        raw_live = lp.get("live_polygon")
+        live = [(float(x), float(y)) for x, y in raw_live] if raw_live else None
         if box is None:
             warnings.append(
                 LetteringWarning(
@@ -193,16 +238,34 @@ def page_inputs(presets: PresetRegistry, files: FileStore, page: Page, fonts: Fo
             urls[panel.id] = f"/panel-images/{img.id}/file"
             faces = faces_on_page(face_boxes(img, size), size, box)
         faces_by_panel[panel.id] = faces
-        panels.append(PanelArt(id=panel.id, index=panel.index, box=box, image=path, image_size=size, polygon=polygon))
+        panels.append(
+            PanelArt(
+                id=panel.id,
+                index=panel.index,
+                box=box,
+                image=path,
+                image_size=size,
+                polygon=polygon,
+                frame=lp.get("frame") if lp.get("frame") in ("border", "none", "fade") else "border",
+                inset=bool(lp.get("inset")),
+            )
+        )
+        # Fond perdu : bulles et onomatopées restent dans la zone utile.
+        letter_box, letter_poly = box, polygon
+        if live:
+            xs, ys = [x for x, _ in live], [y for _, y in live]
+            letter_box, letter_poly = Box(min(xs), min(ys), max(xs), max(ys)), live
         specs.append(
             PanelSpec(
                 id=panel.id,
                 index=panel.index,
-                box=box,
+                box=letter_box,
                 zone=Box.parse(panel.bubble_zone),
-                faces=faces,
+                faces=[f2 for f in faces if (f2 := f.intersection(letter_box)) is not None],
                 characters=list(panel.character_names or []),
-                polygon=polygon,
+                polygon=letter_poly,
+                sfx=[sfx_spec(b) for b in panel.bubbles if b.kind == BubbleKind.sfx],
+                obstacles=insets.get(panel.id, []),
                 bubbles=[
                     BubbleSpec(
                         id=b.id,
@@ -214,17 +277,21 @@ def page_inputs(presets: PresetRegistry, files: FileStore, page: Page, fonts: Fo
                         manual_tail=_manual_tail(b.tail),
                     )
                     for b in panel.bubbles
+                    if b.kind != BubbleKind.sfx
                 ],
             )
         )
-    lettering = Letterer(fonts, presets.lettering, fmt.dpi).letter_page(specs, direction)
+    page_box = Box(0, 0, fmt.width_px, fmt.height_px)
+    lettering = Letterer(fonts, presets.lettering, fmt.dpi).letter_page(specs, direction, page_box)
     art = PageArt(
         number=page.number, fmt=fmt, panels=panels, lettering=lettering, warnings=warnings + lettering.warnings
     )
     return PageInputs(art=art, specs=specs, faces=faces_by_panel, image_urls=urls, stale=stale)
 
 
-def lettering_json(page: Page, inputs: PageInputs, fonts: FontBook) -> dict[str, Any]:
+def lettering_json(
+    page: Page, inputs: PageInputs, fonts: FontBook, presets: PresetRegistry | None = None
+) -> dict[str, Any]:
     """Ce que l'écran Lettrage affiche : planche, cases, bulles calculées, avertissements."""
     art = inputs.art
     styles = {
@@ -236,6 +303,15 @@ def lettering_json(page: Page, inputs: PageInputs, fonts: FontBook) -> dict[str,
         }
         for kind, st in fonts.preset.styles.items()
     }
+    sfx_fonts = {
+        font_id: {
+            "family": fonts.family(st := fonts.sfx_style(font_id)),
+            "name": fonts.name(st),
+            "url": f"/lettering/sfx-fonts/{font_id}.ttf?project_id={page.chapter.project_id}",
+        }
+        for font_id in fonts.preset.sfx_choices()
+    }
+    layout_panels = {lp.get("panel_id"): lp for lp in (page.layout or {}).get("panels", [])}
     return {
         "page_id": page.id,
         "page_number": page.number,
@@ -248,12 +324,21 @@ def lettering_json(page: Page, inputs: PageInputs, fonts: FontBook) -> dict[str,
         "bleed_mm": art.fmt.bleed_mm,
         "layout_stale": inputs.stale,
         "styles": styles,
+        "sfx_fonts": sfx_fonts,
+        "sfx_settings": {
+            "max_overflow_mm": presets.lettering.sfx.max_overflow_mm if presets else None,
+        },
         "panels": [
             {
                 "id": p.id,
                 "index": p.index,
                 "box": p.box.as_rect(),
-                "polygon": [[round(x, 1), round(y, 1)] for x, y in p.polygon] if p.slanted and p.polygon else None,
+                "polygon": [[round(x, 1), round(y, 1)] for x, y in p.polygon]
+                if p.polygon and (p.slanted or (layout_panels.get(p.id) or {}).get("bleed"))
+                else None,
+                "frame": p.frame,
+                "inset": p.inset,
+                "bleed": bool((layout_panels.get(p.id) or {}).get("bleed")),
                 "bubble_zone": spec.zone.as_rect() if spec.zone else None,
                 "image_url": inputs.image_urls.get(p.id),
                 "faces": [f.as_rect() for f in inputs.faces.get(p.id, [])],
@@ -261,6 +346,7 @@ def lettering_json(page: Page, inputs: PageInputs, fonts: FontBook) -> dict[str,
             for p, spec in zip(art.panels, inputs.specs, strict=True)
         ],
         "bubbles": [b.to_json() for b in art.lettering.bubbles],
+        "sfx": [x.to_json() for x in art.lettering.sfx],
         "warnings": [w.to_json() for w in art.warnings],
     }
 
