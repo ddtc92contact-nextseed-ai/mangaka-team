@@ -1,16 +1,16 @@
-# Qwen-Image 2.1 · Qualité — avec images de référence (bf16).
+# Qwen-Image 2.1 · Rapide — avec images de référence (int8 convrot).
 # L'édition / la référence est intégrée au modèle 2.1 : pas de modèle « edit » séparé.
 # JSON au format API, construit d'après le workflow de référence de la GX10
 # (~/ComfyUI/user/default/workflows/image_qwen_image_2_1_image_edit.json, sous-graphe
 # « Image Edit (Qwen Image 2.1) ») : mêmes chargeurs, mêmes options, même échantillonneur.
 # Voir presets/README.md (paliers Qualité / Rapide, ré-export).
-id: qwen-image-edit-ref
-name: "Qwen-Image 2.1 · Qualité — avec images de référence"
+id: qwen-image-edit-ref-rapide
+name: "Qwen-Image 2.1 · Rapide — avec images de référence"
 description: >-
-  Palier Qualité (bf16, 50 étapes) guidé par jusqu'à 3 images de référence des personnages (une par emplacement, dans l'ordre), avec LoRA de style et d'identité.
-workflow_file: qwen-image-edit-ref.json
+  Palier Rapide (int8 convrot, 25 étapes) guidé par jusqu'à 3 images de référence des personnages (une par emplacement, dans l'ordre), avec LoRA de style et d'identité.
+workflow_file: qwen-image-edit-ref-rapide.json
 output_node: "11"
-timeout_s: 1500   # au-delà, la génération est interrompue et le job passe en échec
+timeout_s: 900   # au-delà, la génération est interrompue et le job passe en échec
 mapping:
   # TextEncodeQwenImage21 encode les deux prompts : sorties 0 (positif) et 1 (négatif).
   positive_prompt: { node: "6", input: prompt }
@@ -39,7 +39,7 @@ lora_chain:
 defaults:
   # cfg 1 = chemin officiel de Qwen-Image 2.1 : le prompt négatif est alors ignoré par le modèle.
   negative_prompt: "texte, lettres, bulles, filigrane, signature, flou, mains déformées"
-  steps: 50
+  steps: 25
   cfg: 1
   width: 1024
   height: 1024
@@ -51,5 +51,5 @@ trial:
     rooftop at dusk, wind in her hair, dynamic angle
   width: 512
   height: 512
-  steps: 12
+  steps: 8
   filename_prefix: mangaka/essai

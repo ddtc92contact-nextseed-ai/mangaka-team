@@ -129,15 +129,15 @@ def test_build_workflow_applies_mapping_and_defaults() -> None:
     loaded = PresetRegistry.load(PRESETS_DIR).workflow("qwen-image-base")
     built = build_workflow(loaded, {"positive_prompt": "une ninja sur un toit", "seed": 42, "width": 832})
     wf = built.workflow
-    assert wf["6"]["inputs"]["text"] == "une ninja sur un toit"
+    assert wf["6"]["inputs"]["prompt"] == "une ninja sur un toit"
     assert wf["9"]["inputs"]["seed"] == 42
     assert wf["8"]["inputs"]["width"] == 832
     assert wf["8"]["inputs"]["height"] == loaded.preset.defaults["height"]
-    assert wf["7"]["inputs"]["text"] == loaded.preset.defaults["negative_prompt"]
+    assert wf["6"]["inputs"]["negative_prompt"] == loaded.preset.defaults["negative_prompt"]
     assert built.params["seed"] == 42
     assert built.output_node == "11"
     # le preset chargé n'est pas modifié
-    assert loaded.workflow["6"]["inputs"]["text"] == ""
+    assert loaded.workflow["6"]["inputs"]["prompt"] == ""
     json.dumps(wf)  # sérialisable pour /prompt
 
 

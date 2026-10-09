@@ -1,63 +1,135 @@
 {
   "1": {
     "class_type": "UNETLoader",
-    "inputs": { "unet_name": "qwen_image_2.1_fp8_e4m3fn.safetensors", "weight_dtype": "default" },
-    "_meta": { "title": "Modèle de diffusion" }
+    "inputs": {
+      "unet_name": "qwen_image_2.1_bf16.safetensors",
+      "weight_dtype": "default"
+    },
+    "_meta": {
+      "title": "Modèle de diffusion"
+    }
   },
   "2": {
     "class_type": "CLIPLoader",
-    "inputs": { "clip_name": "qwen_3_vl_8b_fp8.safetensors", "type": "qwen_image", "device": "default" },
-    "_meta": { "title": "Encodeur de texte" }
+    "inputs": {
+      "clip_name": "qwen3vl_8b_bf16.safetensors",
+      "type": "qwen_image",
+      "device": "default"
+    },
+    "_meta": {
+      "title": "Encodeur de texte (Qwen3-VL 8B)"
+    }
   },
   "3": {
     "class_type": "VAELoader",
-    "inputs": { "vae_name": "qwen_image_vae.safetensors" },
-    "_meta": { "title": "VAE" }
+    "inputs": {
+      "vae_name": "qwen_image_2.1_vae_bf16.safetensors"
+    },
+    "_meta": {
+      "title": "VAE"
+    }
   },
-  "5": {
-    "class_type": "ModelSamplingAuraFlow",
-    "inputs": { "shift": 3.1, "model": ["1", 0] },
-    "_meta": { "title": "Échantillonnage" }
+  "4": {
+    "class_type": "QwenImage21Cache",
+    "inputs": {
+      "device": "auto",
+      "dtype": "default",
+      "model": [
+        "1",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Cache Qwen Image 2.1"
+    }
   },
   "6": {
-    "class_type": "CLIPTextEncode",
-    "inputs": { "text": "", "clip": ["2", 0] },
-    "_meta": { "title": "Prompt positif" }
-  },
-  "7": {
-    "class_type": "CLIPTextEncode",
-    "inputs": { "text": "", "clip": ["2", 0] },
-    "_meta": { "title": "Prompt négatif" }
+    "class_type": "TextEncodeQwenImage21",
+    "inputs": {
+      "prompt": "",
+      "negative_prompt": "",
+      "resolution": 1024,
+      "clip": [
+        "2",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Prompts (positif / négatif)"
+    }
   },
   "8": {
-    "class_type": "EmptySD3LatentImage",
-    "inputs": { "width": 1328, "height": 1328, "batch_size": 1 },
-    "_meta": { "title": "Taille de l'image" }
+    "class_type": "EmptyLatentImage",
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 1
+    },
+    "_meta": {
+      "title": "Taille de l'image"
+    }
   },
   "9": {
     "class_type": "KSampler",
     "inputs": {
       "seed": 0,
-      "steps": 20,
-      "cfg": 2.5,
+      "steps": 50,
+      "cfg": 1,
       "sampler_name": "euler",
       "scheduler": "simple",
       "denoise": 1,
-      "model": ["5", 0],
-      "positive": ["6", 0],
-      "negative": ["7", 0],
-      "latent_image": ["8", 0]
+      "model": [
+        "4",
+        0
+      ],
+      "positive": [
+        "6",
+        0
+      ],
+      "negative": [
+        "6",
+        1
+      ],
+      "latent_image": [
+        "8",
+        0
+      ]
     },
-    "_meta": { "title": "KSampler" }
+    "_meta": {
+      "title": "KSampler"
+    }
   },
   "10": {
     "class_type": "VAEDecode",
-    "inputs": { "samples": ["9", 0], "vae": ["3", 0] },
-    "_meta": { "title": "Décodage VAE" }
+    "inputs": {
+      "samples": [
+        "9",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Décodage VAE"
+    }
   },
   "11": {
     "class_type": "SaveImage",
-    "inputs": { "filename_prefix": "mangaka/case", "images": ["10", 0] },
-    "_meta": { "title": "Sauvegarde" }
+    "inputs": {
+      "filename_prefix": "mangaka/case",
+      "images": [
+        "10",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Sauvegarde"
+    }
   }
 }
