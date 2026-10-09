@@ -652,6 +652,126 @@ export interface ExportOptions {
   crop_marks: boolean;
 }
 
+// --- L'équipe : agents du pipeline -------------------------------------------------------
+
+export type AgentState = "ready" | "down" | "misconfigured";
+export type SettingOrigin = "preset" | "global" | "series";
+export type AgentSettingType =
+  | "text"
+  | "longtext"
+  | "prompt"
+  | "prompt_list"
+  | "number"
+  | "integer"
+  | "boolean"
+  | "choice"
+  | "list"
+  | "yaml";
+
+export interface AgentRun {
+  job_id: number;
+  status: JobStatus;
+  finished_at: string | null;
+  duration_ms: number | null;
+  message: string;
+  error: string | null;
+  project_id: number | null;
+}
+
+export interface AgentSummary {
+  id: string;
+  name: string;
+  icon: string;
+  role: string;
+  step: number;
+  step_label: string;
+  /** Modèle / fournisseur utilisé (profil global). */
+  model: string;
+  status: { state: AgentState; label: string; detail: string | null };
+  last_run: AgentRun | null;
+  version: number;
+  series_overrides: number;
+}
+
+export interface AgentSetting {
+  key: string;
+  label: string;
+  help: string;
+  group: string;
+  type: AgentSettingType;
+  choices: { value: string; label: string }[];
+  nullable: boolean;
+  variables: string[];
+  min: number | null;
+  max: number | null;
+  step: number | null;
+  global_only: boolean;
+  /** D'où vient la valeur livrée (« presets/prompts/script.yaml › temperature », « .env (LLM_PROVIDER) »). */
+  source: string;
+  value: unknown;
+  origin: SettingOrigin;
+  preset: unknown;
+  /** Valeur sans le niveau en cours d'édition (ce que « hérité » donnerait). */
+  inherited: unknown;
+}
+
+export interface Knowledge {
+  collections: string[];
+  top_k: number;
+}
+
+export interface AgentDetail extends AgentSummary {
+  scope: { project_id: number | null; project_title: string | null };
+  global_version: number;
+  trial: boolean;
+  trial_description: string;
+  secrets: { env: string; label: string; present: boolean }[];
+  settings: AgentSetting[];
+  knowledge: { value: Knowledge; origin: SettingOrigin; inherited: Knowledge };
+  problem: string | null;
+  saved_version?: number | null;
+}
+
+export interface AgentVersion {
+  version: number;
+  created_at: string;
+  author: string;
+  action: "save" | "restore" | "reset";
+  action_label: string;
+  restored_from: number | null;
+  keys: string[];
+  diff: { key: string; label: string; before: unknown; after: unknown }[];
+}
+
+export interface TrialSection {
+  title: string;
+  kind: "text" | "json" | "layout" | "bubbles";
+  text?: string;
+  data?: unknown;
+}
+
+export interface TrialResult {
+  input: TrialSection[];
+  output: TrialSection[];
+  error: string | null;
+  duration_ms: number;
+}
+
+export interface AgentProfileInput {
+  values: Record<string, unknown>;
+  knowledge?: Knowledge;
+}
+
+export interface SeriesAgentOverride {
+  agent_id: string;
+  name: string;
+  icon: string;
+  step: number;
+  version: number;
+  updated_at: string;
+  settings: { key: string; label: string }[];
+}
+
 export class EngineError extends Error {
   constructor(
     message: string,
@@ -804,7 +924,26 @@ export const api = {
   applyBenchThresholds: (id: number, confirm: boolean) =>
     request<BenchApplyResult>(`/qc/bench/runs/${id}/apply`, json("POST", { confirm })),
   benchExportUrl: (id: number, format: "json" | "csv") => engineUrl(`/qc/bench/runs/${id}/export?format=${format}`),
+
+  listAgents: () => request<AgentSummary[]>("/agents"),
+  getAgent: (id: string, projectId?: number | null) => request<AgentDetail>(`/agents/${id}${agentScope(projectId)}`),
+  saveAgent: (id: string, projectId: number | null, body: AgentProfileInput) =>
+    request<AgentDetail>(`/agents/${id}/profile${agentScope(projectId)}`, json("PUT", body)),
+  agentVersions: (id: string, projectId?: number | null) =>
+    request<AgentVersion[]>(`/agents/${id}/versions${agentScope(projectId)}`),
+  restoreAgentVersion: (id: string, version: number, projectId?: number | null) =>
+    request<AgentDetail>(`/agents/${id}/versions/${version}/restore${agentScope(projectId)}`, json("POST", {})),
+  resetAgent: (id: string, projectId?: number | null) =>
+    request<AgentDetail>(`/agents/${id}/reset${agentScope(projectId)}`, json("POST", {})),
+  tryAgent: (id: string, projectId: number | null, body: AgentProfileInput) =>
+    request<TrialResult>(`/agents/${id}/trial${agentScope(projectId)}`, json("POST", body)),
+  agentExportUrl: (id: string, projectId?: number | null) => engineUrl(`/agents/${id}/export${agentScope(projectId)}`),
+  seriesAgents: (projectId: number) => request<SeriesAgentOverride[]>(`/projects/${projectId}/agents`),
 };
+
+function agentScope(projectId?: number | null): string {
+  return projectId ? `?project_id=${projectId}` : "";
+}
 
 /** Lien de téléchargement du ZIP d'un export de chapitre terminé. */
 export const exportFileUrl = (jobId: number) => engineUrl(`/exports/${jobId}/file`);

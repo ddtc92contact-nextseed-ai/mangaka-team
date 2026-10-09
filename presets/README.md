@@ -22,6 +22,7 @@ Après modification d'un preset, redémarre le moteur (`npm run dev`).
 | `workflows/*.yaml` + `*.json` | Workflows ComfyUI : le JSON API exporté + le mapping des paramètres |
 | `fonts.yaml` + `fonts/` | Polices de lettrage (OFL, licences dans `fonts/OFL*.txt`) et style de texte par type de bulle |
 | `lettering.yaml` | Formes et placement des bulles, queues, bordures de case, repères de coupe |
+| `agents/*.yaml` | Agents du pipeline (écran « L'équipe ») : nom, rôle, étape et réglages éditables depuis l'UI |
 
 ## Format de page
 
@@ -287,3 +288,57 @@ donc rester écrites sur une ligne à part (`ok_min: 70`), pas en style `{ ... }
 Installation des vraies couches sur la GX10 : `engine/.venv/bin/pip install -e "engine[qc]"` (détecteurs
 et CCIP deepghs) et `ollama pull qwen3-vl:4b` (vision), puis `QC_DETECTORS_PROVIDER=dghs`,
 `QC_IDENTITY_PROVIDER=dghs`, `VISION_PROVIDER=ollama` dans `.env`.
+
+## L'équipe : agents du pipeline (`agents/*.yaml`)
+
+Le pipeline reste du Python simple ; un « agent » n'est qu'une déclaration : nom, rôle, étape et
+liste de réglages, chacun pointant vers le preset qui livre sa valeur. L'écran « L'équipe » en tire
+une carte et un formulaire : **un nouvel agent (ex. Directeur artistique) = un nouveau YAML**, sans
+code d'interface (un essai « Essayer » demande en plus une fonction dans
+`engine/mangaka_engine/agents/trials.py`).
+
+```yaml
+id: scenariste
+name: Scénariste
+icon: "✒️"
+role: Découpe chaque chapitre en pages puis en cases…
+step: 1
+step_label: Scénario
+providers: [llm]                     # état « prêt / fournisseur injoignable / mal configuré »
+llm: { provider: provider, model: model }
+job_steps: [script]                  # jobs comptés comme « dernier passage »
+summary: [provider, model]           # « modèle utilisé » sur la carte
+trial: script                        # essai disponible (agents/trials.py)
+secrets: [{ env: DEEPSEEK_API_KEY, label: Clé d'API DeepSeek }]   # seulement « présente / absente »
+settings:
+  - key: temperature
+    label: Température
+    group: Modèle
+    type: number                     # text, longtext, prompt, prompt_list, number, integer, boolean, choice, list, yaml
+    min: 0
+    max: 2
+    source: prompts/script.yaml#temperature
+  - key: system
+    label: Consignes système
+    type: prompt
+    source: prompts/script.yaml#system
+    variables: [series_title, synopsis]   # toute autre $variable est refusée
+```
+
+`source` : `fichier.yaml#chemin.dans.le.fichier` (`defaults`, `providers`, `layout`, `image_prompt`,
+`qc`, `fonts`, `lettering`, `prompts/<id>`), `workflows/*.yaml#…` (appliqué à chaque workflow qui
+mappe le paramètre), `layouts/*.yaml#templates` (toute la bibliothèque de gabarits), `env:VARIABLE`
+(choix fait dans `.env`, ex. `LLM_PROVIDER`) ou `profile` (stocké dans le profil seulement). Options :
+`choices` / `choices_from` (`fonts`, `workflows`, `page_formats`), `nullable`, `env_override`,
+`fallback`, `global_only` (réglage commun à toutes les séries). Un secret (`…KEY`, `…TOKEN`…) ne peut
+jamais être un réglage. Chaque agent a en plus un « Savoir-faire » (collections de la base de
+connaissances + top-k), stocké dès maintenant.
+
+**Où vivent les réglages.** Les valeurs livrées restent dans les presets. Les modifications faites
+dans l'UI sont des profils versionnés en SQLite (`agent_profiles`, `agent_profile_versions`) : un
+profil global et, au besoin, une surcharge « pour cette série seulement ». Le pipeline applique
+**série > profil global > presets** ; le résultat est revalidé par les mêmes schémas que le
+chargeur (un réglage invalide est refusé avec un message lisible). Chaque modification crée une
+version (auteur, date, différences) ; « Revenir à cette version » et « Revenir aux réglages
+d'origine » créent une nouvelle version. « Exporter en YAML » donne le contenu complet des fichiers
+presets de l'agent, à recopier dans `presets/` pour en faire les valeurs livrées.
