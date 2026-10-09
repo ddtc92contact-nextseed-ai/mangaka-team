@@ -154,3 +154,15 @@ def test_intensity_and_rythme_round_trip_through_breakdown_edit(app_client: Test
     assert out[0]["layout"]["style"]["rythme"] == "lent"
     bad = c.put(f"/chapters/{pages[0]['chapter_id']}/pages", json={"pages": [{"rythme": "frénétique", "panels": []}]})
     assert bad.status_code == 422
+
+
+def test_changing_reading_direction_mirrors_slanted_pages(app_client: TestClient) -> None:
+    c = app_client
+    project, pages = _scripted(c, layout_style="nerveuse", reading_direction="rtl")
+    page = next(p for p in pages if any(lp["slanted"] for lp in p["layout"]["panels"]))
+    c.patch(f"/projects/{project['id']}", json={"reading_direction": "ltr"})
+    after = next(p for p in c.get(f"/chapters/{page['chapter_id']}/pages").json() if p["id"] == page["id"])
+    assert after["layout"]["direction"] == "ltr" and not after["layout_stale"]
+    assert after["layout"]["tree"] == page["layout"]["tree"]  # mêmes biais, mêmes proportions
+    assert after["layout"]["style"] == page["layout"]["style"]
+    assert [lp["slanted"] for lp in after["layout"]["panels"]] == [lp["slanted"] for lp in page["layout"]["panels"]]
