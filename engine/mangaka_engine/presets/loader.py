@@ -6,6 +6,7 @@ Arborescence attendue :
       defaults.yaml            # presets par défaut des nouvelles séries
       providers.yaml           # paramètres des fournisseurs (modèle LLM, URL…)
       layout.yaml              # paramètres du découpage (zones de bulles, taille de génération…)
+      image_prompt.yaml        # construction du prompt final des cases (étape 3)
       page_formats/*.yaml      # formats de page
       layouts/*.yaml           # gabarits de planche
       prompts/*.yaml           # prompts des étapes LLM
@@ -27,6 +28,7 @@ from pydantic import BaseModel, ValidationError
 
 from .schemas import (
     Defaults,
+    ImagePromptSettings,
     LayoutSettings,
     LayoutTemplate,
     LayoutTemplateFile,
@@ -62,6 +64,7 @@ class PresetRegistry:
     layout_templates: dict[str, LayoutTemplate] = field(default_factory=dict)
     prompts: dict[str, PromptPreset] = field(default_factory=dict)
     layout: LayoutSettings = field(default_factory=LayoutSettings)
+    image_prompt: ImagePromptSettings = field(default_factory=ImagePromptSettings)
     providers: ProvidersPreset | None = None
     defaults: Defaults | None = None
     issues: list[PresetIssue] = field(default_factory=list)
@@ -132,6 +135,12 @@ class PresetRegistry:
         else:
             reg.issues.append(PresetIssue(reg._rel(layout_path), "fichier absent : valeurs par défaut utilisées"))
 
+        image_prompt_path = root / "image_prompt.yaml"
+        if image_prompt_path.exists():
+            image_prompt = reg._parse(image_prompt_path, ImagePromptSettings)
+            if image_prompt is not None:
+                reg.image_prompt = image_prompt
+
         providers_path = root / "providers.yaml"
         if providers_path.exists():
             reg.providers = reg._parse(providers_path, ProvidersPreset)
@@ -148,6 +157,11 @@ class PresetRegistry:
                     )
                 elif defaults.workflow not in reg.workflows:
                     reg.issues.append(PresetIssue(reg._rel(defaults_path), f"workflow inconnu : {defaults.workflow}"))
+                elif defaults.workflow_with_references and defaults.workflow_with_references not in reg.workflows:
+                    reg.issues.append(
+                        PresetIssue(reg._rel(defaults_path), f"workflow inconnu : {defaults.workflow_with_references}")
+                    )
+                    reg.defaults = defaults.model_copy(update={"workflow_with_references": None})
                 else:
                     reg.defaults = defaults
         else:
@@ -216,6 +230,23 @@ def check_workflow_mapping(preset: WorkflowPreset, workflow: Any) -> list[str]:
             errors.append(f"{param} : entrée « {target.input} » absente du nœud {target.node}")
     if preset.output_node not in workflow:
         errors.append(f"nœud de sortie {preset.output_node} absent du workflow")
+    for i, slot in enumerate(preset.reference_images, start=1):
+        node = workflow.get(slot.node)
+        if not isinstance(node, dict):
+            errors.append(f"référence {i} : nœud {slot.node} absent du workflow")
+        elif slot.input not in node.get("inputs", {}):
+            errors.append(f"référence {i} : entrée « {slot.input} » absente du nœud {slot.node}")
+        mapped = {t.node for t in preset.mapping.values()} | {preset.output_node}
+        for extra in [slot.node, *slot.remove]:
+            if extra not in workflow:
+                errors.append(f"référence {i} : nœud {extra} absent du workflow")
+            elif extra in mapped:
+                errors.append(f"référence {i} : le nœud {extra} est mappé, il ne peut pas être retiré")
+    chain = preset.lora_chain
+    if chain is not None:
+        for label, src in (("model_from", chain.model_from), ("clip_from", chain.clip_from)):
+            if src is not None and not isinstance(workflow.get(src.node), dict):
+                errors.append(f"lora_chain.{label} : nœud {src.node} absent du workflow")
     return errors
 
 

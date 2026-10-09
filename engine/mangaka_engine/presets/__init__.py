@@ -1,12 +1,27 @@
 from .loader import LoadedWorkflow, PresetError, PresetIssue, PresetRegistry
-from .schemas import LayoutSettings, LayoutTemplate, PageFormat, PromptPreset, SplitNode, TreeNode, WorkflowPreset
-from .workflow import BuiltWorkflow, build_workflow
+from .schemas import (
+    ImagePromptSettings,
+    LayoutSettings,
+    LayoutTemplate,
+    LoraChain,
+    PageFormat,
+    PromptPreset,
+    ReferenceSlot,
+    SplitNode,
+    TreeNode,
+    WorkflowPreset,
+)
+from .workflow import BuiltWorkflow, LoraSpec, build_workflow
 
 __all__ = [
     "BuiltWorkflow",
+    "ImagePromptSettings",
     "LayoutSettings",
     "LayoutTemplate",
+    "LoraChain",
+    "LoraSpec",
     "PromptPreset",
+    "ReferenceSlot",
     "SplitNode",
     "TreeNode",
     "LoadedWorkflow",

@@ -1,0 +1,44 @@
+# Workflow avec images de référence (Qwen-Image 2.1 : l'édition / la référence est intégrée
+# au modèle, pas de modèle « edit » séparé). Choisi automatiquement quand la case a des
+# personnages avec une planche de référence (voir defaults.yaml → workflow_with_references).
+#
+# Le JSON est une base « au mieux » : ré-exporte-le depuis ComfyUI (« Save (API Format) »)
+# puis ajuste le mapping ci-dessous — voir presets/README.md.
+id: qwen-image-edit-ref
+name: Qwen-Image 2.1 — avec images de référence
+description: >-
+  Génération d'une case guidée par jusqu'à 3 images de référence des personnages
+  (une par emplacement, dans l'ordre), avec LoRA de style et d'identité.
+workflow_file: qwen-image-edit-ref.json
+output_node: "11"
+timeout_s: 900
+mapping:
+  positive_prompt: { node: "6", input: prompt }
+  negative_prompt: { node: "7", input: prompt }
+  seed: { node: "9", input: seed }
+  steps: { node: "9", input: steps }
+  cfg: { node: "9", input: cfg }
+  width: { node: "8", input: width }
+  height: { node: "8", input: height }
+  filename_prefix: { node: "11", input: filename_prefix }
+# Emplacements d'images de référence, remplis dans l'ordre. Un emplacement inutilisé est
+# retiré avec ses nœuds `remove` ; les entrées image2/image3 des encodeurs qui pointaient
+# vers eux sont supprimées (elles sont optionnelles).
+reference_images:
+  - { node: "20", input: image, remove: ["21"] }
+  - { node: "22", input: image, remove: ["23"] }
+  - { node: "24", input: image, remove: ["25"] }
+# LoRA (style de la série puis identité de chaque personnage) chaînés après le modèle.
+lora_chain:
+  class_type: LoraLoaderModelOnly
+  model_from: { node: "1", output: 0 }
+  model_input: model
+  name_input: lora_name
+  strength_input: strength_model
+defaults:
+  negative_prompt: "texte, lettres, bulles, filigrane, signature, flou, mains déformées"
+  steps: 20
+  cfg: 2.5
+  width: 1328
+  height: 1328
+  filename_prefix: mangaka/case

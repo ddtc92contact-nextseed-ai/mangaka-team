@@ -42,7 +42,11 @@ def test_health_never_leaks_api_key(make_settings: Callable[..., Settings]) -> N
 
 def test_presets_endpoint(client: TestClient) -> None:
     data = client.get("/presets").json()
-    assert data["defaults"] == {"page_format": "a4-300dpi", "workflow": "qwen-image-base"}
+    assert data["defaults"] == {
+        "page_format": "a4-300dpi",
+        "workflow": "qwen-image-base",
+        "workflow_with_references": "qwen-image-edit-ref",
+    }
     formats = {f["id"]: f for f in data["page_formats"]}
     assert formats["a4-300dpi"]["width_px"] == 2480
     assert formats["b4-300dpi"]["dpi"] == 300

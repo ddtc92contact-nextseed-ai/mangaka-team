@@ -64,6 +64,46 @@ class NodeInput(_Strict):
     input: str
 
 
+class NodeOutput(_Strict):
+    """Sortie `[node, output]` d'un nœud du JSON API (lien entre nœuds)."""
+
+    node: str
+    output: int = Field(default=0, ge=0)
+
+
+class ReferenceSlot(_Strict):
+    """Emplacement d'image de référence : un nœud `LoadImage` (ou équivalent) du workflow.
+
+    `node`/`input` reçoivent le nom du fichier envoyé à ComfyUI (`/upload/image`).
+    Un emplacement inutilisé est retiré du workflow avec les nœuds de `remove` (ex. son
+    redimensionnement), et toute entrée qui pointait vers un nœud retiré est supprimée.
+    """
+
+    node: str
+    input: str = "image"
+    remove: list[str] = Field(default_factory=list, description="Nœuds propres à l'emplacement, retirés avec lui")
+
+
+class LoraChain(_Strict):
+    """Point d'insertion des LoRA : une chaîne de chargeurs est branchée sur `model_from`.
+
+    Chaque LoRA devient un nœud `class_type` dont l'entrée `model_input` reçoit le modèle
+    précédent ; les nœuds qui consommaient `model_from` reçoivent la sortie du dernier.
+    `clip_from` (optionnel) fait de même pour l'encodeur de texte (chargeurs type `LoraLoader`).
+    """
+
+    class_type: str = Field(min_length=1, description="Ex. LoraLoaderModelOnly")
+    model_from: NodeOutput
+    model_input: str = "model"
+    name_input: str = "lora_name"
+    strength_input: str = "strength_model"
+    clip_from: NodeOutput | None = None
+    clip_input: str = "clip"
+    clip_strength_input: str = "strength_clip"
+    clip_output: int = Field(default=1, ge=0)
+    extra_inputs: dict[str, Any] = Field(default_factory=dict, description="Entrées constantes du chargeur")
+
+
 REQUIRED_WORKFLOW_PARAMS = ("positive_prompt", "negative_prompt", "seed", "width", "height")
 
 
@@ -75,6 +115,11 @@ class WorkflowPreset(_Strict):
     output_node: str = Field(description="Nœud SaveImage dont on récupère les images")
     mapping: dict[str, NodeInput]
     defaults: dict[str, Any] = Field(default_factory=dict)
+    reference_images: list[ReferenceSlot] = Field(
+        default_factory=list, description="Emplacements d'images de référence, dans l'ordre de remplissage"
+    )
+    lora_chain: LoraChain | None = None
+    timeout_s: float = Field(default=600, gt=0, le=24 * 3600, description="Durée max d'une génération")
 
     @model_validator(mode="after")
     def _check_mapping(self) -> WorkflowPreset:
@@ -84,6 +129,9 @@ class WorkflowPreset(_Strict):
         unknown = [k for k in self.defaults if k not in self.mapping]
         if unknown:
             raise ValueError(f"valeurs par défaut sans mapping : {', '.join(unknown)}")
+        nodes = [s.node for s in self.reference_images]
+        if len(set(nodes)) != len(nodes):
+            raise ValueError("reference_images : un même nœud est déclaré deux fois")
         return self
 
 
@@ -110,6 +158,8 @@ class ProvidersPreset(_Strict):
 class Defaults(_Strict):
     page_format: str
     workflow: str
+    # Workflow choisi automatiquement quand la case a des personnages avec images de référence.
+    workflow_with_references: str | None = None
 
 
 # --- Découpage (étape 2) ------------------------------------------------------
@@ -215,3 +265,38 @@ class PromptPreset(_Strict):
 
     def variables(self, part: Literal["system", "user", "retry"]) -> set[str]:
         return set(string.Template(getattr(self, part)).get_identifiers())
+
+
+# --- Prompt image (étape 3) ---------------------------------------------------
+class ImagePromptSettings(_Strict):
+    """Construction du prompt final d'une case (voir pipeline/prompt.py)."""
+
+    # Morceaux assemblés dans l'ordre ; un morceau dont une variable est vide est omis.
+    # Variables : $shot, $description, $characters, $style.
+    parts: list[str] = Field(
+        default_factory=lambda: [
+            "$shot.",
+            "$description.",
+            "Personnages : $characters.",
+            "Style : $style.",
+            "Case de manga, dessin encré, sans aucun texte ni bulle.",
+        ]
+    )
+    character: str = Field(default="$name ($details)", description="Variables : $name, $details")
+    character_separator: str = " ; "
+    # Toujours présents dans le prompt négatif : le texte est posé au lettrage, jamais dessiné.
+    forbidden_text_terms: list[str] = Field(
+        default_factory=lambda: ["texte", "lettres", "bulles", "phylactères", "onomatopées", "filigrane", "signature"]
+    )
+    strip_quotes: bool = Field(default=True, description="Retire les répliques entre guillemets de la description")
+
+    @field_validator("parts")
+    @classmethod
+    def _check_parts(cls, value: list[str]) -> list[str]:
+        for part in value:
+            if not string.Template(part).is_valid():
+                raise ValueError("gabarit invalide : un « $ » isolé doit s'écrire « $$ »")
+            unknown = set(string.Template(part).get_identifiers()) - {"shot", "description", "characters", "style"}
+            if unknown:
+                raise ValueError(f"variables inconnues : {', '.join(sorted(unknown))}")
+        return value
