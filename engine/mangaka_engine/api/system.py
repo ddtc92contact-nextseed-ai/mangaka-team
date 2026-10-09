@@ -99,6 +99,10 @@ def list_presets(ctx: AppContext = Depends(get_ctx)) -> dict[str, Any]:
                 "reference_slots": len(w.preset.reference_images),
                 "with_references": w.preset.with_references,
                 "has_trial": bool(w.preset.trial),
+                "tier": w.preset.tier.name if w.preset.tier else None,
+                "tier_choice": w.preset.tier.choice if w.preset.tier else None,
+                "tier_order": w.preset.tier.order if w.preset.tier else None,
+                "estimated_s": w.preset.estimated_s,
             }
             for w in reg.workflows.values()
         ],

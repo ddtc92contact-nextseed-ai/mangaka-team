@@ -11,7 +11,7 @@ Après modification d'un preset, redémarre le moteur (`npm run dev`).
 
 | Fichier | Rôle |
 | --- | --- |
-| `defaults.yaml` | Format de page, workflow (palier **Qualité**) et style de mise en page (`layout_style`) appliqués aux nouvelles séries ; workflow « avec références » de repli pour un preset qui ne déclare pas `with_references` (`workflow_with_references`) |
+| `defaults.yaml` | Format de page, workflow (palier **Turbo**) et style de mise en page (`layout_style`) appliqués aux nouvelles séries ; workflow « avec références » de repli pour un preset qui ne déclare pas `with_references` (`workflow_with_references`) ; palier de « Régénérer en Qualité » (`workflow_quality`) |
 | `providers.yaml` | Paramètres des fournisseurs (URL, modèle LLM, timeouts). **Aucune clé d'API ici** : elles vont dans `.env` |
 | `page_formats/*.yaml` | Formats de page (dimensions en mm, DPI, marges, gouttières) : A4 (défaut) et B4 JIS à 300 DPI |
 | `layout.yaml` | Découpage : taille mini d'une case, taille cible de génération, zones de bulles, seuil de régénération conseillée |
@@ -180,7 +180,7 @@ lora_chain: { … }                     # point d'insertion des LoRA (voir plus 
 
 ### Mapping des nœuds (presets Qwen-Image 2.1)
 
-Les quatre presets livrés partagent le même graphe et les mêmes numéros de nœuds :
+Les six presets livrés partagent le même graphe et les mêmes numéros de nœuds :
 
 | Paramètre | Nœud | Type ComfyUI | Entrée | Obligatoire |
 | --- | --- | --- | --- | --- |
@@ -211,28 +211,61 @@ Règles vérifiées au chargement :
 Les noms de fichiers de modèles (`unet_name`, `clip_name`, `vae_name`) vivent
 **uniquement** dans le JSON. Le code Python ne connaît aucun nom de modèle.
 
-### Fichiers de la GX10 et paliers Qualité / Rapide
+### Fichiers de la GX10 et paliers Turbo / Rapide / Qualité
 
 Fichiers installés dans `~/ComfyUI/models/` (liens vers le disque T9) et utilisés par les presets :
 
-| Dossier | Qualité | Rapide |
-| --- | --- | --- |
-| `diffusion_models/` | `qwen_image_2.1_bf16.safetensors` (14,2 Go) | `qwen_image_2.1_int8_convrot.safetensors` (7,3 Go) |
-| `text_encoders/` | `qwen3vl_8b_bf16.safetensors` (17,5 Go) | `qwen3vl_8b_int8_convrot.safetensors` (9,4 Go) |
-| `vae/` | `qwen_image_2.1_vae_bf16.safetensors` | idem |
+| Dossier | Qualité | Rapide | Turbo |
+| --- | --- | --- | --- |
+| `diffusion_models/` | `qwen_image_2.1_bf16.safetensors` (14,2 Go) | `qwen_image_2.1_int8_convrot.safetensors` (7,3 Go) | `qwen_image_2.1_turbo_int8_convrot.safetensors` |
+| `text_encoders/` | `qwen3vl_8b_bf16.safetensors` (17,5 Go) | `qwen3vl_8b_int8_convrot.safetensors` (9,4 Go) | idem Rapide |
+| `vae/` | `qwen_image_2.1_vae_bf16.safetensors` | idem | idem |
+
+**Turbo** = version distillée officielle de Qwen-Image 2.1, publiée par Qwen dans le dépôt
+`Comfy-Org/Qwen-Image-2.1` (`diffusion_models/`) : la distillation est déjà fusionnée dans les poids,
+donc ni LoRA d'accélération ni nœud personnalisé — même graphe que les autres paliers, seul le fichier
+du modèle et l'échantillonnage changent. **Alternative bf16** (pas un 4ᵉ palier) : remplacer `unet_name`
+par `qwen_image_2.1_turbo_bf16.safetensors` (et, au besoin, `clip_name` par `qwen3vl_8b_bf16.safetensors`)
+dans `qwen-image-turbo.json` et `qwen-image-edit-ref-turbo.json`, puis régénérer les JSON de référence
+des tests (`UPDATE_GOLDEN=1`).
+
+Échantillonnage Turbo livré : 8 étapes, cfg 1, `euler` + `simple`, denoise 1 — **à confirmer** avec
+le vrai export ComfyUI du manager (`~/mangaka-comfy-exports/`). Une correction ne touche que les deux
+presets Turbo (YAML `defaults` + JSON nœud 9), jamais le code. Attention : un réglage « Étapes » modifié
+dans l'écran « L'équipe » (dessinateur) s'applique à **tous** les workflows, Turbo compris.
 
 Les fichiers int8 « convrot » se chargent avec les nœuds standard (`UNETLoader` `weight_dtype: default`,
 `CLIPLoader` `type: qwen_image`), comme dans le workflow de référence du manager
 (`~/ComfyUI/user/default/workflows/image_qwen_image_2_1_image_edit.json`).
 
-| Preset | Palier | Usage | Étapes | Délai max |
-| --- | --- | --- | --- | --- |
-| `qwen-image-base` | Qualité (défaut des séries) | texte → image | 50 | 20 min |
-| `qwen-image-edit-ref` | Qualité | avec images de référence | 50 | 25 min |
-| `qwen-image-base-rapide` | Rapide | texte → image | 25 | 10 min |
-| `qwen-image-edit-ref-rapide` | Rapide | avec images de référence | 25 | 15 min |
+| Preset | Palier | Usage | Étapes | Délai max | `estimated_s` |
+| --- | --- | --- | --- | --- | --- |
+| `qwen-image-turbo` | Turbo (défaut des nouvelles séries) | texte → image | 8 | 5 min | 20 |
+| `qwen-image-edit-ref-turbo` | Turbo | avec images de référence | 8 | 10 min | 80 |
+| `qwen-image-base-rapide` | Rapide | texte → image | 25 | 10 min | 60 |
+| `qwen-image-edit-ref-rapide` | Rapide | avec images de référence | 25 | 15 min | 240 |
+| `qwen-image-base` | Qualité (finitions, « Régénérer en Qualité ») | texte → image | 50 | 20 min | 70 |
+| `qwen-image-edit-ref` | Qualité | avec images de référence | 50 | 25 min | 280 |
 
-Le palier se choisit avec le **workflow de la série** (liste « Workflow ComfyUI » de la fiche série).
+Le palier se choisit avec le **workflow de la série** (liste « Palier de génération » de la fiche
+série : « Turbo (rapide, production) », « Rapide », « Qualité (finitions) »). Les séries existantes
+gardent leur preset. Chaque preset déclare son palier :
+
+```yaml
+tier:
+  name: Turbo                            # affiché sur chaque version de case (atelier)
+  choice: "Turbo (rapide, production)"   # libellé de la fiche série ; absent = pas proposé
+  order: 1                               # ordre dans la liste
+estimated_s: 20                          # s / case tant qu'il y a moins de 3 générations réelles
+```
+
+**Régénérer en Qualité** (atelier, par case) : met en file une nouvelle version de cette seule case
+avec `defaults.workflow_quality` (ou son `with_references` si un personnage de la case a une planche
+de référence), même prompt, nouvelle seed. Les autres versions (et la version choisie) ne bougent pas.
+
+**Temps estimé** (en-tête du chapitre et de la série) : cases sans version choisie × durée par case de
+leur preset = médiane des 20 dernières générations réussies de ce preset dès qu'il y en a 3, sinon
+`estimated_s` (libellé « estimation »). API : `GET /chapters/{id}/estimate`, `GET /projects/{id}/estimate`.
 Chaque preset texte → image déclare son pendant « avec références » du même palier :
 
 ```yaml
@@ -242,7 +275,7 @@ with_references: qwen-image-edit-ref-rapide   # dans qwen-image-base-rapide.yaml
 Une case dont un personnage a une planche de référence prend donc `qwen-image-edit-ref-rapide` dans une
 série Rapide, `qwen-image-edit-ref` dans une série Qualité. `defaults.yaml → workflow_with_references`
 ne sert plus qu'aux presets sans `with_references`. La taille de génération reste celle de la mise en page
-(≈ 1 Mpx, `layout.yaml`) pour les deux paliers.
+(≈ 1 Mpx, `layout.yaml`) pour tous les paliers, cases avec références comprises.
 
 ### Case d'essai (`trial`)
 
@@ -254,13 +287,13 @@ l'image et sa durée en secondes s'affichent sous le bouton.
 
 `GET /comfyui/check` (bouton « Tester la connexion » du tableau de bord) interroge `/system_stats` et
 `/object_info` du vrai ComfyUI et liste, par preset : les nœuds inconnus (« nœud inconnu : … ») et les
-valeurs fixes absentes des listes de ComfyUI (« modèle introuvable dans ComfyUI : … », encodeur, VAE,
-échantillonneur…), puis les LoRA saisis dans les séries et les fiches absents de `models/loras/`.
+valeurs fixes absentes des listes de ComfyUI (« modèle introuvable dans ComfyUI : x.safetensors — à
+placer dans ComfyUI/models/diffusion_models/ », encodeur, VAE, échantillonneur…), puis les LoRA saisis dans les séries et les fiches absents de `models/loras/`.
 Avec `COMFYUI_PROVIDER=mock`, il répond « ComfyUI simulé ».
 
 ## Images de référence et LoRA (étape 3)
 
-Les quatre presets acceptent des LoRA ; les deux presets « avec images de référence » ont 3 emplacements
+Les six presets acceptent des LoRA ; les trois presets « avec images de référence » ont 3 emplacements
 (Qwen-Image 2.1 : l'édition / la référence est intégrée au modèle, pas de modèle « edit » séparé). Ils sont
 choisis automatiquement (selon le palier de la série) quand un personnage de la case a une planche de
 référence.

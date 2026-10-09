@@ -1,4 +1,4 @@
-"""JSON API envoyé à ComfyUI pour chaque palier (Qualité / Rapide), comparé à des fichiers de référence.
+"""JSON API envoyé à ComfyUI pour chaque palier (Qualité / Rapide / Turbo), comparé à des fichiers de référence.
 
 Prompts, seed, taille, images de référence et LoRA injectés : toute différence avec
 `golden/workflows/<preset>.json` fait échouer le test. Après une modification voulue des presets,
@@ -29,7 +29,20 @@ PARAMS = {
 LORAS = [LoraSpec("encre-seinen.safetensors", 0.7, "style"), LoraSpec("aiko-v3.safetensors", 0.9, "Aiko")]
 REFERENCES = ["mangaka/perso1_img1.png", "mangaka/perso2_img4.png"]
 
-PRESETS = ["qwen-image-base", "qwen-image-base-rapide", "qwen-image-edit-ref", "qwen-image-edit-ref-rapide"]
+PRESETS = [
+    "qwen-image-base",
+    "qwen-image-base-rapide",
+    "qwen-image-turbo",
+    "qwen-image-edit-ref",
+    "qwen-image-edit-ref-rapide",
+    "qwen-image-edit-ref-turbo",
+]
+# Paliers (texte → image, avec références) : Qualité, Rapide, Turbo.
+TIERS = {
+    "": ("qwen-image-base", "qwen-image-edit-ref"),
+    "-rapide": ("qwen-image-base-rapide", "qwen-image-edit-ref-rapide"),
+    "-turbo": ("qwen-image-turbo", "qwen-image-edit-ref-turbo"),
+}
 
 
 def _build(preset_id: str) -> dict:
@@ -49,29 +62,70 @@ def test_workflow_matches_golden(preset_id: str) -> None:
     assert json.loads(path.read_text(encoding="utf-8")) == built
 
 
-@pytest.mark.parametrize("tier", ["", "-rapide"])
+def _diff(a: dict, b: dict) -> set[tuple[str, str]]:
+    return {(k, name) for k, n in a.items() for name, value in n["inputs"].items() if b[k]["inputs"].get(name) != value}
+
+
+@pytest.mark.parametrize("tier", list(TIERS))
 def test_tiers_share_the_graph_and_differ_by_files_and_steps(tier: str) -> None:
-    """Rapide = mêmes nœuds et liaisons que Qualité ; seuls les fichiers modèle / encodeur et les étapes changent."""
-    for base in ("qwen-image-base", "qwen-image-edit-ref"):
-        qualite, rapide = REG.workflow(base).workflow, REG.workflow(f"{base}-rapide").workflow
-        assert {k: n["class_type"] for k, n in qualite.items()} == {k: n["class_type"] for k, n in rapide.items()}
-        diff = {
-            (k, name)
-            for k, n in qualite.items()
-            for name, value in n["inputs"].items()
-            if rapide[k]["inputs"].get(name) != value
-        }
-        assert diff == {("1", "unet_name"), ("2", "clip_name"), ("9", "steps")}
-    rapide_steps = REG.workflow("qwen-image-base-rapide").preset.defaults["steps"]
-    assert rapide_steps < REG.workflow("qwen-image-base").preset.defaults["steps"]
-    built = _build(f"qwen-image-edit-ref{tier}")
+    """Rapide et Turbo = mêmes nœuds et liaisons que Qualité ; seuls les fichiers modèle / encodeur et les
+    étapes changent (Turbo : mêmes encodeur int8 et VAE que Rapide, seul le modèle distillé diffère)."""
+    for i, other in enumerate(TIERS[tier]):
+        qualite, wf = REG.workflow(TIERS[""][i]).workflow, REG.workflow(other).workflow
+        assert {k: n["class_type"] for k, n in qualite.items()} == {k: n["class_type"] for k, n in wf.items()}
+        assert _diff(qualite, wf) == (set() if not tier else {("1", "unet_name"), ("2", "clip_name"), ("9", "steps")})
+        if tier == "-turbo":
+            assert _diff(REG.workflow(TIERS["-rapide"][i]).workflow, wf) == {("1", "unet_name"), ("9", "steps")}
+    steps = [REG.workflow(TIERS[t][0]).preset.defaults["steps"] for t in ("-turbo", "-rapide", "")]
+    assert steps == sorted(steps) and len(set(steps)) == 3
+    built = _build(TIERS[tier][1])
     assert built["6"]["inputs"]["images.image_1"] == ["20", 0] and "images.image_3" not in built["6"]["inputs"]
 
 
+@pytest.mark.parametrize("preset_id", ["qwen-image-turbo", "qwen-image-edit-ref-turbo"])
+def test_turbo_presets_sampler_and_files(preset_id: str) -> None:
+    """Turbo : modèle distillé int8 (pas de LoRA d'accélération ni de nœud personnalisé), 8 étapes, cfg 1,
+    euler + simple, denoise 1 ; LoRA de série / personnages chaînés après le modèle comme ailleurs."""
+    loaded = REG.workflow(preset_id)
+    built = build_workflow(
+        loaded, PARAMS, reference_images=REFERENCES[: len(loaded.preset.reference_images)], loras=LORAS
+    )
+    wf = built.workflow
+    assert "turbo" in wf["1"]["inputs"]["unet_name"] and "int8" in wf["1"]["inputs"]["unet_name"]
+    assert "int8" in wf["2"]["inputs"]["clip_name"]
+    sampler = wf["9"]["inputs"]
+    assert (sampler["steps"], sampler["cfg"], sampler["sampler_name"], sampler["scheduler"], sampler["denoise"]) == (
+        8,
+        1,
+        "euler",
+        "simple",
+        1,
+    )
+    assert {n["class_type"] for n in wf.values()} == {
+        n["class_type"] for n in REG.workflow("qwen-image-base").workflow.values()
+    } | {"LoraLoaderModelOnly"} | ({"LoadImage"} if loaded.preset.reference_images else set())
+    assert REG.workflow(preset_id).preset.lora_chain == REG.workflow("qwen-image-base-rapide").preset.lora_chain
+    assert loaded.preset.tier is not None and loaded.preset.tier.name == "Turbo"
+
+
 def test_tier_pairing_and_defaults() -> None:
-    assert REG.defaults is not None and REG.defaults.workflow == "qwen-image-base"  # Qualité par défaut
-    assert REG.workflow("qwen-image-base").preset.with_references == "qwen-image-edit-ref"
-    assert REG.workflow("qwen-image-base-rapide").preset.with_references == "qwen-image-edit-ref-rapide"
+    assert REG.defaults is not None and REG.defaults.workflow == "qwen-image-turbo"  # Turbo par défaut
+    assert REG.defaults.workflow_with_references == "qwen-image-edit-ref-turbo"
+    assert REG.defaults.workflow_quality == "qwen-image-base"
+    for base, edit in TIERS.values():
+        assert REG.workflow(base).preset.with_references == edit
     for preset_id in PRESETS:
         assert REG.workflow(preset_id).preset.trial["positive_prompt"]
-    assert list(REG.workflows)[:2] == ["qwen-image-base", "qwen-image-base-rapide"]  # ordre des listes
+    # ordre des listes
+    assert list(REG.workflows)[:3] == ["qwen-image-base", "qwen-image-base-rapide", "qwen-image-turbo"]
+    # trois paliers proposés dans la fiche série, dans l'ordre Turbo, Rapide, Qualité
+    choices = sorted(
+        (w.preset.tier.order, w.preset.tier.choice)
+        for w in REG.workflows.values()
+        if w.preset.tier and w.preset.tier.choice
+    )
+    assert [c for _, c in choices] == ["Turbo (rapide, production)", "Rapide", "Qualité (finitions)"]
+    # estimations des presets (s / case) : Turbo 20, Rapide 60, Qualité 70, ×4 avec références
+    for (base, edit), seconds in zip(TIERS.values(), (70, 60, 20), strict=True):
+        assert REG.workflow(base).preset.estimated_s == seconds
+        assert REG.workflow(edit).preset.estimated_s == seconds * 4

@@ -144,6 +144,27 @@ def resolve_preset_id(
     return series_id
 
 
+def quality_preset_id(presets: PresetRegistry, characters: Sequence[Character]) -> str:
+    """Preset de « Régénérer en Qualité » : `defaults.workflow_quality`, ou son pendant « avec
+    références » (`with_references`) si un personnage de la case a une planche de référence."""
+    defaults = presets.defaults
+    quality_id = defaults.workflow_quality if defaults else None
+    quality = presets.workflows.get(quality_id) if quality_id else None
+    if quality is None:
+        raise GenerationError("aucun palier Qualité configuré (workflow_quality de presets/defaults.yaml)")
+    if any(c.reference_images for c in characters) and not quality.preset.reference_images:
+        if not quality.preset.with_references:
+            raise GenerationError(f"le workflow Qualité {quality.preset.id} ne déclare pas de with_references")
+        return quality.preset.with_references
+    return quality.preset.id
+
+
+def preset_tier(presets: PresetRegistry, preset_id: str | None) -> str | None:
+    """Nom du palier (« Turbo », « Rapide », « Qualité ») d'un preset, s'il en déclare un."""
+    loaded = presets.workflows.get(preset_id) if preset_id else None
+    return loaded.preset.tier.name if loaded is not None and loaded.preset.tier is not None else None
+
+
 def panel_target(presets: PresetRegistry, page: Page, panel: Panel) -> dict[str, int] | None:
     """Taille de génération calculée par la mise en page (même ratio que la case, ≈ 1 Mpx)."""
     for lp in (page.layout or {}).get("panels", []):
@@ -529,6 +550,7 @@ class GenerationExecutor:
                 params={
                     "preset": preset.id,
                     "preset_name": preset.name,
+                    "tier": preset.tier.name if preset.tier else None,
                     "prompt": built.params["positive_prompt"],
                     "negative_prompt": built.params["negative_prompt"],
                     "seed": built.params["seed"],

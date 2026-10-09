@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams, usePathname } from "next/navigation";
 import type { ReactNode } from "react";
+import { EstimateLabel } from "@/components/estimate";
 import { ChapterStatusBadge, formatPlannedDate } from "@/components/status";
 import { Alert, Loading, PageHeader } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -46,6 +47,7 @@ export default function ChapterLayout({ children }: { children: ReactNode }) {
             </Link>
             <ChapterStatusBadge status={c.status} />
             <span>Publication : {formatPlannedDate(c.planned_date)}</span>
+            <EstimateLabel chapterId={c.id} />
           </span>
         }
       />

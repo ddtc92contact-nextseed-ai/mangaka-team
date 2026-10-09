@@ -6,6 +6,7 @@ import { useState } from "react";
 import { AgentOverrides } from "@/components/agent-overrides";
 import { Avatar } from "@/components/avatar";
 import { ChapterList } from "@/components/chapter-list";
+import { EstimateLabel } from "@/components/estimate";
 import { ProjectForm } from "@/components/project-form";
 import { SeriesBible } from "@/components/series-bible";
 import { DIRECTIONS, DirectionBadge } from "@/components/reading-direction";
@@ -48,6 +49,7 @@ export default function ProjectPage() {
             <SeriesStatusBadge status={project.data.status} />
             <DirectionBadge direction={project.data.reading_direction} />
             <span className="hidden sm:inline">{DIRECTIONS[project.data.reading_direction]}</span>
+            <EstimateLabel projectId={id} />
           </span>
         }
         actions={
