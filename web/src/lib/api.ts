@@ -21,6 +21,8 @@ export interface Project {
   style_lora_weight: number;
   character_count: number;
   chapter_count: number;
+  /** Pages déjà mises en page : changer le sens de lecture les met en miroir. */
+  laid_out_page_count: number;
   created_at: string;
   updated_at: string;
 }
