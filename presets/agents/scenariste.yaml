@@ -77,6 +77,8 @@ settings:
       - target_pages
       - shot_types
       - bubble_kinds
+      - intensities
+      - rythmes
       - context_json
       - bible
       - savoir_faire

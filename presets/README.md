@@ -11,11 +11,12 @@ Après modification d'un preset, redémarre le moteur (`npm run dev`).
 
 | Fichier | Rôle |
 | --- | --- |
-| `defaults.yaml` | Format de page et workflow appliqués aux nouvelles séries (palier **Qualité**) ; workflow « avec références » de repli pour un preset qui ne déclare pas `with_references` (`workflow_with_references`) |
+| `defaults.yaml` | Format de page, workflow (palier **Qualité**) et style de mise en page (`layout_style`) appliqués aux nouvelles séries ; workflow « avec références » de repli pour un preset qui ne déclare pas `with_references` (`workflow_with_references`) |
 | `providers.yaml` | Paramètres des fournisseurs (URL, modèle LLM, timeouts). **Aucune clé d'API ici** : elles vont dans `.env` |
 | `page_formats/*.yaml` | Formats de page (dimensions en mm, DPI, marges, gouttières) : A4 (défaut) et B4 JIS à 300 DPI |
-| `layout.yaml` | Découpage : taille mini d'une case, taille cible de génération, zones de bulles |
+| `layout.yaml` | Découpage : taille mini d'une case, taille cible de génération, zones de bulles, seuil de régénération conseillée |
 | `layouts/*.yaml` | Bibliothèque de gabarits de planche (arbres de découpes) |
+| `layout_styles/*.yaml` | Grammaires de mise en page par série : `sage`, `dynamique` (défaut), `nerveuse` — biais, gouttières, gabarits favoris |
 | `prompts/*.yaml` | Prompts des étapes LLM (`script` : découpage d'un chapitre) |
 | `image_prompt.yaml` | Construction du prompt final des cases (étape 3) et termes « pas de texte » du prompt négatif |
 | `qc.yaml` | Contrôle qualité des cases (étape 4) : poids, seuils de verdict, règles des détecteurs, seuil CCIP, zone de doute de la vision, nouveaux essais automatiques |
@@ -56,7 +57,95 @@ templates:
 
 À nombre de cases égal, le moteur prend le gabarit dont la répartition des surfaces suit le mieux
 l'importance (1–3) des cases ; en cas d'égalité, le premier de la liste. Au-delà de la bibliothèque,
-une grille de bandes de 3 cases est générée.
+une grille de bandes de 3 cases est générée. Le style de mise en page de la série (ci-dessous)
+module ce choix.
+
+### Découpes en biais (`slants`)
+
+Une case est un **polygone convexe** : une découpe peut être inclinée. `slants` donne, pour chaque
+découpe d'un nœud (une de moins que de poids), le décalage en mm de ses deux extrémités par rapport à
+la découpe droite : `[gauche, droite]` pour une découpe entre deux bandes, `[haut, bas]` entre deux
+colonnes, dans le sens de lecture (miroir automatique en manga).
+
+```yaml
+tree: { rows: [3, 2], slants: [[-4, 4]], children: [panel, { cols: [1, 1], slants: [[3, -3]] }] }
+```
+
+La gouttière garde sa largeur, **mesurée perpendiculairement** à la découpe. L'image d'une case en
+biais est générée à la taille de sa boîte englobante (mêmes règles que `layout.yaml`), puis découpée au
+polygone à l'assemblage (masque anticrénelé, `clipPath` en SVG) ; la bordure suit les bords du polygone
+et les bulles restent entièrement dans le polygone. Sans `slants`, une case est exactement le rectangle
+d'avant. Les gabarits de la bibliothèque n'ont pas de biais : ce sont les styles qui en ajoutent.
+
+## Styles de mise en page (`layout_styles/*.yaml`)
+
+Chaque série a sa signature de mise en page : le champ « Style de mise en page » de la série (défaut
+`dynamique`, `defaults.yaml`). Une page peut imposer le sien (atelier de mise en page). Aucune valeur de
+style n'est écrite dans le code : tout est dans ces fichiers, et **tous les champs sont obligatoires**.
+
+| Style | Intention |
+| --- | --- |
+| `sage` | Découpes droites, gouttières du format, toujours le gabarit le mieux adapté : identique à la mise en page d'avant les styles |
+| `dynamique` | Quelques biais sur les cases fortes et les temps d'action, gouttières légèrement variables |
+| `nerveuse` | Biais fréquents et plus raides, fort contraste de tailles, grilles régulières rares |
+
+```yaml
+id: dynamique
+name: Dynamique
+gutters_mm:                       # null = gouttières du format de page
+  horizontal: { min: 4, max: 6 }  # largeur tirée par page, au pas de 0,5 mm
+  vertical: { min: 2.5, max: 4 }
+size_contrast: 1.3                # poids d'une case = (importance × poids d'intensité) ^ contraste
+intensity_weight: { calme: 0.85, normal: 1.0, choc: 1.6 }
+size_jitter: 0.08                 # variation aléatoire des proportions de chaque découpe (0 à 0,5)
+temperature: 0.03                 # 0 = meilleur gabarit ; plus haut = choix varié parmi les bons
+default_template_weight: 1
+template_weights: { "*-grille": 0.7, "*-grand-*": 1.3 }   # identifiant ou motif ; 0 = jamais
+avoid_repeat: true                # jamais deux pages de suite avec le même gabarit (s'il en existe un autre)
+slants:                           # probabilité de biais d'une découpe et angle tiré (degrés)
+  by_importance:                  # règle d'une case sans intensité : selon son importance
+    3: { probability: 0.55, rows_deg: { min: 2, max: 4 }, cols_deg: { min: 3, max: 6 } }
+    # … 1 et 2
+  by_intensity:                   # règle d'une case dont le scénario donne l'intensité
+    choc: { probability: 0.8, rows_deg: { min: 2.5, max: 5 }, cols_deg: { min: 4, max: 7 } }
+    # … calme et normal
+rythme:                           # selon le rythme de la page (absent = normal)
+  rapide: { slant_factor: 1.6, size_contrast: 1.2 }
+  # … lent et normal
+```
+
+Une découpe passe en biais avec la probabilité de la case voisine la plus « forte » × le
+`slant_factor` du rythme ; `rows_deg` s'applique aux découpes entre bandes (presque horizontales),
+`cols_deg` aux découpes entre colonnes (presque verticales). L'angle tiré est réduit si une case
+voisine passerait sous `min_panel_mm`.
+
+**Graine.** Chaque page stocke sa graine (`layout_seed`) : même graine, même style, mêmes cases →
+même mise en page, à chaque recalcul. « Nouvelle mise en page » tire une nouvelle graine (et écarte le
+gabarit actuel s'il en existe un autre).
+
+**Retouches à la main.** Dans l'onglet Mise en page, on peut glisser une gouttière (comme avant) ou
+une **extrémité de découpe** pour l'incliner (bornée par la taille minimale des cases). Les images
+déjà générées sont gardées et simplement recadrées au nouveau polygone ; la régénération n'est
+conseillée (« Régénération conseillée ») que si le ratio de la boîte englobante de la case s'écarte de
+plus de `regeneration.ratio_threshold` (`layout.yaml`, 15 %) de celui de l'image retenue. « Recalculer »
+revient à la mise en page de la graine (retouches perdues, comme pour les gouttières).
+
+### Direction artistique : comment piloter la mise en page
+
+La mise en page est de la **géométrie déterministe** : aucune IA ne dessine les cases. Un assistant de
+direction artistique — le LLM du scénario aujourd'hui (`prompts/script.yaml`), un agent DA dédié
+demain — ne la pilote **que** par ces champs structurés, validés par le schéma Pydantic du scénario :
+
+| Champ | Où | Valeurs | Effet |
+| --- | --- | --- | --- |
+| `importance` | case | 1 transition, 2 normale, 3 forte | taille de la case (choix du gabarit), règle de biais `by_importance` |
+| `intensity` (facultatif) | case | `calme`, `normal`, `choc` | poids de taille (`intensity_weight`), règle de biais `by_intensity` (prioritaire) |
+| `rythme` (facultatif) | page | `lent`, `normal`, `rapide` | facteurs de biais et de contraste de la page (`rythme`) |
+
+…et par le choix du style de la série ou d'une page. Jamais de coordonnées, de polygones ni de dessin
+libre : pour un nouvel effet, on ajoute un champ au schéma et une règle au style. Le LLM factice (mode
+mock) remplit ces champs. Ils sont modifiables à la main dans le découpage (API `PUT
+/chapters/{id}/pages`).
 
 ## Prompts (`prompts/*.yaml`)
 

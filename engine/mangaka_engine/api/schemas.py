@@ -19,6 +19,8 @@ BubbleKindName = Literal["speech", "thought", "shout", "narration", "off"]
 QCVerdictName = Literal["ok", "review", "reject"]
 LoraName = Annotated[str, StringConstraints(strip_whitespace=True, max_length=255)]
 LoraWeight = Annotated[float, Field(ge=0, le=2)]
+IntensityName = Literal["calme", "normal", "choc"]
+RythmeName = Literal["lent", "normal", "rapide"]
 
 
 class _In(BaseModel):
@@ -35,6 +37,8 @@ class ProjectCreate(_In):
     workflow_preset: PresetId | None = None
     style_lora_name: LoraName | None = None
     style_lora_weight: LoraWeight = 0.8
+    # Absent : style par défaut des presets (« dynamique »).
+    layout_style: PresetId | None = None
 
 
 class ProjectUpdate(_In):
@@ -46,6 +50,7 @@ class ProjectUpdate(_In):
     workflow_preset: PresetId | None = None
     style_lora_name: LoraName | None = None
     style_lora_weight: LoraWeight | None = None
+    layout_style: PresetId | None = None
 
 
 class ProjectOut(BaseModel):
@@ -58,6 +63,7 @@ class ProjectOut(BaseModel):
     workflow_preset: str
     style_lora_name: str | None
     style_lora_weight: float
+    layout_style: str
     character_count: int
     chapter_count: int
     # Pages déjà mises en page : changer le sens de lecture les recalcule (confirmation dans l'UI).
@@ -127,12 +133,14 @@ class PanelIn(_In):
     characters: Annotated[list[Short], Field(max_length=20)] = Field(default_factory=list)
     shot_type: str | None = None
     importance: Annotated[int, Field(ge=1, le=3)] = 2
+    intensity: IntensityName | None = None
     dialogues: Annotated[list[BubbleIn], Field(max_length=12)] = Field(default_factory=list)
 
 
 class PageIn(_In):
     id: int | None = None
     kind: PageKindName = "story"
+    rythme: RythmeName | None = None
     panels: Annotated[list[PanelIn], Field(max_length=9)] = Field(default_factory=list)
 
 
@@ -154,6 +162,7 @@ class PanelOut(BaseModel):
     characters: list[str]
     shot_type: str | None
     importance: int
+    intensity: IntensityName | None = None
     dialogues: list[BubbleOut]
     bbox: dict[str, int] | None
     bubble_zone: dict[str, int] | None
@@ -170,6 +179,8 @@ class PanelOut(BaseModel):
     qc_reasons: list[str] = Field(default_factory=list)
     qc_override: bool = False  # verdict forcé à ok par un humain
     detections: dict[str, Any] | None = None  # boîtes de la version choisie
+    # Le ratio de la case s'écarte trop de celui de l'image retenue (seuil : presets/layout.yaml).
+    regeneration_advised: bool = False
 
 
 class PageOut(BaseModel):
@@ -178,6 +189,9 @@ class PageOut(BaseModel):
     number: int
     kind: PageKindName
     grid_template: str | None
+    layout_style: str | None = None  # style imposé à la page (None = celui de la série)
+    layout_seed: int | None = None
+    rythme: RythmeName | None = None
     state: str
     layout: dict[str, Any] | None
     layout_stale: bool
@@ -187,12 +201,27 @@ class PageOut(BaseModel):
 class PageLayoutIn(_In):
     # Absent = garder le gabarit actuel ; null = choix automatique ; sinon gabarit imposé.
     template_id: PresetId | None = None
+    # Absent = garder ; null = style de la série ; sinon style imposé à cette page.
+    style: PresetId | None = None
+    # True : « Nouvelle mise en page » (nouvelle graine, autre gabarit si possible).
+    reroll: bool = False
+
+
+FinitePx = Annotated[float, Field(allow_inf_nan=False)]
+
+
+class CutSlant(_In):
+    """Incline une découpe : positions (px de la page, le long de l'axe découpé) de ses deux extrémités."""
+
+    path: Annotated[list[Annotated[int, Field(ge=0)]], Field(max_length=10)]
+    index: Annotated[int, Field(ge=0)]
+    ends: Annotated[list[FinitePx], Field(min_length=2, max_length=2)]
 
 
 class GutterMove(_In):
     path: Annotated[list[Annotated[int, Field(ge=0)]], Field(max_length=10)]
     index: Annotated[int, Field(ge=0)]
-    position: float
+    position: FinitePx
 
 
 # --- Lettrage (étape 5) ------------------------------------------------------

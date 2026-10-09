@@ -3,6 +3,7 @@
 import { useImperativeHandle, useRef, useState, type KeyboardEvent, type PointerEvent, type Ref } from "react";
 import { engineUrl, type BubbleBox, type LetteredBubble, type PageLettering } from "@/lib/api";
 import { BUBBLE_KINDS } from "@/lib/script";
+import { insetPolygon, svgPoints } from "@/lib/layout";
 
 /** Modification d'une bulle faite à la souris ou au clavier sur la planche. */
 export interface CanvasEdit {
@@ -152,7 +153,11 @@ export function LetteringCanvas({
         <style>{fontCss}</style>
         {data.panels.map((p) => (
           <clipPath key={p.id} id={`clip-case-${p.id}`}>
-            <rect x={p.box.x1} y={p.box.y1} width={p.box.x2 - p.box.x1} height={p.box.y2 - p.box.y1} />
+            {p.polygon ? (
+              <polygon points={svgPoints(p.polygon)} />
+            ) : (
+              <rect x={p.box.x1} y={p.box.y1} width={p.box.x2 - p.box.x1} height={p.box.y2 - p.box.y1} />
+            )}
           </clipPath>
         ))}
       </defs>
@@ -174,7 +179,7 @@ export function LetteringCanvas({
               />
             ) : (
               <>
-                <rect x={p.box.x1} y={p.box.y1} width={w} height={h} fill="#9e9e9e" />
+                <rect x={p.box.x1} y={p.box.y1} width={w} height={h} fill="#9e9e9e" clipPath={`url(#clip-case-${p.id})`} />
                 <text
                   x={p.box.x1 + w / 2}
                   y={p.box.y1 + h / 2}
@@ -189,15 +194,24 @@ export function LetteringCanvas({
                 </text>
               </>
             )}
-            <rect
-              x={p.box.x1 + border / 2}
-              y={p.box.y1 + border / 2}
-              width={w - border}
-              height={h - border}
-              fill="none"
-              stroke={warnedPanels.has(p.id) ? "#f59e0b" : "#000000"}
-              strokeWidth={warnedPanels.has(p.id) ? border * 2.5 : border}
-            />
+            {p.polygon ? (
+              <polygon
+                points={svgPoints(insetPolygon(p.polygon, border / 2))}
+                fill="none"
+                stroke={warnedPanels.has(p.id) ? "#f59e0b" : "#000000"}
+                strokeWidth={warnedPanels.has(p.id) ? border * 2.5 : border}
+              />
+            ) : (
+              <rect
+                x={p.box.x1 + border / 2}
+                y={p.box.y1 + border / 2}
+                width={w - border}
+                height={h - border}
+                fill="none"
+                stroke={warnedPanels.has(p.id) ? "#f59e0b" : "#000000"}
+                strokeWidth={warnedPanels.has(p.id) ? border * 2.5 : border}
+              />
+            )}
             {showGuides && p.bubble_zone && (
               <rect
                 x={p.bubble_zone.x1}

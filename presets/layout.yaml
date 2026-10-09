@@ -20,3 +20,9 @@ bubble_zone:
   full_at_chars: 240
   width_fraction: 0.55   # largeur de départ (part de la largeur de la case)
   max_height_fraction: 0.60
+
+# Une case garde son image quand seule sa géométrie change (biais, gouttière) : l'image est
+# recadrée au polygone. La régénération n'est conseillée que si le ratio de la boîte englobante de
+# la case s'écarte de plus de `ratio_threshold` (fraction) de celui de l'image retenue.
+regeneration:
+  ratio_threshold: 0.15

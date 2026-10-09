@@ -1,0 +1,36 @@
+# Style « dynamique » (par défaut) : quelques biais sur les cases fortes, comme un shōnen classique.
+# Champs : voir presets/README.md (« Styles de mise en page »).
+id: dynamique
+name: Dynamique
+description: Quelques découpes en biais sur les cases fortes et les temps d'action.
+
+gutters_mm:
+  horizontal: { min: 4, max: 6 }   # entre deux bandes
+  vertical: { min: 2.5, max: 4 }   # entre deux cases côte à côte
+size_contrast: 1.3
+intensity_weight: { calme: 0.85, normal: 1.0, choc: 1.6 }
+size_jitter: 0.08
+temperature: 0.03
+default_template_weight: 1
+template_weights:
+  "*-grille": 0.7          # grilles régulières un peu moins souvent
+  "*-grand-*": 1.3
+avoid_repeat: true
+
+# Une découpe passe en biais selon la case voisine la plus « forte » : son intensité si le scénario
+# l'a donnée, sinon son importance (1 transition, 2 normale, 3 forte).
+slants:
+  by_importance:
+    1: { probability: 0.05, rows_deg: { min: 1.5, max: 2.5 }, cols_deg: { min: 2, max: 4 } }
+    2: { probability: 0.15, rows_deg: { min: 1.5, max: 3 }, cols_deg: { min: 2.5, max: 5 } }
+    3: { probability: 0.55, rows_deg: { min: 2, max: 4 }, cols_deg: { min: 3, max: 6 } }
+  by_intensity:
+    calme: { probability: 0.0, rows_deg: { min: 0, max: 0 }, cols_deg: { min: 0, max: 0 } }
+    normal: { probability: 0.15, rows_deg: { min: 1.5, max: 3 }, cols_deg: { min: 2.5, max: 5 } }
+    choc: { probability: 0.8, rows_deg: { min: 2.5, max: 5 }, cols_deg: { min: 4, max: 7 } }
+
+# Indice de rythme de la page donné par le scénario (facultatif ; absent = normal).
+rythme:
+  lent: { slant_factor: 0.4, size_contrast: 0.9 }
+  normal: { slant_factor: 1.0, size_contrast: 1.0 }
+  rapide: { slant_factor: 1.6, size_contrast: 1.2 }

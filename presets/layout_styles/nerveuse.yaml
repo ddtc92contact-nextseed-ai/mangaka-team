@@ -1,0 +1,35 @@
+# Style « nerveuse » : biais fréquents et plus raides, fort contraste de tailles (action, seinen nerveux).
+# Champs : voir presets/README.md (« Styles de mise en page »).
+id: nerveuse
+name: Nerveuse
+description: Biais fréquents et marqués, grandes cases d'action et petites cases serrées.
+
+gutters_mm:
+  horizontal: { min: 3, max: 6.5 }
+  vertical: { min: 2, max: 4.5 }
+size_contrast: 2.0
+intensity_weight: { calme: 0.7, normal: 1.0, choc: 2.2 }
+size_jitter: 0.2
+temperature: 0.08
+default_template_weight: 1
+template_weights:
+  "*-grille": 0.3
+  "*-bandes": 0.6
+  "*-grand-*": 1.6
+  "*-bandeau-*": 1.4
+avoid_repeat: true
+
+slants:
+  by_importance:
+    1: { probability: 0.3, rows_deg: { min: 2, max: 4 }, cols_deg: { min: 3, max: 6 } }
+    2: { probability: 0.5, rows_deg: { min: 2.5, max: 5 }, cols_deg: { min: 4, max: 8 } }
+    3: { probability: 0.85, rows_deg: { min: 3.5, max: 7 }, cols_deg: { min: 5, max: 10 } }
+  by_intensity:
+    calme: { probability: 0.15, rows_deg: { min: 1.5, max: 3 }, cols_deg: { min: 2, max: 4 } }
+    normal: { probability: 0.5, rows_deg: { min: 2.5, max: 5 }, cols_deg: { min: 4, max: 8 } }
+    choc: { probability: 1.0, rows_deg: { min: 4, max: 8 }, cols_deg: { min: 6, max: 12 } }
+
+rythme:
+  lent: { slant_factor: 0.6, size_contrast: 0.9 }
+  normal: { slant_factor: 1.0, size_contrast: 1.0 }
+  rapide: { slant_factor: 1.4, size_contrast: 1.3 }

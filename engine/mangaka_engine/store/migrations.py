@@ -7,7 +7,11 @@
 - 5 : banc d'essai du QC (annotations bonne / mauvaise des versions, historique des runs) ;
 - 6 : savoir-faire (collections, documents, passages + index FTS5), bible de série, passages reçus par
   chaque appel du LLM ;
-- 7 : profils des agents du pipeline (réglages édités dans l'UI « L'équipe », versionnés).
+- 7 : profils des agents du pipeline (réglages édités dans l'UI « L'équipe », versionnés) ;
+- 8 : mise en page dynamique (style de mise en page de la série, graine / style / rythme par page,
+  intensité par case). Les séries existantes passent en style « sage » (cases droites : leur
+  mise en page ne change pas) et la signature des mises en page stockées est réécrite au nouveau
+  format, pour qu'elles ne deviennent pas « obsolètes ».
 
 Une base neuve est créée directement à la dernière version. Chaque migration tourne dans une
 transaction unique, clés étrangères désactivées (recette « 12 étapes » de SQLite pour reconstruire
@@ -16,6 +20,7 @@ une table), puis `PRAGMA foreign_key_check` doit être vide avant le COMMIT.
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 from collections.abc import Callable
@@ -40,7 +45,7 @@ from .models import (
 
 log = logging.getLogger("mangaka_engine")
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 
 class MigrationError(RuntimeError):
@@ -162,6 +167,28 @@ def _v6_to_v7(cur: sqlite3.Cursor) -> None:
             cur.execute(stmt)
 
 
+def _v7_to_v8(cur: sqlite3.Cursor) -> None:
+    cur.execute("ALTER TABLE projects ADD COLUMN layout_style VARCHAR(100) NOT NULL DEFAULT 'dynamique'")
+    cur.execute("UPDATE projects SET layout_style = 'sage'")
+    cur.execute("ALTER TABLE pages ADD COLUMN layout_seed INTEGER")
+    cur.execute("ALTER TABLE pages ADD COLUMN layout_style VARCHAR(100)")
+    cur.execute("ALTER TABLE pages ADD COLUMN rythme VARCHAR(20)")
+    cur.execute("ALTER TABLE panels ADD COLUMN intensity VARCHAR(20)")
+    # Signature (cf. pipeline/pages.py) : [numéro, format, sens, gabarit, cases] devient
+    # [numéro, format, sens, gabarit, cases + intensité, style, style de page, graine, rythme].
+    for page_id, raw in cur.execute("SELECT id, layout FROM pages WHERE layout IS NOT NULL").fetchall():
+        try:
+            layout = json.loads(raw)
+            sig = json.loads(layout["signature"])
+        except (TypeError, ValueError, KeyError):
+            continue
+        if not isinstance(sig, list) or len(sig) != 5:
+            continue
+        specs = [[*spec, None] for spec in sig[4]]
+        layout["signature"] = json.dumps([*sig[:4], specs, "sage", None, None, None], separators=(",", ":"))
+        cur.execute("UPDATE pages SET layout = ? WHERE id = ?", (json.dumps(layout), page_id))
+
+
 MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     # version de départ → (version d'arrivée, fonction)
     0: (2, _v0_to_v2),
@@ -171,6 +198,7 @@ MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     4: (5, _v4_to_v5),
     5: (6, _v5_to_v6),
     6: (7, _v6_to_v7),
+    7: (8, _v7_to_v8),
 }
 
 

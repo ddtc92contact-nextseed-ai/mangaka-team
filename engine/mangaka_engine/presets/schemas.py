@@ -178,15 +178,24 @@ class Defaults(_Strict):
     workflow: str
     # Workflow choisi automatiquement quand la case a des personnages avec images de référence.
     workflow_with_references: str | None = None
+    # Style de mise en page des nouvelles séries (presets/layout_styles/).
+    layout_style: str | None = None
 
 
 # --- Découpage (étape 2) ------------------------------------------------------
 class SplitNode(_Strict):
-    """Nœud d'un gabarit : bandes (`rows`) ou colonnes (`cols`), avec leurs poids relatifs."""
+    """Nœud d'un gabarit : bandes (`rows`) ou colonnes (`cols`), avec leurs poids relatifs.
+
+    `slants` (facultatif) met les découpes en biais : pour chaque découpe (une de moins que de
+    poids), le décalage en mm de ses deux extrémités par rapport à la découpe droite, le long de
+    l'axe découpé — [gauche, droite] pour une découpe entre deux bandes, [haut, bas] entre deux
+    colonnes, dans le sens de lecture. Absent ou [0, 0] = découpe droite.
+    """
 
     rows: list[PositiveFloat] | None = None
     cols: list[PositiveFloat] | None = None
     children: list[TreeNode] | None = None
+    slants: list[tuple[float, float]] | None = None
 
     @model_validator(mode="after")
     def _check(self) -> SplitNode:
@@ -197,7 +206,13 @@ class SplitNode(_Strict):
             raise ValueError("au moins deux bandes ou colonnes par découpe")
         if self.children is not None and len(self.children) != len(sizes):
             raise ValueError("« children » doit avoir autant d'éléments que les poids")
+        if self.slants is not None and len(self.slants) != len(sizes) - 1:
+            raise ValueError("« slants » doit avoir une entrée par découpe (une de moins que les poids)")
         return self
+
+    @property
+    def cut_slants(self) -> list[tuple[float, float]]:
+        return list(self.slants) if self.slants is not None else [(0.0, 0.0)] * (len(self.sizes) - 1)
 
     @property
     def axis(self) -> Literal["rows", "cols"]:
@@ -255,10 +270,115 @@ class BubbleZoneSettings(_Strict):
         return self
 
 
+class RegenerationSettings(_Strict):
+    # Après un changement de géométrie (biais, gouttière), une case garde son image ; on ne conseille
+    # de la régénérer que si le ratio de sa boîte englobante s'écarte de plus de cette fraction de
+    # celui de l'image retenue.
+    ratio_threshold: float = Field(default=0.15, gt=0, le=10)
+
+
 class LayoutSettings(_Strict):
     min_panel_mm: float = Field(default=20, gt=0)
     generation: GenerationSize = Field(default_factory=GenerationSize)
     bubble_zone: BubbleZoneSettings = Field(default_factory=BubbleZoneSettings)
+    regeneration: RegenerationSettings = Field(default_factory=RegenerationSettings)
+
+
+# --- Grammaire de mise en page par série (presets/layout_styles/) -------------
+# Aucune valeur par défaut : chaque style écrit tout dans son YAML.
+INTENSITIES = ("calme", "normal", "choc")
+RYTHMES = ("lent", "normal", "rapide")
+Intensity = Literal["calme", "normal", "choc"]
+Rythme = Literal["lent", "normal", "rapide"]
+
+
+class AngleRange(_Strict):
+    min: float = Field(ge=0, le=30)
+    max: float = Field(ge=0, le=30)
+
+    @model_validator(mode="after")
+    def _check(self) -> AngleRange:
+        if self.min > self.max:
+            raise ValueError("min doit être ≤ max")
+        return self
+
+
+class MmRange(_Strict):
+    min: float = Field(ge=0, le=50)
+    max: float = Field(ge=0, le=50)
+
+    @model_validator(mode="after")
+    def _check(self) -> MmRange:
+        if self.min > self.max:
+            raise ValueError("min doit être ≤ max")
+        return self
+
+
+class SlantRule(_Strict):
+    """Probabilité qu'une découpe voisine de la case passe en biais, et angle tiré (degrés)."""
+
+    probability: float = Field(ge=0, le=1)
+    rows_deg: AngleRange = Field(description="Découpe entre deux bandes (ligne presque horizontale)")
+    cols_deg: AngleRange = Field(description="Découpe entre deux colonnes (ligne presque verticale)")
+
+
+class SlantTable(_Strict):
+    # La règle d'une case : celle de son intensité si le scénario l'a donnée, sinon celle de son importance.
+    by_importance: dict[Literal[1, 2, 3], SlantRule]
+    by_intensity: dict[Intensity, SlantRule]
+
+    @model_validator(mode="after")
+    def _check(self) -> SlantTable:
+        missing = [str(k) for k in (1, 2, 3) if k not in self.by_importance]
+        missing += [k for k in INTENSITIES if k not in self.by_intensity]
+        if missing:
+            raise ValueError(f"règles absentes : {', '.join(missing)}")
+        return self
+
+
+class StyleGutters(_Strict):
+    horizontal: MmRange
+    vertical: MmRange
+
+
+class RythmeRule(_Strict):
+    slant_factor: float = Field(ge=0, le=10, description="Multiplie la probabilité de biais")
+    size_contrast: float = Field(gt=0, le=10, description="Multiplie le contraste des tailles de case")
+
+
+class LayoutStyle(_Strict):
+    """Signature de mise en page d'une série : biais, gouttières, gabarits favoris, contraste."""
+
+    id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
+    name: str
+    description: str = ""
+    # null = gouttières du format de page ; sinon largeur tirée (pas de 0,5 mm) par page.
+    gutters_mm: StyleGutters | None
+    slants: SlantTable
+    # Exposant appliqué aux poids des cases avant le choix du gabarit : > 1 = grandes cases plus grandes.
+    size_contrast: float = Field(gt=0, le=10)
+    intensity_weight: dict[Intensity, float]
+    # Variation aléatoire des poids de chaque découpe (0 = proportions exactes du gabarit).
+    size_jitter: float = Field(ge=0, le=0.5)
+    # 0 = toujours le gabarit le mieux adapté ; plus haut = choix plus varié parmi les bons gabarits.
+    temperature: float = Field(ge=0, le=10)
+    # Poids des gabarits (identifiant exact ou motif « 3-grand-* ») ; absent = default_template_weight.
+    template_weights: dict[str, float] = Field(default_factory=dict)
+    default_template_weight: float = Field(gt=0)
+    avoid_repeat: bool = Field(description="Jamais deux mises en page identiques d'affilée")
+    rythme: dict[Rythme, RythmeRule]
+
+    @model_validator(mode="after")
+    def _check(self) -> LayoutStyle:
+        missing = [k for k in INTENSITIES if k not in self.intensity_weight]
+        missing += [k for k in RYTHMES if k not in self.rythme]
+        if missing:
+            raise ValueError(f"valeurs absentes : {', '.join(missing)}")
+        if any(w <= 0 for w in self.intensity_weight.values()):
+            raise ValueError("intensity_weight : les poids doivent être > 0")
+        if any(w < 0 for w in self.template_weights.values()):
+            raise ValueError("template_weights : les poids doivent être ≥ 0")
+        return self
 
 
 # --- Lettrage (étape 5) -------------------------------------------------------

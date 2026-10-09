@@ -13,6 +13,7 @@ Arborescence attendue :
       knowledge.yaml           # savoir-faire : découpage, recherche hybride, collections par agent
       page_formats/*.yaml      # formats de page
       layouts/*.yaml           # gabarits de planche
+      layout_styles/*.yaml     # grammaires de mise en page par série (biais, gouttières, gabarits favoris)
       prompts/*.yaml           # prompts des étapes LLM
       workflows/*.yaml         # workflows ComfyUI (+ leur JSON API)
       agents/*.yaml            # agents du pipeline (écran « L'équipe ») : rôle et réglages éditables
@@ -38,6 +39,7 @@ from .schemas import (
     ImagePromptSettings,
     KnowledgeSettings,
     LayoutSettings,
+    LayoutStyle,
     LayoutTemplate,
     LayoutTemplateFile,
     LetteringSettings,
@@ -73,6 +75,7 @@ class PresetRegistry:
     page_formats: dict[str, PageFormat] = field(default_factory=dict)
     workflows: dict[str, LoadedWorkflow] = field(default_factory=dict)
     layout_templates: dict[str, LayoutTemplate] = field(default_factory=dict)
+    layout_styles: dict[str, LayoutStyle] = field(default_factory=dict)
     prompts: dict[str, PromptPreset] = field(default_factory=dict)
     layout: LayoutSettings = field(default_factory=LayoutSettings)
     image_prompt: ImagePromptSettings = field(default_factory=ImagePromptSettings)
@@ -103,6 +106,19 @@ class PresetRegistry:
             return self.layout_templates[preset_id]
         except KeyError:
             raise PresetError(f"gabarit de planche inconnu : « {preset_id} »") from None
+
+    def layout_style(self, preset_id: str) -> LayoutStyle:
+        try:
+            return self.layout_styles[preset_id]
+        except KeyError:
+            raise PresetError(f"style de mise en page inconnu : « {preset_id} »") from None
+
+    @property
+    def default_layout_style(self) -> str | None:
+        """Style des nouvelles séries : celui de defaults.yaml, sinon le premier disponible."""
+        if self.defaults and self.defaults.layout_style in self.layout_styles:
+            return self.defaults.layout_style
+        return next(iter(self.layout_styles), None)
 
     def prompt(self, preset_id: str) -> PromptPreset:
         try:
@@ -166,6 +182,11 @@ class PresetRegistry:
             lib = reg._parse(path, LayoutTemplateFile)
             for tpl in lib.templates if lib else []:
                 reg._register(reg.layout_templates, tpl.id, tpl, path)
+
+        for path in sorted((root / "layout_styles").glob("*.y*ml")):
+            style = reg._parse(path, LayoutStyle)
+            if style is not None:
+                reg._register(reg.layout_styles, style.id, style, path)
 
         for path in sorted((root / "prompts").glob("*.y*ml")):
             prompt = reg._parse(path, PromptPreset)
@@ -239,6 +260,11 @@ class PresetRegistry:
                         PresetIssue(reg._rel(defaults_path), f"workflow inconnu : {defaults.workflow_with_references}")
                     )
                     reg.defaults = defaults.model_copy(update={"workflow_with_references": None})
+                elif defaults.layout_style and defaults.layout_style not in reg.layout_styles:
+                    reg.issues.append(
+                        PresetIssue(reg._rel(defaults_path), f"style de mise en page inconnu : {defaults.layout_style}")
+                    )
+                    reg.defaults = defaults.model_copy(update={"layout_style": None})
                 else:
                     reg.defaults = defaults
         else:

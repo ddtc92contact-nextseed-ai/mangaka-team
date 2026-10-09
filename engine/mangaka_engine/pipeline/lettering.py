@@ -10,7 +10,8 @@ Règles :
 - **texte** : typographie française (espaces insécables avant « ! ? : ; » et dans les guillemets),
   retour à la ligne glouton avec césure (pyphen) seulement quand la ligne resterait trop vide,
   taille réduite par pas jusqu'au minimum lisible du preset, bloc centré ;
-- **placement** : dans la zone réservée, sinon dans toute la case ; la 1re bulle lue est en haut
+- **placement** : dans la zone réservée, sinon dans toute la case — pour une case en biais, chaque
+  bulle reste entièrement dans le polygone de la case (pas seulement sa boîte) ; la 1re bulle lue est en haut
   côté début de lecture (gauche en ltr, droite en rtl), chaque suivante plus bas ou, à la même
   hauteur, plus loin dans le sens de lecture ; jamais sur un visage détecté tant que c'est
   possible ;
@@ -36,6 +37,7 @@ from typing import Any, Literal
 import pyphen
 
 from ..presets.schemas import FontsPreset, LetteringSettings, TextStyle
+from . import geometry as geo
 from .fonts import NBSP, NNBSP, FontBook, pt_to_px
 
 Direction = Literal["ltr", "rtl"]
@@ -403,6 +405,19 @@ class PanelSpec:
     faces: list[Box] = field(default_factory=list)
     characters: list[str] = field(default_factory=list)
     bubbles: list[BubbleSpec] = field(default_factory=list)
+    # Polygone de la case (px de la page) quand elle est en biais ; None = son cadre `box`.
+    polygon: list[Point] | None = None
+
+    @property
+    def slanted(self) -> bool:
+        return self.polygon is not None and len(self.polygon) >= 3 and not geo.is_axis_rect(self.polygon)
+
+    def clamp(self, x: float, y: float) -> Point:
+        """Point ramené dans la case (polygone si elle est en biais)."""
+        if self.slanted:
+            assert self.polygon is not None
+            return geo.clamp_point(self.polygon, x, y)
+        return self.box.clamp_point(x, y)
 
 
 @dataclass(frozen=True)
@@ -626,11 +641,13 @@ class Letterer:
         obstacles: Sequence[Box],
         direction: Direction,
         tails: Callable[[int, Box], list[Box]] | None = None,
+        fits: Callable[[Box], bool] | None = None,
     ) -> list[Box] | None:
         """Pose les bulles dans l'ordre de lecture ; None si l'une d'elles ne trouve pas de place.
 
         `tails(i, cadre)` donne l'emprise de la queue de la bulle i : une bulle ne recouvre pas la
-        queue d'une précédente et sa queue ne traverse pas une bulle déjà posée.
+        queue d'une précédente et sa queue ne traverse pas une bulle déjà posée. `fits(cadre)` (case
+        en biais) : le cadre doit être entièrement dans le polygone de la case.
         """
         step = max(1.0, self.mm(self.s.grid_mm))
         gap = self.mm(self.s.spacing_mm)
@@ -657,6 +674,8 @@ class Letterer:
                     if any(cand.intersects(o, gap) for o in placed):
                         continue
                     if any(cand.intersects(o) for o in obstacles) or any(cand.intersects(t) for t in tail_boxes):
+                        continue
+                    if fits is not None and not fits(cand):
                         continue
                     own = tails(i, cand) if tails else []
                     if any(t.intersects(o) for t in own for o in placed):
@@ -692,6 +711,10 @@ class Letterer:
             return b.manual_tail
         p = panel.box
         tl = self.s.tail
+        if b.kind == "off" and panel.slanted:
+            # Hors-champ : la pointe touche le bord de case le plus proche (polygone de la case).
+            assert panel.polygon is not None
+            return geo.nearest_on_boundary(panel.polygon, box.cx, box.cy)
         if b.kind == "off":
             # Hors-champ : la pointe touche le bord de case le plus proche.
             d = {"left": box.cx - p.x1, "right": p.x2 - box.cx, "top": box.cy - p.y1, "bottom": p.y2 - box.cy}
@@ -715,7 +738,8 @@ class Letterer:
             if tl.default_direction == "down":
                 ux, uy = 0.0, 1.0
             else:
-                dx, dy = p.cx - box.cx, p.cy - box.cy
+                pcx, pcy = geo.centroid(panel.polygon) if panel.slanted and panel.polygon else (p.cx, p.cy)
+                dx, dy = pcx - box.cx, pcy - box.cy
                 if math.hypot(dx, dy) < 1:
                     dx, dy = 0.0, 1.0
                 norm = math.hypot(dx, dy)
@@ -723,7 +747,7 @@ class Letterer:
             start = math.dist(ellipse_boundary(box, math.atan2(uy, ux)), (box.cx, box.cy))
             length = self.mm(tl.length_mm)
         tip = (box.cx + ux * (start + length), box.cy + uy * (start + length))
-        return p.clamp_point(*tip)
+        return panel.clamp(*tip)
 
     def _speaker_face(self, b: BubbleSpec, box: Box, panel: PanelSpec, direction: Direction) -> Box | None:
         if not panel.faces:
@@ -744,6 +768,13 @@ class Letterer:
         inner = panel.box.inset(self.mm(self.s.panel_margin_mm))
         faces = [f.expand(self.mm(self.s.face_margin_mm)) for f in panel.faces]
         label = f"Case {panel.index + 1}"
+        fits: Callable[[Box], bool] | None = None
+        if panel.slanted:
+            assert panel.polygon is not None
+            planes = geo.edges(geo.inset(panel.polygon, self.mm(self.s.panel_margin_mm)) or panel.polygon)
+
+            def fits(box: Box) -> bool:
+                return geo.contains_box(planes, box.x1, box.y1, box.x2, box.y2)
 
         manual = [b for b in panel.bubbles if b.manual_box is not None]
         auto = [b for b in panel.bubbles if b.manual_box is None]
@@ -778,36 +809,36 @@ class Letterer:
             placed: tuple[list[_Fit], list[Box]] | None = None
             for k in range(steps):
                 for region in regions:
-                    fits: list[_Fit] = []
+                    fitted: list[_Fit] = []
                     for b, text in zip(auto, texts, strict=True):
                         sizes = self.sizes(b.kind)
                         f = self.fit(b.kind, text, sizes[min(k, len(sizes) - 1)], region.w, region.h)
                         if f is None:
                             break
-                        fits.append(f)
+                        fitted.append(f)
                     else:
                         boxes = self.place_sequence(
-                            [f.outer for f in fits], region, [*faces, *obstacles], direction, tails
+                            [f.outer for f in fitted], region, [*faces, *obstacles], direction, tails, fits
                         )
                         if boxes is not None:
-                            placed = (fits, boxes)
+                            placed = (fitted, boxes)
                             break
                 if placed:
                     break
             overflow_ids: set[int] = set()
             if placed is None:
                 # Plus de place hors des visages : on les ignore (avertissement), puis on empile.
-                fits = []
+                fitted = []
                 for b, text in zip(auto, texts, strict=True):
                     size = self.sizes(b.kind)[-1]
                     f = self.fit(b.kind, text, size, inner.w, inner.h)
                     if f is None:
                         overflow_ids.add(b.id)
                         f = self.fit_any(b.kind, text, size, inner.w)
-                    fits.append(f)
+                    fitted.append(f)
                 boxes = None
                 if not overflow_ids:
-                    boxes = self.place_sequence([f.outer for f in fits], inner, obstacles, direction, tails)
+                    boxes = self.place_sequence([f.outer for f in fitted], inner, obstacles, direction, tails, fits)
                     if boxes is not None and panel.faces:
                         warnings.append(
                             LetteringWarning(
@@ -817,9 +848,9 @@ class Letterer:
                             )
                         )
                 if boxes is None:
-                    boxes = self._stack([f.outer for f in fits], inner, direction)
+                    boxes = self._stack([f.outer for f in fitted], inner, direction)
                     overflow_ids |= {b.id for b in auto}
-                placed = (fits, boxes)
+                placed = (fitted, boxes)
             for b, f, box in zip(auto, placed[0], placed[1], strict=True):
                 overflow = b.id in overflow_ids
                 out[b.id] = self._layout(b, panel, box, f, direction, overflow=overflow)

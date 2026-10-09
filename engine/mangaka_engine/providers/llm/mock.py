@@ -25,6 +25,7 @@ _INVALID_MARK = re.compile(r"\[mock:invalide:(\d+)\]")
 _SHOTS = ["plan large", "plan moyen", "gros plan", "plan américain", "contre-plongée", "plan rapproché", "plongée"]
 _PANELS_PER_PAGE = [5, 4, 6, 3, 5, 4]
 _KINDS = ["speech", "speech", "thought", "speech", "shout"]
+_RYTHMES = ["normal", "rapide", "lent", "normal", "rapide"]
 
 
 def _script_context(messages: list[ChatMessage]) -> dict[str, Any] | None:
@@ -70,16 +71,21 @@ def mock_script(ctx: dict[str, Any]) -> dict[str, Any]:
                 dialogues.insert(
                     0, {"speaker": "", "text": f"Chapitre {chapter.get('number', '?')}.", "kind": "narration"}
                 )
+            importance = 3 if count == 1 or (i == 0 and p % 2 == 0) else (1 if i == count - 1 else 2)
+            # Indices de mise en page : une case forte sur deux est un temps d'action, les cases de
+            # transition sont calmes.
+            intensity = "choc" if importance == 3 and p % 4 != 2 else ("calme" if importance == 1 else "normal")
             panels.append(
                 {
                     "description": f"{text} ({who}{' et ' + other if other != who else ''}, page {p + 1}, case {i + 1})",
                     "characters": [who] if i % 2 else [who, other],
                     "shot_type": _SHOTS[(p * 3 + i) % len(_SHOTS)],
-                    "importance": 3 if count == 1 or (i == 0 and p % 2 == 0) else (1 if i == count - 1 else 2),
+                    "importance": importance,
+                    "intensity": intensity,
                     "dialogues": dialogues,
                 }
             )
-        pages.append({"panels": panels})
+        pages.append({"rythme": _RYTHMES[p % len(_RYTHMES)], "panels": panels})
     recap = f" Suite du chapitre {previous[-1]['number']}." if previous else ""
     summary = f"Chapitre {chapter.get('number', '?')} — {' '.join(beats)[:400]}{recap}"
     return {"pages": pages, "summary": summary}

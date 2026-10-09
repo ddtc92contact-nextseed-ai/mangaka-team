@@ -213,3 +213,43 @@ def test_retryable_llm_error_uses_a_retry() -> None:
 
     run, _ = _run(Flaky())
     assert run.attempts == 2  # type: ignore[attr-defined]
+
+
+# --- indices de direction artistique (mise en page) -----------------------------------------
+def test_intensity_and_rythme_are_optional_and_normalized() -> None:
+    payload = {
+        "pages": [
+            {
+                "rythme": " Rapide ",
+                "panels": [
+                    {"description": "Coup de sabre", "shot_type": "gros plan", "importance": 3, "intensity": "CHOC"},
+                    {"description": "Silence", "shot_type": "plan large", "intensity": ""},
+                    {"description": "Suite", "shot_type": "plan moyen"},
+                ],
+            },
+            {"panels": [{"description": "x", "shot_type": "insert"}]},
+        ],
+        "summary": "Résumé.",
+    }
+    out = parse_script(json.dumps(payload))
+    assert out.pages[0].rythme == "rapide" and out.pages[1].rythme is None
+    assert [p.intensity for p in out.pages[0].panels] == ["choc", None, None]
+    with pytest.raises(ScriptValidationError, match="intensity"):
+        parse_script(
+            json.dumps(
+                {**payload, "pages": [{"panels": [{"description": "x", "shot_type": "insert", "intensity": "épique"}]}]}
+            )
+        )
+
+
+def test_mock_script_fills_layout_hints() -> None:
+    out = parse_script(json.dumps(mock_script(_ctx().as_json())))
+    assert all(p.rythme in ("lent", "normal", "rapide") for p in out.pages)
+    intensities = {pa.intensity for p in out.pages for pa in p.panels}
+    assert intensities <= {"calme", "normal", "choc"} and "choc" in intensities
+
+
+def test_prompt_documents_layout_hints() -> None:
+    _, user = render_messages(PROMPT, _ctx())
+    assert "intensity" in user.content and "calme, normal, choc" in user.content
+    assert "rythme" in user.content and "lent, normal, rapide" in user.content

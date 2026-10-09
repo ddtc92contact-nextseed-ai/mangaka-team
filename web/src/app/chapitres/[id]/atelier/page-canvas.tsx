@@ -5,6 +5,7 @@ import { engineUrl, type Job, type LayoutPanel, type PageData, type PanelData, t
 import { DetectionOverlay, QCBadge } from "@/components/qc";
 import { PANEL_STATE } from "@/lib/generation";
 import { needsReview } from "@/lib/qc";
+import { cssClipPath, panelPolygon, svgPoints } from "@/lib/layout";
 
 /** Ce que montre une case de l'atelier, d'après la page, la file d'attente et le dernier job. */
 export interface PanelView {
@@ -112,6 +113,8 @@ export function PageCanvas({
                   ? "Contrôle qualité…"
                   : "QC en file"
                 : PANEL_STATE[panel.state] ?? panel.state;
+        // Case en biais : le bouton est découpé au polygone, son contour est dessiné en SVG.
+        const poly = lp.slanted ? panelPolygon(lp) : null;
         const qcLabel = panel.qc_verdict
           ? ` — QC ${panel.qc_verdict === "ok" ? "ok" : panel.qc_verdict === "review" ? "à revoir" : "rejet"}${panel.qc_score !== null ? ` (${panel.qc_score}/100)` : ""}`
           : "";
@@ -130,14 +133,22 @@ export function PageCanvas({
             data-testid="workshop-panel"
             data-state={running ? "generating" : queued ? "queued" : failure ? "failed" : panel.state}
             data-qc={panel.qc_verdict ?? "none"}
+            data-slanted={poly ? "true" : undefined}
             className={`group absolute overflow-hidden bg-white transition-[box-shadow,opacity] focus-visible:z-20 focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-sky-400 ${
-              selected ? "z-10 ring-4 ring-rose-500" : "ring-2 ring-zinc-900 hover:ring-4 hover:ring-rose-300"
+              poly
+                ? selected
+                  ? "z-10"
+                  : ""
+                : selected
+                  ? "z-10 ring-4 ring-rose-500"
+                  : "ring-2 ring-zinc-900 hover:ring-4 hover:ring-rose-300"
             } ${dimmed ? "opacity-30 hover:opacity-70 focus-visible:opacity-100" : ""}`}
             style={{
               left: pct(lp.x1, W),
               top: pct(lp.y1, H),
               width: pct(lp.width, W),
               height: pct(lp.height, H),
+              clipPath: poly ? cssClipPath(poly, lp) : undefined,
             }}
           >
             {panel.selected_image_url ? (
@@ -185,10 +196,34 @@ export function PageCanvas({
                 </span>
               </span>
             )}
+            {panel.regeneration_advised && !running && !queued && !failure && (
+              <span
+                className="absolute inset-x-0 bottom-0 bg-amber-950/90 px-1.5 py-0.5 text-left text-[10px] font-medium text-amber-200"
+                title="La forme de la case a trop changé depuis l'image retenue (seuil : presets/layout.yaml)"
+              >
+                Régénération conseillée
+              </span>
+            )}
             {failure && (
               <span className="absolute inset-x-0 bottom-0 bg-red-950/90 px-1.5 py-0.5 text-left text-[10px] font-medium text-red-200">
                 Échec de la dernière génération
               </span>
+            )}
+            {poly && (
+              <svg
+                aria-hidden
+                className="pointer-events-none absolute inset-0 h-full w-full"
+                viewBox={`${lp.x1} ${lp.y1} ${lp.width} ${lp.height}`}
+                preserveAspectRatio="none"
+              >
+                <polygon
+                  points={svgPoints(poly)}
+                  fill="none"
+                  vectorEffect="non-scaling-stroke"
+                  strokeWidth={selected ? 8 : 4}
+                  className={selected ? "stroke-rose-500" : "stroke-zinc-900 group-hover:stroke-rose-300"}
+                />
+              </svg>
             )}
           </button>
         );

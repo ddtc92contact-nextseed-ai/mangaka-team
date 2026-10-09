@@ -3,6 +3,7 @@
 # Variables disponibles ($nom ; écrire $$ pour un « $ » littéral) :
 #   $series_title $series_style $reading_direction $characters $previous_chapters
 #   $chapter_number $chapter_title $synopsis $target_pages $shot_types $bubble_kinds
+#   $intensities $rythmes  (indices de mise en page, cf. presets/README.md « Direction artistique »)
 #   $context_json  (le même contexte, en JSON)
 #   $bible         (bible de la série : univers, ton, personnages, règles, gags, résumés validés)
 #   $savoir_faire  (passages du savoir-faire de l'agent « script », avec leur source ; voir knowledge.yaml)
@@ -47,13 +48,18 @@ user: |
   - « kind » d'un dialogue vaut exactement l'une de ces valeurs : $bubble_kinds
     (narration = récitatif, off = voix hors champ) ;
   - « importance » vaut 1 (case de transition), 2 (case normale) ou 3 (case forte, grande) ;
+  - « intensity » (facultatif) vaut l'une de ces valeurs : $intensities — « choc » pour un temps
+    d'action ou de surprise, « calme » pour un moment posé ; la mise en page y place biais et grandes cases ;
+  - « rythme » d'une page (facultatif) vaut l'une de ces valeurs : $rythmes — « rapide » pour une
+    page d'action, « lent » pour une page d'ambiance ;
   - « characters » liste les noms des personnages visibles dans la case ;
   - répliques courtes, en français, comme dans un vrai manga ;
   - « summary » : résumé du chapitre en 3 à 6 phrases, pour assurer la continuité des chapitres suivants.
 
   Format de réponse :
-  {"pages": [{"panels": [{"description": "…", "characters": ["…"], "shot_type": "plan moyen",
-     "importance": 2, "dialogues": [{"speaker": "…", "text": "…", "kind": "speech"}]}]}],
+  {"pages": [{"rythme": "normal", "panels": [{"description": "…", "characters": ["…"],
+     "shot_type": "plan moyen", "importance": 2, "intensity": "normal",
+     "dialogues": [{"speaker": "…", "text": "…", "kind": "speech"}]}]}],
    "summary": "…"}
 
   <contexte>

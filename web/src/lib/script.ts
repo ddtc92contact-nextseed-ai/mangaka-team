@@ -1,5 +1,5 @@
 // Vocabulaire du découpage (mêmes valeurs que le moteur : pipeline/script.py).
-import type { BubbleKind, PageData, PageInput, PageKind, PanelInput } from "./api";
+import type { BubbleKind, PageData, PageInput, PageKind, PanelInput, Rythme } from "./api";
 
 export const SHOT_TYPES = [
   "plan d'ensemble",
@@ -56,6 +56,7 @@ export interface DraftPage {
   key: string;
   id?: number;
   kind: PageKind;
+  rythme: Rythme | null;
   panels: DraftPanel[];
 }
 
@@ -64,6 +65,7 @@ export function toDraft(pages: PageData[]): DraftPage[] {
     key: key(),
     id: p.id,
     kind: p.kind,
+    rythme: p.rythme,
     panels: p.panels.map((pa) => ({
       key: key(),
       id: pa.id,
@@ -71,6 +73,7 @@ export function toDraft(pages: PageData[]): DraftPage[] {
       charactersText: pa.characters.join(", "),
       shot_type: pa.shot_type,
       importance: pa.importance,
+      intensity: pa.intensity,
       dialogues: pa.dialogues.map((d) => ({ key: key(), speaker: d.speaker, text: d.text, kind: d.kind })),
     })),
   }));
@@ -80,6 +83,7 @@ export function fromDraft(pages: DraftPage[]): PageInput[] {
   return pages.map((p) => ({
     id: p.id,
     kind: p.kind,
+    rythme: p.rythme,
     panels: p.panels.map((pa) => ({
       id: pa.id,
       description: pa.description,
@@ -89,6 +93,7 @@ export function fromDraft(pages: DraftPage[]): PageInput[] {
         .filter(Boolean),
       shot_type: pa.shot_type || null,
       importance: pa.importance,
+      intensity: pa.intensity ?? null,
       dialogues: pa.dialogues
         .filter((d) => d.text.trim())
         .map((d) => ({ speaker: d.speaker, text: d.text, kind: d.kind })),
@@ -110,6 +115,7 @@ export const newDialogue = (): DraftDialogue => ({ key: key(), speaker: "", text
 export const newPage = (kind: PageKind = "story"): DraftPage => ({
   key: key(),
   kind,
+  rythme: null,
   panels: kind === "story" ? [newPanel()] : [],
 });
 

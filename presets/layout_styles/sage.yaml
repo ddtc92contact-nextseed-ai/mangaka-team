@@ -1,0 +1,30 @@
+# Style « sage » : découpes droites, gouttières régulières, le gabarit le mieux adapté à chaque page.
+# Une page « sage » est identique à la mise en page d'avant les styles (cases rectangulaires).
+# Champs : voir presets/README.md (« Styles de mise en page »).
+id: sage
+name: Sage
+description: Découpes droites et gouttières régulières, lecture posée.
+
+gutters_mm: null          # gouttières du format de page, inchangées
+size_contrast: 1.0        # poids des cases = importance, sans accentuation
+intensity_weight: { calme: 1.0, normal: 1.0, choc: 1.0 }
+size_jitter: 0            # proportions exactes des gabarits
+temperature: 0            # toujours le gabarit le mieux adapté
+default_template_weight: 1
+template_weights: {}
+avoid_repeat: true
+
+slants:
+  by_importance:
+    1: { probability: 0, rows_deg: { min: 0, max: 0 }, cols_deg: { min: 0, max: 0 } }
+    2: { probability: 0, rows_deg: { min: 0, max: 0 }, cols_deg: { min: 0, max: 0 } }
+    3: { probability: 0, rows_deg: { min: 0, max: 0 }, cols_deg: { min: 0, max: 0 } }
+  by_intensity:
+    calme: { probability: 0, rows_deg: { min: 0, max: 0 }, cols_deg: { min: 0, max: 0 } }
+    normal: { probability: 0, rows_deg: { min: 0, max: 0 }, cols_deg: { min: 0, max: 0 } }
+    choc: { probability: 0, rows_deg: { min: 0, max: 0 }, cols_deg: { min: 0, max: 0 } }
+
+rythme:
+  lent: { slant_factor: 1, size_contrast: 1 }
+  normal: { slant_factor: 1, size_contrast: 1 }
+  rapide: { slant_factor: 1, size_contrast: 1 }
