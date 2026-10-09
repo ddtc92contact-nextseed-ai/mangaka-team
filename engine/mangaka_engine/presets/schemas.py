@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import string
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PositiveFloat, field_validator, model_validator
+
+from ..providers.qc.dghs import check_detector_options
 
 MM_PER_INCH = 25.4
 
@@ -462,14 +464,34 @@ class QCHandRule(QCRule):
 
 
 class QCDetector(_Strict):
-    """Un détecteur : seuil de prise en compte des boîtes + options passées telles quelles au détecteur."""
+    """Un détecteur : seuil de prise en compte des boîtes + options passées telles quelles au détecteur.
+
+    Les options sont vérifiées contre les modèles publiés par deepghs (`providers/qc/dghs.py`) :
+    un niveau inconnu est une erreur de preset, pas une exception à chaque case.
+    """
+
+    kind: ClassVar[str] = "face"
 
     min_confidence: float = Field(ge=0, le=1)
     options: dict[str, Any] = Field(default_factory=dict)
 
+    @field_validator("options")
+    @classmethod
+    def _check_options(cls, value: dict[str, Any]) -> dict[str, Any]:
+        problems = check_detector_options(cls.kind, value)
+        if problems:
+            raise ValueError(" ; ".join(problems))
+        return value
+
 
 class QCHandDetector(QCDetector):
+    kind: ClassVar[str] = "hand"
+
     suspect_below: float = Field(ge=0, le=1, description="Main détectée sous cette confiance = suspecte")
+
+
+class QCTextDetector(QCDetector):
+    kind: ClassVar[str] = "text"
 
 
 class QCDetectorRules(_Strict):
@@ -482,7 +504,7 @@ class QCDetectorRules(_Strict):
 class QCDetectorsSettings(_Strict):
     face: QCDetector
     hand: QCHandDetector
-    text: QCDetector
+    text: QCTextDetector
     rules: QCDetectorRules
     # Types de plan où les visages peuvent légitimement manquer (insert, dos…) : pas de comptage.
     face_count_ignored_for_shots: list[str] = Field(default_factory=list)

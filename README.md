@@ -66,6 +66,7 @@ Le QC tourne en mock sans rien installer. Pour les vraies couches sur la GX10 :
 ```bash
 # 1. Détecteurs visages / mains / texte + cohérence des personnages (deepghs, CPU, ARM64 OK)
 engine/.venv/bin/pip install -e "engine[qc]"
+#    (ou MANGAKA_ENGINE_QC=1 npm run setup:engine)
 #    Les modèles ONNX sont téléchargés depuis Hugging Face au premier contrôle, puis mis en cache
 #    (~/.cache/huggingface).
 
@@ -78,6 +79,23 @@ Puis dans `.env` : `QC_DETECTORS_PROVIDER=dghs`, `QC_IDENTITY_PROVIDER=dghs`,
 est déchargé aussitôt pour rendre la mémoire à ComfyUI). Sans l'extra `qc`, le moteur démarre quand
 même : l'atelier affiche « détecteurs non installés » et le QC continue avec les couches restantes.
 Seuils, poids et règles : [`presets/qc.yaml`](presets/README.md#contrôle-qualité-qcyaml).
+
+**onnxruntime : CPU uniquement.** Les détecteurs tournent sur CPU, le GPU reste à ComfyUI. L'extra
+`qc` installe explicitement `onnxruntime` (CPU) : dghs-imgutils ne déclare pas onnxruntime et, s'il
+ne le trouve pas, installe lui-même `onnxruntime-gpu` dès que `nvidia-smi` existe — ce qui échoue sur
+la GX10 sans cuDNN. Si c'est déjà arrivé, `npm run setup:engine` le remplace par la version CPU, ou à
+la main :
+
+```bash
+engine/.venv/bin/pip uninstall -y onnxruntime-gpu
+engine/.venv/bin/pip install --force-reinstall --no-deps "onnxruntime>=1.18"
+```
+
+Le moteur pose `ONNX_MODE=cpu` (modifiable dans `.env`) ; une erreur de chargement CUDA/cuDNN
+bascule de toute façon sur `CPUExecutionProvider` avec un avertissement dans les logs. Les niveaux
+des détecteurs (`detectors.*.options` dans `qc.yaml`) sont vérifiés au chargement contre les modèles
+publiés par deepghs (visages et mains : `n` ou `s`) : une valeur inconnue rend le QC indisponible avec
+la clé fautive dans `GET /presets` et l'atelier, au lieu d'une erreur à chaque case.
 
 Redémarre `npm run dev`. Le tableau de bord affiche l'état de chaque fournisseur ; une
 configuration incomplète (ex. clé absente) y apparaît en rouge sans empêcher le moteur de démarrer.

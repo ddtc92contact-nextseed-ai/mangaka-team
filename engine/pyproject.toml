@@ -25,8 +25,11 @@ dev = [
 ]
 # Contrôle qualité réel (détecteurs anime ONNX + CCIP de deepghs, CPU). Optionnel : sans lui,
 # le moteur démarre et l'atelier affiche « détecteurs non installés ».
+# `onnxruntime` (CPU) est explicite : sans lui, imgutils installe lui-même onnxruntime-gpu à l'import
+# dès que `nvidia-smi` existe (GX10), qui échoue sans cuDNN. Le GPU reste à ComfyUI.
 qc = [
-  "dghs-imgutils>=0.19",
+  "dghs-imgutils>=0.19,<0.20",
+  "onnxruntime>=1.18",
 ]
 
 [build-system]

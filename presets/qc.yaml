@@ -35,7 +35,7 @@ detectors:
   hand:
     min_confidence: 0.3
     suspect_below: 0.5   # main détectée avec une confiance plus faible = probablement mal dessinée
-    options: { level: m }
+    options: { level: s }   # deepghs publie n et s (pas de m)
   text:
     min_confidence: 0.3
     options: {}

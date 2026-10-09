@@ -43,3 +43,13 @@ jobs:
       - run: ruff check .
       - run: ruff format --check .
       - run: pytest
+      - name: Extra qc → onnxruntime CPU (jamais onnxruntime-gpu)
+        run: |
+          pip install --dry-run --quiet --ignore-installed --report /tmp/qc-report.json -e ".[qc]"
+          python - <<'EOF'
+          import json
+          names = {i["metadata"]["name"].lower() for i in json.load(open("/tmp/qc-report.json"))["install"]}
+          print(sorted(n for n in names if "onnx" in n or "imgutils" in n))
+          assert "onnxruntime" in names, "onnxruntime absent de l'extra qc"
+          assert "onnxruntime-gpu" not in names, "l'extra qc tire onnxruntime-gpu"
+          EOF
