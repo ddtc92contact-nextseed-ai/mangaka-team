@@ -145,13 +145,22 @@ def sweep(samples: Sequence[Sample], thresholds: Iterable[float] = THRESHOLDS) -
     return [_point(confusion((s.bad, flagged_at(s, t)) for s in evaluated), t) for t in thresholds]
 
 
-def suggest_threshold(points: Sequence[Mapping[str, Any]], target_recall: float) -> dict[str, Any] | None:
-    """Seuil qui attrape au moins `target_recall` des mauvaises cases avec la meilleure précision
-    (à égalité : le plus bas, donc le moins de cases signalées). None si inatteignable ou sans mauvaise case."""
+def suggest_threshold(
+    points: Sequence[Mapping[str, Any]], target_recall: float, *, current: float | None = None
+) -> dict[str, Any] | None:
+    """Seuil qui attrape au moins `target_recall` des mauvaises cases avec la meilleure précision.
+
+    À précision égale : le plus proche du seuil actuel (on ne bouge le preset que si les données le
+    justifient), puis le plus bas (le moins de cases signalées). None si inatteignable ou sans mauvaise case."""
     ok = [p for p in points if p["recall"] is not None and p["recall"] >= target_recall - 1e-9]
     if not ok:
         return None
-    return dict(max(ok, key=lambda p: (p["precision"] if p["precision"] is not None else -1.0, -p["threshold"])))
+
+    def rank(p: Mapping[str, Any]) -> tuple[float, float, float]:
+        distance = abs(p["threshold"] - current) if current is not None else 0.0
+        return (p["precision"] if p["precision"] is not None else -1.0, -distance, -p["threshold"])
+
+    return dict(max(ok, key=rank))
 
 
 def layer_metrics(
@@ -173,7 +182,7 @@ def layer_metrics(
         for s in evaluated
     )
     points = sweep(evaluated)
-    suggested = suggest_threshold(points, target_recall)
+    suggested = suggest_threshold(points, target_recall, current=current_threshold)
     bad = sum(1 for s in evaluated if s.bad)
     if not evaluated:
         note = "aucune case évaluée par cette couche"

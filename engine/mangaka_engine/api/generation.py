@@ -82,7 +82,10 @@ def annotation_out(ann: PanelImageAnnotation | None) -> AnnotationOut | None:
     if ann is None:
         return None
     return AnnotationOut(
-        label=ann.label.value, defects=list(ann.defects or []), note=ann.note, updated_at=ann.updated_at
+        label=ann.label.value,
+        defects=list(ann.defects or []),
+        note=ann.note,
+        updated_at=ann.updated_at.replace(tzinfo=ann.updated_at.tzinfo or UTC),
     )
 
 

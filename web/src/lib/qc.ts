@@ -1,5 +1,5 @@
 // Libellés et petits calculs du contrôle qualité (étape 4).
-import type { PanelData, QCLayer, QCLayerName, QCVerdict } from "./api";
+import type { AnnotationLabel, BenchLayerName, DefectId, PanelData, QCLayer, QCLayerName, QCVerdict } from "./api";
 
 export const QC_VERDICT: Record<QCVerdict, string> = {
   ok: "OK",
@@ -36,4 +36,30 @@ export function formatMs(ms: number | null | undefined): string {
   if (ms === null || ms === undefined || !Number.isFinite(ms)) return "—";
   if (ms < 1000) return `${Math.round(ms)} ms`;
   return `${(ms / 1000).toLocaleString("fr-FR", { maximumFractionDigits: 1 })} s`;
+}
+
+// --- Banc d'essai du QC -------------------------------------------------------------
+
+export const ANNOTATION_LABEL: Record<AnnotationLabel, string> = { good: "Bonne", bad: "Mauvaise" };
+
+export const DEFECTS: { id: DefectId; label: string }[] = [
+  { id: "face", label: "Visage raté" },
+  { id: "hands", label: "Mains" },
+  { id: "identity", label: "Perso pas reconnaissable" },
+  { id: "description", label: "Ne colle pas à la description" },
+  { id: "text", label: "Texte parasite" },
+  { id: "other", label: "Autre" },
+];
+
+export const BENCH_LAYERS: { id: BenchLayerName; label: string; variable: string }[] = [
+  { id: "detectors", label: "Détecteurs", variable: "score de la couche" },
+  { id: "identity", label: "Cohérence des personnages", variable: "similarité minimale × 100" },
+  { id: "vision", label: "Vision", variable: "score de la couche" },
+  { id: "combined", label: "QC combiné", variable: "score combiné" },
+];
+
+/** « 87 % » (ou « — » si non mesurable). */
+export function formatPct(x: number | null | undefined): string {
+  if (x === null || x === undefined || !Number.isFinite(x)) return "—";
+  return `${Math.round(x * 100)} %`;
 }

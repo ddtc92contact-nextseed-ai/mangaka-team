@@ -16,6 +16,7 @@ const NAV = [
     label: "Personnages",
     match: (p: string) => p.startsWith("/personnages") || p.includes("/personnages"),
   },
+  { href: "/banc-essai-qc", label: "Banc d'essai QC", match: (p: string) => p.startsWith("/banc-essai-qc") },
 ];
 
 export function Sidebar() {

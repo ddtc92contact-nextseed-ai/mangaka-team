@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import { AnnotationBadge, AnnotationBar } from "@/components/annotation";
 import { Modal } from "@/components/modal";
 import { DetectionOverlay, QCBadge } from "@/components/qc";
 import { Alert, Button, Select } from "@/components/ui";
-import { engineUrl, fullErrorMessage, type PanelImage } from "@/lib/api";
+import { engineUrl, fullErrorMessage, type Annotation, type PanelImage } from "@/lib/api";
 import { formatDuration, imageDurationS } from "@/lib/generation";
 import { QC_VERDICT } from "@/lib/qc";
 
@@ -17,10 +18,12 @@ export function VersionsStrip({
   images,
   onSelect,
   onDelete,
+  onAnnotated,
 }: {
   images: PanelImage[];
   onSelect: (img: PanelImage) => Promise<void>;
   onDelete: (img: PanelImage) => Promise<void>;
+  onAnnotated: (imageId: number, annotation: Annotation | null) => void;
 }) {
   const [viewId, setViewId] = useState<number | null>(null);
   const [compareId, setCompareId] = useState<number | null>(null);
@@ -105,6 +108,11 @@ export function VersionsStrip({
                   <QCBadge verdict={img.qc_verdict} score={img.qc_score} override={Boolean(img.qc.override)} />
                 </span>
               )}
+              {img.annotation && (
+                <span className="absolute bottom-9 right-1">
+                  <AnnotationBadge annotation={img.annotation} />
+                </span>
+              )}
               <span className="block px-1.5 py-1 text-[10px] leading-tight text-zinc-400">
                 <span className="block">
                   v{img.version} · {formatDuration(imageDurationS(img))}
@@ -165,7 +173,20 @@ export function VersionsStrip({
             <Alert>{error}</Alert>
           </div>
         )}
-        {viewed && !compared && <VersionLarge img={viewed} />}
+        {viewed && !compared && (
+          <div className="space-y-3">
+            <AnnotationBar
+              image={viewed}
+              onChange={onAnnotated}
+              keyboard
+              inModal
+              navLabel="version"
+              onPrev={sorted.indexOf(viewed) > 0 ? () => setViewId(sorted[sorted.indexOf(viewed) - 1].id) : undefined}
+              onNext={sorted.indexOf(viewed) < sorted.length - 1 ? () => setViewId(sorted[sorted.indexOf(viewed) + 1].id) : undefined}
+            />
+            <VersionLarge img={viewed} />
+          </div>
+        )}
         {viewed && compared && (
           <div className="grid gap-4 md:grid-cols-2">
             {[viewed, compared].map((img, i) => (

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -86,6 +87,12 @@ def test_suggested_threshold_lets_almost_no_bad_panel_through() -> None:
     overlap = [Sample(True, 30), Sample(True, 70), Sample(False, 40), Sample(False, 80), Sample(False, 95)]
     best = suggest_threshold(sweep(overlap), 0.95)
     assert best is not None and best["threshold"] == 71 and (best["tp"], best["fp"]) == (2, 1)
+    # à précision égale, on reste au plus près du seuil actuel (ici 51 à 60 se valent)
+    assert suggest_threshold(sweep(KNOWN), 0.95, current=58)["threshold"] == 58  # type: ignore[index]
+    assert suggest_threshold(sweep(KNOWN), 0.95, current=70)["threshold"] == 60  # type: ignore[index]
+    # règles qui signalent déjà toutes les mauvaises cases : le seuil actuel est gardé (pas de saut à 0)
+    floors = [Sample(True, 90, floor=True), Sample(False, 95), Sample(False, 85)]
+    assert suggest_threshold(sweep(floors), 0.95, current=70)["threshold"] == 70  # type: ignore[index]
     # inatteignable : une mauvaise case à 100 n'est jamais signalée (seuil max 100)
     assert suggest_threshold(sweep([Sample(True, 100), Sample(False, 20)]), 0.95) is None
     # aucune mauvaise case : rappel non mesurable
@@ -104,7 +111,7 @@ def test_layer_metrics_current_threshold_and_missing() -> None:
     assert (m["evaluated"], m["missing"], m["good"], m["bad"]) == (4, 1, 2, 2)
     assert m["confusion"] == {"tp": 2, "fp": 1, "fn": 0, "tn": 1}  # 60 < 70 : bonne case signalée
     assert (m["precision"], m["recall"], m["mean_ms"]) == (round(2 / 3, 4), 1.0, 20)
-    assert m["suggested"]["threshold"] == 51 and m["suggestion_note"] is None
+    assert m["suggested"]["threshold"] == 60 and m["suggestion_note"] is None  # 51–60 se valent : au plus près de 70
     # verdict actuel fourni par la couche : prioritaire sur le seuil
     m = layer_metrics([Sample(True, 90, flagged=True)], current_threshold=70, target_recall=0.95)
     assert m["confusion"]["tp"] == 1
@@ -365,40 +372,50 @@ def test_bench_job_shows_in_queue_and_vision_never_runs_during_generation(
     assert vision.calls == 6 and set(vision.busy_at_call) == {0}
 
 
+class FixtureVision:
+    """Vision au score imposé par image."""
+
+    name = "fixture"
+
+    def __init__(self) -> None:
+        self.scores: dict[bytes, int] = {}
+
+    def ask(self, image: bytes, prompt: str, *, schema: dict[str, Any] | None = None) -> str:
+        return json.dumps({"score": self.scores.get(image, 50), "raisons": []})
+
+
 def test_apply_suggested_thresholds_after_confirmation(
     make_client: Callable[..., TestClient], presets_copy: Path
 ) -> None:
     edit_qc(presets_copy, auto_after_generation=False)
     original = (presets_copy / "qc.yaml").read_text(encoding="utf-8")
-    det = FixtureDetectors()
-    c = make_client(
-        providers(detectors=det, identity=ScriptedIdentity(0.95), vision=RecordingVision(score=90)),
-        mangaka_presets_dir=presets_copy,
-    )
-    data = _annotated_chapter(c, det)
-    # la mauvaise case non détectée est corrigée : toutes les mauvaises ont du texte
-    det.text_on.add(c.get(f"/panel-images/{data['bad'][2]['id']}/file").content)
+    vision = FixtureVision()
+    # vision seule : mauvaises 10–20, bonnes 25–35 → seuil combiné suggéré 25 (21–25 se valent : au plus près de 70 ; < reject_below 40)
+    c = make_client(providers(detectors=None, identity=None, vision=vision), mangaka_presets_dir=presets_copy)
+    data = _annotated_chapter(c)
+    for img, score in zip([*data["bad"], *data["good"]], [10, 15, 20, 25, 30, 35], strict=True):
+        vision.scores[c.get(f"/panel-images/{img['id']}/file").content] = score
     run = _run(c)
     combined = run["metrics"]["layers"]["combined"]
-    assert combined["suggested"] is not None and combined["suggested"]["recall"] == 1.0
+    assert combined["suggested"]["threshold"] == 25 and combined["suggested"]["recall"] == 1.0
+    assert combined["suggested"]["precision"] == 1.0
     url = f"/qc/bench/runs/{run['id']}/apply"
 
     preview = _ok(c.post(url, json={}))
     assert preview["applied"] is False and preview["preset_changed"] is False
     keys = {ch["key"]: ch for ch in preview["changes"]}
-    assert "verdict.ok_min" in keys and keys["verdict.ok_min"]["before"] == QC.verdict.ok_min
+    assert keys["verdict.ok_min"] == {**keys["verdict.ok_min"], "before": QC.verdict.ok_min, "after": 25}
+    assert keys["verdict.reject_below"]["after"] == 25  # reste ≤ ok_min : le fichier reste valide
     assert (presets_copy / "qc.yaml").read_text(encoding="utf-8") == original  # rien d'écrit sans confirmation
 
     done = _ok(c.post(url, json={"confirm": True}))
     assert done["applied"] is True and "rechargé" in done["message"]
-    new_min = keys["verdict.ok_min"]["after"]
     reloaded = PresetRegistry.load(presets_copy)  # le fichier reste valide au rechargement
-    assert reloaded.qc is not None and reloaded.qc.verdict.ok_min == new_min
-    assert reloaded.qc.verdict.reject_below <= new_min
+    assert reloaded.qc is not None and (reloaded.qc.verdict.ok_min, reloaded.qc.verdict.reject_below) == (25, 25)
     assert not [i for i in reloaded.issues if i.file == "qc.yaml"]
     text = (presets_copy / "qc.yaml").read_text(encoding="utf-8")
     assert text.count("#") == original.count("#")  # commentaires conservés
-    assert _ok(c.get("/qc/status"))["ok_min"] == new_min  # preset rechargé en mémoire
+    assert _ok(c.get("/qc/status"))["ok_min"] == 25  # preset rechargé en mémoire
     assert _ok(c.get(f"/qc/bench/runs/{run['id']}"))["applied_at"] is not None
     # le preset a changé depuis ce run ; réappliquer ne change plus rien
     again = _ok(c.post(url, json={"confirm": True}))

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -48,6 +49,11 @@ from .schemas import (
 )
 
 router = APIRouter(tags=["banc d'essai du QC"])
+
+
+def as_utc(dt: datetime | None) -> datetime | None:
+    """SQLite rend des dates sans fuseau (stockées en UTC) : on les marque UTC pour le navigateur."""
+    return dt.replace(tzinfo=UTC) if dt is not None and dt.tzinfo is None else dt
 
 
 # --- annotation --------------------------------------------------------------------------------
@@ -169,9 +175,9 @@ def _run_out(session: Session, run: QCBenchRun) -> BenchRunOut:
         sample_count=run.sample_count,
         good=metrics.get("good"),
         bad=metrics.get("bad"),
-        created_at=run.created_at,
-        finished_at=run.finished_at,
-        applied_at=run.applied_at,
+        created_at=as_utc(run.created_at),
+        finished_at=as_utc(run.finished_at),
+        applied_at=as_utc(run.applied_at),
         layers=layers,
     )
 
