@@ -1,0 +1,82 @@
+# Agent de l'étape 2 — voir presets/README.md (« L'équipe : agents du pipeline »).
+id: metteur-en-page
+name: Metteur en page
+icon: "📐"
+role: >-
+  Choisit le gabarit de chaque planche selon l'importance des cases, calcule les cases et réserve
+  la place des bulles.
+step: 2
+step_label: Mise en page
+summary_default: Calcul déterministe (sans modèle)
+summary: [page_format]
+trial: layout
+trial_description: >-
+  Met en page une planche factice de quatre cases d'importances différentes (sens manga), sans
+  toucher aux séries.
+settings:
+  - key: page_format
+    label: Format de page des nouvelles séries
+    group: Planche
+    type: choice
+    choices_from: page_formats
+    source: defaults.yaml#page_format
+    global_only: true
+  - key: min_panel_mm
+    label: Taille minimale d'une case (mm)
+    group: Planche
+    type: number
+    min: 1
+    source: layout.yaml#min_panel_mm
+    help: Limite quand on déplace une gouttière à la main.
+  - key: templates
+    label: Gabarits de planche et leurs poids
+    group: Gabarits
+    type: yaml
+    source: layouts/*.yaml#templates
+    help: >-
+      Liste de gabarits (id, name, tree). Les poids de « rows » / « cols » fixent la part de chaque
+      bande ou colonne.
+  - key: bubble_padding_mm
+    label: Marge de la zone de bulles (mm)
+    group: Zone de bulles
+    type: number
+    min: 0
+    source: layout.yaml#bubble_zone.padding_mm
+  - key: bubble_min_fraction
+    label: Surface minimale (part de la case)
+    group: Zone de bulles
+    type: number
+    min: 0
+    max: 1
+    step: 0.01
+    source: layout.yaml#bubble_zone.min_fraction
+  - key: bubble_max_fraction
+    label: Surface maximale (part de la case)
+    group: Zone de bulles
+    type: number
+    min: 0
+    max: 1
+    step: 0.01
+    source: layout.yaml#bubble_zone.max_fraction
+  - key: bubble_full_at_chars
+    label: Longueur de dialogue pour la surface maximale (caractères)
+    group: Zone de bulles
+    type: integer
+    min: 1
+    source: layout.yaml#bubble_zone.full_at_chars
+  - key: bubble_width_fraction
+    label: Largeur de départ (part de la case)
+    group: Zone de bulles
+    type: number
+    min: 0
+    max: 1
+    step: 0.01
+    source: layout.yaml#bubble_zone.width_fraction
+  - key: bubble_max_height_fraction
+    label: Hauteur maximale (part de la case)
+    group: Zone de bulles
+    type: number
+    min: 0
+    max: 1
+    step: 0.01
+    source: layout.yaml#bubble_zone.max_height_fraction

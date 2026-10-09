@@ -1,0 +1,92 @@
+# Agent de l'étape 1 — voir presets/README.md (« L'équipe : agents du pipeline »).
+# Chaque réglage pointe vers sa valeur livrée (`source`) : `fichier.yaml#chemin.dans.le.fichier`,
+# `env:VARIABLE` (choix fait dans .env) ou `profile` (stocké seulement dans le profil de l'agent).
+id: scenariste
+name: Scénariste
+icon: "✒️"
+role: >-
+  Découpe chaque chapitre en pages puis en cases, écrit les dialogues et le résumé qui assure la
+  continuité de la série.
+step: 1
+step_label: Scénario
+providers: [llm]
+llm: { provider: provider, model: model }
+job_steps: [script]
+summary: [provider, model]
+trial: script
+trial_description: >-
+  Découpe un chapitre factice d'une page (série d'essai, deux personnages) avec les réglages du
+  formulaire, sans toucher aux séries.
+secrets:
+  - { env: DEEPSEEK_API_KEY, label: Clé d'API DeepSeek }
+settings:
+  - key: provider
+    label: Fournisseur LLM
+    group: Modèle
+    type: choice
+    choices: [deepseek, ollama, claude, mock]
+    choice_labels: { deepseek: DeepSeek, ollama: Ollama (local), claude: Claude, mock: Factice (mode mock) }
+    source: env:LLM_PROVIDER
+    fallback: mock
+    help: Ollama et Claude sont prévus mais pas encore disponibles.
+  - key: model
+    label: Modèle
+    group: Modèle
+    type: text
+    source: providers.yaml#deepseek.model
+    env_override: DEEPSEEK_MODEL
+    help: Nom du modèle chez le fournisseur (ex. deepseek-chat).
+  - key: temperature
+    label: Température
+    group: Modèle
+    type: number
+    min: 0
+    max: 2
+    step: 0.05
+    source: prompts/script.yaml#temperature
+    help: 0 = réponses très régulières, 1 et plus = plus d'invention.
+  - key: max_retries
+    label: Nouveaux essais après une réponse invalide
+    group: Modèle
+    type: integer
+    min: 0
+    max: 2
+    source: prompts/script.yaml#max_retries
+  - key: max_previous_chapters
+    label: Résumés de chapitres précédents envoyés
+    group: Continuité
+    type: integer
+    min: 0
+    max: 100
+    source: prompts/script.yaml#max_previous_chapters
+  - key: system
+    label: Consignes système
+    group: Prompts
+    type: prompt
+    source: prompts/script.yaml#system
+    variables: &script_vars
+      - series_title
+      - series_style
+      - reading_direction
+      - characters
+      - previous_chapters
+      - chapter_number
+      - chapter_title
+      - synopsis
+      - target_pages
+      - shot_types
+      - bubble_kinds
+      - context_json
+  - key: user
+    label: Gabarit du chapitre
+    group: Prompts
+    type: prompt
+    source: prompts/script.yaml#user
+    variables: *script_vars
+    help: Gardez le bloc <contexte>$context_json</contexte> pour le mode mock.
+  - key: retry
+    label: Consigne de relance
+    group: Prompts
+    type: prompt
+    source: prompts/script.yaml#retry
+    variables: [error]

@@ -92,6 +92,8 @@ class MockLLMProvider:
         self._responder = responder
         self.invalid_attempts = invalid_attempts
         self.calls: list[list[ChatMessage]] = []
+        # Chaque requête telle que reçue (messages, température, mode JSON) : vérifiée par les tests.
+        self.requests: list[dict[str, Any]] = []
 
     def complete(
         self,
@@ -101,6 +103,7 @@ class MockLLMProvider:
         temperature: float | None = None,
     ) -> LLMResult:
         self.calls.append(messages)
+        self.requests.append({"messages": list(messages), "temperature": temperature, "json_mode": json_mode})
         if self._responder is not None:
             return LLMResult(text=self._responder(messages, json_mode), model="mock")
         ctx = _script_context(messages) if json_mode else None

@@ -1,0 +1,87 @@
+# Agent de l'étape 3 — voir presets/README.md (« L'équipe : agents du pipeline »).
+# `workflows/*.yaml#…` : la valeur s'applique à chaque workflow qui mappe ce paramètre ; la valeur
+# livrée affichée est celle du workflow par défaut (defaults.yaml).
+id: dessinateur
+name: Dessinateur
+icon: "🖌️"
+role: >-
+  Écrit le prompt de chaque case (description, plan, personnages, style) et la dessine avec
+  ComfyUI, sans jamais écrire de texte dans l'image.
+step: 3
+step_label: Génération
+providers: [comfyui]
+job_steps: [generation]
+summary: [workflow]
+trial: image_prompt
+trial_description: >-
+  Construit le prompt d'une case factice (deux personnages, une réplique) et les paramètres envoyés
+  à ComfyUI, sans rien générer.
+settings:
+  - key: workflow
+    label: Workflow des nouvelles séries
+    group: Workflow
+    type: choice
+    choices_from: workflows
+    source: defaults.yaml#workflow
+    global_only: true
+  - key: workflow_with_references
+    label: Workflow avec images de référence
+    group: Workflow
+    type: choice
+    choices_from: workflows
+    nullable: true
+    source: defaults.yaml#workflow_with_references
+    help: Choisi automatiquement quand un personnage de la case a une planche de référence.
+  - key: steps
+    label: Étapes d'échantillonnage (steps)
+    group: Workflow
+    type: integer
+    min: 1
+    max: 200
+    source: workflows/*.yaml#defaults.steps
+  - key: cfg
+    label: CFG
+    group: Workflow
+    type: number
+    min: 0
+    max: 30
+    step: 0.1
+    source: workflows/*.yaml#defaults.cfg
+  - key: megapixels
+    label: Taille des images (mégapixels)
+    group: Workflow
+    type: number
+    min: 0.1
+    max: 16
+    step: 0.1
+    source: layout.yaml#generation.megapixels
+    help: Même ratio que la case ; côtés arrondis au multiple accepté par le modèle.
+  - key: negative_prompt
+    label: Prompt négatif
+    group: Prompt
+    type: longtext
+    source: workflows/*.yaml#defaults.negative_prompt
+    help: Les termes « pas de texte » ci-dessous y sont toujours ajoutés.
+  - key: parts
+    label: Morceaux du prompt (un par ligne)
+    group: Prompt
+    type: prompt_list
+    source: image_prompt.yaml#parts
+    variables: [shot, description, characters, style]
+    help: Un morceau dont une variable est vide est omis.
+  - key: character
+    label: Présentation d'un personnage
+    group: Prompt
+    type: prompt
+    source: image_prompt.yaml#character
+    variables: [name, details]
+  - key: forbidden_text_terms
+    label: Termes « pas de texte » du prompt négatif
+    group: Prompt
+    type: list
+    source: image_prompt.yaml#forbidden_text_terms
+  - key: strip_quotes
+    label: Retirer les répliques entre guillemets de la description
+    group: Prompt
+    type: boolean
+    source: image_prompt.yaml#strip_quotes

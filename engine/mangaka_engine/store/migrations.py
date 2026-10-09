@@ -4,7 +4,8 @@
 - 2 : Série → Chapitre → Page (statuts, types de page, mise en page stockée, progression des jobs) ;
 - 3 : génération (paramètres des jobs, prompt final édité à la main) ;
 - 4 : contrôle qualité (verdict, détail des couches et boîtes détectées par version d'image) ;
-- 5 : banc d'essai du QC (annotations bonne / mauvaise des versions, historique des runs).
+- 5 : banc d'essai du QC (annotations bonne / mauvaise des versions, historique des runs) ;
+- 6 : profils des agents du pipeline (réglages édités dans l'UI, versionnés).
 
 Une base neuve est créée directement à la dernière version. Chaque migration tourne dans une
 transaction unique, clés étrangères désactivées (recette « 12 étapes » de SQLite pour reconstruire
@@ -21,11 +22,11 @@ from sqlalchemy import Engine, inspect
 from sqlalchemy.dialects import sqlite
 from sqlalchemy.schema import CreateIndex, CreateTable
 
-from .models import Base, Chapter, PanelImageAnnotation, QCBenchRun
+from .models import AgentProfile, AgentProfileVersion, Base, Chapter, PanelImageAnnotation, QCBenchRun
 
 log = logging.getLogger("mangaka_engine")
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 class MigrationError(RuntimeError):
@@ -112,6 +113,12 @@ def _v4_to_v5(cur: sqlite3.Cursor) -> None:
             cur.execute(stmt)
 
 
+def _v5_to_v6(cur: sqlite3.Cursor) -> None:
+    for table in (AgentProfile.__table__, AgentProfileVersion.__table__):
+        for stmt in _ddl(table):
+            cur.execute(stmt)
+
+
 MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     # version de départ → (version d'arrivée, fonction)
     0: (2, _v0_to_v2),
@@ -119,6 +126,7 @@ MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     2: (3, _v2_to_v3),
     3: (4, _v3_to_v4),
     4: (5, _v4_to_v5),
+    5: (6, _v5_to_v6),
 }
 
 

@@ -62,8 +62,11 @@ def resolve_llm_name(settings: Settings) -> str:
     return _normalize(settings.llm_provider) or "mock"
 
 
-def build_llm(settings: Settings, presets: PresetRegistry) -> LLMProvider:
-    name = resolve_llm_name(settings)
+def build_llm(
+    settings: Settings, presets: PresetRegistry, *, name: str | None = None, model: str | None = None
+) -> LLMProvider:
+    """`name` / `model` : choix d'un profil d'agent (écran « L'équipe »), prioritaires sur .env."""
+    name = name or resolve_llm_name(settings)
     _check("fournisseur LLM", name, LLM_CHOICES, ("deepseek", "mock"))
     if name == "mock":
         return MockLLMProvider(invalid_attempts=settings.mock_llm_invalid_attempts)
@@ -76,7 +79,7 @@ def build_llm(settings: Settings, presets: PresetRegistry) -> LLMProvider:
         return DeepSeekProvider(
             api_key=key,
             base_url=settings.deepseek_base_url or cfg.base_url,
-            model=settings.deepseek_model or cfg.model,
+            model=model or settings.deepseek_model or cfg.model,
             timeout_s=cfg.timeout_s,
             temperature=cfg.temperature,
         )

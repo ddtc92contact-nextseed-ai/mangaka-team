@@ -37,7 +37,7 @@ router = APIRouter(tags=["contrôle qualité"])
 
 
 def _status(ctx: AppContext) -> QCStatusOut:
-    cfg = ctx.presets.qc
+    cfg = ctx.agents.presets_for(None).qc
     layers = layer_status(ctx.providers)
     detail = None
     if cfg is None:

@@ -14,6 +14,7 @@ Arborescence attendue :
       layouts/*.yaml           # gabarits de planche
       prompts/*.yaml           # prompts des étapes LLM
       workflows/*.yaml         # workflows ComfyUI (+ leur JSON API)
+      agents/*.yaml            # agents du pipeline (écran « L'équipe ») : rôle et réglages éditables
 
 Un preset invalide n'empêche pas le moteur de démarrer : il est écarté et
 l'erreur est exposée via `GET /presets` et `GET /health`.
@@ -30,6 +31,7 @@ import yaml
 from pydantic import BaseModel, ValidationError
 
 from .schemas import (
+    AgentPreset,
     Defaults,
     FontsPreset,
     ImagePromptSettings,
@@ -76,6 +78,7 @@ class PresetRegistry:
     providers: ProvidersPreset | None = None
     qc: QCSettings | None = None
     defaults: Defaults | None = None
+    agents: dict[str, AgentPreset] = field(default_factory=dict)
     issues: list[PresetIssue] = field(default_factory=list)
 
     # --- accès -----------------------------------------------------------
@@ -223,6 +226,11 @@ class PresetRegistry:
                     reg.defaults = defaults
         else:
             reg.issues.append(PresetIssue(reg._rel(defaults_path), "fichier absent"))
+
+        for path in sorted((root / "agents").glob("*.y*ml")):
+            agent = reg._parse(path, AgentPreset)
+            if agent is not None:
+                reg._register(reg.agents, agent.id, agent, path)
         return reg
 
     def _rel(self, path: Path) -> str:

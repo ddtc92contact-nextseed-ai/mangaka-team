@@ -1,0 +1,114 @@
+# Agent de l'étape 4 — voir presets/README.md (« L'équipe : agents du pipeline »).
+id: controleur-qualite
+name: Contrôleur qualité
+icon: "🔍"
+role: >-
+  Vérifie chaque case générée : visages, mains et texte parasite, ressemblance des personnages à
+  leur fiche, puis conformité à la description par un modèle de vision en cas de doute.
+step: 4
+step_label: Contrôle qualité
+providers: [detectors, identity, vision]
+job_steps: [qc]
+summary: [vision_model]
+trial: qc
+trial_description: >-
+  Note trois cases factices (bonne, douteuse, ratée) à partir de détections et de scores types, avec
+  les seuils du formulaire, sans appeler les modèles.
+settings:
+  - key: auto_after_generation
+    label: Contrôle automatique après chaque génération
+    group: Couches
+    type: boolean
+    source: qc.yaml#auto_after_generation
+  - key: max_auto_retries
+    label: Nouveaux essais automatiques après un rejet
+    group: Couches
+    type: integer
+    min: 0
+    max: 5
+    source: qc.yaml#max_auto_retries
+  - key: weight_detectors
+    label: Poids des détecteurs (0 = couche ignorée)
+    group: Couches
+    type: number
+    min: 0
+    step: 0.05
+    source: qc.yaml#weights.detectors
+  - key: weight_identity
+    label: Poids de la ressemblance (0 = couche ignorée)
+    group: Couches
+    type: number
+    min: 0
+    step: 0.05
+    source: qc.yaml#weights.identity
+  - key: weight_vision
+    label: Poids de la vision (0 = couche ignorée)
+    group: Couches
+    type: number
+    min: 0
+    step: 0.05
+    source: qc.yaml#weights.vision
+  - key: vision_mode
+    label: Quand lancer la vision
+    group: Couches
+    type: choice
+    choices: [never, on_doubt, always]
+    choice_labels: { never: Jamais automatiquement, on_doubt: En cas de doute, always: À chaque contrôle }
+    source: qc.yaml#vision.mode
+  - key: ok_min
+    label: Score minimal pour « ok »
+    group: Seuils
+    type: integer
+    min: 0
+    max: 100
+    source: qc.yaml#verdict.ok_min
+  - key: reject_below
+    label: Score sous lequel la case est rejetée
+    group: Seuils
+    type: integer
+    min: 0
+    max: 100
+    source: qc.yaml#verdict.reject_below
+  - key: min_similarity
+    label: Ressemblance minimale à la fiche (0 à 1)
+    group: Seuils
+    type: number
+    min: 0
+    max: 1
+    step: 0.01
+    source: qc.yaml#identity.min_similarity
+  - key: face_min_confidence
+    label: Confiance minimale d'un visage
+    group: Seuils
+    type: number
+    min: 0
+    max: 1
+    step: 0.01
+    source: qc.yaml#detectors.face.min_confidence
+  - key: hand_suspect_below
+    label: Main suspecte sous cette confiance
+    group: Seuils
+    type: number
+    min: 0
+    max: 1
+    step: 0.01
+    source: qc.yaml#detectors.hand.suspect_below
+  - key: text_min_confidence
+    label: Confiance minimale d'un texte parasite
+    group: Seuils
+    type: number
+    min: 0
+    max: 1
+    step: 0.01
+    source: qc.yaml#detectors.text.min_confidence
+  - key: vision_model
+    label: Modèle de vision (Ollama)
+    group: Vision
+    type: text
+    source: providers.yaml#ollama.vision_model
+  - key: vision_prompt
+    label: Consigne du modèle de vision
+    group: Vision
+    type: prompt
+    source: qc.yaml#vision.prompt
+    variables: [description, characters, shot]

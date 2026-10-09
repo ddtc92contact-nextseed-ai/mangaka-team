@@ -629,3 +629,107 @@ class QCSettings(_Strict):
     identity: QCIdentitySettings
     vision: QCVisionSettings
     bench: QCBenchSettings
+
+
+# --- Agents du pipeline (écran « L'équipe ») ------------------------------------
+# Un agent = un rôle du pipeline (Python simple, pas de framework d'agents) dont les réglages
+# pointent vers les presets qui les livrent. Voir mangaka_engine/agents/.
+SettingType = Literal[
+    "text", "longtext", "prompt", "prompt_list", "number", "integer", "boolean", "choice", "list", "yaml"
+]
+# `fichier.yaml#chemin`, `prompts/<id>.yaml#chemin`, `workflows/*.yaml#chemin`, `layouts/*.yaml#templates`,
+# `env:VARIABLE` (fournisseur choisi dans .env) ou `profile` (stocké seulement dans le profil de l'agent).
+PRESET_FILES = ("defaults", "providers", "layout", "image_prompt", "qc", "fonts", "lettering")
+_SOURCE = (
+    r"^(env:[A-Z][A-Z0-9_]*|profile|(" + "|".join(PRESET_FILES) + r")\.yaml#[\w.-]+"
+    r"|prompts/[a-z0-9][a-z0-9-]*\.yaml#[\w.-]+|workflows/\*\.yaml#[\w.-]+|layouts/\*\.yaml#templates)$"
+)
+SECRET_WORDS = ("KEY", "SECRET", "TOKEN", "PASSWORD")
+
+
+class AgentSetting(_Strict):
+    key: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    label: str = Field(min_length=1)
+    help: str = ""
+    group: str = ""
+    type: SettingType
+    source: str = Field(pattern=_SOURCE)
+    choices: list[str] = Field(default_factory=list)
+    choice_labels: dict[str, str] = Field(default_factory=dict)
+    choices_from: Literal["fonts", "workflows", "page_formats"] | None = None
+    nullable: bool = Field(default=False, description="Valeur vide autorisée (choix « aucun »)")
+    variables: list[str] = Field(default_factory=list, description="Variables $… autorisées (prompts)")
+    min: float | None = None
+    max: float | None = None
+    step: float | None = None
+    env_override: str | None = Field(default=None, pattern=r"^[A-Z][A-Z0-9_]*$")
+    fallback: Any = Field(default=None, description="Valeur livrée quand la source est vide")
+    global_only: bool = Field(default=False, description="Réglage commun à toutes les séries")
+
+    @model_validator(mode="after")
+    def _check(self) -> AgentSetting:
+        if self.type == "choice" and not self.choices and self.choices_from is None:
+            raise ValueError(f"{self.key} : « choices » ou « choices_from » obligatoire pour un choix")
+        for env in (self.source.removeprefix("env:") if self.source.startswith("env:") else None, self.env_override):
+            if env and any(w in env for w in SECRET_WORDS):
+                raise ValueError(f"{self.key} : un secret ({env}) ne peut pas être un réglage")
+        return self
+
+    @property
+    def file(self) -> str | None:
+        """Fichier preset de la valeur livrée (None : `env:` ou `profile`)."""
+        return self.source.split("#", 1)[0] if "#" in self.source else None
+
+    @property
+    def path(self) -> list[str]:
+        return self.source.split("#", 1)[1].split(".") if "#" in self.source else []
+
+
+class AgentSecret(_Strict):
+    env: str = Field(pattern=r"^[A-Z][A-Z0-9_]*$")
+    label: str
+
+
+class AgentLLM(_Strict):
+    provider: str
+    model: str
+
+
+AgentProviderKind = Literal["llm", "vision", "comfyui", "detectors", "identity"]
+
+
+class AgentPreset(_Strict):
+    """Déclaration d'un agent (`presets/agents/<id>.yaml`)."""
+
+    id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
+    name: str = Field(min_length=1)
+    icon: str = "🤖"
+    role: str = ""
+    step: int = Field(ge=0, le=99)
+    step_label: str = ""
+    providers: list[AgentProviderKind] = Field(default_factory=list)
+    llm: AgentLLM | None = None
+    job_steps: list[str] = Field(default_factory=list)
+    summary: list[str] = Field(default_factory=list, description="Réglages affichés comme « modèle utilisé »")
+    summary_default: str = ""
+    trial: str | None = Field(default=None, description="Essai disponible (voir agents/trials.py)")
+    trial_description: str = ""
+    secrets: list[AgentSecret] = Field(default_factory=list)
+    settings: list[AgentSetting] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _check(self) -> AgentPreset:
+        keys = [s.key for s in self.settings]
+        dupes = sorted({k for k in keys if keys.count(k) > 1})
+        if dupes:
+            raise ValueError(f"réglages en double : {', '.join(dupes)}")
+        if "knowledge" in keys:
+            raise ValueError("« knowledge » est réservé au savoir-faire, commun à tous les agents")
+        refs = [*self.summary, *([self.llm.provider, self.llm.model] if self.llm else [])]
+        unknown = sorted({k for k in refs if k not in keys})
+        if unknown:
+            raise ValueError(f"réglages inconnus : {', '.join(unknown)}")
+        return self
+
+    def setting(self, key: str) -> AgentSetting | None:
+        return next((s for s in self.settings if s.key == key), None)

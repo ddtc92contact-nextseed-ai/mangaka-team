@@ -13,7 +13,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from . import __version__
-from .api import chapters, characters, generation, jobs, lettering, projects, qc, qc_bench, system
+from .agents import AgentService
+from .api import agents, chapters, characters, generation, jobs, lettering, projects, qc, qc_bench, system
 from .api.deps import AppContext
 from .api.errors import install_error_handlers
 from .config import Settings, get_settings
@@ -42,6 +43,7 @@ def build_context(settings: Settings, providers: Providers | None = None) -> App
     for kind, error in providers.errors.items():
         log.warning("fournisseur %s indisponible : %s", kind, error)
     db = Database(settings.database_path)
+    agents_service = AgentService(settings, presets, providers, db)
     runner = JobRunner(db)
     interrupted = runner.recover()
     if interrupted:
@@ -55,7 +57,8 @@ def build_context(settings: Settings, providers: Providers | None = None) -> App
         providers.comfyui,
         comfyui_error=providers.errors.get("comfyui"),
         poll_s=settings.comfyui_poll_s,
-        on_generated=AutoQC(presets, providers),
+        on_generated=AutoQC(presets, providers, presets_for=agents_service.presets_for),
+        presets_for=agents_service.presets_for,
     )
     comfy = providers.comfyui
 
@@ -66,7 +69,15 @@ def build_context(settings: Settings, providers: Providers | None = None) -> App
         status = comfy.health()
         return status.online and status.queue_running > 0
 
-    qc_executor = QCExecutor(db, presets, files, providers, comfy_busy=comfy_busy, poll_s=settings.comfyui_poll_s)
+    qc_executor = QCExecutor(
+        db,
+        presets,
+        files,
+        providers,
+        comfy_busy=comfy_busy,
+        poll_s=settings.comfyui_poll_s,
+        presets_for=agents_service.presets_for,
+    )
     queue = SerialJobQueue(
         db,
         step=GENERATION_STEP,
@@ -91,6 +102,7 @@ def build_context(settings: Settings, providers: Providers | None = None) -> App
         jobs=runner,
         generation=queue,
         qc=qc_executor,
+        agents=agents_service,
     )
 
 
@@ -116,6 +128,7 @@ def create_app(settings: Settings | None = None, providers: Providers | None = N
     app.include_router(lettering.router)
     app.include_router(qc.router)
     app.include_router(qc_bench.router)
+    app.include_router(agents.router)
     return app
 
 
