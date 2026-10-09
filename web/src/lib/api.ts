@@ -82,7 +82,16 @@ export interface PanelData {
   dialogues: Dialogue[];
   bbox: Rect | null;
   bubble_zone: Rect | null;
+  state: PanelState;
+  final_prompt: string | null;
+  final_prompt_manual: boolean;
+  generation_preset: string | null;
+  image_count: number;
+  selected_image_id: number | null;
+  selected_image_url: string | null;
 }
+
+export type PanelState = "draft" | "queued" | "generating" | "review" | "qc" | "flagged" | "approved";
 
 export interface LayoutPanel extends Rect {
   index: number;
@@ -158,10 +167,113 @@ export interface Job {
   error: string | null;
   project_id: number | null;
   chapter_id: number | null;
+  panel_id?: number | null;
+  params?: Record<string, unknown>;
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
   duration_ms: number | null;
+}
+
+/** Une version générée d'une case. */
+export interface PanelImage {
+  id: number;
+  panel_id: number;
+  version: number;
+  url: string;
+  seed: Seed | null;
+  selected: boolean;
+  width: number | null;
+  height: number | null;
+  preset: string | null;
+  params: {
+    prompt?: string;
+    negative_prompt?: string;
+    duration_ms?: number;
+    loras?: unknown[];
+    references?: unknown[];
+    [key: string]: unknown;
+  };
+  qc_score: number | null;
+  qc_reasons: string[];
+  created_at: string;
+}
+
+/** Détail d'une case pour l'atelier. */
+export interface PanelDetail {
+  id: number;
+  page_id: number;
+  page_number: number;
+  chapter_id: number;
+  project_id: number;
+  index: number;
+  label: string;
+  description: string;
+  characters: string[];
+  character_ids: number[];
+  shot_type: string | null;
+  state: PanelState;
+  bbox: Rect | null;
+  final_prompt: string | null;
+  final_prompt_manual: boolean;
+  generation_preset: string | null;
+  resolved_preset: string | null;
+  target: { width: number; height: number } | null;
+  images: PanelImage[];
+  active_jobs: Job[];
+}
+
+export interface GenerateInput {
+  count?: number;
+  seed?: Seed | null;
+  preset?: string | null;
+  prompt_override?: string | null;
+}
+
+export interface BatchGenerateResult {
+  jobs: Job[];
+  panel_ids: number[];
+  skipped: number;
+}
+
+export interface QueueItem {
+  job: Job;
+  position: number;
+  label: string;
+  panel_id: number | null;
+  panel_index: number | null;
+  page_id: number | null;
+  page_number: number | null;
+  chapter_id: number | null;
+  chapter_number: number | null;
+  chapter_title: string | null;
+  project_id: number | null;
+  series_title: string | null;
+  preset: string | null;
+  variant: number | null;
+  count: number | null;
+  estimated_duration_s: number | null;
+  eta_s: number | null;
+}
+
+export interface Queue {
+  running: QueueItem | null;
+  pending: QueueItem[];
+  total_eta_s: number | null;
+  comfyui: string | null;
+}
+
+export interface WorkflowPreset {
+  id: string;
+  name: string;
+  description: string;
+  params: string[];
+  reference_slots: number;
+  supports_lora: boolean;
+  lora_loader: string | null;
+  timeout_s: number;
+  is_default: boolean;
+  is_reference_default: boolean;
 }
 
 export interface LayoutTemplate {
@@ -253,7 +365,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new EngineError("Interface web injoignable", 0, {}, true);
   }
   if (res.status === 204) return undefined as T;
-  const data = await res.json().catch(() => null);
+  const data = await res
+    .text()
+    .then(parseEngineJson)
+    .catch(() => null);
   if (!res.ok) {
     const fieldErrors: Record<string, string> = {};
     for (const e of data?.errors ?? []) fieldErrors[e.field] = e.message;
@@ -262,6 +377,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
   return data as T;
 }
+
+/**
+ * Les seeds vont jusqu'à 2⁶³ − 1 : au-delà de 2⁵³, `JSON.parse` les arrondirait (et « Même seed »
+ * relancerait une autre seed). On les garde donc en texte ; le moteur accepte une seed en chaîne.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function parseEngineJson(text: string): any {
+  return JSON.parse(text.replace(/("seed"\s*:\s*)(\d{16,})/g, '$1"$2"'));
+}
+
+/** Seed telle que renvoyée par le moteur : nombre, ou texte si elle dépasse les entiers exacts de JS. */
+export type Seed = number | string;
 
 const json = (method: string, body: unknown): RequestInit => ({
   method,
@@ -325,9 +452,33 @@ export const api = {
   moveGutter: (pageId: number, body: { path: number[]; index: number; position: number }) =>
     request<PageData>(`/pages/${pageId}/gutters`, json("POST", body)),
   layoutTemplates: () => request<LayoutTemplate[]>("/layout/templates"),
+
+  cancelJob: (id: number) => request<Job>(`/jobs/${id}/cancel`, { method: "POST" }),
+  queue: () => request<Queue>("/queue"),
+  workflowPresets: () => request<WorkflowPreset[]>("/presets/workflows"),
+  getPanel: (id: number) => request<PanelDetail>(`/panels/${id}`),
+  updatePanel: (id: number, body: { final_prompt?: string | null; generation_preset?: string | null }) =>
+    request<PanelDetail>(`/panels/${id}`, json("PATCH", body)),
+  rebuildPrompt: (id: number) => request<PanelDetail>(`/panels/${id}/prompt/rebuild`, { method: "POST" }),
+  generatePanel: (id: number, body: GenerateInput = {}) => request<Job[]>(`/panels/${id}/generate`, json("POST", body)),
+  generatePage: (id: number, body: { force?: boolean; count?: number } = {}) =>
+    request<BatchGenerateResult>(`/pages/${id}/generate`, json("POST", body)),
+  generateChapter: (id: number, body: { force?: boolean; count?: number } = {}) =>
+    request<BatchGenerateResult>(`/chapters/${id}/generate`, json("POST", body)),
+  selectPanelImage: (id: number) => request<PanelImage[]>(`/panel-images/${id}/select`, { method: "POST" }),
+  deletePanelImage: (id: number) => request<void>(`/panel-images/${id}`, { method: "DELETE" }),
 };
 
 export function errorMessage(err: unknown): string {
   if (err instanceof EngineError) return err.offline ? "Moteur hors ligne" : err.message;
   return "Erreur inattendue";
+}
+
+/** Message complet : détail du moteur + erreurs par champ (ex. « workflow inconnu », « page non mise en page »). */
+export function fullErrorMessage(err: unknown): string {
+  if (err instanceof EngineError && !err.offline) {
+    const fields = Object.values(err.fieldErrors);
+    if (fields.length) return fields.map((m) => m.charAt(0).toUpperCase() + m.slice(1)).join(" · ");
+  }
+  return errorMessage(err);
 }

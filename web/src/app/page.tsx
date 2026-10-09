@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { ComfyBadge, useEngineStatus } from "@/components/engine-status";
+import { QueueList } from "@/components/queue";
 import { Alert, ButtonLink, Card, EmptyState, Loading, PageHeader, formatDate } from "@/components/ui";
 import { DIRECTIONS } from "@/components/project-form";
 import { ChapterStatusBadge, SeriesStatusBadge, formatPlannedDate } from "@/components/status";
@@ -90,6 +91,15 @@ export default function DashboardPage() {
               <Alert>{p.detail}</Alert>
             </div>
           ))}
+
+      <section id="file-attente" className="mb-10 scroll-mt-16" aria-labelledby="queue-title">
+        <h2 id="queue-title" className="mb-4 text-lg font-semibold text-zinc-100">
+          File d&apos;attente ComfyUI
+        </h2>
+        <Card>
+          <QueueList />
+        </Card>
+      </section>
 
       <section className="mb-10" aria-labelledby="week-title">
         <h2 id="week-title" className="mb-4 text-lg font-semibold text-zinc-100">

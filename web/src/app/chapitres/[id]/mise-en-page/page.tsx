@@ -126,6 +126,11 @@ export default function LayoutPreviewPage() {
           <Button variant="ghost" onClick={recomputeAll} disabled={busy}>
             Recalculer tout le chapitre
           </Button>
+          {selected?.layout && (
+            <ButtonLink href={`/chapitres/${chapter.id}/atelier?page=${selected.id}`} data-testid="open-workshop">
+              Ouvrir dans l&apos;atelier
+            </ButtonLink>
+          )}
         </div>
         {error && <Alert>{error}</Alert>}
         {anyStale && !error && (
