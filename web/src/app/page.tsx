@@ -4,6 +4,7 @@ import Link from "next/link";
 import { ComfyBadge, useEngineStatus } from "@/components/engine-status";
 import { Alert, ButtonLink, Card, EmptyState, Loading, PageHeader, formatDate } from "@/components/ui";
 import { DIRECTIONS } from "@/components/project-form";
+import { ChapterStatusBadge, SeriesStatusBadge, formatPlannedDate } from "@/components/status";
 import { api } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
 
@@ -13,13 +14,14 @@ export default function DashboardPage() {
   const status = useEngineStatus();
   const online = status.state === "online";
   const projects = useEngineData(() => api.listProjects(), [online]);
+  const week = useEngineData(() => api.upcomingChapters(7), [online]);
 
   return (
     <>
       <PageHeader
         title="Tableau de bord"
-        subtitle="Tes projets et l'état de la chaîne de production locale."
-        actions={<ButtonLink href="/projets/nouveau">Nouveau projet</ButtonLink>}
+        subtitle="Tes séries, les chapitres à sortir cette semaine et l'état de la chaîne de production locale."
+        actions={<ButtonLink href="/projets/nouveau">Nouvelle série</ButtonLink>}
       />
 
       <section className="mb-10 grid gap-4 md:grid-cols-3" aria-label="État des services">
@@ -89,12 +91,49 @@ export default function DashboardPage() {
             </div>
           ))}
 
+      <section className="mb-10" aria-labelledby="week-title">
+        <h2 id="week-title" className="mb-4 text-lg font-semibold text-zinc-100">
+          Chapitres de la semaine
+        </h2>
+        {week.loading && !week.data ? (
+          <Loading />
+        ) : week.error ? (
+          <Alert>Impossible de charger les chapitres : {week.error}</Alert>
+        ) : week.data?.length ? (
+          <ul className="divide-y divide-zinc-800 rounded-xl border border-zinc-800 bg-zinc-900/60">
+            {week.data.map((c) => (
+              <li key={c.id}>
+                <Link
+                  href={`/chapitres/${c.id}`}
+                  className="flex flex-wrap items-center gap-3 px-5 py-3 text-sm hover:bg-zinc-900"
+                >
+                  <span className="w-28 text-zinc-300">{formatPlannedDate(c.planned_date)}</span>
+                  <span className="min-w-0 flex-1 truncate">
+                    <span className="font-medium text-zinc-100">{c.series_title}</span>
+                    <span className="text-zinc-400">
+                      {" "}
+                      · ch. {c.number}
+                      {c.title ? ` — ${c.title}` : ""}
+                    </span>
+                  </span>
+                  <ChapterStatusBadge status={c.status} />
+                </Link>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <EmptyState title="Aucun chapitre prévu dans les 7 prochains jours">
+            Renseigne la date de publication prévue d&apos;un chapitre pour le voir ici.
+          </EmptyState>
+        )}
+      </section>
+
       <section>
-        <h2 className="mb-4 text-lg font-semibold text-zinc-100">Projets</h2>
+        <h2 className="mb-4 text-lg font-semibold text-zinc-100">Séries</h2>
         {projects.loading && !projects.data ? (
           <Loading />
         ) : projects.error ? (
-          <Alert>Impossible de charger les projets : {projects.error}</Alert>
+          <Alert>Impossible de charger les séries : {projects.error}</Alert>
         ) : projects.data?.length ? (
           <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {projects.data.map((p) => (
@@ -103,10 +142,14 @@ export default function DashboardPage() {
                   href={`/projets/${p.id}`}
                   className="block h-full rounded-xl border border-zinc-800 bg-zinc-900/60 p-5 transition-colors hover:border-zinc-600"
                 >
-                  <p className="font-semibold text-zinc-100">{p.title}</p>
+                  <p className="flex items-center justify-between gap-2 font-semibold text-zinc-100">
+                    <span className="truncate">{p.title}</span>
+                    <SeriesStatusBadge status={p.status} />
+                  </p>
                   <p className="mt-1 line-clamp-2 text-sm text-zinc-400">{p.style || "Style non défini"}</p>
                   <p className="mt-3 text-xs text-zinc-500">
-                    {p.character_count} personnage{p.character_count > 1 ? "s" : ""} ·{" "}
+                    {p.chapter_count} chapitre{p.chapter_count > 1 ? "s" : ""} · {p.character_count} personnage
+                    {p.character_count > 1 ? "s" : ""} ·{" "}
                     {DIRECTIONS[p.reading_direction]} · modifié le {formatDate(p.updated_at)}
                   </p>
                 </Link>
@@ -114,8 +157,8 @@ export default function DashboardPage() {
             ))}
           </ul>
         ) : (
-          <EmptyState title="Aucun projet pour l'instant">
-            <ButtonLink href="/projets/nouveau">Créer mon premier projet</ButtonLink>
+          <EmptyState title="Aucune série pour l'instant">
+            <ButtonLink href="/projets/nouveau">Créer ma première série</ButtonLink>
           </EmptyState>
         )}
       </section>

@@ -41,7 +41,7 @@ export default function CharacterPage() {
         title={c.name}
         subtitle={
           <Link href={`/projets/${c.project_id}`} className="hover:text-zinc-200">
-            ← Retour au projet
+            ← Retour à la série
           </Link>
         }
         actions={

@@ -9,6 +9,7 @@ from fastapi import Request
 from sqlalchemy.orm import Session
 
 from ..config import Settings
+from ..pipeline.jobs import JobRunner
 from ..presets import PresetRegistry
 from ..providers.factory import Providers
 from ..store.db import Database
@@ -22,6 +23,7 @@ class AppContext:
     providers: Providers
     db: Database
     files: FileStore
+    jobs: JobRunner
 
 
 def get_ctx(request: Request) -> AppContext:

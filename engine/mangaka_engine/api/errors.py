@@ -10,6 +10,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from ..validation import translate_error as _translate
+
 log = logging.getLogger("mangaka_engine")
 
 
@@ -20,52 +22,6 @@ class FieldError(Exception):
         super().__init__(message)
         self.field = field
         self.message = message
-
-
-def _num(value: Any) -> str:
-    return f"{value:g}" if isinstance(value, float) else str(value)
-
-
-def _translate(err: dict[str, Any]) -> str:
-    kind = err.get("type", "")
-    ctx = err.get("ctx") or {}
-    match kind:
-        case "missing":
-            return "champ obligatoire"
-        case "string_too_short":
-            n = ctx.get("min_length", 1)
-            return "ne doit pas être vide" if n == 1 else f"au moins {n} caractères"
-        case "string_too_long":
-            return f"au plus {ctx.get('max_length')} caractères"
-        case "too_long":
-            return f"au plus {ctx.get('max_length')} éléments"
-        case "literal_error" | "enum":
-            return f"valeur non autorisée (attendu : {ctx.get('expected', '?')})"
-        case "greater_than_equal":
-            return f"doit être supérieur ou égal à {_num(ctx.get('ge'))}"
-        case "less_than_equal":
-            return f"doit être inférieur ou égal à {_num(ctx.get('le'))}"
-        case "greater_than":
-            return f"doit être strictement supérieur à {_num(ctx.get('gt'))}"
-        case "less_than":
-            return f"doit être strictement inférieur à {_num(ctx.get('lt'))}"
-        case "int_parsing" | "int_type" | "float_parsing" | "float_type" | "int_from_float":
-            return "nombre attendu"
-        case "string_type":
-            return "texte attendu"
-        case "list_type":
-            return "liste attendue"
-        case "bool_parsing" | "bool_type":
-            return "booléen attendu"
-        case "json_invalid":
-            return "JSON invalide"
-        case "model_attributes_type" | "dict_type":
-            return "objet JSON attendu"
-        case "extra_forbidden":
-            return "champ inconnu"
-        case "value_error":
-            return str(err.get("msg", "")).removeprefix("Value error, ")
-    return str(err.get("msg", "valeur invalide"))
 
 
 def _field(loc: tuple[Any, ...] | list[Any]) -> str:

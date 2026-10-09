@@ -1,0 +1,22 @@
+# Paramètres de l'étape 2 (découpage / mise en page), communs à tous les formats.
+
+# Taille minimale (mm) d'une case quand on déplace une gouttière dans l'interface.
+min_panel_mm: 20
+
+# Taille cible des images générées pour une case : même ratio que la case,
+# surface ≈ megapixels, côtés arrondis à un multiple de `multiple` (contrainte du modèle).
+generation:
+  megapixels: 1.0
+  multiple: 16
+  min_side: 256
+
+# Zone réservée aux bulles, placée en haut de la case, du côté où commence la lecture
+# (gauche en ltr, droite en rtl). Sa surface dépend de la longueur des dialogues :
+# min_fraction de la case pour une réplique très courte → max_fraction à partir de full_at_chars.
+bubble_zone:
+  padding_mm: 2
+  min_fraction: 0.10
+  max_fraction: 0.40
+  full_at_chars: 240
+  width_fraction: 0.55   # largeur de départ (part de la largeur de la case)
+  max_height_fraction: 0.60

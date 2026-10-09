@@ -49,6 +49,8 @@ def health(ctx: AppContext = Depends(get_ctx)) -> dict[str, Any]:
         "presets": {
             "page_formats": len(ctx.presets.page_formats),
             "workflows": len(ctx.presets.workflows),
+            "layout_templates": len(ctx.presets.layout_templates),
+            "prompts": len(ctx.presets.prompts),
             "issues": len(ctx.presets.issues),
         },
     }
@@ -71,6 +73,10 @@ def list_presets(ctx: AppContext = Depends(get_ctx)) -> dict[str, Any]:
             }
             for f in reg.page_formats.values()
         ],
+        "layout_templates": [
+            {"id": t.id, "name": t.name, "panel_count": t.panel_count} for t in reg.layout_templates.values()
+        ],
+        "prompts": sorted(reg.prompts),
         "workflows": [
             {
                 "id": w.preset.id,

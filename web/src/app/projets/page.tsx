@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { DIRECTIONS } from "@/components/project-form";
+import { SeriesStatusBadge } from "@/components/status";
 import { Alert, ButtonLink, EmptyState, Loading, PageHeader, formatDate } from "@/components/ui";
 import { api } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
@@ -12,20 +13,22 @@ export default function ProjectsPage() {
   return (
     <>
       <PageHeader
-        title="Projets"
-        subtitle="Une série = un style, un sens de lecture, un format de page et ses personnages."
-        actions={<ButtonLink href="/projets/nouveau">Nouveau projet</ButtonLink>}
+        title="Séries"
+        subtitle="Une série = un style, un sens de lecture, un format de page, ses personnages et ses chapitres."
+        actions={<ButtonLink href="/projets/nouveau">Nouvelle série</ButtonLink>}
       />
       {projects.loading ? (
         <Loading />
       ) : projects.error ? (
-        <Alert>Impossible de charger les projets : {projects.error}</Alert>
+        <Alert>Impossible de charger les séries : {projects.error}</Alert>
       ) : projects.data?.length ? (
         <div className="overflow-x-auto rounded-xl border border-zinc-800">
           <table className="w-full text-left text-sm">
             <thead className="bg-zinc-900 text-xs uppercase tracking-wide text-zinc-500">
               <tr>
                 <th className="px-4 py-3 font-medium">Titre</th>
+                <th className="px-4 py-3 font-medium">Statut</th>
+                <th className="px-4 py-3 font-medium">Chapitres</th>
                 <th className="px-4 py-3 font-medium">Sens de lecture</th>
                 <th className="px-4 py-3 font-medium">Format</th>
                 <th className="px-4 py-3 font-medium">Personnages</th>
@@ -40,6 +43,10 @@ export default function ProjectsPage() {
                       {p.title}
                     </Link>
                   </td>
+                  <td className="px-4 py-3">
+                    <SeriesStatusBadge status={p.status} />
+                  </td>
+                  <td className="px-4 py-3 text-zinc-400">{p.chapter_count}</td>
                   <td className="px-4 py-3 text-zinc-400">{DIRECTIONS[p.reading_direction]}</td>
                   <td className="px-4 py-3 text-zinc-400">{p.page_format}</td>
                   <td className="px-4 py-3 text-zinc-400">{p.character_count}</td>
@@ -50,8 +57,8 @@ export default function ProjectsPage() {
           </table>
         </div>
       ) : (
-        <EmptyState title="Aucun projet">
-          <ButtonLink href="/projets/nouveau">Créer un projet</ButtonLink>
+        <EmptyState title="Aucune série">
+          <ButtonLink href="/projets/nouveau">Créer une série</ButtonLink>
         </EmptyState>
       )}
     </>

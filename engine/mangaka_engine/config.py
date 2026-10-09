@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     deepseek_base_url: str | None = None
     deepseek_model: str | None = None
 
+    # Mode mock : nombre de réponses invalides du LLM factice avant une réponse valide (test des relances).
+    mock_llm_invalid_attempts: int = 0
+
     comfyui_url: str = "http://127.0.0.1:8188"
     comfyui_timeout_s: float = 5.0
 

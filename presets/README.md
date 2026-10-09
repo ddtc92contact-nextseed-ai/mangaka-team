@@ -11,9 +11,12 @@ Après modification d'un preset, redémarre le moteur (`npm run dev`).
 
 | Fichier | Rôle |
 | --- | --- |
-| `defaults.yaml` | Format de page et workflow appliqués aux nouveaux projets |
+| `defaults.yaml` | Format de page et workflow appliqués aux nouvelles séries |
 | `providers.yaml` | Paramètres des fournisseurs (URL, modèle LLM, timeouts). **Aucune clé d'API ici** : elles vont dans `.env` |
-| `page_formats/*.yaml` | Formats de page (dimensions en mm, DPI, marges, gouttières) |
+| `page_formats/*.yaml` | Formats de page (dimensions en mm, DPI, marges, gouttières) : A4 (défaut) et B4 JIS à 300 DPI |
+| `layout.yaml` | Découpage : taille mini d'une case, taille cible de génération, zones de bulles |
+| `layouts/*.yaml` | Bibliothèque de gabarits de planche (arbres de découpes) |
+| `prompts/*.yaml` | Prompts des étapes LLM (`script` : découpage d'un chapitre) |
 | `workflows/*.yaml` + `*.json` | Workflows ComfyUI : le JSON API exporté + le mapping des paramètres |
 
 ## Format de page
@@ -30,6 +33,30 @@ gutters_mm: { horizontal: 6, vertical: 4 }                   # espaces entre cas
 ```
 
 La taille en pixels est calculée : `round(mm / 25.4 × dpi)` → A4 300 DPI = 2480 × 3508 px.
+
+## Gabarits de planche (`layouts/*.yaml`)
+
+Un gabarit est un arbre de découpes « guillotine » : `panel` (une case), `{ rows: [poids…] }`
+(bandes empilées) ou `{ cols: [poids…] }` (cases côte à côte **dans le sens de lecture**, mises en
+miroir automatiquement en manga). `children` absent = uniquement des cases.
+
+```yaml
+templates:
+  - id: 3-grand-haut
+    name: Grande case en haut + deux cases
+    tree: { rows: [3, 2], children: [panel, { cols: [1, 1] }] }
+```
+
+À nombre de cases égal, le moteur prend le gabarit dont la répartition des surfaces suit le mieux
+l'importance (1–3) des cases ; en cas d'égalité, le premier de la liste. Au-delà de la bibliothèque,
+une grille de bandes de 3 cases est générée.
+
+## Prompts (`prompts/*.yaml`)
+
+Gabarits `$variable` (écrire `$$` pour un dollar). `script.yaml` liste ses variables en tête ;
+`max_retries` (0 à 2) fixe le nombre de relances après une réponse invalide, `max_previous_chapters`
+le nombre de résumés de chapitres précédents envoyés. Le bloc `<contexte>…</contexte>` transmet le
+même contexte en JSON (le LLM factice du mode mock s'en sert pour produire un découpage).
 
 ## Workflow ComfyUI
 

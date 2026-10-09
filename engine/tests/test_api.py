@@ -43,8 +43,11 @@ def test_health_never_leaks_api_key(make_settings: Callable[..., Settings]) -> N
 def test_presets_endpoint(client: TestClient) -> None:
     data = client.get("/presets").json()
     assert data["defaults"] == {"page_format": "a4-300dpi", "workflow": "qwen-image-base"}
-    [fmt] = data["page_formats"]
-    assert fmt["width_px"] == 2480
+    formats = {f["id"]: f for f in data["page_formats"]}
+    assert formats["a4-300dpi"]["width_px"] == 2480
+    assert formats["b4-300dpi"]["dpi"] == 300
+    assert any(t["panel_count"] == 6 for t in data["layout_templates"])
+    assert data["prompts"] == ["script"]
     assert data["workflows"][0]["id"] == "qwen-image-base"
     assert data["issues"] == []
 
@@ -65,7 +68,7 @@ def test_project_crud(client: TestClient) -> None:
 
     assert client.delete(f"/projects/{pid}").status_code == 204
     resp = client.get(f"/projects/{pid}")
-    assert resp.status_code == 404 and resp.json() == {"detail": "Projet introuvable"}
+    assert resp.status_code == 404 and resp.json() == {"detail": "Série introuvable"}
 
 
 def test_project_default_reading_direction_is_rtl(client: TestClient) -> None:

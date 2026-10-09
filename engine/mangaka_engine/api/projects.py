@@ -1,4 +1,4 @@
-"""CRUD des projets."""
+"""CRUD des séries (table historique « projects », routes /projects)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..store.models import Character, Project, ReadingDirection
+from ..store.models import Chapter, Character, Project, ReadingDirection, SeriesStatus
 from .deps import AppContext, get_ctx, get_session
 from .errors import FieldError
 from .schemas import ProjectCreate, ProjectOut, ProjectUpdate
@@ -14,15 +14,19 @@ from .schemas import ProjectCreate, ProjectOut, ProjectUpdate
 router = APIRouter(prefix="/projects", tags=["projets"])
 
 
-def project_out(project: Project, character_count: int) -> ProjectOut:
+def project_out(project: Project, character_count: int, chapter_count: int) -> ProjectOut:
     return ProjectOut(
         id=project.id,
         title=project.title,
         style=project.style,
+        status=project.status.value,
         reading_direction=project.reading_direction.value,
         page_format=project.page_format,
         workflow_preset=project.workflow_preset,
+        style_lora_name=project.style_lora_name,
+        style_lora_weight=project.style_lora_weight,
         character_count=character_count,
+        chapter_count=chapter_count,
         created_at=project.created_at,
         updated_at=project.updated_at,
     )
@@ -31,12 +35,14 @@ def project_out(project: Project, character_count: int) -> ProjectOut:
 def get_project_or_404(session: Session, project_id: int) -> Project:
     project = session.get(Project, project_id)
     if project is None:
-        raise HTTPException(status_code=404, detail="Projet introuvable")
+        raise HTTPException(status_code=404, detail="Série introuvable")
     return project
 
 
-def _count_characters(session: Session, project_id: int) -> int:
-    return session.scalar(select(func.count()).where(Character.project_id == project_id)) or 0
+def _counts(session: Session, project_id: int) -> tuple[int, int]:
+    chars = session.scalar(select(func.count()).where(Character.project_id == project_id)) or 0
+    chapters = session.scalar(select(func.count()).where(Chapter.project_id == project_id)) or 0
+    return chars, chapters
 
 
 def _check_presets(ctx: AppContext, page_format: str | None, workflow: str | None) -> None:
@@ -48,9 +54,10 @@ def _check_presets(ctx: AppContext, page_format: str | None, workflow: str | Non
 
 @router.get("", response_model=list[ProjectOut])
 def list_projects(session: Session = Depends(get_session)) -> list[ProjectOut]:
-    counts = dict(session.execute(select(Character.project_id, func.count()).group_by(Character.project_id)).all())
+    chars = dict(session.execute(select(Character.project_id, func.count()).group_by(Character.project_id)).all())
+    chapters = dict(session.execute(select(Chapter.project_id, func.count()).group_by(Chapter.project_id)).all())
     projects = session.scalars(select(Project).order_by(Project.updated_at.desc())).all()
-    return [project_out(p, counts.get(p.id, 0)) for p in projects]
+    return [project_out(p, chars.get(p.id, 0), chapters.get(p.id, 0)) for p in projects]
 
 
 @router.post("", response_model=ProjectOut, status_code=201)
@@ -68,19 +75,22 @@ def create_project(
     project = Project(
         title=body.title,
         style=body.style,
+        status=SeriesStatus(body.status),
         reading_direction=ReadingDirection(body.reading_direction),
         page_format=page_format,
         workflow_preset=workflow,
+        style_lora_name=body.style_lora_name or None,
+        style_lora_weight=body.style_lora_weight,
     )
     session.add(project)
     session.commit()
-    return project_out(project, 0)
+    return project_out(project, 0, 0)
 
 
 @router.get("/{project_id}", response_model=ProjectOut)
 def get_project(project_id: int, session: Session = Depends(get_session)) -> ProjectOut:
     project = get_project_or_404(session, project_id)
-    return project_out(project, _count_characters(session, project_id))
+    return project_out(project, *_counts(session, project_id))
 
 
 @router.patch("/{project_id}", response_model=ProjectOut)
@@ -92,16 +102,20 @@ def update_project(
 ) -> ProjectOut:
     project = get_project_or_404(session, project_id)
     changes = body.model_dump(exclude_unset=True)
-    for key in ("title", "page_format", "workflow_preset", "reading_direction", "style"):
+    for key in ("title", "page_format", "workflow_preset", "reading_direction", "style", "status", "style_lora_weight"):
         if key in changes and changes[key] is None:
             raise FieldError(key, "ne peut pas être vide")
     _check_presets(ctx, changes.get("page_format"), changes.get("workflow_preset"))
     if "reading_direction" in changes:
         changes["reading_direction"] = ReadingDirection(changes["reading_direction"])
+    if "status" in changes:
+        changes["status"] = SeriesStatus(changes["status"])
+    if "style_lora_name" in changes:
+        changes["style_lora_name"] = changes["style_lora_name"] or None
     for key, value in changes.items():
         setattr(project, key, value)
     session.commit()
-    return project_out(project, _count_characters(session, project_id))
+    return project_out(project, *_counts(session, project_id))
 
 
 @router.delete("/{project_id}", status_code=204)

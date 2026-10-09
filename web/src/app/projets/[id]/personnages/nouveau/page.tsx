@@ -13,7 +13,7 @@ export default function NewCharacterPage() {
   const project = useEngineData(() => api.getProject(projectId), [projectId]);
 
   if (project.loading) return <Loading />;
-  if (project.error || !project.data) return <Alert>{project.error ?? "Projet introuvable"}</Alert>;
+  if (project.error || !project.data) return <Alert>{project.error ?? "Série introuvable"}</Alert>;
 
   return (
     <>

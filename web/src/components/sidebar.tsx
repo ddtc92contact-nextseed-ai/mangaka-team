@@ -6,7 +6,11 @@ import { ComfyBadge, EngineBadge } from "./engine-status";
 
 const NAV = [
   { href: "/", label: "Tableau de bord", match: (p: string) => p === "/" },
-  { href: "/projets", label: "Projets", match: (p: string) => p.startsWith("/projets") && !p.includes("/personnages") },
+  {
+    href: "/projets",
+    label: "Séries",
+    match: (p: string) => (p.startsWith("/projets") && !p.includes("/personnages")) || p.startsWith("/chapitres"),
+  },
   {
     href: "/personnages",
     label: "Personnages",

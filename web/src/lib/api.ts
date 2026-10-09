@@ -3,20 +3,172 @@
 export const ENGINE_BASE = "/api/engine";
 
 export type ReadingDirection = "ltr" | "rtl";
+export type SeriesStatus = "ongoing" | "paused" | "completed" | "cancelled";
+export type ChapterStatus = "draft" | "script" | "layout" | "generation" | "lettering" | "ready" | "published";
+export type PageKind = "story" | "bonus" | "chapter_cover";
+export type BubbleKind = "speech" | "thought" | "shout" | "narration" | "off";
 
+/** Une série (« projet » côté moteur). */
 export interface Project {
   id: number;
   title: string;
   style: string;
+  status: SeriesStatus;
   reading_direction: ReadingDirection;
   page_format: string;
   workflow_preset: string;
+  style_lora_name: string | null;
+  style_lora_weight: number;
   character_count: number;
+  chapter_count: number;
   created_at: string;
   updated_at: string;
 }
 
-export type ProjectInput = Pick<Project, "title" | "style" | "reading_direction" | "page_format" | "workflow_preset">;
+export type ProjectInput = Pick<
+  Project,
+  | "title"
+  | "style"
+  | "status"
+  | "reading_direction"
+  | "page_format"
+  | "workflow_preset"
+  | "style_lora_name"
+  | "style_lora_weight"
+>;
+
+export interface Chapter {
+  id: number;
+  project_id: number;
+  series_title: string;
+  number: number;
+  title: string;
+  synopsis: string;
+  summary: string;
+  target_page_count: number;
+  status: ChapterStatus;
+  planned_date: string | null;
+  page_count: number;
+  panel_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ChapterInput = Pick<Chapter, "title" | "synopsis" | "target_page_count" | "status" | "planned_date"> & {
+  summary?: string;
+};
+
+export interface Dialogue {
+  id?: number;
+  speaker: string;
+  text: string;
+  kind: BubbleKind;
+}
+
+export interface Rect {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
+export interface PanelData {
+  id: number;
+  index: number;
+  description: string;
+  characters: string[];
+  shot_type: string | null;
+  importance: number;
+  dialogues: Dialogue[];
+  bbox: Rect | null;
+  bubble_zone: Rect | null;
+}
+
+export interface LayoutPanel extends Rect {
+  index: number;
+  reading_order: number;
+  panel_id: number | null;
+  width: number;
+  height: number;
+  ratio: number;
+  target: { width: number; height: number };
+  bubble_zone: Rect | null;
+}
+
+export interface LayoutGutter extends Rect {
+  path: number[];
+  index: number;
+  orientation: "horizontal" | "vertical";
+  position: number;
+  min: number;
+  max: number;
+}
+
+export interface PageLayout {
+  version: number;
+  template_id: string;
+  page_format: string;
+  dpi: number;
+  direction: ReadingDirection;
+  page_number: number;
+  page: { width: number; height: number };
+  live_area: Rect;
+  inner_side: "left" | "right";
+  gutters_px: { horizontal: number; vertical: number };
+  panels: LayoutPanel[];
+  gutters: LayoutGutter[];
+}
+
+export interface PageData {
+  id: number;
+  chapter_id: number;
+  number: number;
+  kind: PageKind;
+  grid_template: string | null;
+  state: string;
+  layout: PageLayout | null;
+  layout_stale: boolean;
+  panels: PanelData[];
+}
+
+/** Découpage envoyé au moteur : `id` absent = nouvel élément. */
+export interface PanelInput {
+  id?: number;
+  description: string;
+  characters: string[];
+  shot_type: string | null;
+  importance: number;
+  dialogues: Dialogue[];
+}
+
+export interface PageInput {
+  id?: number;
+  kind: PageKind;
+  panels: PanelInput[];
+}
+
+export type JobStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled";
+
+export interface Job {
+  id: number;
+  step: string;
+  status: JobStatus;
+  progress: number;
+  message: string;
+  error: string | null;
+  project_id: number | null;
+  chapter_id: number | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  duration_ms: number | null;
+}
+
+export interface LayoutTemplate {
+  id: string;
+  name: string;
+  panel_count: number;
+}
 
 export interface ReferenceImage {
   id: number;
@@ -73,6 +225,8 @@ export interface Presets {
     height_px: number;
   }[];
   workflows: { id: string; name: string; description: string; params: string[] }[];
+  layout_templates: LayoutTemplate[];
+  prompts: string[];
   issues: { file: string; message: string }[];
 }
 
@@ -146,6 +300,31 @@ export const api = {
   },
   deleteReferenceImage: (characterId: number, imageId: number) =>
     request<void>(`/characters/${characterId}/images/${imageId}`, { method: "DELETE" }),
+
+  listChapters: (projectId: number) => request<Chapter[]>(`/projects/${projectId}/chapters`),
+  upcomingChapters: (days = 7) => request<Chapter[]>(`/chapters/upcoming?days=${days}`),
+  getChapter: (id: number) => request<Chapter>(`/chapters/${id}`),
+  createChapter: (projectId: number, body: Partial<ChapterInput>) =>
+    request<Chapter>(`/projects/${projectId}/chapters`, json("POST", body)),
+  updateChapter: (id: number, body: Partial<ChapterInput>) => request<Chapter>(`/chapters/${id}`, json("PATCH", body)),
+  deleteChapter: (id: number) => request<void>(`/chapters/${id}`, { method: "DELETE" }),
+  reorderChapters: (projectId: number, chapterIds: number[]) =>
+    request<Chapter[]>(`/projects/${projectId}/chapters/reorder`, json("POST", { chapter_ids: chapterIds })),
+
+  startScript: (chapterId: number) => request<Job>(`/chapters/${chapterId}/script`, { method: "POST" }),
+  chapterJobs: (chapterId: number, step?: string) =>
+    request<Job[]>(`/chapters/${chapterId}/jobs${step ? `?step=${encodeURIComponent(step)}` : ""}`),
+  getJob: (id: number) => request<Job>(`/jobs/${id}`),
+
+  listPages: (chapterId: number) => request<PageData[]>(`/chapters/${chapterId}/pages`),
+  savePages: (chapterId: number, pages: PageInput[]) =>
+    request<PageData[]>(`/chapters/${chapterId}/pages`, json("PUT", { pages })),
+  layoutChapter: (chapterId: number) => request<PageData[]>(`/chapters/${chapterId}/layout`, { method: "POST" }),
+  layoutPage: (pageId: number, body: { template_id?: string | null } = {}) =>
+    request<PageData>(`/pages/${pageId}/layout`, json("POST", body)),
+  moveGutter: (pageId: number, body: { path: number[]; index: number; position: number }) =>
+    request<PageData>(`/pages/${pageId}/gutters`, json("POST", body)),
+  layoutTemplates: () => request<LayoutTemplate[]>("/layout/templates"),
 };
 
 export function errorMessage(err: unknown): string {
