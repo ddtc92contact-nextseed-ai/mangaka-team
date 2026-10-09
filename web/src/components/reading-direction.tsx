@@ -88,7 +88,7 @@ export function DirectionPicker({
     <fieldset aria-describedby="reading_direction-help" className="space-y-2">
       <legend className="text-sm font-medium text-zinc-300">Sens de lecture</legend>
       <p id="reading_direction-help" className={`text-xs ${error ? "text-red-400" : "text-zinc-500"}`} role={error ? "alert" : undefined}>
-        {error ?? "Il décide de l'ordre des cases, de la reliure et de la place des bulles. Modifiable ensuite."}
+        {error || "Il décide de l'ordre des cases, de la reliure et de la place des bulles. Modifiable ensuite."}
       </p>
       <div className="grid gap-3 sm:grid-cols-2">
         {OPTIONS.map((o) => {
