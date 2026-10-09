@@ -1,13 +1,14 @@
 """Modèle de données SQLite (SQLAlchemy 2).
 
-Project → Character (+ images de référence) · Page → Panel (+ versions d'image) → Bubble · Job.
+Série (`Project`) → Character (+ images de référence)
+Série → Chapter → Page → Panel (+ versions d'image) → Bubble · Job.
 Les fichiers binaires (images) vivent dans `data/`, la base ne stocke que leurs chemins relatifs.
 """
 
 from __future__ import annotations
 
 import enum
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 from sqlalchemy import JSON, Enum, Float, ForeignKey, Integer, String, Text, UniqueConstraint
@@ -30,6 +31,29 @@ class TimestampMixin:
 class ReadingDirection(enum.StrEnum):
     ltr = "ltr"  # BD franco-belge / comics
     rtl = "rtl"  # manga
+
+
+class SeriesStatus(enum.StrEnum):
+    ongoing = "ongoing"  # en cours
+    paused = "paused"  # en pause
+    completed = "completed"  # terminée
+    cancelled = "cancelled"  # arrêtée
+
+
+class ChapterStatus(enum.StrEnum):
+    draft = "draft"  # brouillon
+    script = "script"  # scénario
+    layout = "layout"  # mise en page
+    generation = "generation"  # génération
+    lettering = "lettering"  # lettrage
+    ready = "ready"  # prêt
+    published = "published"  # publié
+
+
+class PageKind(enum.StrEnum):
+    story = "story"  # page de l'histoire
+    bonus = "bonus"  # croquis, notes de l'auteur…
+    chapter_cover = "chapter_cover"  # page de garde du chapitre
 
 
 class PageState(enum.StrEnum):
@@ -71,20 +95,26 @@ def _enum(e: type[enum.Enum]) -> Enum:
 
 
 class Project(TimestampMixin, Base):
+    """Une série (table historique `projects`)."""
+
     __tablename__ = "projects"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     title: Mapped[str] = mapped_column(String(200))
     style: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[SeriesStatus] = mapped_column(_enum(SeriesStatus), default=SeriesStatus.ongoing)
     reading_direction: Mapped[ReadingDirection] = mapped_column(_enum(ReadingDirection), default=ReadingDirection.rtl)
+    # Presets par défaut de la série
     page_format: Mapped[str] = mapped_column(String(100))
     workflow_preset: Mapped[str] = mapped_column(String(100))
+    style_lora_name: Mapped[str | None] = mapped_column(String(255), default=None)
+    style_lora_weight: Mapped[float] = mapped_column(Float, default=0.8)
 
     characters: Mapped[list[Character]] = relationship(
         back_populates="project", cascade="all, delete-orphan", order_by="Character.name"
     )
-    pages: Mapped[list[Page]] = relationship(
-        back_populates="project", cascade="all, delete-orphan", order_by="Page.number"
+    chapters: Mapped[list[Chapter]] = relationship(
+        back_populates="project", cascade="all, delete-orphan", order_by="Chapter.number"
     )
 
 
@@ -120,17 +150,42 @@ class CharacterImage(Base):
     character: Mapped[Character] = relationship(back_populates="reference_images")
 
 
-class Page(TimestampMixin, Base):
-    __tablename__ = "pages"
+class Chapter(TimestampMixin, Base):
+    __tablename__ = "chapters"
     __table_args__ = (UniqueConstraint("project_id", "number"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     number: Mapped[int] = mapped_column(Integer)
+    title: Mapped[str] = mapped_column(String(200), default="")
+    synopsis: Mapped[str] = mapped_column(Text, default="")
+    target_page_count: Mapped[int] = mapped_column(Integer, default=15)
+    status: Mapped[ChapterStatus] = mapped_column(_enum(ChapterStatus), default=ChapterStatus.draft)
+    planned_date: Mapped[date | None] = mapped_column(default=None)
+    # Résumé produit par l'étape « scénario », relu par les chapitres suivants (continuité).
+    summary: Mapped[str] = mapped_column(Text, default="")
+
+    project: Mapped[Project] = relationship(back_populates="chapters")
+    pages: Mapped[list[Page]] = relationship(
+        back_populates="chapter", cascade="all, delete-orphan", order_by="Page.number"
+    )
+
+
+class Page(TimestampMixin, Base):
+    __tablename__ = "pages"
+    __table_args__ = (UniqueConstraint("chapter_id", "number"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chapter_id: Mapped[int] = mapped_column(ForeignKey("chapters.id", ondelete="CASCADE"), index=True)
+    number: Mapped[int] = mapped_column(Integer)
+    kind: Mapped[PageKind] = mapped_column(_enum(PageKind), default=PageKind.story)
+    # Gabarit imposé à la main (None = choix automatique par le découpage).
     grid_template: Mapped[str | None] = mapped_column(String(100), default=None)
+    # Résultat de l'étape « découpage » (voir pipeline/layout.py), rejouable.
+    layout: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
     state: Mapped[PageState] = mapped_column(_enum(PageState), default=PageState.draft)
 
-    project: Mapped[Project] = relationship(back_populates="pages")
+    chapter: Mapped[Chapter] = relationship(back_populates="pages")
     panels: Mapped[list[Panel]] = relationship(
         back_populates="page", cascade="all, delete-orphan", order_by="Panel.index"
     )
@@ -145,10 +200,12 @@ class Panel(TimestampMixin, Base):
     index: Mapped[int] = mapped_column(Integer)
     description: Mapped[str] = mapped_column(Text, default="")
     character_ids: Mapped[list[int]] = mapped_column(JSON, default=list)
+    # Noms tels qu'écrits par le scénario (personnages secondaires compris).
+    character_names: Mapped[list[str]] = mapped_column(JSON, default=list)
     shot_type: Mapped[str | None] = mapped_column(String(50), default=None)
-    dialogues: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    dialogues: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)  # inutilisé : voir Bubble
     importance: Mapped[int] = mapped_column(Integer, default=1)
-    # Géométrie en pixels de la page : {"x", "y", "w", "h"}
+    # Géométrie en pixels de la page : {"x1", "y1", "x2", "y2"} (recopiée depuis Page.layout)
     bbox: Mapped[dict[str, int] | None] = mapped_column(JSON, default=None)
     bubble_zone: Mapped[dict[str, int] | None] = mapped_column(JSON, default=None)
     final_prompt: Mapped[str | None] = mapped_column(Text, default=None)
@@ -192,6 +249,7 @@ class Bubble(TimestampMixin, Base):
     panel_id: Mapped[int] = mapped_column(ForeignKey("panels.id", ondelete="CASCADE"), index=True)
     order: Mapped[int] = mapped_column(Integer, default=0)
     speaker_id: Mapped[int | None] = mapped_column(ForeignKey("characters.id", ondelete="SET NULL"))
+    speaker_name: Mapped[str] = mapped_column(String(120), default="")
     text: Mapped[str] = mapped_column(Text)
     kind: Mapped[BubbleKind] = mapped_column(_enum(BubbleKind), default=BubbleKind.speech)
     position: Mapped[dict[str, int] | None] = mapped_column(JSON, default=None)  # {"x","y","w","h"}
@@ -205,9 +263,12 @@ class Job(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    chapter_id: Mapped[int | None] = mapped_column(ForeignKey("chapters.id", ondelete="CASCADE"), index=True)
     panel_id: Mapped[int | None] = mapped_column(ForeignKey("panels.id", ondelete="CASCADE"), index=True)
     step: Mapped[str] = mapped_column(String(30))  # script | layout | generation | qc | lettering
     status: Mapped[JobStatus] = mapped_column(_enum(JobStatus), default=JobStatus.pending)
+    progress: Mapped[int] = mapped_column(Integer, default=0)  # 0–100
+    message: Mapped[str] = mapped_column(Text, default="")
     error: Mapped[str | None] = mapped_column(Text, default=None)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     started_at: Mapped[datetime | None] = mapped_column(default=None)

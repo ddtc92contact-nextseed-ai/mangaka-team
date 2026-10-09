@@ -3,7 +3,7 @@
 deepseek:
   base_url: https://api.deepseek.com
   model: deepseek-chat
-  timeout_s: 60
+  timeout_s: 300   # un chapitre complet en JSON peut prendre plusieurs minutes
   temperature: 0.7
   # DeepSeek n'accepte pas encore d'images : le contrôle qualité visuel
   # passera par Ollama (Qwen3-VL 4B chargé à la demande, keep_alive 0).

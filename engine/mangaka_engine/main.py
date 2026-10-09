@@ -13,10 +13,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from . import __version__
-from .api import characters, projects, system
+from .api import chapters, characters, jobs, projects, system
 from .api.deps import AppContext
 from .api.errors import install_error_handlers
 from .config import Settings, get_settings
+from .pipeline.jobs import JobRunner
 from .presets import PresetRegistry
 from .providers.factory import Providers, build_providers
 from .store.db import Database
@@ -32,12 +33,18 @@ def build_context(settings: Settings, providers: Providers | None = None) -> App
     providers = providers or build_providers(settings, presets)
     for kind, error in providers.errors.items():
         log.warning("fournisseur %s indisponible : %s", kind, error)
+    db = Database(settings.database_path)
+    runner = JobRunner(db)
+    interrupted = runner.recover()
+    if interrupted:
+        log.warning("%s job(s) interrompu(s) par l'arrêt précédent marqué(s) en échec", interrupted)
     return AppContext(
         settings=settings,
         presets=presets,
         providers=providers,
-        db=Database(settings.database_path),
+        db=db,
         files=FileStore(settings.data_dir),
+        jobs=runner,
     )
 
 
@@ -47,6 +54,7 @@ def create_app(settings: Settings | None = None, providers: Providers | None = N
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
+        app.state.ctx.jobs.shutdown()
         app.state.ctx.db.dispose()
 
     app = FastAPI(title="mangaka-team — moteur", version=__version__, lifespan=lifespan)
@@ -55,6 +63,8 @@ def create_app(settings: Settings | None = None, providers: Providers | None = N
     app.include_router(system.router)
     app.include_router(projects.router)
     app.include_router(characters.router)
+    app.include_router(chapters.router)
+    app.include_router(jobs.router)
     return app
 
 

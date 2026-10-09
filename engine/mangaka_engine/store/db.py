@@ -8,7 +8,7 @@ from pathlib import Path
 from sqlalchemy import Engine, create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
-from .models import Base
+from .migrations import migrate
 
 
 def create_db_engine(path: Path) -> Engine:
@@ -22,7 +22,7 @@ def create_db_engine(path: Path) -> Engine:
         cur.execute("PRAGMA journal_mode=WAL")
         cur.close()
 
-    Base.metadata.create_all(engine)
+    migrate(engine)
     return engine
 
 
@@ -30,6 +30,10 @@ class Database:
     def __init__(self, path: Path) -> None:
         self.engine = create_db_engine(path)
         self._sessions = sessionmaker(self.engine, expire_on_commit=False)
+
+    def session_scope(self) -> Session:
+        """Session à utiliser dans un `with` (threads des jobs)."""
+        return self._sessions()
 
     def session(self) -> Iterator[Session]:
         with self._sessions() as session:

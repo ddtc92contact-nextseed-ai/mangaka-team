@@ -1,0 +1,15 @@
+# B4 JIS portrait (format des manuscrits manga), 300 DPI → 3035 × 4299 px.
+id: b4-300dpi
+name: B4 JIS portrait — 300 DPI
+width_mm: 257
+height_mm: 364
+dpi: 300
+bleed_mm: 3
+margins_mm:
+  top: 18
+  bottom: 18
+  inner: 18   # côté reliure
+  outer: 15
+gutters_mm:
+  horizontal: 7  # entre deux rangées de cases
+  vertical: 5    # entre deux cases d'une même rangée

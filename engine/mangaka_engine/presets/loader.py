@@ -3,9 +3,12 @@
 Arborescence attendue :
 
     presets/
-      defaults.yaml            # presets par défaut des nouveaux projets
+      defaults.yaml            # presets par défaut des nouvelles séries
       providers.yaml           # paramètres des fournisseurs (modèle LLM, URL…)
+      layout.yaml              # paramètres du découpage (zones de bulles, taille de génération…)
       page_formats/*.yaml      # formats de page
+      layouts/*.yaml           # gabarits de planche
+      prompts/*.yaml           # prompts des étapes LLM
       workflows/*.yaml         # workflows ComfyUI (+ leur JSON API)
 
 Un preset invalide n'empêche pas le moteur de démarrer : il est écarté et
@@ -22,7 +25,16 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, ValidationError
 
-from .schemas import Defaults, PageFormat, ProvidersPreset, WorkflowPreset
+from .schemas import (
+    Defaults,
+    LayoutSettings,
+    LayoutTemplate,
+    LayoutTemplateFile,
+    PageFormat,
+    PromptPreset,
+    ProvidersPreset,
+    WorkflowPreset,
+)
 
 
 class PresetError(Exception):
@@ -47,6 +59,9 @@ class PresetRegistry:
     root: Path
     page_formats: dict[str, PageFormat] = field(default_factory=dict)
     workflows: dict[str, LoadedWorkflow] = field(default_factory=dict)
+    layout_templates: dict[str, LayoutTemplate] = field(default_factory=dict)
+    prompts: dict[str, PromptPreset] = field(default_factory=dict)
+    layout: LayoutSettings = field(default_factory=LayoutSettings)
     providers: ProvidersPreset | None = None
     defaults: Defaults | None = None
     issues: list[PresetIssue] = field(default_factory=list)
@@ -63,6 +78,18 @@ class PresetRegistry:
             return self.workflows[preset_id]
         except KeyError:
             raise PresetError(f"workflow inconnu : « {preset_id} »") from None
+
+    def layout_template(self, preset_id: str) -> LayoutTemplate:
+        try:
+            return self.layout_templates[preset_id]
+        except KeyError:
+            raise PresetError(f"gabarit de planche inconnu : « {preset_id} »") from None
+
+    def prompt(self, preset_id: str) -> PromptPreset:
+        try:
+            return self.prompts[preset_id]
+        except KeyError:
+            raise PresetError(f"prompt introuvable : presets/prompts/{preset_id}.yaml") from None
 
     def require_providers(self) -> ProvidersPreset:
         if self.providers is None:
@@ -86,6 +113,24 @@ class PresetRegistry:
             wf = reg._load_workflow(path)
             if wf is not None:
                 reg._register(reg.workflows, wf.preset.id, wf, path)
+
+        for path in sorted((root / "layouts").glob("*.y*ml")):
+            lib = reg._parse(path, LayoutTemplateFile)
+            for tpl in lib.templates if lib else []:
+                reg._register(reg.layout_templates, tpl.id, tpl, path)
+
+        for path in sorted((root / "prompts").glob("*.y*ml")):
+            prompt = reg._parse(path, PromptPreset)
+            if prompt is not None:
+                reg._register(reg.prompts, prompt.id, prompt, path)
+
+        layout_path = root / "layout.yaml"
+        if layout_path.exists():
+            layout = reg._parse(layout_path, LayoutSettings)
+            if layout is not None:
+                reg.layout = layout
+        else:
+            reg.issues.append(PresetIssue(reg._rel(layout_path), "fichier absent : valeurs par défaut utilisées"))
 
         providers_path = root / "providers.yaml"
         if providers_path.exists():

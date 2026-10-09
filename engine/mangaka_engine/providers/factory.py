@@ -51,7 +51,7 @@ def build_llm(settings: Settings, presets: PresetRegistry) -> LLMProvider:
     name = resolve_llm_name(settings)
     _check("fournisseur LLM", name, LLM_CHOICES, ("deepseek", "mock"))
     if name == "mock":
-        return MockLLMProvider()
+        return MockLLMProvider(invalid_attempts=settings.mock_llm_invalid_attempts)
     try:
         cfg = presets.require_providers().deepseek
     except PresetError as exc:

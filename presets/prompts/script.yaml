@@ -1,0 +1,58 @@
+# Étape 1 — découpage d'un chapitre en pages → cases (prompt du LLM texte).
+#
+# Variables disponibles ($nom ; écrire $$ pour un « $ » littéral) :
+#   $series_title $series_style $reading_direction $characters $previous_chapters
+#   $chapter_number $chapter_title $synopsis $target_pages $shot_types $bubble_kinds
+#   $context_json  (le même contexte, en JSON)
+# Gabarit de relance après une réponse invalide : $error (erreurs de validation).
+id: script
+description: Découpage d'un chapitre en pages et cases, avec dialogues et résumé.
+max_retries: 2            # nouveaux essais après une réponse invalide (2 au maximum)
+temperature: 0.7
+max_previous_chapters: 8  # résumés des chapitres précédents envoyés pour la continuité
+
+system: |
+  Tu es scénariste et storyboarder de manga professionnel. Tu découpes un chapitre en pages
+  puis en cases, comme pour une publication hebdomadaire. Tu respectes la continuité de la
+  série (personnages, événements des chapitres précédents) et le rythme d'un vrai chapitre :
+  accroche, montée, cliffhanger final.
+  Tu réponds UNIQUEMENT par un objet JSON valide, sans texte autour ni bloc de code.
+
+user: |
+  Série : « $series_title »
+  Style : $series_style
+  Sens de lecture : $reading_direction
+
+  Personnages connus :
+  $characters
+
+  Résumé des chapitres précédents :
+  $previous_chapters
+
+  Chapitre $chapter_number — « $chapter_title »
+  Synopsis ou script brut :
+  $synopsis
+
+  Contraintes :
+  - environ $target_pages pages ; 3 à 7 cases par page (1 seule pour une pleine page) ;
+  - « shot_type » vaut exactement l'une de ces valeurs : $shot_types ;
+  - « kind » d'un dialogue vaut exactement l'une de ces valeurs : $bubble_kinds
+    (narration = récitatif, off = voix hors champ) ;
+  - « importance » vaut 1 (case de transition), 2 (case normale) ou 3 (case forte, grande) ;
+  - « characters » liste les noms des personnages visibles dans la case ;
+  - répliques courtes, en français, comme dans un vrai manga ;
+  - « summary » : résumé du chapitre en 3 à 6 phrases, pour assurer la continuité des chapitres suivants.
+
+  Format de réponse :
+  {"pages": [{"panels": [{"description": "…", "characters": ["…"], "shot_type": "plan moyen",
+     "importance": 2, "dialogues": [{"speaker": "…", "text": "…", "kind": "speech"}]}]}],
+   "summary": "…"}
+
+  <contexte>
+  $context_json
+  </contexte>
+
+retry: |
+  Ta réponse précédente est invalide :
+  $error
+  Corrige ces erreurs et renvoie l'objet JSON complet, et uniquement lui.

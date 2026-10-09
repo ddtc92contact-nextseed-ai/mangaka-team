@@ -1,0 +1,436 @@
+"""Chapitres d'une série, leur découpage (pages → cases → bulles) et leur mise en page."""
+
+from __future__ import annotations
+
+from datetime import date, timedelta
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session, selectinload
+
+from ..pipeline.layout import LayoutError
+from ..pipeline.pages import is_stale, layout_page, move_page_gutter
+from ..pipeline.script import normalize_shot_type, script_job
+from ..presets import PresetError
+from ..store.models import (
+    Bubble,
+    BubbleKind,
+    Chapter,
+    ChapterStatus,
+    Character,
+    Job,
+    JobStatus,
+    Page,
+    PageKind,
+    Panel,
+)
+from .deps import AppContext, get_ctx, get_session
+from .errors import FieldError
+from .jobs import job_out
+from .projects import get_project_or_404
+from .schemas import (
+    BreakdownIn,
+    BubbleOut,
+    ChapterCreate,
+    ChapterOut,
+    ChapterReorder,
+    ChapterUpdate,
+    GutterMove,
+    JobOut,
+    PageLayoutIn,
+    PageOut,
+    PanelOut,
+)
+
+router = APIRouter(tags=["chapitres"])
+
+
+# --- sorties --------------------------------------------------------------------
+def _page_counts(session: Session, chapter_ids: list[int]) -> dict[int, tuple[int, int]]:
+    if not chapter_ids:
+        return {}
+    rows = session.execute(
+        select(Page.chapter_id, func.count(func.distinct(Page.id)), func.count(Panel.id))
+        .outerjoin(Panel, Panel.page_id == Page.id)
+        .where(Page.chapter_id.in_(chapter_ids))
+        .group_by(Page.chapter_id)
+    ).all()
+    return {cid: (pages, panels) for cid, pages, panels in rows}
+
+
+def chapter_out(chapter: Chapter, counts: tuple[int, int] = (0, 0)) -> ChapterOut:
+    return ChapterOut(
+        id=chapter.id,
+        project_id=chapter.project_id,
+        series_title=chapter.project.title,
+        number=chapter.number,
+        title=chapter.title,
+        synopsis=chapter.synopsis,
+        summary=chapter.summary,
+        target_page_count=chapter.target_page_count,
+        status=chapter.status.value,
+        planned_date=chapter.planned_date,
+        page_count=counts[0],
+        panel_count=counts[1],
+        created_at=chapter.created_at,
+        updated_at=chapter.updated_at,
+    )
+
+
+def _one_out(session: Session, chapter: Chapter) -> ChapterOut:
+    return chapter_out(chapter, _page_counts(session, [chapter.id]).get(chapter.id, (0, 0)))
+
+
+def page_out(page: Page) -> PageOut:
+    return PageOut(
+        id=page.id,
+        chapter_id=page.chapter_id,
+        number=page.number,
+        kind=page.kind.value,
+        grid_template=page.grid_template,
+        state=page.state.value,
+        layout=page.layout,
+        layout_stale=bool(page.panels) and is_stale(page),
+        panels=[
+            PanelOut(
+                id=p.id,
+                index=p.index,
+                description=p.description,
+                characters=list(p.character_names or []),
+                shot_type=p.shot_type,
+                importance=p.importance,
+                dialogues=[
+                    BubbleOut(id=b.id, speaker=b.speaker_name, text=b.text, kind=b.kind.value) for b in p.bubbles
+                ],
+                bbox=p.bbox,
+                bubble_zone=p.bubble_zone,
+            )
+            for p in page.panels
+        ],
+    )
+
+
+def get_chapter_or_404(session: Session, chapter_id: int) -> Chapter:
+    chapter = session.get(Chapter, chapter_id)
+    if chapter is None:
+        raise HTTPException(status_code=404, detail="Chapitre introuvable")
+    return chapter
+
+
+def get_page_or_404(session: Session, page_id: int) -> Page:
+    page = session.get(Page, page_id)
+    if page is None:
+        raise HTTPException(status_code=404, detail="Page introuvable")
+    return page
+
+
+def _load_pages(session: Session, chapter_id: int) -> list[Page]:
+    return list(
+        session.scalars(
+            select(Page)
+            .where(Page.chapter_id == chapter_id)
+            .options(selectinload(Page.panels).selectinload(Panel.bubbles))
+            .order_by(Page.number)
+        ).all()
+    )
+
+
+# --- chapitres ------------------------------------------------------------------
+@router.get("/chapters/upcoming", response_model=list[ChapterOut])
+def upcoming_chapters(
+    days: int = Query(default=7, ge=0, le=366), session: Session = Depends(get_session)
+) -> list[ChapterOut]:
+    """Chapitres dont la publication est prévue d'aujourd'hui à J+`days` (« chapitres de la semaine »)."""
+    today = date.today()
+    rows = session.scalars(
+        select(Chapter)
+        .where(Chapter.planned_date.is_not(None), Chapter.planned_date >= today)
+        .where(Chapter.planned_date <= today + timedelta(days=days))
+        .options(selectinload(Chapter.project))
+        .order_by(Chapter.planned_date, Chapter.project_id, Chapter.number)
+    ).all()
+    counts = _page_counts(session, [c.id for c in rows])
+    return [chapter_out(c, counts.get(c.id, (0, 0))) for c in rows]
+
+
+@router.get("/projects/{project_id}/chapters", response_model=list[ChapterOut])
+def list_chapters(project_id: int, session: Session = Depends(get_session)) -> list[ChapterOut]:
+    get_project_or_404(session, project_id)
+    rows = session.scalars(select(Chapter).where(Chapter.project_id == project_id).order_by(Chapter.number)).all()
+    counts = _page_counts(session, [c.id for c in rows])
+    return [chapter_out(c, counts.get(c.id, (0, 0))) for c in rows]
+
+
+@router.post("/projects/{project_id}/chapters", response_model=ChapterOut, status_code=201)
+def create_chapter(project_id: int, body: ChapterCreate, session: Session = Depends(get_session)) -> ChapterOut:
+    get_project_or_404(session, project_id)
+    last = session.scalar(select(func.max(Chapter.number)).where(Chapter.project_id == project_id)) or 0
+    number = body.number or last + 1
+    taken = session.scalar(select(Chapter.id).where(Chapter.project_id == project_id, Chapter.number == number))
+    if taken is not None:
+        raise FieldError("number", f"le chapitre {number} existe déjà")
+    chapter = Chapter(
+        project_id=project_id,
+        number=number,
+        title=body.title,
+        synopsis=body.synopsis,
+        target_page_count=body.target_page_count,
+        status=ChapterStatus(body.status),
+        planned_date=body.planned_date,
+    )
+    session.add(chapter)
+    session.commit()
+    return chapter_out(chapter)
+
+
+@router.post("/projects/{project_id}/chapters/reorder", response_model=list[ChapterOut])
+def reorder_chapters(
+    project_id: int, body: ChapterReorder, session: Session = Depends(get_session)
+) -> list[ChapterOut]:
+    """Renumérote les chapitres 1..n dans l'ordre donné (tous les chapitres de la série, une fois chacun)."""
+    get_project_or_404(session, project_id)
+    chapters = {c.id: c for c in session.scalars(select(Chapter).where(Chapter.project_id == project_id))}
+    if sorted(body.chapter_ids) != sorted(chapters) or len(set(body.chapter_ids)) != len(body.chapter_ids):
+        raise FieldError("chapter_ids", "la liste doit contenir chaque chapitre de la série exactement une fois")
+    for c in chapters.values():
+        c.number = -c.id
+    session.flush()
+    for n, cid in enumerate(body.chapter_ids, start=1):
+        chapters[cid].number = n
+    session.commit()
+    return list_chapters(project_id, session)
+
+
+@router.get("/chapters/{chapter_id}", response_model=ChapterOut)
+def get_chapter(chapter_id: int, session: Session = Depends(get_session)) -> ChapterOut:
+    return _one_out(session, get_chapter_or_404(session, chapter_id))
+
+
+@router.patch("/chapters/{chapter_id}", response_model=ChapterOut)
+def update_chapter(chapter_id: int, body: ChapterUpdate, session: Session = Depends(get_session)) -> ChapterOut:
+    chapter = get_chapter_or_404(session, chapter_id)
+    changes = body.model_dump(exclude_unset=True)
+    for key in ("title", "synopsis", "summary", "target_page_count", "status"):
+        if key in changes and changes[key] is None:
+            raise FieldError(key, "ne peut pas être vide")
+    if "status" in changes:
+        changes["status"] = ChapterStatus(changes["status"])
+    for key, value in changes.items():
+        setattr(chapter, key, value)
+    session.commit()
+    return _one_out(session, chapter)
+
+
+@router.delete("/chapters/{chapter_id}", status_code=204)
+def delete_chapter(chapter_id: int, session: Session = Depends(get_session)) -> Response:
+    session.delete(get_chapter_or_404(session, chapter_id))
+    session.commit()
+    return Response(status_code=204)
+
+
+# --- étape 1 : scénario ---------------------------------------------------------
+@router.post("/chapters/{chapter_id}/script", response_model=JobOut, status_code=202)
+def start_script(
+    chapter_id: int, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
+) -> JobOut:
+    """Lance « Découper » : job en arrière-plan, progression via GET /jobs/{id}/events."""
+    chapter = get_chapter_or_404(session, chapter_id)
+    if not chapter.synopsis.strip():
+        raise FieldError("synopsis", "écris d'abord le synopsis ou le script brut du chapitre")
+    if ctx.providers.llm is None:
+        detail = ctx.providers.errors.get("llm", "fournisseur LLM indisponible")
+        raise HTTPException(status_code=503, detail=f"LLM indisponible : {detail}")
+    try:
+        ctx.presets.prompt("script")
+    except PresetError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+    running = session.scalar(
+        select(Job.id).where(
+            Job.chapter_id == chapter_id,
+            Job.step == "script",
+            Job.status.in_([JobStatus.pending, JobStatus.running]),
+        )
+    )
+    if running is not None:
+        raise HTTPException(status_code=409, detail="Un découpage de ce chapitre est déjà en cours")
+    job = Job(project_id=chapter.project_id, chapter_id=chapter_id, step="script", message="En attente…")
+    session.add(job)
+    session.commit()
+    ctx.jobs.submit(job.id, script_job(ctx.db, ctx.presets, ctx.providers.llm, chapter_id))
+    return job_out(job)
+
+
+@router.get("/chapters/{chapter_id}/jobs", response_model=list[JobOut])
+def chapter_jobs(chapter_id: int, step: str | None = None, session: Session = Depends(get_session)) -> list[JobOut]:
+    get_chapter_or_404(session, chapter_id)
+    q = select(Job).where(Job.chapter_id == chapter_id)
+    if step:
+        q = q.where(Job.step == step)
+    return [job_out(j) for j in session.scalars(q.order_by(Job.id.desc()).limit(20))]
+
+
+# --- découpage éditable ---------------------------------------------------------
+@router.get("/chapters/{chapter_id}/pages", response_model=list[PageOut])
+def list_pages(chapter_id: int, session: Session = Depends(get_session)) -> list[PageOut]:
+    get_chapter_or_404(session, chapter_id)
+    return [page_out(p) for p in _load_pages(session, chapter_id)]
+
+
+@router.put("/chapters/{chapter_id}/pages", response_model=list[PageOut])
+def replace_pages(
+    chapter_id: int,
+    body: BreakdownIn,
+    session: Session = Depends(get_session),
+    ctx: AppContext = Depends(get_ctx),
+) -> list[PageOut]:
+    """Enregistre le découpage édité à la main (ajout, suppression, réordonnancement).
+
+    Les pages et cases existantes sont repérées par `id` (conservées, avec leurs futures images) ;
+    une page ou une case sans `id` est créée ; ce qui n'est plus listé est supprimé. Les pages dont
+    le contenu a changé sont remises en page automatiquement.
+    """
+    chapter = get_chapter_or_404(session, chapter_id)
+    pages = _load_pages(session, chapter_id)
+    pages_by_id = {p.id: p for p in pages}
+    panels_by_id = {pa.id: pa for p in pages for pa in p.panels}
+    names = {
+        c.name.casefold(): c.id
+        for c in session.scalars(select(Character).where(Character.project_id == chapter.project_id))
+    }
+
+    seen_pages: set[int] = set()
+    seen_panels: set[int] = set()
+    for pi, pin in enumerate(body.pages):
+        if pin.id is not None:
+            if pin.id not in pages_by_id or pin.id in seen_pages:
+                raise FieldError(f"pages.{pi}.id", "page inconnue dans ce chapitre")
+            seen_pages.add(pin.id)
+        for ci, cin in enumerate(pin.panels):
+            if cin.id is not None:
+                if cin.id not in panels_by_id or cin.id in seen_panels:
+                    raise FieldError(f"pages.{pi}.panels.{ci}.id", "case inconnue dans ce chapitre")
+                seen_panels.add(cin.id)
+
+    # Numéros temporaires négatifs : évite les conflits d'unicité pendant le réordonnancement.
+    for p in pages:
+        p.number = -p.id
+        for pa in p.panels:
+            pa.index = -pa.id
+    session.flush()
+
+    result: list[Page] = []
+    for n, pin in enumerate(body.pages, start=1):
+        page = pages_by_id.get(pin.id) if pin.id is not None else None
+        if page is None:
+            page = Page(chapter_id=chapter_id, number=n, kind=PageKind(pin.kind))
+            session.add(page)
+        page.number = n
+        page.kind = PageKind(pin.kind)
+        ordered: list[Panel] = []
+        for i, cin in enumerate(pin.panels):
+            panel = panels_by_id.get(cin.id) if cin.id is not None else None
+            if panel is None:
+                panel = Panel(index=i)
+            ordered.append(panel)
+            panel.index = i
+            panel.description = cin.description
+            panel.character_names = list(dict.fromkeys(c for c in cin.characters if c))
+            panel.character_ids = [names[c.casefold()] for c in panel.character_names if c.casefold() in names]
+            panel.shot_type = normalize_shot_type(cin.shot_type) or None
+            panel.importance = cin.importance
+            panel.bubbles = [
+                Bubble(
+                    order=j,
+                    speaker_name=d.speaker,
+                    speaker_id=names.get(d.speaker.casefold()),
+                    text=d.text,
+                    kind=BubbleKind(d.kind),
+                )
+                for j, d in enumerate(cin.dialogues)
+            ]
+        page.panels = ordered  # les cases retirées deviennent orphelines → supprimées
+        result.append(page)
+
+    for p in pages:
+        if p.id not in seen_pages:
+            session.delete(p)
+    session.flush()
+
+    for page in result:
+        if page.grid_template:
+            tpl = ctx.presets.layout_templates.get(page.grid_template)
+            if tpl is None or tpl.panel_count != len(page.panels):
+                page.grid_template = None
+        if page.panels and is_stale(page):
+            _layout(ctx, page)
+        elif not page.panels:
+            page.layout = None
+    session.commit()
+    return [page_out(p) for p in _load_pages(session, chapter_id)]
+
+
+# --- étape 2 : mise en page -----------------------------------------------------
+def _layout(ctx: AppContext, page: Page) -> None:
+    try:
+        layout_page(ctx.presets, page)
+    except (LayoutError, PresetError) as exc:
+        raise FieldError("layout", f"page {page.number} : {exc}") from None
+
+
+@router.post("/chapters/{chapter_id}/layout", response_model=list[PageOut])
+def layout_chapter(
+    chapter_id: int, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
+) -> list[PageOut]:
+    """« Recalculer » tout le chapitre (les gouttières déplacées à la main sont réinitialisées)."""
+    get_chapter_or_404(session, chapter_id)
+    pages = _load_pages(session, chapter_id)
+    for page in pages:
+        if page.panels:
+            _layout(ctx, page)
+    session.commit()
+    return [page_out(p) for p in pages]
+
+
+@router.post("/pages/{page_id}/layout", response_model=PageOut)
+def layout_one_page(
+    page_id: int,
+    body: PageLayoutIn | None = None,
+    session: Session = Depends(get_session),
+    ctx: AppContext = Depends(get_ctx),
+) -> PageOut:
+    """« Recalculer » une page ; `template_id` impose un gabarit (null = choix automatique)."""
+    page = get_page_or_404(session, page_id)
+    if not page.panels:
+        raise FieldError("layout", "page sans case : rien à mettre en page")
+    if body is not None and "template_id" in body.model_fields_set:
+        if body.template_id is not None:
+            tpl = ctx.presets.layout_templates.get(body.template_id)
+            if tpl is None:
+                raise FieldError("template_id", f"gabarit inconnu : « {body.template_id} »")
+            if tpl.panel_count != len(page.panels):
+                raise FieldError(
+                    "template_id", f"ce gabarit a {tpl.panel_count} case(s), la page en a {len(page.panels)}"
+                )
+        page.grid_template = body.template_id
+    _layout(ctx, page)
+    session.commit()
+    return page_out(page)
+
+
+@router.post("/pages/{page_id}/gutters", response_model=PageOut)
+def move_gutter(
+    page_id: int, body: GutterMove, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
+) -> PageOut:
+    """Déplace une gouttière (position de son centre en px de la page) ; ses voisines sont recalculées."""
+    page = get_page_or_404(session, page_id)
+    try:
+        move_page_gutter(ctx.presets, page, path=body.path, index=body.index, position=body.position)
+    except (LayoutError, PresetError) as exc:
+        raise FieldError("gutter", str(exc)) from None
+    session.commit()
+    return page_out(page)
+
+
+@router.get("/layout/templates")
+def list_templates(ctx: AppContext = Depends(get_ctx)) -> list[dict[str, object]]:
+    return [{"id": t.id, "name": t.name, "panel_count": t.panel_count} for t in ctx.presets.layout_templates.values()]

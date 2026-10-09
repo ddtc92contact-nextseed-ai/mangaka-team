@@ -67,7 +67,7 @@ def test_page_format_rejects_unknown_fields_and_bad_dpi(presets_copy: Path) -> N
     data["colour"] = "rouge"
     path.write_text(yaml.safe_dump(data))
     reg = PresetRegistry.load(presets_copy)
-    assert reg.page_formats == {}
+    assert "a4-300dpi" not in reg.page_formats
     messages = " ".join(i.message for i in reg.issues)
     assert "dpi" in messages and "colour" in messages
     # les défauts pointent vers un format désormais absent
