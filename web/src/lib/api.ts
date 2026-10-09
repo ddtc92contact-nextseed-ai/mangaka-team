@@ -305,6 +305,8 @@ export interface PanelImage {
   width: number | null;
   height: number | null;
   preset: string | null;
+  /** Palier du preset qui a produit la version (Turbo, Rapide, Qualité). */
+  tier: string | null;
   params: {
     prompt?: string;
     negative_prompt?: string;
@@ -535,6 +537,29 @@ export interface WorkflowPreset {
   /** Workflow du même palier utilisé pour les cases avec images de référence. */
   with_references: string | null;
   has_trial: boolean;
+  tier: string | null;
+  tier_choice: string | null;
+  tier_order: number | null;
+  estimated_s: number | null;
+  /** Palier de « Régénérer en Qualité ». */
+  is_quality: boolean;
+}
+
+/** Temps estimé des cases encore à générer (chapitre ou série). */
+export interface Estimate {
+  remaining_panels: number;
+  /** null : un preset sans durée connue ni estimation. */
+  total_s: number | null;
+  /** false : au moins une partie vient des estimations des presets, pas de vraies durées. */
+  measured: boolean;
+  by_preset: {
+    preset: string;
+    tier: string | null;
+    panels: number;
+    per_panel_s: number | null;
+    measured: boolean;
+    samples: number;
+  }[];
 }
 
 /** Rapport de `GET /comfyui/check` : nœuds et fichiers des presets face au ComfyUI réel. */
@@ -616,7 +641,13 @@ export interface Health {
 }
 
 export interface Presets {
-  defaults: { page_format: string; workflow: string; layout_style?: string | null } | null;
+  defaults: {
+    page_format: string;
+    workflow: string;
+    workflow_with_references?: string | null;
+    workflow_quality?: string | null;
+    layout_style?: string | null;
+  } | null;
   page_formats: {
     id: string;
     name: string;
@@ -634,6 +665,11 @@ export interface Presets {
     reference_slots: number;
     with_references: string | null;
     has_trial: boolean;
+    tier: string | null;
+    /** Libellé du palier dans la fiche série (null : pas proposé comme palier). */
+    tier_choice: string | null;
+    tier_order: number | null;
+    estimated_s: number | null;
   }[];
   fonts: { id: string; name: string; bold: boolean; italic: boolean }[];
   layout_templates: LayoutTemplate[];
@@ -1123,6 +1159,9 @@ export const api = {
     request<PanelDetail>(`/panels/${id}`, json("PATCH", body)),
   rebuildPrompt: (id: number) => request<PanelDetail>(`/panels/${id}/prompt/rebuild`, { method: "POST" }),
   generatePanel: (id: number, body: GenerateInput = {}) => request<Job[]>(`/panels/${id}/generate`, json("POST", body)),
+  regeneratePanelQuality: (id: number) => request<Job[]>(`/panels/${id}/regenerate-quality`, { method: "POST" }),
+  chapterEstimate: (id: number) => request<Estimate>(`/chapters/${id}/estimate`),
+  projectEstimate: (id: number) => request<Estimate>(`/projects/${id}/estimate`),
   generatePage: (id: number, body: { force?: boolean; count?: number } = {}) =>
     request<BatchGenerateResult>(`/pages/${id}/generate`, json("POST", body)),
   generateChapter: (id: number, body: { force?: boolean; count?: number } = {}) =>

@@ -57,6 +57,11 @@ export function ProjectForm({
   const layoutStyle =
     form.layout_style ?? defaults?.layout_style ?? styles.find((s) => s.is_default)?.id ?? "";
   const styleInfo = styles.find((s) => s.id === layoutStyle);
+  // Paliers proposés (Turbo, Rapide, Qualité) : workflows qui déclarent un libellé de palier.
+  const tiers = (presets.data?.workflows ?? [])
+    .filter((w) => w.tier_choice)
+    .sort((a, b) => (a.tier_order ?? 0) - (b.tier_order ?? 0));
+  const currentWorkflow = presets.data?.workflows.find((w) => w.id === workflow);
 
   const set = <K extends keyof ProjectInput>(key: K, value: ProjectInput[K]) => {
     setForm((f) => ({ ...f, [key]: value }));
@@ -215,7 +220,12 @@ export function ProjectForm({
             )}
           </Select>
         </Field>
-        <Field label="Workflow ComfyUI" htmlFor="workflow_preset" error={errors.workflow_preset}>
+        <Field
+          label="Palier de génération"
+          htmlFor="workflow_preset"
+          error={errors.workflow_preset}
+          hint="Chaque case peut ensuite être régénérée en Qualité depuis l'atelier."
+        >
           <Select
             id="workflow_preset"
             value={workflow}
@@ -223,13 +233,14 @@ export function ProjectForm({
             aria-invalid={Boolean(errors.workflow_preset)}
             disabled={!presets.data}
           >
-            {presets.data?.workflows.map((w) => (
+            {tiers.map((w) => (
               <option key={w.id} value={w.id}>
-                {w.name}
+                {w.tier_choice}
               </option>
             ))}
-            {workflow && !presets.data?.workflows.some((w) => w.id === workflow) && (
-              <option value={workflow}>{workflow} (preset introuvable)</option>
+            {/* Série réglée sur un workflow qui n'est pas un palier (ou disparu) : on le garde visible. */}
+            {workflow && presets.data && !tiers.some((w) => w.id === workflow) && (
+              <option value={workflow}>{currentWorkflow?.name ?? `${workflow} (preset introuvable)`}</option>
             )}
           </Select>
           <WorkflowHint presets={presets.data?.workflows} workflow={workflow} />

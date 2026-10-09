@@ -10,7 +10,18 @@ import { formatDuration, imageDurationS } from "@/lib/generation";
 import { QC_VERDICT } from "@/lib/qc";
 
 function caption(img: PanelImage): string {
-  return `v${img.version} · seed ${img.seed ?? "—"} · ${formatDuration(imageDurationS(img))}`;
+  return `v${img.version}${img.tier ? ` · ${img.tier}` : ""} · seed ${img.seed ?? "—"} · ${formatDuration(imageDurationS(img))}`;
+}
+
+/** Pastille du palier qui a produit la version (Turbo, Rapide, Qualité). */
+function TierBadge({ tier }: { tier: string | null }) {
+  if (!tier) return null;
+  const tone = tier === "Qualité" ? "bg-amber-500/15 text-amber-300" : tier === "Turbo" ? "bg-sky-500/15 text-sky-300" : "bg-zinc-800 text-zinc-300";
+  return (
+    <span className={`rounded px-1 py-px text-[9px] font-semibold uppercase tracking-wide ${tone}`} data-testid="version-tier">
+      {tier}
+    </span>
+  );
 }
 
 /** Bandeau des versions d'une case : vignettes, grand aperçu, choix, suppression, comparaison. */
@@ -86,7 +97,7 @@ export function VersionsStrip({
               className={`group relative block w-full overflow-hidden rounded-md bg-zinc-950 text-left ring-inset focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-400 ${
                 img.selected ? "ring-2 ring-rose-400" : "ring-1 ring-zinc-800 hover:ring-zinc-500"
               }`}
-              aria-label={`Version ${img.version}, seed ${img.seed ?? "inconnue"}${img.selected ? ", choisie" : ""}${
+              aria-label={`Version ${img.version}${img.tier ? `, palier ${img.tier}` : ""}, seed ${img.seed ?? "inconnue"}${img.selected ? ", choisie" : ""}${
                 img.qc_verdict ? `, QC ${QC_VERDICT[img.qc_verdict].toLowerCase()}` : ""
               } : agrandir`}
               data-testid="version-thumb"
@@ -114,8 +125,8 @@ export function VersionsStrip({
                 </span>
               )}
               <span className="block px-1.5 py-1 text-[10px] leading-tight text-zinc-400">
-                <span className="block">
-                  v{img.version} · {formatDuration(imageDurationS(img))}
+                <span className="flex items-center gap-1">
+                  v{img.version} <TierBadge tier={img.tier} /> {formatDuration(imageDurationS(img))}
                 </span>
                 <span className="block truncate text-zinc-500" title={`seed ${img.seed ?? "—"}`}>
                   seed {img.seed ?? "—"}
@@ -208,6 +219,7 @@ export function VersionsStrip({
                           .map((o) => (
                             <option key={o.id} value={o.id}>
                               Version {o.version}
+                              {o.tier ? ` · ${o.tier}` : ""}
                               {o.selected ? " (choisie)" : ""}
                             </option>
                           ))}
@@ -216,6 +228,7 @@ export function VersionsStrip({
                   ) : (
                     <span className="text-sm font-medium text-zinc-200">
                       Version {img.version}
+                      {img.tier && <span className="ml-2 text-xs text-zinc-400">{img.tier}</span>}
                       {img.selected && <span className="ml-2 text-xs text-rose-300">choisie</span>}
                     </span>
                   )}
@@ -250,6 +263,7 @@ function VersionLarge({ img }: { img: PanelImage }) {
   const rows: [string, string][] = [
     ["Seed", String(img.seed ?? "—")],
     ["Durée", formatDuration(imageDurationS(img))],
+    ["Palier", img.tier ?? "—"],
     ["Workflow", img.preset ?? "—"],
     ["Taille", img.width && img.height ? `${img.width} × ${img.height} px` : "—"],
     ["Créée le", new Date(img.created_at).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })],
