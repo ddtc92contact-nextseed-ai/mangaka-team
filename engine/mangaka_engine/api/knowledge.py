@@ -423,7 +423,9 @@ def status(session: Session = Depends(get_session), ctx: AppContext = Depends(ge
     settings = ctx.knowledge.settings
     agents = []
     for role, agent in settings.agents.items():
-        profile = ctx.knowledge.profile_lookup(session, role) if ctx.knowledge.profile_lookup else None
+        kb = ctx.knowledge
+        profile = kb.profile_lookup(session, role, None) if kb.profile_lookup else None
+        profile_top_k = kb.profile_top_k(session, role, None) if kb.profile_top_k else None
         agents.append(
             KnowledgeAgentOut(
                 role=role,
@@ -432,7 +434,7 @@ def status(session: Session = Depends(get_session), ctx: AppContext = Depends(ge
                 source="profile" if profile is not None else "preset",
                 series_collections=agent.series_collections,
                 budget_tokens=agent.budget_tokens,
-                top_k=agent.top_k or settings.retrieval.top_k,
+                top_k=profile_top_k or agent.top_k or settings.retrieval.top_k,
                 bible=agent.bible,
             )
         )

@@ -373,10 +373,13 @@ class GenerationExecutor:
         comfyui_error: str | None = None,
         poll_s: float = 1.0,
         on_generated: Callable[[Session, Job, PanelImage], None] | None = None,
+        presets_for: Callable[[int | None], PresetRegistry] | None = None,
         knowledge: KnowledgeBase | None = None,
     ) -> None:
         self.db = db
         self.knowledge = knowledge
+        # Presets effectifs d'une série (profils des agents, écran « L'équipe ») ; sans profil : `presets`.
+        self.presets_for = presets_for or (lambda _project_id: presets)
         # Appelé avec la nouvelle version, avant le commit (mise en file du QC automatique).
         self.on_generated = on_generated
         self.presets = presets
@@ -411,10 +414,11 @@ class GenerationExecutor:
             page = panel.page
             chapter: Chapter = page.chapter
             characters = panel_characters(session, panel)
-            preset_id = str(job.params.get("preset") or resolve_preset_id(self.presets, panel, characters))
-            loaded = self.presets.workflow(preset_id)
-            prompt = update_panel_prompt(self.presets, session, panel, self.knowledge)
-            size = panel_target(self.presets, page, panel)
+            presets = self.presets_for(chapter.project_id)
+            preset_id = str(job.params.get("preset") or resolve_preset_id(presets, panel, characters))
+            loaded = presets.workflow(preset_id)
+            prompt = update_panel_prompt(presets, session, panel, self.knowledge)
+            size = panel_target(presets, page, panel)
             if size is None:
                 raise GenerationError(f"la page {page.number} n'est pas mise en page")
             references: list[tuple[int, int, str, bytes]] = []
@@ -429,7 +433,7 @@ class GenerationExecutor:
             params: dict[str, Any] = {
                 "positive_prompt": prompt,
                 "negative_prompt": build_negative_prompt(
-                    str(loaded.preset.defaults.get("negative_prompt", "")), self.presets.image_prompt
+                    str(loaded.preset.defaults.get("negative_prompt", "")), presets.image_prompt
                 ),
                 "seed": job.params.get("seed"),
                 **size,

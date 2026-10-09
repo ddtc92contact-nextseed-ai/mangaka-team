@@ -15,6 +15,7 @@ Les jobs `qc` passent par la file sérielle de la génération (`pipeline/queue.
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import re
@@ -374,18 +375,25 @@ def target_image(panel: Panel) -> PanelImage | None:
 class AutoQC:
     """Crochet de `GenerationExecutor` : met en file le QC de chaque nouvelle version."""
 
-    def __init__(self, presets: PresetRegistry, providers: Providers) -> None:
+    def __init__(
+        self,
+        presets: PresetRegistry,
+        providers: Providers,
+        *,
+        presets_for: Callable[[int | None], PresetRegistry] | None = None,
+    ) -> None:
         self.presets = presets
         self.providers = providers
+        self.presets_for = presets_for or (lambda _project_id: presets)
 
     def __call__(self, session: Session, job: Job, image: PanelImage) -> None:
-        cfg = self.presets.qc
-        if cfg is None or not cfg.auto_after_generation or not any_layer_available(self.providers):
-            return
         panel = session.get(Panel, image.panel_id)
         if panel is None:
             return
         chapter = panel.page.chapter
+        cfg = self.presets_for(chapter.project_id).qc
+        if cfg is None or not cfg.auto_after_generation or not any_layer_available(self.providers):
+            return
         session.add(
             make_qc_job(
                 panel,
@@ -432,9 +440,12 @@ class QCExecutor:
         *,
         comfy_busy: Callable[[], bool] | None = None,
         poll_s: float = 1.0,
+        presets_for: Callable[[int | None], PresetRegistry] | None = None,
     ) -> None:
         self.db = db
         self.presets = presets
+        # Presets effectifs d'une série (profils des agents) ; sans profil : `presets`.
+        self.presets_for = presets_for or (lambda _project_id: presets)
         self.files = files
         self.providers = providers
         self.poll_s = poll_s
@@ -476,12 +487,14 @@ class QCExecutor:
                 session.commit()
 
     def __call__(self, job_id: int, report: JobReporter, cancel: threading.Event) -> str:
-        cfg = self.presets.require_qc()
         with self.db.session_scope() as session:
             job = session.get(Job, job_id)
             if job is None:
                 raise QCError("job introuvable")
             params = dict(job.params or {})
+            project_id = job.project_id
+        presets = self.presets_for(project_id)
+        cfg = presets.require_qc()
         image_ids = [i for i in params.get("image_ids", []) if isinstance(i, int)]
         vision: VisionMode = params.get("vision") if params.get("vision") in ("auto", "force", "skip") else "auto"
         auto = bool(params.get("auto"))
@@ -503,7 +516,9 @@ class QCExecutor:
                 raise QCError("contrôle annulé")
             report(int(100 * i / n), f"Contrôle {i + 1}/{n}…" if n > 1 else "Contrôle en cours…")
             try:
-                verdict = self.check_image(image_id, cfg, vision=vision, auto=auto, attempt=attempt, cancel=cancel)
+                verdict = self.check_image(
+                    image_id, cfg, vision=vision, auto=auto, attempt=attempt, cancel=cancel, presets=presets
+                )
             except QCError as exc:
                 if n == 1:
                     raise
@@ -562,11 +577,26 @@ class QCExecutor:
                 panel.state = PanelState.qc
                 session.commit()
 
+    def vision_provider(self, model: str | None = None) -> VisionProvider | None:
+        """Fournisseur vision, avec le modèle choisi dans le profil du contrôleur qualité s'il diffère."""
+        provider = self.providers.vision
+        if provider is not None and model and getattr(provider, "model", model) != model:
+            provider = copy.copy(provider)
+            provider.model = model  # type: ignore[attr-defined]
+        return provider
+
     def run_layers(
-        self, t: _Target, cfg: QCSettings, *, vision: VisionMode, cancel: threading.Event
+        self,
+        t: _Target,
+        cfg: QCSettings,
+        *,
+        vision: VisionMode,
+        cancel: threading.Event,
+        vision_model: str | None = None,
     ) -> tuple[dict[str, LayerResult], Detections | None, Combined | None, str]:
         """Fait tourner les couches (sans toucher la base). Renvoie couches, boîtes, verdict, motif vision."""
         p = self.providers
+        vision_provider = self.vision_provider(vision_model)
         layers: dict[str, LayerResult] = {}
         detections: Detections | None = None
 
@@ -630,7 +660,7 @@ class QCExecutor:
         run, why = vision_decision(prelim, cfg.vision, vision)
         if not run:
             layers["vision"] = LayerResult("skipped", message=why, provider=p.names.get("vision"))
-        elif p.vision is None:
+        elif vision_provider is None:
             layers["vision"] = LayerResult(
                 "unavailable", message=p.errors.get("vision", "non configurée"), provider=p.names.get("vision")
             )
@@ -638,7 +668,7 @@ class QCExecutor:
             layers["vision"] = LayerResult(
                 "skipped",
                 message="ComfyUI occupé : la vision ne tourne jamais pendant une génération",
-                provider=p.vision.name,
+                provider=vision_provider.name,
                 at_least=QCVerdict.review if prelim is None else None,
             )
         else:
@@ -647,7 +677,7 @@ class QCExecutor:
                 cfg.vision, description=t.description, characters=t.character_names, shot=t.shot_type
             )
             try:
-                answer, attempts = run_vision(p.vision, t.data, prompt, max_retries=cfg.vision.max_retries)
+                answer, attempts = run_vision(vision_provider, t.data, prompt, max_retries=cfg.vision.max_retries)
                 res = LayerResult(
                     "done",
                     score=answer.score,
@@ -662,7 +692,7 @@ class QCExecutor:
                     reasons=[f"Vision en erreur : {exc}"],
                 )
             res.duration_ms = int((time.monotonic() - t0) * 1000)
-            res.provider = p.vision.name
+            res.provider = vision_provider.name
             res.extra["why"] = why
             layers["vision"] = res
         return layers, detections, combine(layers, cfg.weights, cfg.verdict), why
@@ -676,8 +706,14 @@ class QCExecutor:
         auto: bool = False,
         attempt: int = 0,
         cancel: threading.Event | None = None,
+        presets: PresetRegistry | None = None,
     ) -> QCVerdict | None:
-        """Contrôle une version et enregistre le résultat ; None si la version a disparu."""
+        """Contrôle une version et enregistre le résultat ; None si la version a disparu.
+
+        `presets` : presets effectifs de la série (profils des agents) ; défaut : ceux du moteur.
+        """
+        presets = presets or self.presets
+        ollama = presets.providers.ollama if presets.providers else None
         cancel = cancel or threading.Event()
         with self.db.session_scope() as session:
             t = self._load(session, image_id, cfg)
@@ -686,7 +722,9 @@ class QCExecutor:
         self._set_panel_qc_state(t.panel_id)
         t0 = time.monotonic()
         try:
-            layers, detections, result, _ = self.run_layers(t, cfg, vision=vision, cancel=cancel)
+            layers, detections, result, _ = self.run_layers(
+                t, cfg, vision=vision, cancel=cancel, vision_model=ollama.vision_model if ollama else None
+            )
         finally:
             self.after_panel(t.panel_id)
         if result is None:
@@ -704,7 +742,7 @@ class QCExecutor:
             retry: dict[str, Any] | None = None
             if auto and verdict == QCVerdict.reject:
                 if attempt < cfg.max_auto_retries:
-                    retry = self._retry(session, panel, img, attempt + 1, cfg)
+                    retry = self._retry(session, panel, img, attempt + 1, cfg, presets)
                     if retry.get("job_id"):
                         reasons.append(
                             f"Rejet : nouvel essai automatique lancé ({attempt + 1}/{cfg.max_auto_retries}, nouvelle seed)"
@@ -761,11 +799,13 @@ class QCExecutor:
             refresh_states(session, [panel_id])
             session.commit()
 
-    def _retry(self, session: Session, panel: Panel, img: PanelImage, attempt: int, cfg: QCSettings) -> dict[str, Any]:
+    def _retry(
+        self, session: Session, panel: Panel, img: PanelImage, attempt: int, cfg: QCSettings, presets: PresetRegistry
+    ) -> dict[str, Any]:
         try:
             jobs = enqueue_panel(
                 session,
-                self.presets,
+                presets,
                 panel,
                 count=1,
                 preset=(img.params or {}).get("preset"),

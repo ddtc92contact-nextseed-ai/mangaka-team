@@ -22,6 +22,8 @@ Après modification d'un preset, redémarre le moteur (`npm run dev`).
 | `workflows/*.yaml` + `*.json` | Workflows ComfyUI : le JSON API exporté + le mapping des paramètres |
 | `fonts.yaml` + `fonts/` | Polices de lettrage (OFL, licences dans `fonts/OFL*.txt`) et style de texte par type de bulle |
 | `lettering.yaml` | Formes et placement des bulles, queues, bordures de case, repères de coupe |
+| `agents/*.yaml` | Agents du pipeline (écran « L'équipe ») : nom, rôle, étape et réglages éditables depuis l'UI |
+
 | `knowledge.yaml` | Savoir-faire (RAG local) : découpage des documents, recherche hybride, seuil « petite collection », budget de la bible, collections lues par chaque agent |
 
 ## Format de page
@@ -350,6 +352,61 @@ Installation des vraies couches sur la GX10 : `engine/.venv/bin/pip install -e "
 et CCIP deepghs) et `ollama pull qwen3-vl:4b` (vision), puis `QC_DETECTORS_PROVIDER=dghs`,
 `QC_IDENTITY_PROVIDER=dghs`, `VISION_PROVIDER=ollama` dans `.env`.
 
+## L'équipe : agents du pipeline (`agents/*.yaml`)
+
+Le pipeline reste du Python simple ; un « agent » n'est qu'une déclaration : nom, rôle, étape et
+liste de réglages, chacun pointant vers le preset qui livre sa valeur. L'écran « L'équipe » en tire
+une carte et un formulaire : **un nouvel agent (ex. Directeur artistique) = un nouveau YAML**, sans
+code d'interface (un essai « Essayer » demande en plus une fonction dans
+`engine/mangaka_engine/agents/trials.py`).
+
+```yaml
+id: scenariste
+name: Scénariste
+icon: "✒️"
+role: Découpe chaque chapitre en pages puis en cases…
+step: 1
+step_label: Scénario
+providers: [llm]                     # état « prêt / fournisseur injoignable / mal configuré »
+llm: { provider: provider, model: model }
+job_steps: [script]                  # jobs comptés comme « dernier passage »
+summary: [provider, model]           # « modèle utilisé » sur la carte
+trial: script                        # essai disponible (agents/trials.py)
+secrets: [{ env: DEEPSEEK_API_KEY, label: Clé d'API DeepSeek }]   # seulement « présente / absente »
+settings:
+  - key: temperature
+    label: Température
+    group: Modèle
+    type: number                     # text, longtext, prompt, prompt_list, number, integer, boolean, choice, list, yaml
+    min: 0
+    max: 2
+    source: prompts/script.yaml#temperature
+  - key: system
+    label: Consignes système
+    type: prompt
+    source: prompts/script.yaml#system
+    variables: [series_title, synopsis]   # toute autre $variable est refusée
+```
+
+`source` : `fichier.yaml#chemin.dans.le.fichier` (`defaults`, `providers`, `layout`, `image_prompt`,
+`qc`, `fonts`, `lettering`, `prompts/<id>`), `workflows/*.yaml#…` (appliqué à chaque workflow qui
+mappe le paramètre), `layouts/*.yaml#templates` (toute la bibliothèque de gabarits), `env:VARIABLE`
+(choix fait dans `.env`, ex. `LLM_PROVIDER`) ou `profile` (stocké dans le profil seulement). Options :
+`choices` / `choices_from` (`fonts`, `workflows`, `page_formats`), `nullable`, `env_override`,
+`fallback`, `global_only` (réglage commun à toutes les séries). Un secret (`…KEY`, `…TOKEN`…) ne peut
+jamais être un réglage. Chaque agent a en plus un « Savoir-faire » (noms de collections de la
+bibliothèque + top-k) ; `knowledge_role` le relie à son rôle dans `knowledge.yaml` (valeur livrée), et
+le profil prime sur ce fichier.
+
+**Où vivent les réglages.** Les valeurs livrées restent dans les presets. Les modifications faites
+dans l'UI sont des profils versionnés en SQLite (`agent_profiles`, `agent_profile_versions`) : un
+profil global et, au besoin, une surcharge « pour cette série seulement ». Le pipeline applique
+**série > profil global > presets** ; le résultat est revalidé par les mêmes schémas que le
+chargeur (un réglage invalide est refusé avec un message lisible). Chaque modification crée une
+version (auteur, date, différences) ; « Revenir à cette version » et « Revenir aux réglages
+d'origine » créent une nouvelle version. « Exporter en YAML » donne le contenu complet des fichiers
+presets de l'agent, à recopier dans `presets/` pour en faire les valeurs livrées.
+
 ## Savoir-faire et bible de série (`knowledge.yaml`)
 
 Les fiches de méthode (synthèses et notes personnelles, pas des livres entiers) sont rangées dans
@@ -370,8 +427,9 @@ une série, documents `.md` / `.txt` / `.pdf` (texte extrait par pypdf) ou texte
 - **Agents** (`agents`) : `script` (étape 1, variable `$savoir_faire` de `prompts/script.yaml`) et
   `image_prompt` (étape 3, `$savoir_faire` / `$bible` de `image_prompt.yaml`). Collections par nom
   (casse ignorée) ; `series_collections: true` ajoute celles de la série du chapitre — jamais
-  celles d'une autre série. Quand l'écran « L'équipe » fournira un profil d'agent avec un champ
-  « Savoir-faire », ce profil prime sur cette liste (`KnowledgeBase.profile_lookup`).
+  celles d'une autre série. Le champ « Savoir-faire » d'un profil d'agent (écran « L'équipe »,
+  `knowledge_role` de `agents/*.yaml`) prime sur cette liste et sur `top_k`, surcharge de série comprise
+  (`KnowledgeBase.profile_lookup`).
 - **Bible de série** (page de la série) : univers, ton, règles, gags et motifs, notes par fiche
   personnage, et le résumé de chaque chapitre passé à « Prêt » ou « Publié ». Toujours injectée
   dans les agents de sa série (`$bible`), coupée à `bible_max_tokens` en retirant d'abord les plus

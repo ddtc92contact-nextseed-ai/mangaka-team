@@ -385,7 +385,7 @@ def test_agent_profile_wins_over_preset(db: Database) -> None:
         _doc(session, humour, "Gags", "Un gag par page.", settings)
         kb = KnowledgeBase(settings, MockEmbeddingProvider())
         assert kb.for_agent(session, "script", None, "gag scène").collections == ["Écriture"]
-        kb.profile_lookup = lambda _s, role: ["humour JEUNESSE"] if role == "script" else None
+        kb.profile_lookup = lambda _s, role, _p: ["humour JEUNESSE"] if role == "script" else None
         found = kb.for_agent(session, "script", None, "gag scène")
         assert found.collections == ["Humour jeunesse"] and [p.document_title for p in found.passages] == ["Gags"]
 

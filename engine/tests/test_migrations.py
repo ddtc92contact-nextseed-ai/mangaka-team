@@ -62,9 +62,15 @@ def _version(path: Path) -> int:
 
 
 def _drop_v6_tables(con: sqlite3.Connection) -> None:
+    _drop_v7_tables(con)
     con.execute("DROP TABLE knowledge_fts")  # (ses triggers partent avec knowledge_chunks)
     for table in ("llm_runs", "series_bibles", "knowledge_chunks", "knowledge_documents", "knowledge_collections"):
         con.execute(f"DROP TABLE {table}")
+
+
+def _drop_v7_tables(con: sqlite3.Connection) -> None:
+    con.execute("DROP TABLE agent_profile_versions")
+    con.execute("DROP TABLE agent_profiles")
 
 
 def _drop_v5_tables(con: sqlite3.Connection) -> None:
@@ -231,6 +237,27 @@ def test_v5_database_gets_knowledge_tables(make_settings: Callable[..., Settings
         assert hits["passages"][0]["document_title"] == "Fiche"
         assert c.delete("/projects/1").status_code == 204
     assert _version(settings.database_path) == SCHEMA_VERSION
+    fresh = settings.database_path.parent / "fresh.db"
+    create_db_engine(fresh).dispose()
+    assert _columns(settings.database_path) == _columns(fresh)
+
+
+def test_v6_database_gets_agent_profile_tables(make_settings: Callable[..., Settings]) -> None:
+    settings = make_settings()
+    _v1_db(settings.database_path, with_pages=True)
+    create_db_engine(settings.database_path).dispose()
+    # retour à un schéma v6 (savoir-faire, avant les profils d'agents)
+    con = sqlite3.connect(settings.database_path)
+    _drop_v7_tables(con)
+    con.execute("PRAGMA user_version = 6")
+    con.commit()
+    con.close()
+
+    with TestClient(create_app(settings)) as c:
+        assert c.get("/projects/1/agents").json() == []
+        res = c.put("/agents/scenariste/profile", json={"values": {"temperature": 0.3}})
+        assert res.status_code == 200, res.text
+    assert _version(settings.database_path) == SCHEMA_VERSION == 7
     fresh = settings.database_path.parent / "fresh.db"
     create_db_engine(fresh).dispose()
     assert _columns(settings.database_path) == _columns(fresh)

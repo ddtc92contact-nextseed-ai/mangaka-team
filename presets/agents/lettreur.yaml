@@ -1,0 +1,38 @@
+# Agent de l'étape 5 — voir presets/README.md (« L'équipe : agents du pipeline »).
+id: lettreur
+name: Lettreur
+icon: "💬"
+role: >-
+  Pose les bulles et le texte en vectoriel : police et taille par type de bulle, forme, queue vers
+  le locuteur, sans couvrir les visages.
+step: 5
+step_label: Lettrage
+job_steps: [export]
+summary: [speech_font]
+trial: lettering
+trial_description: >-
+  Letter une case factice avec une bulle de chaque type, avec les polices et tailles du formulaire,
+  sans toucher aux séries.
+settings:
+  - { key: speech_font, label: Police de la parole, group: Parole, type: choice, choices_from: fonts, source: "fonts.yaml#styles.speech.font" }
+  - { key: speech_size, label: Taille (pt), group: Parole, type: number, min: 1, max: 72, step: 0.5, source: "fonts.yaml#styles.speech.size_pt" }
+  - { key: speech_min_size, label: Taille minimale (pt), group: Parole, type: number, min: 1, max: 72, step: 0.5, source: "fonts.yaml#styles.speech.min_size_pt" }
+  - { key: thought_font, label: Police de la pensée, group: Pensée, type: choice, choices_from: fonts, source: "fonts.yaml#styles.thought.font" }
+  - { key: thought_size, label: Taille (pt), group: Pensée, type: number, min: 1, max: 72, step: 0.5, source: "fonts.yaml#styles.thought.size_pt" }
+  - { key: thought_min_size, label: Taille minimale (pt), group: Pensée, type: number, min: 1, max: 72, step: 0.5, source: "fonts.yaml#styles.thought.min_size_pt" }
+  - { key: shout_font, label: Police du cri, group: Cri, type: choice, choices_from: fonts, source: "fonts.yaml#styles.shout.font" }
+  - { key: shout_size, label: Taille (pt), group: Cri, type: number, min: 1, max: 72, step: 0.5, source: "fonts.yaml#styles.shout.size_pt" }
+  - { key: shout_min_size, label: Taille minimale (pt), group: Cri, type: number, min: 1, max: 72, step: 0.5, source: "fonts.yaml#styles.shout.min_size_pt" }
+  - { key: narration_font, label: Police du récitatif, group: Récitatif, type: choice, choices_from: fonts, source: "fonts.yaml#styles.narration.font" }
+  - { key: narration_size, label: Taille (pt), group: Récitatif, type: number, min: 1, max: 72, step: 0.5, source: "fonts.yaml#styles.narration.size_pt" }
+  - { key: narration_min_size, label: Taille minimale (pt), group: Récitatif, type: number, min: 1, max: 72, step: 0.5, source: "fonts.yaml#styles.narration.min_size_pt" }
+  - { key: off_font, label: Police du hors-champ, group: Hors-champ, type: choice, choices_from: fonts, source: "fonts.yaml#styles.off.font" }
+  - { key: off_size, label: Taille (pt), group: Hors-champ, type: number, min: 1, max: 72, step: 0.5, source: "fonts.yaml#styles.off.size_pt" }
+  - { key: off_min_size, label: Taille minimale (pt), group: Hors-champ, type: number, min: 1, max: 72, step: 0.5, source: "fonts.yaml#styles.off.min_size_pt" }
+  - key: speech_shape
+    label: Forme des bulles de parole
+    group: Formes
+    type: choice
+    choices: [ellipse, rounded]
+    choice_labels: { ellipse: Ellipse, rounded: Rectangle arrondi }
+    source: lettering.yaml#speech_shape

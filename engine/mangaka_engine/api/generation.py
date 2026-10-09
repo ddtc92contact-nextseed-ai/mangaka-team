@@ -26,7 +26,7 @@ from ..pipeline.generation import (
     update_panel_prompt,
 )
 from ..pipeline.qc_bench import STEP as BENCH_STEP
-from ..presets import PresetError
+from ..presets import PresetError, PresetRegistry
 from ..store.models import Chapter, Job, JobStatus, Page, Panel, PanelImage, PanelImageAnnotation
 from .chapters import get_chapter_or_404, get_page_or_404
 from .deps import AppContext, get_ctx, get_session
@@ -118,7 +118,8 @@ def _active_jobs(session: Session, panel_id: int) -> list[Job]:
 def panel_detail(session: Session, ctx: AppContext, panel: Panel) -> PanelDetailOut:
     page = panel.page
     characters = panel_characters(session, panel)
-    resolved = resolve_preset_id(ctx.presets, panel, characters)
+    presets = _presets(ctx, panel)
+    resolved = resolve_preset_id(presets, panel, characters)
     return PanelDetailOut(
         id=panel.id,
         page_id=page.id,
@@ -136,11 +137,16 @@ def panel_detail(session: Session, ctx: AppContext, panel: Panel) -> PanelDetail
         final_prompt=panel.final_prompt,
         final_prompt_manual=panel.final_prompt_manual,
         generation_preset=panel.generation_preset,
-        resolved_preset=resolved if resolved in ctx.presets.workflows else None,
-        target=panel_target(ctx.presets, page, panel),
+        resolved_preset=resolved if resolved in presets.workflows else None,
+        target=panel_target(presets, page, panel),
         images=[panel_image_out(i) for i in panel.images],
         active_jobs=[job_out(j) for j in _active_jobs(session, panel.id)],
     )
+
+
+def _presets(ctx: AppContext, panel: Panel) -> PresetRegistry:
+    """Presets de la série de la case, avec les réglages du dessinateur (écran « L'équipe »)."""
+    return ctx.agents.presets_for(panel.page.chapter.project_id)
 
 
 def _require_comfyui(ctx: AppContext) -> None:
@@ -151,7 +157,7 @@ def _require_comfyui(ctx: AppContext) -> None:
 
 def _enqueue(session: Session, ctx: AppContext, panel: Panel, **kwargs: object) -> list[Job]:
     try:
-        return enqueue_panel(session, ctx.presets, panel, knowledge=ctx.knowledge, **kwargs)  # type: ignore[arg-type]
+        return enqueue_panel(session, _presets(ctx, panel), panel, knowledge=ctx.knowledge, **kwargs)  # type: ignore[arg-type]
     except PresetError as exc:
         raise FieldError("preset", str(exc)) from None
     except GenerationError as exc:
@@ -175,14 +181,14 @@ def update_panel(
     changes = body.model_dump(exclude_unset=True)
     if "generation_preset" in changes:
         preset = changes["generation_preset"]
-        if preset is not None and preset not in ctx.presets.workflows:
+        if preset is not None and preset not in _presets(ctx, panel).workflows:
             raise FieldError("generation_preset", f"workflow inconnu : « {preset} »")
         panel.generation_preset = preset
     if "final_prompt" in changes:
         text = (changes["final_prompt"] or "").strip()
         panel.final_prompt = text or None
         panel.final_prompt_manual = bool(text)
-        update_panel_prompt(ctx.presets, session, panel, ctx.knowledge)
+        update_panel_prompt(_presets(ctx, panel), session, panel, ctx.knowledge)
     session.commit()
     return panel_detail(session, ctx, panel)
 
@@ -194,7 +200,7 @@ def rebuild_prompt(
     """Abandonne l'édition manuelle et reconstruit le prompt final depuis la case et les fiches."""
     panel = get_panel_or_404(session, panel_id)
     panel.final_prompt_manual = False
-    update_panel_prompt(ctx.presets, session, panel, ctx.knowledge)
+    update_panel_prompt(_presets(ctx, panel), session, panel, ctx.knowledge)
     session.commit()
     return panel_detail(session, ctx, panel)
 
@@ -436,7 +442,8 @@ def get_queue(session: Session = Depends(get_session), ctx: AppContext = Depends
 # --- presets ----------------------------------------------------------------------------
 @router.get("/presets/workflows", response_model=list[WorkflowPresetOut])
 def list_workflow_presets(ctx: AppContext = Depends(get_ctx)) -> list[WorkflowPresetOut]:
-    defaults = ctx.presets.defaults
+    presets = ctx.agents.presets_for(None)
+    defaults = presets.defaults
     return [
         WorkflowPresetOut(
             id=w.preset.id,
@@ -452,5 +459,5 @@ def list_workflow_presets(ctx: AppContext = Depends(get_ctx)) -> list[WorkflowPr
             with_references=w.preset.with_references,
             has_trial=bool(w.preset.trial),
         )
-        for w in ctx.presets.workflows.values()
+        for w in presets.workflows.values()
     ]

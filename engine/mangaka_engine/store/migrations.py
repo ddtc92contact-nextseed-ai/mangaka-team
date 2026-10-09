@@ -6,7 +6,8 @@
 - 4 : contrôle qualité (verdict, détail des couches et boîtes détectées par version d'image) ;
 - 5 : banc d'essai du QC (annotations bonne / mauvaise des versions, historique des runs) ;
 - 6 : savoir-faire (collections, documents, passages + index FTS5), bible de série, passages reçus par
-  chaque appel du LLM.
+  chaque appel du LLM ;
+- 7 : profils des agents du pipeline (réglages édités dans l'UI « L'équipe », versionnés).
 
 Une base neuve est créée directement à la dernière version. Chaque migration tourne dans une
 transaction unique, clés étrangères désactivées (recette « 12 étapes » de SQLite pour reconstruire
@@ -24,6 +25,8 @@ from sqlalchemy.dialects import sqlite
 from sqlalchemy.schema import CreateIndex, CreateTable
 
 from .models import (
+    AgentProfile,
+    AgentProfileVersion,
     Base,
     Chapter,
     KnowledgeChunk,
@@ -37,7 +40,7 @@ from .models import (
 
 log = logging.getLogger("mangaka_engine")
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 
 class MigrationError(RuntimeError):
@@ -153,6 +156,12 @@ FTS_DDL = (
 )
 
 
+def _v6_to_v7(cur: sqlite3.Cursor) -> None:
+    for table in (AgentProfile.__table__, AgentProfileVersion.__table__):
+        for stmt in _ddl(table):
+            cur.execute(stmt)
+
+
 MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     # version de départ → (version d'arrivée, fonction)
     0: (2, _v0_to_v2),
@@ -161,6 +170,7 @@ MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     3: (4, _v3_to_v4),
     4: (5, _v4_to_v5),
     5: (6, _v5_to_v6),
+    6: (7, _v6_to_v7),
 }
 
 

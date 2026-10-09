@@ -416,7 +416,9 @@ def select_passages(
 # --- collections d'un agent ---------------------------------------------------------
 # Lecture du champ « Savoir-faire » du profil d'un agent (écran « L'équipe ») : renvoie la liste des
 # noms de collections, ou None si l'agent n'a pas de profil (on retombe alors sur knowledge.yaml).
-ProfileLookup = Callable[[Session, str], Sequence[str] | None]
+# Le troisième argument est la série (profil global + surcharge de la série).
+ProfileLookup = Callable[[Session, str, int | None], Sequence[str] | None]
+TopKLookup = Callable[[Session, str, int | None], int | None]
 
 
 def agent_collections(
@@ -598,12 +600,14 @@ class KnowledgeBase:
     settings: KnowledgeSettings
     embedder: EmbeddingProvider | None
     profile_lookup: ProfileLookup | None = None
+    profile_top_k: TopKLookup | None = None
 
     def for_agent(
         self, session: Session, role: str, project_id: int | None, query: str, *, include_bible: bool = True
     ) -> AgentKnowledge:
         agent = self.settings.agent(role)
-        profile = self.profile_lookup(session, role) if self.profile_lookup else None
+        profile = self.profile_lookup(session, role, project_id) if self.profile_lookup else None
+        profile_top_k = self.profile_top_k(session, role, project_id) if self.profile_top_k else None
         collections = agent_collections(session, agent, project_id, profile=profile)
         selection = select_passages(
             session,
@@ -611,7 +615,7 @@ class KnowledgeBase:
             [c.id for c in collections],
             self.embedder,
             self.settings,
-            top_k=agent.top_k or self.settings.retrieval.top_k,
+            top_k=profile_top_k or agent.top_k or self.settings.retrieval.top_k,
             budget_tokens=agent.budget_tokens,
         )
         bible = None

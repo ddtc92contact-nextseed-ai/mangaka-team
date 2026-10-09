@@ -344,6 +344,47 @@ class Job(Base):
     params: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
 
+class AgentProfile(TimestampMixin, Base):
+    """Réglages d'un agent du pipeline édités dans l'UI : profil global (`project_id` vide) ou d'une série.
+
+    `values` ne contient que les réglages modifiés (clé du réglage → valeur) ; le reste est hérité
+    (série → profil global → presets livrés). Chaque modification crée une `AgentProfileVersion`.
+    """
+
+    __tablename__ = "agent_profiles"
+    __table_args__ = (UniqueConstraint("agent_id", "project_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    agent_id: Mapped[str] = mapped_column(String(60), index=True)
+    project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    values: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    version: Mapped[int] = mapped_column(Integer, default=0)
+
+    versions: Mapped[list[AgentProfileVersion]] = relationship(
+        back_populates="profile", cascade="all, delete-orphan", order_by="AgentProfileVersion.version"
+    )
+
+
+class AgentProfileVersion(Base):
+    """Une version d'un profil d'agent : valeurs complètes du profil, auteur, date et différences."""
+
+    __tablename__ = "agent_profile_versions"
+    __table_args__ = (UniqueConstraint("profile_id", "version"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    profile_id: Mapped[int] = mapped_column(ForeignKey("agent_profiles.id", ondelete="CASCADE"), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    values: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    # [{key, before, after}] : valeurs effectives avant / après, pour l'historique.
+    diff: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    author: Mapped[str] = mapped_column(String(120), default="")
+    action: Mapped[str] = mapped_column(String(20), default="save")  # save | restore | reset
+    restored_from: Mapped[int | None] = mapped_column(Integer, default=None)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+    profile: Mapped[AgentProfile] = relationship(back_populates="versions")
+
+
 class KnowledgeCollection(TimestampMixin, Base):
     """Collection de fiches de savoir-faire : globale (`project_id` nul) ou propre à une série."""
 

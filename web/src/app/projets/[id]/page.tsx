@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
+import { AgentOverrides } from "@/components/agent-overrides";
 import { Avatar } from "@/components/avatar";
 import { ChapterList } from "@/components/chapter-list";
 import { ProjectForm } from "@/components/project-form";
@@ -62,6 +63,9 @@ export default function ProjectPage() {
       )}
       <div className="mb-6">
         <ChapterList projectId={id} />
+      </div>
+      <div className="mb-6">
+        <AgentOverrides projectId={id} />
       </div>
       <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
         <Card>
