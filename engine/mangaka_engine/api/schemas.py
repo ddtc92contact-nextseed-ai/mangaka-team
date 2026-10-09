@@ -255,6 +255,10 @@ VariantCount = Annotated[int, Field(ge=1, le=4)]
 FinalPrompt = Annotated[str, StringConstraints(strip_whitespace=True, max_length=4000)]
 
 
+class ComfyTrialIn(_In):
+    preset: PresetId | None = None  # null : workflow par défaut des séries
+
+
 class GenerateIn(_In):
     count: VariantCount = 1
     seed: Annotated[int, Field(ge=0, le=MAX_SEED)] | None = None
@@ -365,6 +369,8 @@ class WorkflowPresetOut(BaseModel):
     timeout_s: float
     is_default: bool
     is_reference_default: bool
+    with_references: str | None = None  # workflow du même palier pour les cases avec références
+    has_trial: bool = False
 
 
 # --- Contrôle qualité (étape 4) ------------------------------------------------

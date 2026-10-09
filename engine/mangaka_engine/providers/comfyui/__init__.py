@@ -4,13 +4,16 @@ from .base import (
     ComfyUIError,
     ComfyUIExecutionError,
     ComfyUIInterruptedError,
+    ComfyUIOutOfMemoryError,
     ComfyUITimeoutError,
     ComfyUIUnavailableError,
     ComfyUIWorkflowError,
     ImageRef,
     ProgressFn,
     StopFn,
+    describe_prompt_error,
     format_node_errors,
+    missing_value_message,
 )
 from .http import HttpComfyUIClient
 from .mock import MockComfyUIClient
@@ -21,6 +24,7 @@ __all__ = [
     "ComfyUIError",
     "ComfyUIExecutionError",
     "ComfyUIInterruptedError",
+    "ComfyUIOutOfMemoryError",
     "ComfyUITimeoutError",
     "ComfyUIUnavailableError",
     "ComfyUIWorkflowError",
@@ -29,5 +33,7 @@ __all__ = [
     "MockComfyUIClient",
     "ProgressFn",
     "StopFn",
+    "describe_prompt_error",
     "format_node_errors",
+    "missing_value_message",
 ]

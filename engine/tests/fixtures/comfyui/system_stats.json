@@ -1,0 +1,60 @@
+{
+    "system": {
+        "os": "linux",
+        "ram_total": 130593898496,
+        "ram_free": 110795259904,
+        "comfyui_version": "0.37.0",
+        "required_frontend_version": "1.53.6",
+        "installed_templates_version": "0.11.70",
+        "required_templates_version": "0.11.70",
+        "comfy_package_versions": [
+            {
+                "name": "comfyui-frontend-package",
+                "installed": "1.53.6",
+                "required": "1.53.6"
+            },
+            {
+                "name": "comfyui-workflow-templates",
+                "installed": "0.11.70",
+                "required": "0.11.70"
+            },
+            {
+                "name": "comfyui-embedded-docs",
+                "installed": "0.5.12",
+                "required": "0.5.12"
+            },
+            {
+                "name": "comfy-kitchen",
+                "installed": "0.2.35",
+                "required": "0.2.35"
+            },
+            {
+                "name": "comfy-aimdo",
+                "installed": "0.5.5",
+                "required": "0.5.5"
+            }
+        ],
+        "python_version": "3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]",
+        "pytorch_version": "2.11.0+cu130",
+        "embedded_python": false,
+        "deploy_environment": "local-git",
+        "argv": [
+            "main.py",
+            "--listen",
+            "127.0.0.1",
+            "--port",
+            "8188"
+        ]
+    },
+    "devices": [
+        {
+            "name": "cuda:0 NVIDIA GB10 : cudaMallocAsync",
+            "type": "cuda",
+            "index": 0,
+            "vram_total": 130593898496,
+            "vram_free": 44001263616,
+            "torch_vram_total": 33554432,
+            "torch_vram_free": 25034752
+        }
+    ]
+}

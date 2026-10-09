@@ -39,6 +39,9 @@ settings:
     min: 1
     max: 200
     source: workflows/*.yaml#defaults.steps
+    help: >-
+      Valeur livrée : celle du workflow par défaut. Une fois modifiée, elle s'applique à tous les
+      workflows, paliers Qualité et Rapide compris.
   - key: cfg
     label: CFG
     group: Workflow
@@ -47,6 +50,7 @@ settings:
     max: 30
     step: 0.1
     source: workflows/*.yaml#defaults.cfg
+    help: Qwen-Image 2.1 attend 1 (le prompt négatif est alors ignoré par le modèle).
   - key: megapixels
     label: Taille des images (mégapixels)
     group: Workflow

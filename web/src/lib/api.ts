@@ -503,6 +503,28 @@ export interface WorkflowPreset {
   timeout_s: number;
   is_default: boolean;
   is_reference_default: boolean;
+  /** Workflow du même palier utilisé pour les cases avec images de référence. */
+  with_references: string | null;
+  has_trial: boolean;
+}
+
+/** Rapport de `GET /comfyui/check` : nœuds et fichiers des presets face au ComfyUI réel. */
+export interface ComfyCheck {
+  provider: string;
+  simulated: boolean;
+  url: string | null;
+  online: boolean;
+  error: string | null;
+  ok: boolean;
+  system: {
+    comfyui_version: string | null;
+    pytorch_version: string | null;
+    ram_total: number | null;
+    ram_free: number | null;
+    devices: { name: string; type: string; vram_total: number | null; vram_free: number | null }[];
+  } | null;
+  presets: { id: string; name: string; ok: boolean; problems: string[] }[];
+  loras: { checked: number; problems: string[] };
 }
 
 export interface LayoutTemplate {
@@ -568,7 +590,15 @@ export interface Presets {
     width_px: number;
     height_px: number;
   }[];
-  workflows: { id: string; name: string; description: string; params: string[] }[];
+  workflows: {
+    id: string;
+    name: string;
+    description: string;
+    params: string[];
+    reference_slots: number;
+    with_references: string | null;
+    has_trial: boolean;
+  }[];
   fonts: { id: string; name: string; bold: boolean; italic: boolean }[];
   layout_templates: LayoutTemplate[];
   prompts: string[];
@@ -886,6 +916,9 @@ export const api = {
   cancelJob: (id: number) => request<Job>(`/jobs/${id}/cancel`, { method: "POST" }),
   queue: () => request<Queue>("/queue"),
   workflowPresets: () => request<WorkflowPreset[]>("/presets/workflows"),
+  // /object_info pèse plusieurs Mo : le moteur borne ses appels, on borne aussi le nôtre.
+  checkComfy: () => request<ComfyCheck>("/comfyui/check", { signal: AbortSignal.timeout(90_000) }),
+  startComfyTrial: (preset: string) => request<Job>("/comfyui/trial", json("POST", { preset })),
   getPanel: (id: number) => request<PanelDetail>(`/panels/${id}`),
   updatePanel: (id: number, body: { final_prompt?: string | null; generation_preset?: string | null }) =>
     request<PanelDetail>(`/panels/${id}`, json("PATCH", body)),
