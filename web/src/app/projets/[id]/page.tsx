@@ -6,6 +6,7 @@ import { useState } from "react";
 import { Avatar } from "@/components/avatar";
 import { ChapterList } from "@/components/chapter-list";
 import { ProjectForm } from "@/components/project-form";
+import { DIRECTIONS, DirectionBadge } from "@/components/reading-direction";
 import { SeriesStatusBadge } from "@/components/status";
 import { Alert, Button, ButtonLink, Card, Loading, PageHeader } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
@@ -43,6 +44,8 @@ export default function ProjectPage() {
               ← Toutes les séries
             </Link>
             <SeriesStatusBadge status={project.data.status} />
+            <DirectionBadge direction={project.data.reading_direction} />
+            <span className="hidden sm:inline">{DIRECTIONS[project.data.reading_direction]}</span>
           </span>
         }
         actions={

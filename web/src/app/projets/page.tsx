@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { DIRECTIONS } from "@/components/project-form";
+import { DirectionBadge } from "@/components/reading-direction";
 import { SeriesStatusBadge } from "@/components/status";
 import { Alert, ButtonLink, EmptyState, Loading, PageHeader, formatDate } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -47,7 +47,9 @@ export default function ProjectsPage() {
                     <SeriesStatusBadge status={p.status} />
                   </td>
                   <td className="px-4 py-3 text-zinc-400">{p.chapter_count}</td>
-                  <td className="px-4 py-3 text-zinc-400">{DIRECTIONS[p.reading_direction]}</td>
+                  <td className="px-4 py-3">
+                    <DirectionBadge direction={p.reading_direction} />
+                  </td>
                   <td className="px-4 py-3 text-zinc-400">{p.page_format}</td>
                   <td className="px-4 py-3 text-zinc-400">{p.character_count}</td>
                   <td className="px-4 py-3 text-zinc-500">{formatDate(p.updated_at)}</td>
