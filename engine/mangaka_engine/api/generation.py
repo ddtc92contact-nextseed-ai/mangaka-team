@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from ..pipeline.comfy_trial import STEP as TRIAL_STEP
+from ..pipeline.estimate import Estimate, estimate_panels, remaining_panels
 from ..pipeline.generation import (
     ACTIVE,
     QC_STEP,
@@ -21,13 +22,15 @@ from ..pipeline.generation import (
     panel_label,
     panel_target,
     panels_to_generate,
+    preset_tier,
+    quality_preset_id,
     refresh_states,
     resolve_preset_id,
     update_panel_prompt,
 )
 from ..pipeline.qc_bench import STEP as BENCH_STEP
 from ..presets import PresetError, PresetRegistry
-from ..store.models import Chapter, Job, JobStatus, Page, Panel, PanelImage, PanelImageAnnotation
+from ..store.models import Chapter, Job, JobStatus, Page, Panel, PanelImage, PanelImageAnnotation, Project
 from .chapters import get_chapter_or_404, get_page_or_404
 from .deps import AppContext, get_ctx, get_session
 from .errors import FieldError
@@ -36,11 +39,13 @@ from .schemas import (
     AnnotationOut,
     BatchGenerateIn,
     BatchGenerateOut,
+    EstimateOut,
     GenerateIn,
     JobOut,
     PanelDetailOut,
     PanelImageOut,
     PanelUpdate,
+    PresetEstimateOut,
     QueueItemOut,
     QueueOut,
     WorkflowPresetOut,
@@ -56,8 +61,13 @@ def image_url(img: PanelImage) -> str:
     return f"/panel-images/{img.id}/file"
 
 
-def panel_image_out(img: PanelImage) -> PanelImageOut:
+def panel_image_out(img: PanelImage, presets: PresetRegistry | None = None) -> PanelImageOut:
+    """`presets` : palier des versions antérieures aux paliers (déduit de leur preset)."""
     params = img.params or {}
+    preset = params.get("preset")
+    tier = params.get("tier")
+    if tier is None and presets is not None and isinstance(preset, str):
+        tier = preset_tier(presets, preset)
     return PanelImageOut(
         id=img.id,
         panel_id=img.panel_id,
@@ -67,7 +77,8 @@ def panel_image_out(img: PanelImage) -> PanelImageOut:
         selected=img.selected,
         width=params.get("image_width"),
         height=params.get("image_height"),
-        preset=params.get("preset"),
+        preset=preset,
+        tier=tier,
         params=params,
         qc_score=img.qc_score,
         qc_reasons=list(img.qc_reasons or []),
@@ -139,7 +150,7 @@ def panel_detail(session: Session, ctx: AppContext, panel: Panel) -> PanelDetail
         generation_preset=panel.generation_preset,
         resolved_preset=resolved if resolved in presets.workflows else None,
         target=panel_target(presets, page, panel),
-        images=[panel_image_out(i) for i in panel.images],
+        images=[panel_image_out(i, presets) for i in panel.images],
         active_jobs=[job_out(j) for j in _active_jobs(session, panel.id)],
     )
 
@@ -203,6 +214,25 @@ def rebuild_prompt(
     update_panel_prompt(_presets(ctx, panel), session, panel, ctx.knowledge)
     session.commit()
     return panel_detail(session, ctx, panel)
+
+
+@router.post("/panels/{panel_id}/regenerate-quality", response_model=list[JobOut], status_code=202)
+def regenerate_panel_quality(
+    panel_id: int, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
+) -> list[JobOut]:
+    """« Régénérer en Qualité » : une nouvelle version de cette case seulement, avec le palier Qualité
+    (avec références si un personnage de la case en a), même prompt, nouvelle seed. Les autres
+    versions (et la version choisie) ne bougent pas."""
+    _require_comfyui(ctx)
+    panel = get_panel_or_404(session, panel_id)
+    try:
+        preset = quality_preset_id(_presets(ctx, panel), panel_characters(session, panel))
+    except GenerationError as exc:
+        raise FieldError("preset", str(exc)) from None
+    jobs = _enqueue(session, ctx, panel, count=1, preset=preset, extra_params={"regenerate": "quality"})
+    session.commit()
+    ctx.generation.notify()
+    return [job_out(j) for j in jobs]
 
 
 @router.post("/panels/{panel_id}/generate", response_model=list[JobOut], status_code=202)
@@ -269,9 +299,11 @@ def generate_chapter(
 
 # --- versions ---------------------------------------------------------------------------
 @router.get("/panels/{panel_id}/images", response_model=list[PanelImageOut])
-def list_panel_images(panel_id: int, session: Session = Depends(get_session)) -> list[PanelImageOut]:
+def list_panel_images(
+    panel_id: int, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
+) -> list[PanelImageOut]:
     panel = get_panel_or_404(session, panel_id)
-    return [panel_image_out(i) for i in panel.images]
+    return [panel_image_out(i, _presets(ctx, panel)) for i in panel.images]
 
 
 @router.get("/panel-images/{image_id}/file")
@@ -291,7 +323,9 @@ def get_panel_image_file(
 
 
 @router.post("/panel-images/{image_id}/select", response_model=list[PanelImageOut])
-def select_panel_image(image_id: int, session: Session = Depends(get_session)) -> list[PanelImageOut]:
+def select_panel_image(
+    image_id: int, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
+) -> list[PanelImageOut]:
     """Choisit cette version pour la case (une seule version choisie par case)."""
     img = _get_image_or_404(session, image_id)
     panel = img.panel
@@ -300,7 +334,7 @@ def select_panel_image(image_id: int, session: Session = Depends(get_session)) -
     session.flush()
     refresh_states(session, [panel.id])  # l'état de la case suit le verdict QC de la version choisie
     session.commit()
-    return [panel_image_out(i) for i in panel.images]
+    return [panel_image_out(i, _presets(ctx, panel)) for i in panel.images]
 
 
 @router.delete("/panel-images/{image_id}", status_code=204)
@@ -316,6 +350,52 @@ def delete_panel_image(
     session.commit()
     ctx.files.delete(path)
     return Response(status_code=204)
+
+
+# --- temps estimé -----------------------------------------------------------------------
+def _estimate_out(est: Estimate) -> EstimateOut:
+    return EstimateOut(
+        remaining_panels=est.remaining_panels,
+        total_s=round(est.total_s, 1) if est.total_s is not None else None,
+        measured=est.measured,
+        by_preset=[
+            PresetEstimateOut(
+                preset=p.preset,
+                tier=p.tier,
+                panels=p.panels,
+                per_panel_s=round(p.per_panel_s, 1) if p.per_panel_s is not None else None,
+                measured=p.measured,
+                samples=p.samples,
+            )
+            for p in est.by_preset
+        ],
+    )
+
+
+def _pages_of(session: Session, *conditions: object) -> list[Page]:
+    return list(session.scalars(select(Page).where(*conditions).options(selectinload(Page.panels))))  # type: ignore[arg-type]
+
+
+@router.get("/chapters/{chapter_id}/estimate", response_model=EstimateOut)
+def chapter_estimate(
+    chapter_id: int, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
+) -> EstimateOut:
+    """Temps estimé des cases du chapitre encore à générer (sans version choisie)."""
+    get_chapter_or_404(session, chapter_id)
+    panels = remaining_panels(session, _pages_of(session, Page.chapter_id == chapter_id))
+    return _estimate_out(estimate_panels(session, ctx.agents.presets_for, panels))
+
+
+@router.get("/projects/{project_id}/estimate", response_model=EstimateOut)
+def project_estimate(
+    project_id: int, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
+) -> EstimateOut:
+    """Temps estimé de toutes les cases de la série encore à générer."""
+    if session.get(Project, project_id) is None:
+        raise HTTPException(status_code=404, detail="Série introuvable")
+    chapter_ids = select(Chapter.id).where(Chapter.project_id == project_id)
+    panels = remaining_panels(session, _pages_of(session, Page.chapter_id.in_(chapter_ids)))
+    return _estimate_out(estimate_panels(session, ctx.agents.presets_for, panels))
 
 
 # --- file d'attente ---------------------------------------------------------------------
@@ -458,6 +538,11 @@ def list_workflow_presets(ctx: AppContext = Depends(get_ctx)) -> list[WorkflowPr
             is_reference_default=bool(defaults and defaults.workflow_with_references == w.preset.id),
             with_references=w.preset.with_references,
             has_trial=bool(w.preset.trial),
+            tier=w.preset.tier.name if w.preset.tier else None,
+            tier_choice=w.preset.tier.choice if w.preset.tier else None,
+            tier_order=w.preset.tier.order if w.preset.tier else None,
+            estimated_s=w.preset.estimated_s,
+            is_quality=bool(defaults and defaults.workflow_quality == w.preset.id),
         )
         for w in presets.workflows.values()
     ]

@@ -1,0 +1,62 @@
+# Qwen-Image 2.1 · Turbo — avec images de référence (version distillée officielle, int8 convrot).
+# L'édition / la référence est intégrée au modèle 2.1 : pas de modèle « edit » séparé.
+# Turbo = poids distillés publiés par Qwen (dépôt Comfy-Org/Qwen-Image-2.1, diffusion_models/),
+# déjà fusionnés dans le modèle : ni LoRA d'accélération ni nœud personnalisé. Même graphe, même
+# encodeur (int8) et même VAE que le palier Rapide ; seuls le fichier du modèle et l'échantillonnage
+# changent. Alternative bf16 documentée dans presets/README.md.
+# Voir presets/README.md (paliers Turbo / Rapide / Qualité, ré-export).
+id: qwen-image-edit-ref-turbo
+name: "Qwen-Image 2.1 · Turbo — avec images de référence"
+description: >-
+  Palier Turbo (distillé int8 convrot, 8 étapes) guidé par jusqu'à 3 images de référence des personnages (une par emplacement, dans l'ordre), avec LoRA de style et d'identité.
+workflow_file: qwen-image-edit-ref-turbo.json
+output_node: "11"
+timeout_s: 600   # au-delà, la génération est interrompue et le job passe en échec
+tier:
+  name: Turbo
+# Durée d'une case (s) tant qu'il y a moins de 3 générations terminées avec ce preset.
+estimated_s: 80
+mapping:
+  # TextEncodeQwenImage21 encode les deux prompts : sorties 0 (positif) et 1 (négatif).
+  positive_prompt: { node: "6", input: prompt }
+  negative_prompt: { node: "6", input: negative_prompt }
+  seed: { node: "9", input: seed }
+  steps: { node: "9", input: steps }
+  cfg: { node: "9", input: cfg }
+  width: { node: "8", input: width }
+  height: { node: "8", input: height }
+  filename_prefix: { node: "11", input: filename_prefix }
+# Emplacements d'images de référence (LoadImage), remplis dans l'ordre et branchés sur les
+# entrées images.image_1…3 de l'encodeur (nœud 6). Un emplacement inutilisé est retiré et son
+# entrée images.image_N disparaît de l'encodeur (entrées optionnelles) : rien d'autre à retirer.
+reference_images:
+  - { node: "20", input: image }
+  - { node: "21", input: image }
+  - { node: "22", input: image }
+# LoRA (style de la série puis identité de chaque personnage) chaînés après le modèle :
+# chaque LoRA devient un nœud `class_type` inséré entre le nœud 1 (UNETLoader) et le cache (nœud 4).
+lora_chain:
+  class_type: LoraLoaderModelOnly
+  model_from: { node: "1", output: 0 }
+  model_input: model
+  name_input: lora_name
+  strength_input: strength_model
+defaults:
+  # À CONFIRMER avec le vrai export ComfyUI du manager (~/mangaka-comfy-exports/) : 8 étapes,
+  # cfg 1, euler + simple, denoise 1 (ces deux derniers dans le JSON, nœud 9). Une correction ne
+  # touche que ce preset (et son JSON), jamais le code.
+  negative_prompt: "texte, lettres, bulles, filigrane, signature, flou, mains déformées"
+  steps: 8
+  cfg: 1
+  width: 1024
+  height: 1024
+  filename_prefix: mangaka/case
+# « Générer une case d'essai » (tableau de bord) : petite image, peu d'étapes.
+trial:
+  positive_prompt: >-
+    manga panel, black and white ink, screentone shading, a young swordswoman standing on a
+    rooftop at dusk, wind in her hair, dynamic angle
+  width: 512
+  height: 512
+  steps: 8
+  filename_prefix: mangaka/essai

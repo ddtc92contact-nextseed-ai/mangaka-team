@@ -11,7 +11,7 @@ Après modification d'un preset, redémarre le moteur (`npm run dev`).
 
 | Fichier | Rôle |
 | --- | --- |
-| `defaults.yaml` | Format de page, workflow (palier **Qualité**) et style de mise en page (`layout_style`) appliqués aux nouvelles séries ; workflow « avec références » de repli pour un preset qui ne déclare pas `with_references` (`workflow_with_references`) |
+| `defaults.yaml` | Format de page, workflow (palier **Turbo**) et style de mise en page (`layout_style`) appliqués aux nouvelles séries ; workflow « avec références » de repli pour un preset qui ne déclare pas `with_references` (`workflow_with_references`) ; palier de « Régénérer en Qualité » (`workflow_quality`) |
 | `providers.yaml` | Paramètres des fournisseurs (URL, modèle LLM, timeouts). **Aucune clé d'API ici** : elles vont dans `.env` |
 | `page_formats/*.yaml` | Formats de page (dimensions en mm, DPI, marges, gouttières) : A4 (défaut) et B4 JIS à 300 DPI |
 | `layout.yaml` | Découpage : taille mini d'une case, taille cible de génération, zones de bulles, seuil de régénération conseillée |
@@ -112,6 +112,7 @@ slants:                           # probabilité de biais d'une découpe et angl
 rythme:                           # selon le rythme de la page (absent = normal)
   rapide: { slant_factor: 1.6, size_contrast: 1.2 }
   # … lent et normal
+page_choc: { slant_factor: 1.3, size_contrast: 1.8 }   # page choc de la direction artistique, en plus du rythme
 ```
 
 Une découpe passe en biais avec la probabilité de la case voisine la plus « forte » × le
@@ -171,9 +172,9 @@ biais ; ajouter ou retirer une incrustation recalcule la page depuis sa graine.
 
 ### Direction artistique : comment piloter la mise en page
 
-La mise en page est de la **géométrie déterministe** : aucune IA ne dessine les cases. Un assistant de
-direction artistique — le LLM du scénario aujourd'hui (`prompts/script.yaml`), un agent DA dédié
-demain — ne la pilote **que** par ces champs structurés, validés par le schéma Pydantic du scénario :
+La mise en page est de la **géométrie déterministe** : aucune IA ne dessine les cases. Le LLM du
+scénario (`prompts/script.yaml`) et l'agent « Directeur artistique » (`prompts/direction-artistique.yaml`)
+ne la pilotent **que** par ces champs structurés, validés par Pydantic :
 
 | Champ | Où | Valeurs | Effet |
 | --- | --- | --- | --- |
@@ -181,11 +182,42 @@ demain — ne la pilote **que** par ces champs structurés, validés par le sch�
 | `intensity` (facultatif) | case | `calme`, `normal`, `choc` | poids de taille (`intensity_weight`), règle de biais `by_intensity` (prioritaire) |
 | `rythme` (facultatif) | page | `lent`, `normal`, `rapide` | facteurs de biais et de contraste de la page (`rythme`) |
 | `sfx` (facultatif) | case | `[{text, intensity}]` | onomatopées posées au lettrage (jamais dans la description ni le prompt image) |
+| gabarit suggéré (DA) | page | un gabarit au bon nombre de cases | imposé à la page tant qu'il n'est pas écarté par « Nouvelle mise en page » |
+| page choc (DA) | page | `pleine page`, `splash` | facteurs `page_choc` du style, en plus du rythme |
 
 …et par le choix du style de la série ou d'une page. Jamais de coordonnées, de polygones ni de dessin
 libre : pour un nouvel effet, on ajoute un champ au schéma et une règle au style. Le LLM factice (mode
 mock) remplit ces champs. Ils sont modifiables à la main dans le découpage (API `PUT
 /chapters/{id}/pages`).
+
+### Agent « Directeur artistique » (`prompts/direction-artistique.yaml`)
+
+Étape LLM entre le scénario et la mise en page, lancée depuis l'onglet **Direction artistique** du
+chapitre (tout le chapitre, ou une page avec « Proposer autre chose »). Il reçoit le scénario validé, la
+bible et les personnages, le style de mise en page de la série, les choix du chapitre précédent (pour ne
+pas se répéter) et son savoir-faire (`knowledge.yaml` › `art_direction`). Il répond en JSON :
+
+- par page : `rythme` (`calme`, `montée`, `climax`, `respiration`), `layout_style` (null ou un style),
+  `template` (null ou un gabarit possible), `page_choc` (null, `pleine page`, `splash`), `rationale`
+  (justification en français montrée à l'auteur) ;
+- par case : `intensity`, `plan` (plan large / moyen / rapproché, gros plan, insert, plongée,
+  contre-plongée), `angle`, `cadre` (normal, sans bord, fond perdu, incrustation), `ambiance`, `sfx`
+  (onomatopées : texte + intensité).
+
+Réponse invalide (schéma, pages ou cases manquantes, gabarit impossible) → relance avec l'erreur
+(`max_retries`, 2 au maximum) → sinon erreur visible sur le job. `variety` (sobre, equilibree,
+audacieuse) règle l'audace, modifiable dans « L'équipe » (globalement ou par série), comme le modèle, la
+température et les consignes.
+
+L'auteur corrige n'importe quel champ : il est alors **verrouillé** (🔒) et gardé quand l'agent repropose,
+jusqu'à ce qu'il le déverrouille ; une page « acceptée » n'est pas remplacée par une relance de tout le
+chapitre. **« Appliquer à la mise en page »** recopie les choix : rythme de la page (calme et respiration →
+`lent`, montée → `normal`, climax → `rapide`), style suggéré, intensité des cases, gabarit suggéré et
+page choc ; seules les pages dont la mise en page change sont recalculées. Les choix appliqués
+alimentent aussi le prompt image (`$plan`, `$angle`, `$ambiance`). Le cadre devient une option de cadre
+de la case (sans bord → `frame: none`, fond perdu → `bleed`, incrustation → `inset`) et les onomatopées
+des `sfx` du lettrage (léger → calme, moyen → normal, fort → choc) ; une option ou une onomatopée
+réglée par l'auteur n'est jamais écrasée, celles de l'application précédente sont remplacées. Si le découpage d'une page change, sa direction est marquée « à refaire ».
 
 ## Prompts (`prompts/*.yaml`)
 
@@ -220,7 +252,7 @@ lora_chain: { … }                     # point d'insertion des LoRA (voir plus 
 
 ### Mapping des nœuds (presets Qwen-Image 2.1)
 
-Les quatre presets livrés partagent le même graphe et les mêmes numéros de nœuds :
+Les six presets livrés partagent le même graphe et les mêmes numéros de nœuds :
 
 | Paramètre | Nœud | Type ComfyUI | Entrée | Obligatoire |
 | --- | --- | --- | --- | --- |
@@ -251,28 +283,61 @@ Règles vérifiées au chargement :
 Les noms de fichiers de modèles (`unet_name`, `clip_name`, `vae_name`) vivent
 **uniquement** dans le JSON. Le code Python ne connaît aucun nom de modèle.
 
-### Fichiers de la GX10 et paliers Qualité / Rapide
+### Fichiers de la GX10 et paliers Turbo / Rapide / Qualité
 
 Fichiers installés dans `~/ComfyUI/models/` (liens vers le disque T9) et utilisés par les presets :
 
-| Dossier | Qualité | Rapide |
-| --- | --- | --- |
-| `diffusion_models/` | `qwen_image_2.1_bf16.safetensors` (14,2 Go) | `qwen_image_2.1_int8_convrot.safetensors` (7,3 Go) |
-| `text_encoders/` | `qwen3vl_8b_bf16.safetensors` (17,5 Go) | `qwen3vl_8b_int8_convrot.safetensors` (9,4 Go) |
-| `vae/` | `qwen_image_2.1_vae_bf16.safetensors` | idem |
+| Dossier | Qualité | Rapide | Turbo |
+| --- | --- | --- | --- |
+| `diffusion_models/` | `qwen_image_2.1_bf16.safetensors` (14,2 Go) | `qwen_image_2.1_int8_convrot.safetensors` (7,3 Go) | `qwen_image_2.1_turbo_int8_convrot.safetensors` |
+| `text_encoders/` | `qwen3vl_8b_bf16.safetensors` (17,5 Go) | `qwen3vl_8b_int8_convrot.safetensors` (9,4 Go) | idem Rapide |
+| `vae/` | `qwen_image_2.1_vae_bf16.safetensors` | idem | idem |
+
+**Turbo** = version distillée officielle de Qwen-Image 2.1, publiée par Qwen dans le dépôt
+`Comfy-Org/Qwen-Image-2.1` (`diffusion_models/`) : la distillation est déjà fusionnée dans les poids,
+donc ni LoRA d'accélération ni nœud personnalisé — même graphe que les autres paliers, seul le fichier
+du modèle et l'échantillonnage changent. **Alternative bf16** (pas un 4ᵉ palier) : remplacer `unet_name`
+par `qwen_image_2.1_turbo_bf16.safetensors` (et, au besoin, `clip_name` par `qwen3vl_8b_bf16.safetensors`)
+dans `qwen-image-turbo.json` et `qwen-image-edit-ref-turbo.json`, puis régénérer les JSON de référence
+des tests (`UPDATE_GOLDEN=1`).
+
+Échantillonnage Turbo livré : 8 étapes, cfg 1, `euler` + `simple`, denoise 1 — **à confirmer** avec
+le vrai export ComfyUI du manager (`~/mangaka-comfy-exports/`). Une correction ne touche que les deux
+presets Turbo (YAML `defaults` + JSON nœud 9), jamais le code. Attention : un réglage « Étapes » modifié
+dans l'écran « L'équipe » (dessinateur) s'applique à **tous** les workflows, Turbo compris.
 
 Les fichiers int8 « convrot » se chargent avec les nœuds standard (`UNETLoader` `weight_dtype: default`,
 `CLIPLoader` `type: qwen_image`), comme dans le workflow de référence du manager
 (`~/ComfyUI/user/default/workflows/image_qwen_image_2_1_image_edit.json`).
 
-| Preset | Palier | Usage | Étapes | Délai max |
-| --- | --- | --- | --- | --- |
-| `qwen-image-base` | Qualité (défaut des séries) | texte → image | 50 | 20 min |
-| `qwen-image-edit-ref` | Qualité | avec images de référence | 50 | 25 min |
-| `qwen-image-base-rapide` | Rapide | texte → image | 25 | 10 min |
-| `qwen-image-edit-ref-rapide` | Rapide | avec images de référence | 25 | 15 min |
+| Preset | Palier | Usage | Étapes | Délai max | `estimated_s` |
+| --- | --- | --- | --- | --- | --- |
+| `qwen-image-turbo` | Turbo (défaut des nouvelles séries) | texte → image | 8 | 5 min | 20 |
+| `qwen-image-edit-ref-turbo` | Turbo | avec images de référence | 8 | 10 min | 80 |
+| `qwen-image-base-rapide` | Rapide | texte → image | 25 | 10 min | 60 |
+| `qwen-image-edit-ref-rapide` | Rapide | avec images de référence | 25 | 15 min | 240 |
+| `qwen-image-base` | Qualité (finitions, « Régénérer en Qualité ») | texte → image | 50 | 20 min | 70 |
+| `qwen-image-edit-ref` | Qualité | avec images de référence | 50 | 25 min | 280 |
 
-Le palier se choisit avec le **workflow de la série** (liste « Workflow ComfyUI » de la fiche série).
+Le palier se choisit avec le **workflow de la série** (liste « Palier de génération » de la fiche
+série : « Turbo (rapide, production) », « Rapide », « Qualité (finitions) »). Les séries existantes
+gardent leur preset. Chaque preset déclare son palier :
+
+```yaml
+tier:
+  name: Turbo                            # affiché sur chaque version de case (atelier)
+  choice: "Turbo (rapide, production)"   # libellé de la fiche série ; absent = pas proposé
+  order: 1                               # ordre dans la liste
+estimated_s: 20                          # s / case tant qu'il y a moins de 3 générations réelles
+```
+
+**Régénérer en Qualité** (atelier, par case) : met en file une nouvelle version de cette seule case
+avec `defaults.workflow_quality` (ou son `with_references` si un personnage de la case a une planche
+de référence), même prompt, nouvelle seed. Les autres versions (et la version choisie) ne bougent pas.
+
+**Temps estimé** (en-tête du chapitre et de la série) : cases sans version choisie × durée par case de
+leur preset = médiane des 20 dernières générations réussies de ce preset dès qu'il y en a 3, sinon
+`estimated_s` (libellé « estimation »). API : `GET /chapters/{id}/estimate`, `GET /projects/{id}/estimate`.
 Chaque preset texte → image déclare son pendant « avec références » du même palier :
 
 ```yaml
@@ -282,7 +347,7 @@ with_references: qwen-image-edit-ref-rapide   # dans qwen-image-base-rapide.yaml
 Une case dont un personnage a une planche de référence prend donc `qwen-image-edit-ref-rapide` dans une
 série Rapide, `qwen-image-edit-ref` dans une série Qualité. `defaults.yaml → workflow_with_references`
 ne sert plus qu'aux presets sans `with_references`. La taille de génération reste celle de la mise en page
-(≈ 1 Mpx, `layout.yaml`) pour les deux paliers.
+(≈ 1 Mpx, `layout.yaml`) pour tous les paliers, cases avec références comprises.
 
 ### Case d'essai (`trial`)
 
@@ -294,13 +359,13 @@ l'image et sa durée en secondes s'affichent sous le bouton.
 
 `GET /comfyui/check` (bouton « Tester la connexion » du tableau de bord) interroge `/system_stats` et
 `/object_info` du vrai ComfyUI et liste, par preset : les nœuds inconnus (« nœud inconnu : … ») et les
-valeurs fixes absentes des listes de ComfyUI (« modèle introuvable dans ComfyUI : … », encodeur, VAE,
-échantillonneur…), puis les LoRA saisis dans les séries et les fiches absents de `models/loras/`.
+valeurs fixes absentes des listes de ComfyUI (« modèle introuvable dans ComfyUI : x.safetensors — à
+placer dans ComfyUI/models/diffusion_models/ », encodeur, VAE, échantillonneur…), puis les LoRA saisis dans les séries et les fiches absents de `models/loras/`.
 Avec `COMFYUI_PROVIDER=mock`, il répond « ComfyUI simulé ».
 
 ## Images de référence et LoRA (étape 3)
 
-Les quatre presets acceptent des LoRA ; les deux presets « avec images de référence » ont 3 emplacements
+Les six presets acceptent des LoRA ; les trois presets « avec images de référence » ont 3 emplacements
 (Qwen-Image 2.1 : l'édition / la référence est intégrée au modèle, pas de modèle « edit » séparé). Ils sont
 choisis automatiquement (selon le palier de la série) quand un personnage de la case a une planche de
 référence.
@@ -383,7 +448,9 @@ référence de la GX10, puis validés contre le ComfyUI 0.37 de la machine. Pour
 
 ## Prompt final des cases (`image_prompt.yaml`)
 
-`parts` est une liste de morceaux `string.Template` assemblés dans l'ordre (`$shot`,
+`parts` est une liste de morceaux `string.Template` assemblés dans l'ordre (`$plan` = plan de la
+direction artistique appliquée, sinon celui du scénario, `$angle` et `$ambiance` de la direction
+artistique, `$shot` = plan du scénario,
 `$description`, `$characters`, `$style`, `$bible` = notes de la bible sur les personnages de la
 case, `$savoir_faire` = passages du savoir-faire de l'agent `image_prompt`) ; un morceau dont une
 variable est vide est omis.

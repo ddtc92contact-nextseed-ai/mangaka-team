@@ -2,7 +2,8 @@
 
 La mise en page d'une page dépend de sa graine (`Page.layout_seed`, tirée une fois puis stockée :
 même graine = même page), du style de la série (ou celui imposé à la page), du gabarit imposé
-éventuel, du rythme de la page, de l'importance / intensité de ses cases et des options de cadre
+éventuel, du rythme de la page, de l'importance / intensité de ses cases, de la direction
+artistique appliquée (gabarit suggéré, page choc ; voir art_direction.py) et des options de cadre
 imposées dans l'UI (`Panel.frame`). « Nouvelle mise en page » tire une autre graine et écarte le
 gabarit actuel. Les onomatopées (`kind = sfx`) ne comptent pas dans la longueur des dialogues.
 """
@@ -54,6 +55,21 @@ def panel_specs(page: Page) -> list[PanelSpec]:
     ]
 
 
+def applied_values(page: Page) -> dict[str, Any] | None:
+    """Direction artistique appliquée à la page (« Appliquer à la mise en page »), None sinon."""
+    d = page.direction
+    return d.applied if d is not None and d.applied else None
+
+
+def layout_hints(page: Page) -> tuple[str | None, bool]:
+    """(gabarit suggéré, page choc) de la direction artistique appliquée."""
+    applied = applied_values(page)
+    if not applied:
+        return None, False
+    template = applied.get("template") if isinstance(applied.get("template"), str) else None
+    return template, bool(applied.get("page_choc"))
+
+
 def effective_style(page: Page) -> str:
     return page.layout_style or page.chapter.project.layout_style
 
@@ -66,21 +82,23 @@ def layout_signature(page: Page) -> str:
     frames = [[s.panel_id, s.frame, s.shot_type] for s in panel_specs(page) if s.frame]
     fmt = page.chapter.project.page_format
     direction = page.chapter.project.reading_direction.value
-    return json.dumps(
-        [
-            page.number,
-            fmt,
-            direction,
-            page.grid_template,
-            specs,
-            page.chapter.project.layout_style,
-            page.layout_style,
-            page.layout_seed,
-            page.rythme,
-            *([frames] if frames else []),
-        ],
-        separators=(",", ":"),
-    )
+    sig: list[Any] = [
+        page.number,
+        fmt,
+        direction,
+        page.grid_template,
+        specs,
+        page.chapter.project.layout_style,
+        page.layout_style,
+        page.layout_seed,
+        page.rythme,
+    ]
+    template, choc = layout_hints(page)
+    if template or choc:  # sans direction artistique appliquée : signature inchangée
+        sig.append([template, choc])
+    if frames:  # options de cadre imposées (absentes : signature inchangée)
+        sig.append({"frames": frames})
+    return json.dumps(sig, separators=(",", ":"))
 
 
 def is_stale(page: Page) -> bool:
@@ -174,6 +192,12 @@ def layout_page(presets: PresetRegistry, page: Page, *, reroll: bool = False) ->
             rerolled_out = [page.layout["template_id"]]
     elif page.layout_seed is None:
         page.layout_seed = default_seed(page.chapter_id, page.number)
+    hint, page_choc = layout_hints(page)
+    if forced is None and hint and hint not in rerolled_out:
+        # Gabarit suggéré par la direction artistique (sauf s'il vient d'être écarté par « Nouvelle mise en page »).
+        tpl = presets.layout_templates.get(hint)
+        if tpl is not None and tpl.panel_count == len(specs):
+            forced = (tpl.id, tpl.tree)
     exclude = [] if forced else list(rerolled_out)
     previous = _previous_template(page)
     if style.avoid_repeat and previous and not forced:
@@ -190,6 +214,7 @@ def layout_page(presets: PresetRegistry, page: Page, *, reroll: bool = False) ->
         rythme=page.rythme,
         forced=forced,
         exclude=exclude,
+        page_choc=page_choc,
     )
     if rerolled_out:
         layout[REROLL_KEY] = {"panels": len(specs), "templates": rerolled_out}

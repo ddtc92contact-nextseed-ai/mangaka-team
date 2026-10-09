@@ -109,6 +109,15 @@ class LoraChain(_Strict):
 REQUIRED_WORKFLOW_PARAMS = ("positive_prompt", "negative_prompt", "seed", "width", "height")
 
 
+class WorkflowTier(_Strict):
+    """Palier d'un workflow (Turbo, Rapide, Qualité) : affiché sur les versions et dans la fiche série."""
+
+    name: str = Field(min_length=1, description="Nom court affiché sur les versions (« Turbo »)")
+    # Libellé dans la fiche série ; absent = workflow non proposé comme palier (ex. « avec références »).
+    choice: str | None = None
+    order: int = 0
+
+
 class WorkflowPreset(_Strict):
     id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
     name: str
@@ -129,6 +138,9 @@ class WorkflowPreset(_Strict):
     )
     # Case d'essai (« Générer une case d'essai ») : paramètres mappés, prompt positif compris.
     trial: dict[str, Any] = Field(default_factory=dict)
+    tier: WorkflowTier | None = None
+    # Durée estimée d'une case (s), utilisée tant que les vraies durées de ce preset sont trop peu nombreuses.
+    estimated_s: float | None = Field(default=None, gt=0)
 
     @model_validator(mode="after")
     def _check_mapping(self) -> WorkflowPreset:
@@ -180,6 +192,8 @@ class Defaults(_Strict):
     workflow_with_references: str | None = None
     # Style de mise en page des nouvelles séries (presets/layout_styles/).
     layout_style: str | None = None
+    # Palier de « Régénérer en Qualité » (atelier) ; son `with_references` sert aux cases avec références.
+    workflow_quality: str | None = None
 
 
 # --- Découpage (étape 2) ------------------------------------------------------
@@ -403,6 +417,8 @@ class LayoutStyle(_Strict):
     default_template_weight: float = Field(gt=0)
     avoid_repeat: bool = Field(description="Jamais deux mises en page identiques d'affilée")
     rythme: dict[Rythme, RythmeRule]
+    # « Page choc » (pleine page / splash) décidée par la direction artistique : s'ajoute au rythme.
+    page_choc: RythmeRule
     # Cases sans bord, à fond perdu, incrustées.
     frames: FrameTable
 
@@ -672,6 +688,8 @@ class PromptPreset(_Strict):
     max_retries: int = Field(default=2, ge=0, le=2)
     temperature: float | None = Field(default=None, ge=0, le=2)
     max_previous_chapters: int = Field(default=8, ge=0, le=100)
+    # Audace de la direction artistique (prompts/direction-artistique.yaml) : sobre, équilibrée, audacieuse.
+    variety: Literal["sobre", "equilibree", "audacieuse"] | None = None
 
     @field_validator("system", "user", "retry")
     @classmethod
@@ -685,7 +703,17 @@ class PromptPreset(_Strict):
 
 
 # --- Prompt image (étape 3) ---------------------------------------------------
-IMAGE_PROMPT_VARIABLES = {"shot", "description", "characters", "style", "savoir_faire", "bible"}
+IMAGE_PROMPT_VARIABLES = {
+    "shot",
+    "plan",
+    "angle",
+    "ambiance",
+    "description",
+    "characters",
+    "style",
+    "savoir_faire",
+    "bible",
+}
 
 
 class ImagePromptSettings(_Strict):
@@ -693,7 +721,8 @@ class ImagePromptSettings(_Strict):
 
     # Morceaux assemblés dans l'ordre ; un morceau dont une variable est vide est omis.
     # Variables : $shot, $description, $characters, $style, $savoir_faire (passages du savoir-faire),
-    # $bible (notes de la bible sur les personnages de la case).
+    # $bible (notes de la bible sur les personnages de la case) ; direction artistique appliquée :
+    # $plan (son type de plan, sinon celui du scénario), $angle, $ambiance.
     parts: list[str] = Field(
         default_factory=lambda: [
             "$shot.",

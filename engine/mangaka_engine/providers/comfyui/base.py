@@ -62,6 +62,15 @@ _FILE_INPUT_LABELS = (
     ("model", "modèle"),
 )
 
+# Entrée de chargeur (nom exact) → dossier de ComfyUI/models/ où le fichier est attendu.
+_FILE_INPUT_FOLDERS = {
+    "unet_name": "diffusion_models",
+    "clip_name": "text_encoders",
+    "vae_name": "vae",
+    "lora_name": "loras",
+    "ckpt_name": "checkpoints",
+}
+
 # Types d'erreurs de validation de `/prompt` (champ `type`) → libellé français.
 _NODE_ERROR_LABELS = {
     "required_input_missing": "entrée obligatoire manquante",
@@ -82,7 +91,9 @@ def missing_value_message(input_name: str, value: Any) -> str:
     name = input_name.lower()
     for key, label in _FILE_INPUT_LABELS:
         if key in name:
-            return f"{label} introuvable dans ComfyUI : {value}"
+            folder = _FILE_INPUT_FOLDERS.get(name)
+            where = f" — à placer dans ComfyUI/models/{folder}/" if folder else ""
+            return f"{label} introuvable dans ComfyUI : {value}{where}"
     if name == "image":
         return f"image introuvable dans ComfyUI (dossier input) : {value}"
     return f"valeur « {value} » refusée pour l'entrée {input_name}"

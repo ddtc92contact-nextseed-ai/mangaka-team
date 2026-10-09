@@ -11,6 +11,12 @@ workflow_file: qwen-image-base.json
 output_node: "11"
 timeout_s: 1200   # au-delà, la génération est interrompue et le job passe en échec
 with_references: qwen-image-edit-ref   # cases avec images de référence
+tier:
+  name: Qualité
+  choice: "Qualité (finitions)"   # libellé du palier dans la fiche série
+  order: 3
+# Durée d'une case (s) tant qu'il y a moins de 3 générations terminées avec ce preset.
+estimated_s: 70
 mapping:
   # TextEncodeQwenImage21 encode les deux prompts : sorties 0 (positif) et 1 (négatif).
   positive_prompt: { node: "6", input: prompt }

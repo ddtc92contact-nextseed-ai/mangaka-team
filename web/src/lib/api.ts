@@ -266,7 +266,14 @@ export interface PageLayout {
   gutters_px: { horizontal: number; vertical: number };
   panels: LayoutPanel[];
   gutters: LayoutGutter[];
-  style?: { id: string; seed: number; rythme: Rythme | null; gutters_mm: { horizontal: number; vertical: number } | null };
+  style?: {
+    id: string;
+    seed: number;
+    rythme: Rythme | null;
+    gutters_mm: { horizontal: number; vertical: number } | null;
+    /** Page choc décidée par la direction artistique. */
+    page_choc?: boolean;
+  };
 }
 
 export interface PageData {
@@ -333,6 +340,8 @@ export interface PanelImage {
   width: number | null;
   height: number | null;
   preset: string | null;
+  /** Palier du preset qui a produit la version (Turbo, Rapide, Qualité). */
+  tier: string | null;
   params: {
     prompt?: string;
     negative_prompt?: string;
@@ -563,6 +572,29 @@ export interface WorkflowPreset {
   /** Workflow du même palier utilisé pour les cases avec images de référence. */
   with_references: string | null;
   has_trial: boolean;
+  tier: string | null;
+  tier_choice: string | null;
+  tier_order: number | null;
+  estimated_s: number | null;
+  /** Palier de « Régénérer en Qualité ». */
+  is_quality: boolean;
+}
+
+/** Temps estimé des cases encore à générer (chapitre ou série). */
+export interface Estimate {
+  remaining_panels: number;
+  /** null : un preset sans durée connue ni estimation. */
+  total_s: number | null;
+  /** false : au moins une partie vient des estimations des presets, pas de vraies durées. */
+  measured: boolean;
+  by_preset: {
+    preset: string;
+    tier: string | null;
+    panels: number;
+    per_panel_s: number | null;
+    measured: boolean;
+    samples: number;
+  }[];
 }
 
 /** Rapport de `GET /comfyui/check` : nœuds et fichiers des presets face au ComfyUI réel. */
@@ -644,7 +676,13 @@ export interface Health {
 }
 
 export interface Presets {
-  defaults: { page_format: string; workflow: string; layout_style?: string | null } | null;
+  defaults: {
+    page_format: string;
+    workflow: string;
+    workflow_with_references?: string | null;
+    workflow_quality?: string | null;
+    layout_style?: string | null;
+  } | null;
   page_formats: {
     id: string;
     name: string;
@@ -662,6 +700,11 @@ export interface Presets {
     reference_slots: number;
     with_references: string | null;
     has_trial: boolean;
+    tier: string | null;
+    /** Libellé du palier dans la fiche série (null : pas proposé comme palier). */
+    tier_choice: string | null;
+    tier_order: number | null;
+    estimated_s: number | null;
   }[];
   fonts: { id: string; name: string; bold: boolean; italic: boolean }[];
   layout_templates: LayoutTemplate[];
@@ -919,6 +962,83 @@ export interface SeriesAgentOverride {
   settings: { key: string; label: string }[];
 }
 
+// --- Direction artistique -------------------------------------------------------------------
+export type DaRythme = "calme" | "montée" | "climax" | "respiration";
+export type DaPageChoc = "pleine page" | "splash";
+
+export interface DaSfx {
+  text: string;
+  intensity: string;
+}
+
+export interface DaPanel {
+  panel_id: number;
+  index: number;
+  intensity: Intensity | null;
+  plan: string | null;
+  angle: string | null;
+  cadre: string | null;
+  ambiance: string;
+  sfx: DaSfx[];
+}
+
+/** Choix de direction artistique d'une page (`has_direction` faux : pas encore proposée). */
+export interface PageDirection {
+  page_id: number;
+  number: number;
+  panel_count: number;
+  rythme: DaRythme | null;
+  layout_style: string | null;
+  template: string | null;
+  page_choc: DaPageChoc | null;
+  rationale: string;
+  panels: DaPanel[];
+  has_direction: boolean;
+  /** Champs modifiés par l'auteur, gardés quand l'agent repropose : « rythme », « 12.plan »… */
+  locks: string[];
+  status: "proposed" | "accepted";
+  variant: number;
+  out_of_date: boolean;
+  applied: boolean;
+  pending: boolean;
+  applied_at: string | null;
+}
+
+export interface ChapterDirection {
+  chapter_id: number;
+  variety: string;
+  variety_label: string;
+  series_layout_style: string;
+  pages: PageDirection[];
+  options: {
+    rythmes: DaRythme[];
+    intensities: Intensity[];
+    plans: string[];
+    angles: string[];
+    cadres: string[];
+    page_chocs: DaPageChoc[];
+    sfx_intensities: string[];
+    styles: { value: string; label: string }[];
+    templates: LayoutTemplate[];
+  };
+}
+
+export interface DirectionEdit {
+  page?: Partial<Pick<PageDirection, "rythme" | "layout_style" | "template" | "page_choc">>;
+  panels?: ({ panel_id: number } & Partial<Omit<DaPanel, "panel_id" | "index">>)[];
+  lock?: string[];
+  unlock?: string[];
+  accept?: boolean;
+}
+
+export interface DirectionApplyResult {
+  applied: number[];
+  relaid: number[];
+  skipped: { number: number; reason: string }[];
+  message: string;
+  pages: PageData[];
+}
+
 export class EngineError extends Error {
   constructor(
     message: string,
@@ -1170,6 +1290,14 @@ export const api = {
     request<Job[]>(`/chapters/${chapterId}/jobs${step ? `?step=${encodeURIComponent(step)}` : ""}`),
   getJob: (id: number) => request<Job>(`/jobs/${id}`),
 
+  getDirection: (chapterId: number) => request<ChapterDirection>(`/chapters/${chapterId}/direction`),
+  startDirection: (chapterId: number, pageId?: number) =>
+    request<Job>(`/chapters/${chapterId}/direction`, json("POST", pageId ? { page_id: pageId } : {})),
+  editDirection: (pageId: number, body: DirectionEdit) =>
+    request<PageDirection>(`/pages/${pageId}/direction`, json("PATCH", body)),
+  applyDirection: (chapterId: number, pageIds?: number[]) =>
+    request<DirectionApplyResult>(`/chapters/${chapterId}/direction/apply`, json("POST", pageIds ? { page_ids: pageIds } : {})),
+
   listPages: (chapterId: number) => request<PageData[]>(`/chapters/${chapterId}/pages`),
   savePages: (chapterId: number, pages: PageInput[]) =>
     request<PageData[]>(`/chapters/${chapterId}/pages`, json("PUT", { pages })),
@@ -1196,6 +1324,9 @@ export const api = {
     request<PanelDetail>(`/panels/${id}`, json("PATCH", body)),
   rebuildPrompt: (id: number) => request<PanelDetail>(`/panels/${id}/prompt/rebuild`, { method: "POST" }),
   generatePanel: (id: number, body: GenerateInput = {}) => request<Job[]>(`/panels/${id}/generate`, json("POST", body)),
+  regeneratePanelQuality: (id: number) => request<Job[]>(`/panels/${id}/regenerate-quality`, { method: "POST" }),
+  chapterEstimate: (id: number) => request<Estimate>(`/chapters/${id}/estimate`),
+  projectEstimate: (id: number) => request<Estimate>(`/projects/${id}/estimate`),
   generatePage: (id: number, body: { force?: boolean; count?: number } = {}) =>
     request<BatchGenerateResult>(`/pages/${id}/generate`, json("POST", body)),
   generateChapter: (id: number, body: { force?: boolean; count?: number } = {}) =>

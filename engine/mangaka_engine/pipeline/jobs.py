@@ -18,6 +18,7 @@ from ..presets import PresetError
 from ..providers.llm import LLMError
 from ..store.db import Database
 from ..store.models import Job, JobStatus, utcnow
+from .art_direction import ArtDirectionError
 from .layout import LayoutError
 from .lettering import LetteringError
 from .script import ScriptError
@@ -25,7 +26,7 @@ from .script import ScriptError
 log = logging.getLogger("mangaka_engine")
 
 TERMINAL = (JobStatus.succeeded, JobStatus.failed, JobStatus.cancelled)
-EXPECTED_ERRORS = (ScriptError, LLMError, PresetError, LayoutError, LetteringError)
+EXPECTED_ERRORS = (ScriptError, ArtDirectionError, LLMError, PresetError, LayoutError, LetteringError)
 
 
 class JobReporter:

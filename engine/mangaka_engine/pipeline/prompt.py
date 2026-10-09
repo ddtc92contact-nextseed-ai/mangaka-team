@@ -1,6 +1,6 @@
 """Étape 3 — prompt final d'une case (fonctions pures, sans base ni réseau).
 
-description + type de plan + fiches des personnages (description visuelle, mots-clés)
+description + type de plan (+ plan, angle et ambiance de la direction artistique) + fiches des personnages (description visuelle, mots-clés)
 + style de la série (+ notes de la bible sur les personnages et passages du savoir-faire) → prompt positif ; le prompt négatif contient toujours les termes qui
 interdisent au modèle de dessiner du texte (bulles et lettrage sont vectoriels).
 Le gabarit vit dans `presets/image_prompt.yaml`.
@@ -59,21 +59,34 @@ def build_prompt(
     *,
     description: str,
     shot_type: str | None = None,
+    plan: str | None = None,
+    angle: str | None = None,
+    ambiance: str | None = None,
     characters: Sequence[PromptCharacter] = (),
     style: str = "",
     savoir_faire: str = "",
     bible: str = "",
     settings: ImagePromptSettings | None = None,
 ) -> str:
-    """Assemble le prompt positif d'une case à partir des morceaux du preset."""
+    """Assemble le prompt positif d'une case à partir des morceaux du preset.
+
+    `plan`, `angle`, `ambiance` : direction artistique appliquée à la case ; `$plan` vaut le type de
+    plan du scénario quand la direction artistique n'en donne pas.
+    """
     settings = settings or ImagePromptSettings()
     desc, savoir_faire, bible = description or "", savoir_faire or "", bible or ""
+    ambiance = ambiance or ""
     if settings.strip_quotes:
         # Notes de la bible et savoir-faire aussi : le texte n'est jamais dessiné par le modèle.
         desc, savoir_faire, bible = strip_quoted(desc), strip_quoted(savoir_faire), strip_quoted(bible)
+        ambiance = strip_quoted(ambiance)
     shot = _clean(shot_type)
+    chosen = _clean(plan) or shot
     values = {
         "shot": shot[:1].upper() + shot[1:] if shot else "",
+        "plan": chosen[:1].upper() + chosen[1:] if chosen else "",
+        "angle": _clean(angle),
+        "ambiance": _clean(ambiance),
         "description": _clean(desc),
         "characters": settings.character_separator.join(
             d for d in (describe_character(c, settings) for c in characters) if d

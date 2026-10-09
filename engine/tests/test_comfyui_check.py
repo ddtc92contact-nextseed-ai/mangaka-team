@@ -76,6 +76,8 @@ def test_check_ok_with_recorded_object_info() -> None:
         "qwen-image-base-rapide",
         "qwen-image-edit-ref",
         "qwen-image-edit-ref-rapide",
+        "qwen-image-turbo",
+        "qwen-image-edit-ref-turbo",
     }
     assert all(p["ok"] and p["problems"] == [] for p in report["presets"])
     assert report["loras"] == {"checked": 1, "problems": []}
@@ -102,10 +104,26 @@ def test_missing_model_file_is_reported_per_preset() -> None:
     report = _report(info)
     problems = _problems(report)
     assert not report["ok"]
-    expected = f"modèle introuvable dans ComfyUI : {missing} (nœud 1, UNETLoader)"
+    expected = f"modèle introuvable dans ComfyUI : {missing} — à placer dans ComfyUI/models/diffusion_models/ (nœud 1, UNETLoader)"
     assert problems["qwen-image-base-rapide"] == [expected]
     assert problems["qwen-image-edit-ref-rapide"] == [expected]
     assert problems["qwen-image-base"] == [] and problems["qwen-image-edit-ref"] == []
+
+
+def test_missing_turbo_file_names_the_file_and_the_folder() -> None:
+    """Fichier Turbo absent de la GX10 : message lisible pour les deux presets Turbo, et eux seuls."""
+    info = _object_info()
+    missing = _preset_value("qwen-image-turbo", "1", "unet_name")
+    assert missing == _preset_value("qwen-image-edit-ref-turbo", "1", "unet_name")
+    _choices(info, "UNETLoader", "unet_name").remove(missing)
+    problems = _problems(_report(info))
+    expected = (
+        f"modèle introuvable dans ComfyUI : {missing} — à placer dans ComfyUI/models/diffusion_models/"
+        " (nœud 1, UNETLoader)"
+    )
+    assert problems["qwen-image-turbo"] == [expected]
+    assert problems["qwen-image-edit-ref-turbo"] == [expected]
+    assert all(not v for k, v in problems.items() if "turbo" not in k)
 
 
 def test_missing_encoder_and_vae_are_named() -> None:
@@ -116,8 +134,9 @@ def test_missing_encoder_and_vae_are_named() -> None:
     _choices(info, "VAELoader", "vae_name").remove(vae)
     problems = _problems(_report(info))["qwen-image-base"]
     assert problems == [
-        f"encodeur de texte introuvable dans ComfyUI : {encoder} (nœud 2, CLIPLoader)",
-        f"VAE introuvable dans ComfyUI : {vae} (nœud 3, VAELoader)",
+        f"encodeur de texte introuvable dans ComfyUI : {encoder} — à placer dans ComfyUI/models/text_encoders/"
+        " (nœud 2, CLIPLoader)",
+        f"VAE introuvable dans ComfyUI : {vae} — à placer dans ComfyUI/models/vae/ (nœud 3, VAELoader)",
     ]
 
 
@@ -142,7 +161,8 @@ def test_missing_lora_from_series_and_characters() -> None:
     assert report["loras"] == {
         "checked": 2,
         "problems": [
-            "LoRA introuvable dans ComfyUI : absent/aiko-v9.safetensors (personnage Aiko (série « Les Lames »))"
+            "LoRA introuvable dans ComfyUI : absent/aiko-v9.safetensors — à placer dans ComfyUI/models/loras/"
+            " (personnage Aiko (série « Les Lames »))"
         ],
     }
 
@@ -203,7 +223,8 @@ def test_mock_provider_is_simulated() -> None:
         (
             "prompt_400_missing_model.json",
             "workflow refusé par ComfyUI : le workflow ne passe pas la validation de ComfyUI — "
-            "nœud 1 (UNETLoader) : modèle introuvable dans ComfyUI : absent.safetensors",
+            "nœud 1 (UNETLoader) : modèle introuvable dans ComfyUI : absent.safetensors"
+            " — à placer dans ComfyUI/models/diffusion_models/",
         ),
         (
             "prompt_400_unknown_node.json",
@@ -316,7 +337,10 @@ def test_check_endpoint_mock_and_http(make_client: Callable[[ComfyUIClient], Tes
     assert all(p["ok"] for p in report["presets"])
     assert report["loras"] == {
         "checked": 2,
-        "problems": ["LoRA introuvable dans ComfyUI : aiko-absent.safetensors (personnage Aiko (série « Les Lames »))"],
+        "problems": [
+            "LoRA introuvable dans ComfyUI : aiko-absent.safetensors — à placer dans ComfyUI/models/loras/"
+            " (personnage Aiko (série « Les Lames »))"
+        ],
     }
 
 
@@ -350,7 +374,7 @@ def test_trial_generation_mock(make_client: Callable[[ComfyUIClient], TestClient
 
     # sans preset : workflow par défaut des séries
     default = c.post("/comfyui/trial", json={}).json()
-    assert default["params"]["preset"] == "qwen-image-base"
+    assert default["params"]["preset"] == "qwen-image-turbo"
     _wait_done(c, default["id"])
 
 

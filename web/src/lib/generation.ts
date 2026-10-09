@@ -27,6 +27,14 @@ export function formatDuration(seconds: number | null | undefined): string {
   return `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")} min`;
 }
 
+/** « ~1 h 05 min », « ~12 min », « < 1 min » : temps estimé d'un chapitre ou d'une série. */
+export function formatEstimate(seconds: number): string {
+  const m = Math.round(Math.max(0, seconds) / 60);
+  if (seconds > 0 && m === 0) return "< 1 min";
+  if (m < 60) return `~${m} min`;
+  return `~${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")} min`;
+}
+
 export function imageDurationS(img: PanelImage): number | null {
   const ms = img.params.duration_ms;
   return typeof ms === "number" ? ms / 1000 : null;

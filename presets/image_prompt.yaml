@@ -3,13 +3,17 @@
 # demande pas de le reconstruire.
 
 # Morceaux assemblés dans l'ordre, séparés par une espace. Un morceau dont une variable
-# est vide est omis. Variables : $shot (type de plan), $description (description de la
+# est vide est omis. Variables : $shot (type de plan du scénario), $description (description de la
 # case), $characters (personnages, voir `character`), $style (style de la série),
 # $bible (notes de la bible sur les personnages de la case), $savoir_faire (passages des
 # collections de l'agent « image_prompt », voir knowledge.yaml ; budget de jetons serré).
+# Direction artistique appliquée (onglet « Direction artistique » du chapitre) : $plan (son type de
+# plan, sinon celui du scénario), $angle (angle de caméra), $ambiance (lumière, atmosphère).
 parts:
-  - "$shot."
+  - "$plan."
+  - "Angle de caméra : $angle."
   - "$description."
+  - "Ambiance : $ambiance."
   - "Personnages : $characters."
   - "Repères de la bible : $bible."
   - "Style : $style."

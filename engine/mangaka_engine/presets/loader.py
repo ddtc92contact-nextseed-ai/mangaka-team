@@ -260,6 +260,11 @@ class PresetRegistry:
                         PresetIssue(reg._rel(defaults_path), f"workflow inconnu : {defaults.workflow_with_references}")
                     )
                     reg.defaults = defaults.model_copy(update={"workflow_with_references": None})
+                elif defaults.workflow_quality and defaults.workflow_quality not in reg.workflows:
+                    reg.issues.append(
+                        PresetIssue(reg._rel(defaults_path), f"workflow inconnu : {defaults.workflow_quality}")
+                    )
+                    reg.defaults = defaults.model_copy(update={"workflow_quality": None})
                 elif defaults.layout_style and defaults.layout_style not in reg.layout_styles:
                     reg.issues.append(
                         PresetIssue(reg._rel(defaults_path), f"style de mise en page inconnu : {defaults.layout_style}")

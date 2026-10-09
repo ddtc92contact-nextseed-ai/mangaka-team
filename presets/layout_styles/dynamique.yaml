@@ -35,6 +35,8 @@ rythme:
   normal: { slant_factor: 1.0, size_contrast: 1.0 }
   rapide: { slant_factor: 1.6, size_contrast: 1.2 }
 
+# « Page choc » (pleine page ou splash) décidée par la direction artistique : s'ajoute au rythme.
+page_choc: { slant_factor: 1.3, size_contrast: 1.8 }
 # Options de cadre (probabilité par case, comme les biais : intensité si donnée, sinon importance).
 # frameless = sans bord · bleed = fond perdu (case au bord de la zone utile) · inset = incrustation.
 frames:

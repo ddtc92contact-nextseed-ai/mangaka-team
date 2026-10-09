@@ -93,6 +93,17 @@ export function PanelInspector({
       );
     });
 
+  const regenerateQuality = () =>
+    run(async () => {
+      if (promptDirty) await api.updatePanel(panelId, { final_prompt: draft });
+      await api.regeneratePanelQuality(panelId);
+      setDraft(null);
+      refresh();
+      onChanged();
+      detail.reload();
+      setNotice("Nouvelle version en Qualité mise en file (même prompt, nouvelle seed) : les autres versions ne bougent pas.");
+    });
+
   const savePrompt = () =>
     run(async () => {
       detail.setData(await api.updatePanel(panelId, { final_prompt: draft }));
@@ -145,6 +156,7 @@ export function PanelInspector({
 
   const resolvedName = presets?.find((p) => p.id === d?.resolved_preset)?.name ?? d?.resolved_preset ?? "—";
   const hasImages = (d?.images.length ?? 0) > 0;
+  const quality = presets?.find((p) => p.is_quality) ?? null;
 
   return (
     <section
@@ -344,6 +356,21 @@ export function PanelInspector({
               title={chosen?.seed != null ? `Relance avec la seed ${chosen.seed} de la version choisie (utile après une retouche du prompt)` : "Choisis d'abord une version"}
             >
               Même seed
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={regenerateQuality}
+              disabled={busy || !hasImages || !quality}
+              title={
+                !quality
+                  ? "Aucun palier Qualité configuré (presets/defaults.yaml)"
+                  : hasImages
+                    ? "Nouvelle version de cette case seulement, en Qualité (avec les références si la case en a), même prompt, nouvelle seed"
+                    : "Génère d'abord une première version"
+              }
+              data-testid="regenerate-quality"
+            >
+              Régénérer en Qualité
             </Button>
           </div>
 

@@ -160,7 +160,10 @@ def get_chapter_qc(chapter_id: int, session: Session = Depends(get_session)) -> 
 
 @router.post("/panel-images/{image_id}/qc/override", response_model=PanelImageOut)
 def override_panel_image_qc(
-    image_id: int, body: QCOverrideIn | None = None, session: Session = Depends(get_session)
+    image_id: int,
+    body: QCOverrideIn | None = None,
+    session: Session = Depends(get_session),
+    ctx: AppContext = Depends(get_ctx),
 ) -> PanelImageOut:
     """« Valider quand même » : force le verdict à ok ; la décision humaine et le verdict précédent sont tracés."""
     img = session.get(PanelImage, image_id)
@@ -168,4 +171,4 @@ def override_panel_image_qc(
         raise HTTPException(status_code=404, detail="Version introuvable")
     override_ok(session, img, note=(body.note if body else None))
     session.commit()
-    return panel_image_out(img)
+    return panel_image_out(img, ctx.agents.presets_for(img.panel.page.chapter.project_id))

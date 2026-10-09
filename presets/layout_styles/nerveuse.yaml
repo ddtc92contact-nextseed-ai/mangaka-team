@@ -34,6 +34,8 @@ rythme:
   normal: { slant_factor: 1.0, size_contrast: 1.0 }
   rapide: { slant_factor: 1.4, size_contrast: 1.3 }
 
+# « Page choc » (pleine page ou splash) décidée par la direction artistique : s'ajoute au rythme.
+page_choc: { slant_factor: 1.4, size_contrast: 2.2 }
 # Options de cadre : fonds perdus fréquents sur les cases fortes, incrustations de réaction.
 frames:
   by_importance:
