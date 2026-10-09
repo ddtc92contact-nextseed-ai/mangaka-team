@@ -3,6 +3,9 @@
 Série (`Project`) → Character (+ images de référence)
 Série → Chapter → Page → Panel (+ versions d'image → annotation humaine) → Bubble · Job.
 Banc d'essai du QC : `QCBenchRun` (historique des mesures du QC sur les cases annotées).
+Savoir-faire : `KnowledgeCollection` (globale ou d'une série) → `KnowledgeDocument` → `KnowledgeChunk`
+(+ index plein texte FTS5 `knowledge_fts`, tenu à jour par des triggers) · `SeriesBible` (une par série)
+· `LLMRun` (passages reçus par chaque appel du LLM).
 Les fichiers binaires (images) vivent dans `data/`, la base ne stocke que leurs chemins relatifs.
 """
 
@@ -12,7 +15,7 @@ import enum
 from datetime import UTC, date, datetime
 from typing import Any
 
-from sqlalchemy import JSON, Enum, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Enum, Float, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -339,3 +342,92 @@ class Job(Base):
     duration_ms: Mapped[int | None] = mapped_column(Integer, default=None)
     # Paramètres de la demande (génération : preset, prompt, seed, variante…).
     params: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
+class KnowledgeCollection(TimestampMixin, Base):
+    """Collection de fiches de savoir-faire : globale (`project_id` nul) ou propre à une série."""
+
+    __tablename__ = "knowledge_collections"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(120))
+    description: Mapped[str] = mapped_column(Text, default="")
+    project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+
+    documents: Mapped[list[KnowledgeDocument]] = relationship(
+        back_populates="collection", cascade="all, delete-orphan", order_by="KnowledgeDocument.id"
+    )
+
+
+class KnowledgeDocument(TimestampMixin, Base):
+    __tablename__ = "knowledge_documents"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    collection_id: Mapped[int] = mapped_column(ForeignKey("knowledge_collections.id", ondelete="CASCADE"), index=True)
+    title: Mapped[str] = mapped_column(String(200))
+    source: Mapped[str] = mapped_column(String(20), default="text")  # text | md | txt | pdf
+    original_name: Mapped[str | None] = mapped_column(String(255), default=None)
+    content: Mapped[str] = mapped_column(Text, default="")
+    tags: Mapped[list[str]] = mapped_column(JSON, default=list)
+    token_count: Mapped[int] = mapped_column(Integer, default=0)
+    # Dernière erreur d'indexation (embeddings indisponibles : la recherche par mots-clés reste possible).
+    index_error: Mapped[str | None] = mapped_column(Text, default=None)
+
+    collection: Mapped[KnowledgeCollection] = relationship(back_populates="documents")
+    chunks: Mapped[list[KnowledgeChunk]] = relationship(
+        back_populates="document", cascade="all, delete-orphan", order_by="KnowledgeChunk.index"
+    )
+
+
+class KnowledgeChunk(Base):
+    """Passage d'un document, avec son vecteur (float32 little-endian) et le modèle qui l'a produit."""
+
+    __tablename__ = "knowledge_chunks"
+    __table_args__ = (UniqueConstraint("document_id", "index"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    document_id: Mapped[int] = mapped_column(ForeignKey("knowledge_documents.id", ondelete="CASCADE"), index=True)
+    collection_id: Mapped[int] = mapped_column(ForeignKey("knowledge_collections.id", ondelete="CASCADE"), index=True)
+    index: Mapped[int] = mapped_column(Integer)
+    heading: Mapped[str] = mapped_column(Text, default="")  # « Titre › Sous-titre »
+    text: Mapped[str] = mapped_column(Text)
+    token_count: Mapped[int] = mapped_column(Integer, default=0)
+    embedding: Mapped[bytes | None] = mapped_column(LargeBinary, default=None)
+    embedding_model: Mapped[str | None] = mapped_column(String(200), default=None)
+
+    document: Mapped[KnowledgeDocument] = relationship(back_populates="chunks")
+
+
+class SeriesBible(TimestampMixin, Base):
+    """Bible d'une série : toujours injectée dans les agents de cette série (et d'elle seule)."""
+
+    __tablename__ = "series_bibles"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), unique=True, index=True)
+    world: Mapped[str] = mapped_column(Text, default="")  # univers
+    tone: Mapped[str] = mapped_column(Text, default="")  # ton
+    rules: Mapped[str] = mapped_column(Text, default="")  # règles de l'univers
+    motifs: Mapped[str] = mapped_column(Text, default="")  # gags et motifs récurrents
+    # Notes de la bible par fiche personnage : {"<character_id>": "caractère, rôle, arc…"}.
+    character_notes: Mapped[dict[str, str]] = mapped_column(JSON, default=dict)
+    # Résumés des chapitres validés : [{"chapter_id", "number", "title", "summary", "added_at"}].
+    chapter_summaries: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+
+
+class LLMRun(Base):
+    """Un appel d'agent LLM et ce qu'on lui a appris : passages reçus (titres, extraits, scores) et bible."""
+
+    __tablename__ = "llm_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    job_id: Mapped[int | None] = mapped_column(ForeignKey("jobs.id", ondelete="SET NULL"), index=True)
+    project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    chapter_id: Mapped[int | None] = mapped_column(ForeignKey("chapters.id", ondelete="CASCADE"), index=True)
+    agent: Mapped[str] = mapped_column(String(50))  # rôle : script…
+    model: Mapped[str | None] = mapped_column(String(200), default=None)
+    query: Mapped[str] = mapped_column(Text, default="")
+    passages: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    bible: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
+    collections: Mapped[list[str]] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)

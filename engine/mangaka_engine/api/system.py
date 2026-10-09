@@ -43,9 +43,11 @@ def health(ctx: AppContext = Depends(get_ctx)) -> dict[str, Any]:
                 "ok": kind not in providers.errors,
                 "detail": providers.errors.get(kind),
             }
-            for kind in ("llm", "vision", "comfyui", "detectors", "identity")
+            for kind in ("llm", "vision", "comfyui", "detectors", "identity", "embedding")
         },
-        "mock": all(providers.names.get(k) == "mock" for k in ("llm", "vision", "comfyui", "detectors", "identity")),
+        "mock": all(
+            providers.names.get(k) == "mock" for k in ("llm", "vision", "comfyui", "detectors", "identity", "embedding")
+        ),
         "presets": {
             "page_formats": len(ctx.presets.page_formats),
             "workflows": len(ctx.presets.workflows),

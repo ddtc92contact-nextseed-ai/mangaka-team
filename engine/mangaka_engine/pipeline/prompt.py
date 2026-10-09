@@ -1,7 +1,7 @@
 """Étape 3 — prompt final d'une case (fonctions pures, sans base ni réseau).
 
 description + type de plan + fiches des personnages (description visuelle, mots-clés)
-+ style de la série → prompt positif ; le prompt négatif contient toujours les termes qui
++ style de la série (+ notes de la bible sur les personnages et passages du savoir-faire) → prompt positif ; le prompt négatif contient toujours les termes qui
 interdisent au modèle de dessiner du texte (bulles et lettrage sont vectoriels).
 Le gabarit vit dans `presets/image_prompt.yaml`.
 """
@@ -55,6 +55,8 @@ def build_prompt(
     shot_type: str | None = None,
     characters: Sequence[PromptCharacter] = (),
     style: str = "",
+    savoir_faire: str = "",
+    bible: str = "",
     settings: ImagePromptSettings | None = None,
 ) -> str:
     """Assemble le prompt positif d'une case à partir des morceaux du preset."""
@@ -70,6 +72,8 @@ def build_prompt(
             d for d in (describe_character(c, settings) for c in characters) if d
         ),
         "style": _clean(style),
+        "savoir_faire": _clean(savoir_faire),
+        "bible": _clean(bible),
     }
     parts: list[str] = []
     for part in settings.parts:

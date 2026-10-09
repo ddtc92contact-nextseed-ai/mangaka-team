@@ -4,7 +4,9 @@
 - 2 : Série → Chapitre → Page (statuts, types de page, mise en page stockée, progression des jobs) ;
 - 3 : génération (paramètres des jobs, prompt final édité à la main) ;
 - 4 : contrôle qualité (verdict, détail des couches et boîtes détectées par version d'image) ;
-- 5 : banc d'essai du QC (annotations bonne / mauvaise des versions, historique des runs).
+- 5 : banc d'essai du QC (annotations bonne / mauvaise des versions, historique des runs) ;
+- 6 : savoir-faire (collections, documents, passages + index FTS5), bible de série, passages reçus par
+  chaque appel du LLM.
 
 Une base neuve est créée directement à la dernière version. Chaque migration tourne dans une
 transaction unique, clés étrangères désactivées (recette « 12 étapes » de SQLite pour reconstruire
@@ -21,11 +23,21 @@ from sqlalchemy import Engine, inspect
 from sqlalchemy.dialects import sqlite
 from sqlalchemy.schema import CreateIndex, CreateTable
 
-from .models import Base, Chapter, PanelImageAnnotation, QCBenchRun
+from .models import (
+    Base,
+    Chapter,
+    KnowledgeChunk,
+    KnowledgeCollection,
+    KnowledgeDocument,
+    LLMRun,
+    PanelImageAnnotation,
+    QCBenchRun,
+    SeriesBible,
+)
 
 log = logging.getLogger("mangaka_engine")
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 class MigrationError(RuntimeError):
@@ -112,6 +124,35 @@ def _v4_to_v5(cur: sqlite3.Cursor) -> None:
             cur.execute(stmt)
 
 
+def _v5_to_v6(cur: sqlite3.Cursor) -> None:
+    for table in (
+        KnowledgeCollection.__table__,
+        KnowledgeDocument.__table__,
+        KnowledgeChunk.__table__,
+        SeriesBible.__table__,
+        LLMRun.__table__,
+    ):
+        for stmt in _ddl(table):
+            cur.execute(stmt)
+    for stmt in FTS_DDL:
+        cur.execute(stmt)
+
+
+# Index plein texte des passages (recherche par mots-clés, BM25). Table FTS5 autonome dont le rowid est
+# l'id du passage ; les triggers la suivent, y compris lors des suppressions en cascade (document,
+# collection, série). `remove_diacritics 2` : « décor » trouve « decor ».
+FTS_DDL = (
+    "CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts USING fts5(heading, text,"
+    " tokenize = 'unicode61 remove_diacritics 2')",
+    "CREATE TRIGGER IF NOT EXISTS knowledge_chunks_ai AFTER INSERT ON knowledge_chunks BEGIN"
+    " INSERT INTO knowledge_fts(rowid, heading, text) VALUES (new.id, new.heading, new.text); END",
+    "CREATE TRIGGER IF NOT EXISTS knowledge_chunks_ad AFTER DELETE ON knowledge_chunks BEGIN"
+    " DELETE FROM knowledge_fts WHERE rowid = old.id; END",
+    "CREATE TRIGGER IF NOT EXISTS knowledge_chunks_au AFTER UPDATE OF heading, text ON knowledge_chunks BEGIN"
+    " UPDATE knowledge_fts SET heading = new.heading, text = new.text WHERE rowid = new.id; END",
+)
+
+
 MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     # version de départ → (version d'arrivée, fonction)
     0: (2, _v0_to_v2),
@@ -119,6 +160,7 @@ MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     2: (3, _v2_to_v3),
     3: (4, _v3_to_v4),
     4: (5, _v4_to_v5),
+    5: (6, _v5_to_v6),
 }
 
 
@@ -132,6 +174,8 @@ def migrate(engine: Engine) -> int:
     if "projects" not in inspect(engine).get_table_names():
         Base.metadata.create_all(engine)
         with engine.begin() as conn:
+            for stmt in FTS_DDL:
+                conn.exec_driver_sql(stmt)
             conn.exec_driver_sql(f"PRAGMA user_version = {SCHEMA_VERSION}")
         return SCHEMA_VERSION
 

@@ -60,7 +60,14 @@ def test_defaults_are_mock_without_env(make_settings: Callable[..., Settings]) -
     assert isinstance(p.vision, MockVisionProvider)
     assert isinstance(p.comfyui, MockComfyUIClient)
     assert isinstance(p.detectors, MockDetectorProvider) and isinstance(p.identity, MockIdentityProvider)
-    assert p.names == {"llm": "mock", "vision": "mock", "comfyui": "mock", "detectors": "mock", "identity": "mock"}
+    assert p.names == {
+        "llm": "mock",
+        "vision": "mock",
+        "comfyui": "mock",
+        "detectors": "mock",
+        "identity": "mock",
+        "embedding": "mock",
+    }
 
 
 def test_key_alone_does_not_leave_mock_mode(make_settings: Callable[..., Settings]) -> None:

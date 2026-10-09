@@ -148,6 +148,8 @@ class DeepSeekPreset(_Strict):
 class OllamaPreset(_Strict):
     base_url: str
     vision_model: str
+    # Modèle d'embeddings du savoir-faire (EMBEDDING_PROVIDER=ollama), ex. bge-m3 (multilingue, bon en français).
+    embedding_model: str | None = None
     keep_alive: int | str = 0
     timeout_s: float = Field(default=120, gt=0)
 
@@ -436,11 +438,15 @@ class PromptPreset(_Strict):
 
 
 # --- Prompt image (étape 3) ---------------------------------------------------
+IMAGE_PROMPT_VARIABLES = {"shot", "description", "characters", "style", "savoir_faire", "bible"}
+
+
 class ImagePromptSettings(_Strict):
     """Construction du prompt final d'une case (voir pipeline/prompt.py)."""
 
     # Morceaux assemblés dans l'ordre ; un morceau dont une variable est vide est omis.
-    # Variables : $shot, $description, $characters, $style.
+    # Variables : $shot, $description, $characters, $style, $savoir_faire (passages du savoir-faire),
+    # $bible (notes de la bible sur les personnages de la case).
     parts: list[str] = Field(
         default_factory=lambda: [
             "$shot.",
@@ -464,7 +470,7 @@ class ImagePromptSettings(_Strict):
         for part in value:
             if not string.Template(part).is_valid():
                 raise ValueError("gabarit invalide : un « $ » isolé doit s'écrire « $$ »")
-            unknown = set(string.Template(part).get_identifiers()) - {"shot", "description", "characters", "style"}
+            unknown = set(string.Template(part).get_identifiers()) - IMAGE_PROMPT_VARIABLES
             if unknown:
                 raise ValueError(f"variables inconnues : {', '.join(sorted(unknown))}")
         return value
@@ -629,3 +635,51 @@ class QCSettings(_Strict):
     identity: QCIdentitySettings
     vision: QCVisionSettings
     bench: QCBenchSettings
+
+
+# --- Savoir-faire (RAG local) ------------------------------------------------------
+class KnowledgeChunking(_Strict):
+    max_tokens: int = Field(default=350, ge=50, le=4000, description="Taille maximale d'un passage")
+    min_tokens: int = Field(default=40, ge=0, le=2000, description="Un passage plus petit est fusionné au suivant")
+
+
+class KnowledgeRetrieval(_Strict):
+    top_k: int = Field(default=6, ge=1, le=50)
+    vector_weight: float = Field(default=0.6, ge=0, le=1)
+    keyword_weight: float = Field(default=0.4, ge=0, le=1)
+    min_score: float = Field(default=0.05, ge=0, le=1, description="Passages sous ce score hybride : écartés")
+
+
+class KnowledgeAgent(_Strict):
+    """Savoir-faire d'un agent : collections (par nom), budget de jetons, nombre de passages."""
+
+    label: str
+    collections: list[str] = Field(default_factory=list)
+    series_collections: bool = Field(default=True, description="Ajoute les collections rattachées à la série")
+    budget_tokens: int = Field(default=2000, ge=0, le=32000)
+    top_k: int | None = Field(default=None, ge=1, le=50)
+    bible: bool = True
+    bible_max_tokens: int | None = Field(default=None, ge=0, le=32000)
+
+
+class KnowledgeSettings(_Strict):
+    """Savoir-faire (`presets/knowledge.yaml`) : découpage, recherche hybride, collections par agent."""
+
+    chunking: KnowledgeChunking = Field(default_factory=KnowledgeChunking)
+    retrieval: KnowledgeRetrieval = Field(default_factory=KnowledgeRetrieval)
+    small_collection_tokens: int = Field(
+        default=1200, ge=0, le=100000, description="Collection plus petite : injectée entière, sans recherche"
+    )
+    bible_max_tokens: int = Field(default=2500, ge=0, le=32000)
+    agents: dict[str, KnowledgeAgent] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _check(self) -> KnowledgeSettings:
+        if self.chunking.min_tokens >= self.chunking.max_tokens:
+            raise ValueError("chunking.min_tokens doit être inférieur à chunking.max_tokens")
+        if self.retrieval.vector_weight + self.retrieval.keyword_weight <= 0:
+            raise ValueError("retrieval : vector_weight + keyword_weight doit être positif")
+        return self
+
+    def agent(self, role: str) -> KnowledgeAgent:
+        return self.agents.get(role) or KnowledgeAgent(label=role, collections=[], budget_tokens=0)

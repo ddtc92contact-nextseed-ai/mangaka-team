@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
+from ..pipeline.knowledge import record_chapter_summary
 from ..pipeline.layout import LayoutError
 from ..pipeline.pages import is_stale, layout_page, move_page_gutter
 from ..pipeline.script import normalize_shot_type, script_job
@@ -233,6 +234,9 @@ def update_chapter(chapter_id: int, body: ChapterUpdate, session: Session = Depe
         changes["status"] = ChapterStatus(changes["status"])
     for key, value in changes.items():
         setattr(chapter, key, value)
+    if "status" in changes or "summary" in changes:
+        # Chapitre validé (prêt / publié) : son résumé rejoint la bible de la série.
+        record_chapter_summary(session, chapter)
     session.commit()
     return _one_out(session, chapter)
 
@@ -272,7 +276,9 @@ def start_script(
     job = Job(project_id=chapter.project_id, chapter_id=chapter_id, step="script", message="En attente…")
     session.add(job)
     session.commit()
-    ctx.jobs.submit(job.id, script_job(ctx.db, ctx.presets, ctx.providers.llm, chapter_id))
+    ctx.jobs.submit(
+        job.id, script_job(ctx.db, ctx.presets, ctx.providers.llm, chapter_id, knowledge=ctx.knowledge, job_id=job.id)
+    )
     return job_out(job)
 
 
