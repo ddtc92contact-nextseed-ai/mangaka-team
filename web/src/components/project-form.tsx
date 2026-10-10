@@ -163,6 +163,12 @@ export function ProjectForm({
       formRef.current?.querySelector<HTMLSelectElement>(`#${missing[0]}`)?.focus();
       return;
     }
+    if (toneRefused) {
+      // Message affiché sous la liste des tons ; l'API refuserait aussi (422).
+      setFormError("Ce ton n'est pas proposé pour ce genre : choisis-en un autre.");
+      formRef.current?.querySelector<HTMLSelectElement>("#style_tone")?.focus();
+      return;
+    }
     if (!form.reading_direction) {
       setErrors({ reading_direction: DIRECTION_REQUIRED });
       setFormError(null);
