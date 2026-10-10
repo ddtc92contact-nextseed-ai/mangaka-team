@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from fastapi import Request
 from sqlalchemy.orm import Session
 
 from ..agents import AgentService
 from ..config import Settings
+from ..pipeline.comfy_loras import LoraCatalog
 from ..pipeline.jobs import JobRunner
 from ..pipeline.knowledge import KnowledgeBase
 from ..pipeline.qc import QCExecutor
@@ -32,6 +33,7 @@ class AppContext:
     qc: QCExecutor
     agents: AgentService  # profils des agents (écran « L'équipe ») : presets effectifs par série
     knowledge: KnowledgeBase  # savoir-faire et bible injectés dans les agents
+    lora_catalog: LoraCatalog = field(default_factory=LoraCatalog)  # LoRA vus par ComfyUI (cache court)
 
 
 def get_ctx(request: Request) -> AppContext:

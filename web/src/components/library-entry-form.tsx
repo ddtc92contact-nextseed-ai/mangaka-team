@@ -12,6 +12,7 @@ import {
 } from "@/lib/api";
 import { LIBRARY_KINDS } from "@/lib/library";
 import { ImageDropzone } from "./image-dropzone";
+import { LoraPicker } from "./lora-picker";
 import { Alert, Button, Field, Input, Textarea } from "./ui";
 
 function parseKeywords(raw: string): string[] {
@@ -43,6 +44,7 @@ export function LibraryEntryForm({
   const [keywords, setKeywords] = useState((initial?.prompt_keywords ?? []).join(", "));
   const [loraName, setLoraName] = useState(initial?.lora_name ?? "");
   const [loraWeight, setLoraWeight] = useState(String(initial?.lora_weight ?? 0.8));
+  const [loraTriggers, setLoraTriggers] = useState(initial?.lora_trigger_words ?? "");
   const [pending, setPending] = useState<File[]>([]);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
@@ -65,6 +67,7 @@ export function LibraryEntryForm({
       prompt_keywords: parseKeywords(keywords),
       lora_name: loraName.trim() || null,
       lora_weight: weight,
+      lora_trigger_words: loraTriggers.trim(),
     };
     try {
       let saved = initial
@@ -129,28 +132,22 @@ export function LibraryEntryForm({
           placeholder={info.keywordsPlaceholder}
         />
       </Field>
-      <div className="grid gap-5 md:grid-cols-[1fr_10rem]">
-        <Field label={info.loraLabel} htmlFor="lora_name" error={errors.lora_name}>
-          <Input
-            id="lora_name"
-            value={loraName}
-            onChange={(e) => setLoraName(e.target.value)}
-            placeholder={info.loraPlaceholder}
-          />
-        </Field>
-        <Field label="Poids du LoRA" htmlFor="lora_weight" error={errors.lora_weight}>
-          <Input
-            id="lora_weight"
-            type="number"
-            step="0.05"
-            min="0"
-            max="2"
-            value={loraWeight}
-            onChange={(e) => setLoraWeight(e.target.value)}
-            aria-invalid={Boolean(errors.lora_weight)}
-          />
-        </Field>
-      </div>
+      <LoraPicker
+        id="lora_name"
+        label={info.loraLabel}
+        placeholder={info.loraPlaceholder}
+        value={loraName}
+        onChange={setLoraName}
+        savedValue={initial?.lora_name}
+        error={errors.lora_name}
+        weight={loraWeight}
+        onWeightChange={setLoraWeight}
+        weightLabel="Poids du LoRA"
+        weightError={errors.lora_weight}
+        triggerWords={loraTriggers}
+        onTriggerWordsChange={setLoraTriggers}
+        triggerWordsError={errors.lora_trigger_words}
+      />
       {!initial && (
         <div className="space-y-3">
           <p className="text-sm font-medium text-zinc-300">Images de référence</p>

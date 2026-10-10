@@ -124,6 +124,8 @@ class Project(TimestampMixin, Base):
     workflow_preset: Mapped[str] = mapped_column(String(100))
     style_lora_name: Mapped[str | None] = mapped_column(String(255), default=None)
     style_lora_weight: Mapped[float] = mapped_column(Float, default=0.8)
+    # Mots déclencheurs du LoRA de style, ajoutés au prompt quand le LoRA est appliqué.
+    style_lora_trigger_words: Mapped[str] = mapped_column(Text, default="")
     # Grammaire de mise en page de la série (presets/layout_styles/) : sage, dynamique, nerveuse…
     layout_style: Mapped[str] = mapped_column(String(100), default="dynamique")
 
@@ -148,6 +150,7 @@ class Character(TimestampMixin, Base):
     prompt_keywords: Mapped[list[str]] = mapped_column(JSON, default=list)
     lora_name: Mapped[str | None] = mapped_column(String(255), default=None)
     lora_weight: Mapped[float] = mapped_column(Float, default=0.8)
+    lora_trigger_words: Mapped[str] = mapped_column(Text, default="")  # ajoutés au prompt avec le LoRA
 
     project: Mapped[Project] = relationship(back_populates="characters")
     reference_images: Mapped[list[CharacterImage]] = relationship(
@@ -188,6 +191,7 @@ class SeriesAsset(TimestampMixin, Base):
     prompt_keywords: Mapped[list[str]] = mapped_column(JSON, default=list)
     lora_name: Mapped[str | None] = mapped_column(String(255), default=None)
     lora_weight: Mapped[float] = mapped_column(Float, default=0.8)
+    lora_trigger_words: Mapped[str] = mapped_column(Text, default="")  # ajoutés au prompt avec le LoRA
 
     project: Mapped[Project] = relationship(back_populates="assets")
     reference_images: Mapped[list[SeriesAssetImage]] = relationship(

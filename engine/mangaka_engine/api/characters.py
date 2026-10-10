@@ -46,6 +46,7 @@ def character_out(c: Character) -> CharacterOut:
         prompt_keywords=list(c.prompt_keywords or []),
         lora_name=c.lora_name,
         lora_weight=c.lora_weight,
+        lora_trigger_words=c.lora_trigger_words or "",
         reference_images=[reference_image_out(img, image_url(img)) for img in c.reference_images],
         created_at=c.created_at,
         updated_at=c.updated_at,
@@ -60,6 +61,8 @@ def apply_changes(entry: Character | SeriesAsset, body: CharacterUpdate) -> None
             raise FieldError(key, "ne peut pas être vide")
     if "lora_name" in changes:
         changes["lora_name"] = changes["lora_name"] or None
+    if "lora_trigger_words" in changes:
+        changes["lora_trigger_words"] = changes["lora_trigger_words"] or ""
     for key, value in changes.items():
         setattr(entry, key, value)
 

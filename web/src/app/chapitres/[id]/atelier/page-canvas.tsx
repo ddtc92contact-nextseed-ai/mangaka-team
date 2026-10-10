@@ -3,7 +3,7 @@
 import { useImperativeHandle, useRef, type KeyboardEvent, type Ref } from "react";
 import { engineUrl, type Job, type LayoutPanel, type PageData, type PanelData, type QueueItem } from "@/lib/api";
 import { DetectionOverlay, QCBadge } from "@/components/qc";
-import { PANEL_STATE } from "@/lib/generation";
+import { generationStep, PANEL_STATE } from "@/lib/generation";
 import { needsReview } from "@/lib/qc";
 import { cssClipPath, panelPolygon, svgPoints } from "@/lib/layout";
 
@@ -15,6 +15,35 @@ export interface PanelView {
   failure: Job | null;
   /** Contrôle qualité en cours ou en attente pour cette case. */
   qc: QueueItem | null;
+}
+
+/** État vivant de chaque case : job en cours / en file (d'après la file), dernier échec (d'après les jobs). */
+export function buildPanelViews(pages: PageData[], items: QueueItem[], jobs: Job[]): Map<number, PanelView> {
+  const latest = new Map<number, Job>();
+  for (const j of jobs) {
+    if (j.panel_id != null && !latest.has(j.panel_id)) latest.set(j.panel_id, j);
+  }
+  const map = new Map<number, PanelView>();
+  for (const p of pages) {
+    for (const panel of p.panels) {
+      const mine = items.filter((i) => i.panel_id === panel.id && i.job.step !== "qc");
+      const last = latest.get(panel.id);
+      map.set(panel.id, {
+        panel,
+        running: mine.find((i) => i.job.status === "running") ?? null,
+        pending: mine.filter((i) => i.job.status === "pending"),
+        failure: last?.status === "failed" ? last : null,
+        qc: items.find((i) => i.panel_id === panel.id && i.job.step === "qc") ?? null,
+      });
+    }
+  }
+  return map;
+}
+
+/** Libellé de progression d'une génération en cours : « Étape 4/8 · 50 % ». */
+export function runningLabel(item: QueueItem): string {
+  const step = generationStep(item.job.message);
+  return step ? `${step} · ${item.job.progress} %` : `Génération ${item.job.progress} %`;
 }
 
 export type ArrowDir = "left" | "right" | "up" | "down";
@@ -103,10 +132,11 @@ export function PageCanvas({
         const failure = !running && !queued ? (view?.failure ?? null) : null;
         const checking = !running && !queued && view?.qc ? view.qc : null;
         const dimmed = onlyReview && !needsReview(panel) && !selected;
+        const position = queued ? Math.min(...view!.pending.map((i) => i.position)) : null;
         const stateLabel = running
-          ? `Génération ${running.job.progress} %`
+          ? runningLabel(running)
           : queued
-            ? "En file"
+            ? `En file · n° ${position}`
             : failure
               ? "Échec"
               : checking
@@ -157,7 +187,7 @@ export function PageCanvas({
               <img
                 src={engineUrl(panel.selected_image_url)}
                 alt=""
-                className={`h-full w-full object-cover ${running || queued ? "opacity-60" : ""}`}
+                className={`h-full w-full object-cover ${running || queued ? "opacity-60" : ""} ${queued ? "grayscale" : ""}`}
                 draggable={false}
               />
             ) : null}
@@ -169,10 +199,15 @@ export function PageCanvas({
                 <QCBadge verdict={panel.qc_verdict} score={panel.qc_score} override={panel.qc_override} />
               </span>
             ) : (
-              <span className="flex h-full w-full flex-col items-center justify-center gap-1 bg-zinc-200 p-1 text-center text-zinc-600 [background-image:repeating-linear-gradient(45deg,transparent_0_10px,rgba(0,0,0,0.035)_10px_20px)]">
-                <span className="text-lg font-bold leading-none text-zinc-800">{panel.index + 1}</span>
+              <span
+                className={`flex h-full w-full flex-col items-center justify-center gap-1 p-1 text-center [background-image:repeating-linear-gradient(45deg,transparent_0_10px,rgba(0,0,0,0.035)_10px_20px)] ${
+                  failure ? "bg-red-100 text-red-800" : queued ? "bg-zinc-300 text-zinc-500" : "bg-zinc-200 text-zinc-600"
+                }`}
+              >
+                <span className={`text-lg font-bold leading-none ${failure ? "text-red-900" : queued ? "text-zinc-500" : "text-zinc-800"}`}>
+                  {panel.index + 1}
+                </span>
                 <span className="text-[11px] font-medium leading-tight">{stateLabel}</span>
-                {failure && <span className="sr-only">{failure.error}</span>}
               </span>
             )}
             {panel.selected_image_url && (
@@ -186,7 +221,9 @@ export function PageCanvas({
             {(running || queued) && (
               <span className="absolute inset-x-0 bottom-0 bg-zinc-950/80 px-1.5 py-1 text-left">
                 <span className="block text-[10px] font-medium text-zinc-100">
-                  {running ? `Génération ${running.job.progress} %` : `En file (${view!.pending.length})`}
+                  {running
+                    ? runningLabel(running)
+                    : `En file · n° ${position}${view!.pending.length > 1 ? ` (${view!.pending.length} variantes)` : ""}`}
                 </span>
                 <span className="mt-0.5 block h-1 overflow-hidden rounded bg-zinc-700">
                   <span
@@ -206,8 +243,13 @@ export function PageCanvas({
               </span>
             )}
             {failure && (
-              <span className="absolute inset-x-0 bottom-0 bg-red-950/90 px-1.5 py-0.5 text-left text-[10px] font-medium text-red-200">
-                Échec de la dernière génération
+              <span
+                className="absolute inset-x-0 bottom-0 bg-red-950/90 px-1.5 py-1 text-left text-[10px] font-medium text-red-200"
+                title={failure.error ?? undefined}
+                data-testid="panel-failure"
+              >
+                <span className="block">Échec de la dernière génération</span>
+                {failure.error && <span className="line-clamp-2 font-normal text-red-300">{failure.error}</span>}
               </span>
             )}
             {poly && (

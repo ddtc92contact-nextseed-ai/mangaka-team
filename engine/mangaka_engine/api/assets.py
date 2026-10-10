@@ -40,6 +40,7 @@ def asset_out(a: SeriesAsset) -> AssetOut:
         prompt_keywords=list(a.prompt_keywords or []),
         lora_name=a.lora_name,
         lora_weight=a.lora_weight,
+        lora_trigger_words=a.lora_trigger_words or "",
         reference_images=[reference_image_out(img, asset_image_url(a, img)) for img in a.reference_images],
         created_at=a.created_at,
         updated_at=a.updated_at,

@@ -118,7 +118,8 @@ def entry_kind(entry: LibraryEntry) -> str:
 
 
 def _prompt_entry(entry: LibraryEntry) -> PromptCharacter:
-    return PromptCharacter(entry.name, entry.visual_description, tuple(entry.prompt_keywords or []))
+    triggers = split_trigger_words(entry.lora_trigger_words) if entry.lora_name else ()
+    return PromptCharacter(entry.name, entry.visual_description, (*(entry.prompt_keywords or []), *triggers))
 
 
 def panel_knowledge(
@@ -135,6 +136,19 @@ def panel_knowledge(
     except Exception:  # noqa: BLE001 — le prompt se construit sans notes plutôt que d'échouer
         log.warning("savoir-faire indisponible pour le prompt de la case %s", panel.id, exc_info=True)
         return "", ""
+
+
+def split_trigger_words(raw: str | None) -> tuple[str, ...]:
+    """Mots déclencheurs d'un LoRA (« aiko_v1, red kimono ») → mots-clés de prompt."""
+    return tuple(w.strip() for w in (raw or "").split(",") if w.strip())
+
+
+def style_with_triggers(style: str, triggers: str | None) -> str:
+    """Mots déclencheurs du LoRA de style en tête du style de la série."""
+    words = split_trigger_words(triggers)
+    if not words:
+        return style
+    return ", ".join([*words, style.strip()]) if style.strip() else ", ".join(words)
 
 
 def build_panel_prompt(
@@ -157,7 +171,7 @@ def build_panel_prompt(
         characters=[_prompt_entry(c) for c in characters],
         decor=_prompt_entry(decor) if decor is not None else None,
         objects=[_prompt_entry(o) for o in objects],
-        style=series.style,
+        style=style_with_triggers(series.style, series.style_lora_trigger_words if series.style_lora_name else ""),
         savoir_faire=savoir_faire,
         bible=bible,
         settings=presets.image_prompt,

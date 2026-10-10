@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 from mangaka_engine.config import Settings
 from mangaka_engine.main import create_app
 from mangaka_engine.pipeline.art_direction import DirectionValidationError, parse_direction
-from mangaka_engine.pipeline.generation import PanelCast, collect_loras, pick_references
+from mangaka_engine.pipeline.generation import PanelCast, _prompt_entry, collect_loras, pick_references
 from mangaka_engine.pipeline.library import SeriesLibrary
 from mangaka_engine.pipeline.prompt import PromptCharacter, build_prompt
 from mangaka_engine.pipeline.script import ScriptValidationError, parse_script
@@ -103,8 +103,14 @@ def test_crud_with_reference_images(c: TestClient, segment: str, kind: str) -> N
     bad = c.post(f"/{segment}/{aid}/images", files=[("files", ("x.png", b"pas une image", "image/png"))])
     assert bad.status_code == 422 and "x.png" in bad.text
 
-    patched = _ok(c.patch(f"/{segment}/{aid}", json={"lora_name": "robot.safetensors", "lora_weight": 0.6}))
+    patched = _ok(
+        c.patch(
+            f"/{segment}/{aid}",
+            json={"lora_name": "robot.safetensors", "lora_weight": 0.6, "lora_trigger_words": "r2bot"},
+        )
+    )
     assert patched["lora_name"] == "robot.safetensors" and patched["lora_weight"] == 0.6
+    assert patched["lora_trigger_words"] == "r2bot"
     assert c.patch(f"/{segment}/{aid}", json={"name": None}).status_code == 422
     assert [a["id"] for a in _ok(c.get(f"/projects/{s['id']}/{segment}"))] == [aid]
 
@@ -310,6 +316,17 @@ def test_reference_priority_characters_then_decor_then_objects() -> None:
     ]
 
 
+def test_lora_trigger_words_of_decor_and_objects_reach_the_prompt() -> None:
+    cast = _entries()
+    cast.decor.lora_trigger_words = "lab_style, neon"  # type: ignore[union-attr]
+    robot = cast.objects[0]
+    robot.lora_trigger_words = "r2bot"
+    assert _prompt_entry(cast.decor).prompt_keywords == ("néons", "lab_style", "neon")  # type: ignore[arg-type]
+    assert _prompt_entry(robot).prompt_keywords == ("antenne rouge", "r2bot")
+    robot.lora_name = None  # sans LoRA, ses mots déclencheurs ne servent à rien
+    assert _prompt_entry(robot).prompt_keywords == ("antenne rouge",)
+
+
 def test_workflow_graph_has_library_keywords_loras_and_references_in_order() -> None:
     cast = _entries()
     prompt = build_prompt(
@@ -439,7 +456,7 @@ def test_database_from_before_the_library_keeps_working(make_settings: Callable[
     con.execute("ALTER TABLE panels DROP COLUMN object_ids")
     con.execute("DROP TABLE series_asset_images")
     con.execute("DROP TABLE series_assets")
-    con.execute("PRAGMA user_version = 9")
+    con.execute("PRAGMA user_version = 10")
     con.commit()
     con.close()
 

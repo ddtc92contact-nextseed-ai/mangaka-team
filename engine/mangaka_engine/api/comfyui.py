@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..pipeline.comfy_check import LoraUse, offline_report, run_check
+from ..pipeline.comfy_loras import unavailable
 from ..pipeline.comfy_trial import STEP as TRIAL_STEP
 from ..store.models import Character, Job, JobStatus, Project
 from .deps import AppContext, get_ctx, get_session
@@ -52,6 +53,20 @@ def check_comfyui(session: Session = Depends(get_session), ctx: AppContext = Dep
         )
     url = ctx.settings.comfyui_url if client.name != "mock" else None
     return run_check(client, ctx.presets, url=url, loras=lora_uses(session))
+
+
+@router.get("/comfyui/loras")
+def list_loras(refresh: bool = False, ctx: AppContext = Depends(get_ctx)) -> dict[str, Any]:
+    """LoRA que ComfyUI accepte (valeurs permises du chargeur de `lora_chain`), sous-dossiers compris.
+
+    Gardés 30 s (`refresh=true` pour relire) ; `available: false` et `error` si ComfyUI ne répond pas.
+    Le mock renvoie une petite liste factice (`simulated: true`)."""
+    client = ctx.providers.comfyui
+    if client is None:
+        return unavailable(
+            ctx.providers.names.get("comfyui") or "?", ctx.providers.errors.get("comfyui") or "ComfyUI non configuré"
+        )
+    return ctx.lora_catalog.get(client, ctx.presets, refresh=refresh)
 
 
 @router.post("/comfyui/trial", response_model=JobOut, status_code=202)

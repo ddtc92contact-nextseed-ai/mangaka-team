@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { ChapterForm } from "@/components/chapter-form";
 import { GenerateChapterButton } from "@/components/generate-chapter";
+import { ProductionLink } from "@/components/production-link";
 import { Alert, Button, ButtonLink, Card } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { useChapter } from "./chapter-context";
@@ -72,7 +73,9 @@ export default function ChapterInfoPage() {
           )}
           {queued && (
             <div className="mt-3">
-              <Alert tone="info">{queued}</Alert>
+              <Alert tone="info">
+                {queued} <ProductionLink chapterId={chapter.id} />
+              </Alert>
             </div>
           )}
           {chapter.panel_count > 0 && (

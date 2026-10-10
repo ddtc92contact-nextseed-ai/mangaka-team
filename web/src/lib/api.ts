@@ -22,6 +22,8 @@ export interface Project {
   workflow_preset: string;
   style_lora_name: string | null;
   style_lora_weight: number;
+  /** Mots déclencheurs du LoRA de style, ajoutés au prompt quand il est appliqué. */
+  style_lora_trigger_words: string;
   /** Style de mise en page de la série (presets/layout_styles/). */
   layout_style: string;
   character_count: number;
@@ -42,6 +44,7 @@ export type ProjectInput = Pick<
   | "workflow_preset"
   | "style_lora_name"
   | "style_lora_weight"
+  | "style_lora_trigger_words"
   | "layout_style"
 >;
 
@@ -568,6 +571,8 @@ export interface QueueItem {
   project_id: number | null;
   series_title: string | null;
   preset: string | null;
+  /** Palier du preset (« Turbo », « Rapide », « Qualité »). */
+  tier?: string | null;
   variant: number | null;
   count: number | null;
   estimated_duration_s: number | null;
@@ -639,6 +644,18 @@ export interface ComfyCheck {
   loras: { checked: number; problems: string[] };
 }
 
+/** `GET /comfyui/loras` : LoRA que ComfyUI accepte (sous-dossiers de models/loras compris). */
+export interface LoraCatalog {
+  provider: string;
+  /** false : ComfyUI hors ligne ou liste illisible (`error` dit pourquoi). */
+  available: boolean;
+  /** ComfyUI factice : petite liste d'exemple. */
+  simulated: boolean;
+  error: string | null;
+  loader: string | null;
+  loras: { name: string; folder: string; file: string }[];
+}
+
 export interface LayoutTemplate {
   id: string;
   name: string;
@@ -670,6 +687,8 @@ export interface Character {
   prompt_keywords: string[];
   lora_name: string | null;
   lora_weight: number;
+  /** Mots déclencheurs du LoRA de la fiche, ajoutés au prompt quand il est appliqué. */
+  lora_trigger_words: string;
   reference_images: ReferenceImage[];
   created_at: string;
   updated_at: string;
@@ -687,7 +706,7 @@ export interface SeriesAsset extends Character {
 export type LibraryEntry = Character | SeriesAsset;
 export type LibraryEntryInput = Pick<
   Character,
-  "name" | "visual_description" | "prompt_keywords" | "lora_name" | "lora_weight"
+  "name" | "visual_description" | "prompt_keywords" | "lora_name" | "lora_weight" | "lora_trigger_words"
 >;
 
 /** Élément de la bibliothèque cité par une case. */
@@ -718,9 +737,26 @@ export interface Health {
     "llm" | "vision" | "comfyui" | "detectors" | "identity" | "embedding",
     { name: string | null; ok: boolean; detail: string | null }
   >;
+  /** Fournisseurs actifs (badge de l'en-tête) ; absent d'un moteur plus ancien. */
+  active?: ActiveProviders;
   mock: boolean;
   presets: { page_formats: number; workflows: number; issues: number };
 }
+
+/** Un fournisseur actif : nom, mode simulé et variable `.env` qui le choisit (jamais la clé). */
+export interface ActiveProvider {
+  name: string;
+  label: string;
+  mock: boolean;
+  ok: boolean;
+  detail: string | null;
+  env: string;
+  key_env: string | null;
+  key_set: boolean | null;
+  url?: string;
+}
+
+export type ActiveProviders = Record<"llm" | "vision" | "comfyui", ActiveProvider>;
 
 export interface Presets {
   defaults: {
@@ -1374,6 +1410,9 @@ export const api = {
   workflowPresets: () => request<WorkflowPreset[]>("/presets/workflows"),
   // /object_info pèse plusieurs Mo : le moteur borne ses appels, on borne aussi le nôtre.
   checkComfy: () => request<ComfyCheck>("/comfyui/check", { signal: AbortSignal.timeout(90_000) }),
+  // Délai court : sans réponse, le sélecteur passe en saisie libre au lieu de tourner sans fin.
+  comfyLoras: (refresh = false) =>
+    request<LoraCatalog>(`/comfyui/loras${refresh ? "?refresh=true" : ""}`, { signal: AbortSignal.timeout(15_000) }),
   startComfyTrial: (preset: string) => request<Job>("/comfyui/trial", json("POST", { preset })),
   getPanel: (id: number) => request<PanelDetail>(`/panels/${id}`),
   updatePanel: (id: number, body: { final_prompt?: string | null; generation_preset?: string | null }) =>
