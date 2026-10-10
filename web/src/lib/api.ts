@@ -1099,7 +1099,7 @@ export interface StyleBoard {
   style: string;
   style_names: string;
   trials_per_batch: number;
-  use_reference_sheets: "always" | "never" | null;
+  use_reference_sheets: "with_subject" | "always" | "never" | null;
   use_panels: "free_slot" | "never" | null;
   active: StyleReference | null;
   history: StyleReference[];
@@ -1112,6 +1112,8 @@ export interface ReferenceGenerateInput {
   sheet: string;
   count?: number;
   quality?: boolean;
+  /** Image de départ : une image de référence de la fiche ; absente = à partir de la description seule. */
+  start_image_id?: number | null;
 }
 
 export interface ReferenceRefineInput {

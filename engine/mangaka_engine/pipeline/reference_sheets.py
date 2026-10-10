@@ -3,17 +3,22 @@
 - `sheet_prompt` / `sheet_loras` / `sheet_preset_id` / `sheet_params` (purs) : prompt du type de fiche
   (`presets/reference_sheets/*.yaml`) rempli avec la fiche de la bibliothèque et la série, chaîne de
   LoRA (style de la série puis LoRA de la fiche), workflow (palier de la série, Qualité sur demande,
-  pendant « avec références » pour « Affiner »), paramètres mappés (taille de la fiche) ;
+  pendant « avec références » dès qu'une image est envoyée), paramètres mappés (taille de la fiche) ;
 - `enqueue_sheet` : crée `count` jobs `reference` en attente dans la file ComfyUI unique (même
-  progression, même annulation que les cases) ; « Affiner » = mêmes jobs avec une variante de départ
-  envoyée comme image de référence et une consigne ;
+  progression, même annulation que les cases). Par défaut, à partir de zéro : texte → image au palier
+  de la série, aucune image envoyée. Image de départ facultative (une image de référence de la fiche,
+  ex. un croquis à la main) : image 1 du workflow « avec références », le prompt dit d'en garder le
+  sujet. « Affiner » = mêmes jobs avec la variante de départ en image 1 et une consigne ;
 - `ReferenceExecutor` : exécute un job → nouvelle `ReferenceVariant` dans l'historique de la fiche ;
 - `keep_variant` : « Garder comme référence » copie la variante parmi les images de référence de la
   fiche (en dernière position ; l'ordre se règle ensuite à la main).
 
-Référence de style (planche de style de la série) : jointe à chaque génération de fiche si
-`style_board.reference_sheets` de defaults.yaml vaut `always` (workflow « avec références » du palier),
-après la variante de départ d'« Affiner ». Sans planche de style, rien ne change.
+Référence de style (planche de style de la série), selon `style_board.reference_sheets` de defaults.yaml :
+`with_subject` (défaut) = jointe seulement quand une image du sujet est déjà envoyée (image de départ ou
+variante d'« Affiner »), toujours après elle et s'il reste un emplacement — jamais seule, sinon le
+workflow d'édition redessinerait le personnage de la planche au lieu de la description ; `always` =
+jointe à chaque fiche (seule image sans sujet) ; `never` = jamais. Le prompt précise son rôle
+($style_ref : style uniquement). Sans planche de style, rien ne change.
 
 Aucun nom de modèle, de LoRA ni de nœud ici : tout vient des presets et des fiches.
 """
@@ -67,6 +72,7 @@ ENTRY_KINDS = ("character", "object", "decor")
 # Sorte → dossier sous data/projects/{id}/ (le même que les images envoyées).
 FOLDERS = {"character": "characters", "object": "objects", "decor": "decors"}
 KIND_LABELS = {"character": "personnage", "object": "objet", "decor": "décor"}
+UPLOAD_LABELS = {"variant": "la variante de départ", "start": "l'image de départ", "style": "la référence de style"}
 
 
 def entry_kind(entry: LibraryEntry) -> str:
@@ -97,9 +103,20 @@ def _clean(text: str | None) -> str:
 
 
 def sheet_prompt(
-    presets: PresetRegistry, sheet: ReferenceSheet, entry: LibraryEntry, series: Project, instruction: str = ""
+    presets: PresetRegistry,
+    sheet: ReferenceSheet,
+    entry: LibraryEntry,
+    series: Project,
+    instruction: str = "",
+    *,
+    start: bool = False,
+    style_slot: int | None = None,
 ) -> str:
-    """Prompt positif : morceaux du type de fiche, un morceau dont une variable est vide est omis."""
+    """Prompt positif : morceaux du type de fiche, un morceau dont une variable est vide est omis.
+
+    `start` : une image de départ est envoyée en image 1 ($start) ; `style_slot` : numéro de l'image de
+    la référence de style jointe, la dernière ($style_ref).
+    """
     triggers = split_trigger_words(entry.lora_trigger_words) if entry.lora_name else ()
     keywords = list(dict.fromkeys(k for k in (_clean(k) for k in (*(entry.prompt_keywords or []), *triggers)) if k))
     values = {
@@ -108,6 +125,8 @@ def sheet_prompt(
         "keywords": ", ".join(keywords),
         "style": _clean(series_style(presets, series)),
         "instruction": _clean(instruction),
+        "start": "image 1" if start else "",
+        "style_ref": f"image {style_slot}" if style_slot else "",
     }
     parts: list[str] = []
     for part in sheet.prompt:
@@ -134,8 +153,8 @@ def sheet_preset_id(
     """Workflow d'une génération de fiche.
 
     Workflow imposé par le type de fiche > palier Qualité (`defaults.workflow_quality`) si demandé >
-    palier de la série. Pour « Affiner » (une image de référence), son pendant « avec références »
-    (`with_references`, sinon `defaults.workflow_with_references`).
+    palier de la série. Dès qu'une image est envoyée (`refine` : « Affiner », image de départ ou référence
+    de style), son pendant « avec références » (`with_references`, sinon `defaults.workflow_with_references`).
     """
     defaults = presets.defaults
     if sheet.workflow:
@@ -154,7 +173,9 @@ def sheet_preset_id(
     fallback = defaults.workflow_with_references if defaults else None
     if fallback and fallback in presets.workflows:
         return fallback
-    raise GenerationError(f"le workflow {base_id} n'a pas de pendant avec image de référence : « Affiner » impossible")
+    raise GenerationError(
+        f"le workflow {base_id} n'a pas de pendant avec image de référence : « Affiner » ou image de départ impossible"
+    )
 
 
 def sheet_params(
@@ -202,8 +223,13 @@ def enqueue_sheet(
     seed: int | None = None,
     parent: ReferenceVariant | None = None,
     instruction: str = "",
+    start: ReferenceImage | None = None,
 ) -> list[Job]:
-    """Crée `count` jobs `reference` en attente (sans commit). `parent` : « Affiner » depuis cette variante."""
+    """Crée `count` jobs `reference` en attente (sans commit).
+
+    `parent` : « Affiner » depuis cette variante ; `start` : image de départ (une image de référence de la
+    fiche). Sans l'un ni l'autre, la fiche part de zéro (texte → image).
+    """
     if not 1 <= count <= MAX_VARIANTS:
         raise GenerationError(f"entre 1 et {MAX_VARIANTS} variantes par demande")
     kind = entry_kind(entry)
@@ -214,19 +240,29 @@ def enqueue_sheet(
     series = session.get(Project, entry.project_id)
     if series is None:
         raise GenerationError("série introuvable")
+    if parent is not None:
+        start = None  # « Affiner » : la variante est l'image du sujet
+    if start is not None and all(img.id != start.id for img in entry.reference_images):
+        raise GenerationError("image de départ introuvable parmi les images de référence de la fiche")
+    subject = parent is not None or start is not None
     style = style_for(session, presets, series.id, "reference_sheets")
+    settings = presets.defaults.style_board if presets.defaults else None
+    if style is not None and not subject and settings is not None and settings.reference_sheets == "with_subject":
+        style = None  # à partir de zéro : la description seule, jamais le personnage de la planche
     try:
-        preset_id = sheet_preset_id(
-            presets, sheet, series, quality=quality, refine=parent is not None or style is not None
-        )
+        preset_id = sheet_preset_id(presets, sheet, series, quality=quality, refine=subject or style is not None)
     except GenerationError:
-        if parent is not None or style is None:
+        if subject or style is None:
             raise
         # Aucun workflow « avec références » pour ce palier : la fiche se génère sans la référence de style.
         style = None
         preset_id = sheet_preset_id(presets, sheet, series, quality=quality)
     loaded = presets.workflow(preset_id)
-    prompt = sheet_prompt(presets, sheet, entry, series, instruction)
+    slots = len(loaded.preset.reference_images)
+    if style is not None and int(subject) >= slots:
+        style = None  # pas d'emplacement après l'image du sujet
+    style_slot = int(subject) + 1 if style is not None else None
+    prompt = sheet_prompt(presets, sheet, entry, series, instruction, start=start is not None, style_slot=style_slot)
     if not prompt.strip():
         raise GenerationError("prompt vide : décris la fiche (description visuelle ou mots-clés)")
     jobs: list[Job] = []
@@ -250,6 +286,7 @@ def enqueue_sheet(
                 "variant": i + 1,
                 "count": count,
                 "parent_id": parent.id if parent is not None else None,
+                "start_image_id": start.id if start is not None else None,
                 "instruction": instruction,
                 "style_asset_id": style.id if style is not None else None,
             },
@@ -336,8 +373,9 @@ class _Plan:
     loaded: LoadedWorkflow
     params: dict[str, Any]
     loras: list[LoraSpec]
-    # Images de référence envoyées, dans l'ordre : variante de départ d'« Affiner » ({kind: variant,
-    # variant_id, filename}), puis référence de style ({kind: style, asset_id, image_id, filename}).
+    # Images de référence envoyées, dans l'ordre : image du sujet — variante de départ d'« Affiner »
+    # ({kind: variant, variant_id, filename}) ou image de départ ({kind: start, image_id, filename}) —,
+    # puis référence de style ({kind: style, asset_id, image_id, filename}).
     references: list[dict[str, Any]]
     reference_data: list[bytes]
     folder: str
@@ -401,6 +439,23 @@ class ReferenceExecutor:
                     }
                 )
                 reference_data.append(path.read_bytes())
+            elif params.get("start_image_id") is not None:
+                start_id = int(params["start_image_id"])
+                start = next((img for img in entry.reference_images if img.id == start_id), None)
+                start_path = self.files.absolute(start.path) if start is not None else None
+                if start is None or start_path is None or not start_path.is_file():
+                    raise GenerationError("image de départ introuvable (supprimée entre-temps ?)")
+                if not loaded.preset.reference_images:
+                    raise GenerationError(f"le workflow {loaded.preset.id} n'accepte pas d'image de référence")
+                ext = PurePosixPath(start.path).suffix or ".png"
+                references.append(
+                    {
+                        "kind": "start",
+                        "image_id": start.id,
+                        "filename": f"{FOLDERS[entry_kind(entry)][:-1]}{entry.id}_depart{start.id}{ext}",
+                    }
+                )
+                reference_data.append(start_path.read_bytes())
             if params.get("style_asset_id") is not None and len(references) < len(loaded.preset.reference_images):
                 style = self._style(session, entry.project_id, int(params["style_asset_id"]))
                 image = style.reference_images[0]
@@ -454,7 +509,7 @@ class ReferenceExecutor:
 
         uploaded: list[str] = []
         for ref, data in zip(plan.references, plan.reference_data, strict=True):
-            what = "la variante de départ" if ref["kind"] == "variant" else "la référence de style"
+            what = UPLOAD_LABELS.get(ref["kind"], "la référence de style")
             report(4, f"Envoi de {what} à ComfyUI…")
             uploaded.append(comfy.upload_image(data, ref["filename"], subfolder=UPLOAD_SUBFOLDER))
         built = build_workflow(plan.loaded, plan.params, reference_images=uploaded, loras=plan.loras)

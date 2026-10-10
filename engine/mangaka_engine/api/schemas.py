@@ -901,6 +901,9 @@ class ReferenceGenerateIn(_In):
     count: VariantCount = 4
     quality: bool = False  # palier Qualité au lieu de celui de la série
     seed: Annotated[int, Field(ge=0, le=MAX_SEED)] | None = None
+    # Image de départ facultative : une image de référence de la fiche (image 1 du workflow « avec
+    # références ») ; absente = à partir de zéro, depuis la description seule.
+    start_image_id: int | None = None
 
 
 class ReferenceRefineIn(_In):
@@ -984,7 +987,7 @@ class StyleBoardOut(BaseModel):
     style: str
     style_names: str
     trials_per_batch: int
-    use_reference_sheets: Literal["always", "never"] | None
+    use_reference_sheets: Literal["with_subject", "always", "never"] | None
     use_panels: Literal["free_slot", "never"] | None
     active: StyleReferenceOut | None
     history: list[StyleReferenceOut]
