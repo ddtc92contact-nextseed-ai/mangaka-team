@@ -493,8 +493,8 @@ def test_v15_database_keeps_its_old_style_read_only(make_settings: Callable[...,
         )
         # Aucun pack : l'ancien texte tient lieu de genre, avec le rendu par défaut.
         assert got["style_prompt"] == (
-            "Seinen sombre, encrage épais, manga noir et blanc, ombres en points de trame réguliers (halftone), "
-            "screentone, motifs de points gris, pas de hachures"
+            "Seinen sombre, encrage épais, black and white manga, halftone screentone dots, "
+            "regular grey dot pattern, no cross-hatching"
         )
         # Un pack seul ne suffit pas : genre, rendu et ton vont ensemble.
         bad = c.patch(f"/projects/{project['id']}", json={"style_genre": "seinen"})

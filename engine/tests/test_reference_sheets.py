@@ -178,7 +178,7 @@ def test_sheet_builds_prompt_size_and_lora_chain() -> None:
     assert "Détails : katana, cicatrice, aiko_v1." in prompt
     # Mots déclencheurs du catalogue (style_loras.yaml), puis genre, rendu et ton de la série.
     assert "Style : ink seinen style, shonen manga, dynamic energetic style," in prompt
-    assert "manga noir et blanc" in prompt and "ambiance lumineuse et joyeuse" in prompt
+    assert "black and white manga" in prompt and "ambiance lumineuse et joyeuse" in prompt
     assert "Modification demandée" not in prompt  # pas de consigne : morceau omis
 
     preset_id = sheet_preset_id(REG, sheet, series)
@@ -209,7 +209,7 @@ def test_sheet_without_lora_or_style_keeps_a_clean_prompt() -> None:
     prompt = sheet_prompt(REG, sheet, entry, legacy)
     assert "Le labo en plan large" in prompt and "Détails" not in prompt
     assert (
-        "Style : manga noir et blanc, ombres en points de trame réguliers (halftone), screentone, motifs de points gris, pas de hachures."
+        "Style : black and white manga, halftone screentone dots, regular grey dot pattern, no cross-hatching."
         in prompt
     )
     assert sheet_loras(_series(), entry) == []
