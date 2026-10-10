@@ -399,10 +399,14 @@ def save_script(session: Session, chapter: Chapter, output: ScriptOutput) -> lis
         c.name.casefold(): c.id
         for c in session.scalars(select(Character).where(Character.project_id == chapter.project_id))
     }
-    for page in list(chapter.pages):
-        if page.kind == PageKind.story:
-            chapter.pages.remove(page)
-            session.delete(page)
+    # Sans autoflush : la cascade de `session.delete` charge les relations de la page (cases, direction
+    # artistique) ; un autoflush à ce moment, page déjà retirée de `chapter.pages`, fait échouer la session
+    # (« Failed to add object to the flush context ») et un second « Découper » n'était jamais enregistré.
+    with session.no_autoflush:
+        for page in list(chapter.pages):
+            if page.kind == PageKind.story:
+                chapter.pages.remove(page)
+                session.delete(page)
     session.flush()
     kept = list(chapter.pages)
     for i, page in enumerate(kept):  # libère les numéros 1..n sans violer l'unicité
