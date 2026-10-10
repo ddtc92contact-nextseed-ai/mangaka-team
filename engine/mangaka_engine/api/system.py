@@ -11,6 +11,49 @@ from .deps import AppContext, get_ctx
 
 router = APIRouter(tags=["système"])
 
+# Libellés affichés dans l'en-tête de l'interface ; « simulé » pour les fournisseurs factices.
+_LABELS = {
+    "llm": {"deepseek": "DeepSeek", "ollama": "Ollama", "claude": "Claude", "mock": "simulé"},
+    "vision": {"ollama": "Ollama", "deepseek": "DeepSeek", "mock": "simulé"},
+    "comfyui": {"http": "réel", "mock": "simulé"},
+}
+_ENV = {"llm": "LLM_PROVIDER", "vision": "VISION_PROVIDER", "comfyui": "COMFYUI_PROVIDER"}
+
+
+def active_providers(ctx: AppContext) -> dict[str, dict[str, Any]]:
+    """Fournisseurs actifs (LLM, vision, ComfyUI) : nom, mode simulé, variable `.env` à changer.
+
+    Ne renvoie jamais de clé d'API : seulement si elle est renseignée (`key_set`).
+    """
+    providers, settings = ctx.providers, ctx.settings
+    out: dict[str, dict[str, Any]] = {}
+    for kind, env in _ENV.items():
+        name = providers.names.get(kind) or "mock"
+        entry: dict[str, Any] = {
+            "name": name,
+            "label": _LABELS[kind].get(name, name),
+            "mock": name == "mock",
+            "ok": kind not in providers.errors,
+            "detail": providers.errors.get(kind),
+            "env": env,
+            "key_env": None,
+            "key_set": None,
+        }
+        if kind == "llm" and name == "deepseek":
+            key = settings.deepseek_api_key.get_secret_value().strip() if settings.deepseek_api_key else ""
+            entry["key_env"] = "DEEPSEEK_API_KEY"
+            entry["key_set"] = bool(key)
+        if kind == "comfyui" and name == "http":
+            entry["url"] = settings.comfyui_url
+        out[kind] = entry
+    return out
+
+
+@router.get("/providers")
+def get_providers(ctx: AppContext = Depends(get_ctx)) -> dict[str, dict[str, Any]]:
+    """Fournisseurs actifs, pour le badge de l'en-tête (jamais la clé d'API elle-même)."""
+    return active_providers(ctx)
+
 
 @router.get("/health")
 def health(ctx: AppContext = Depends(get_ctx)) -> dict[str, Any]:
@@ -45,6 +88,7 @@ def health(ctx: AppContext = Depends(get_ctx)) -> dict[str, Any]:
             }
             for kind in ("llm", "vision", "comfyui", "detectors", "identity", "embedding")
         },
+        "active": active_providers(ctx),
         "mock": all(
             providers.names.get(k) == "mock" for k in ("llm", "vision", "comfyui", "detectors", "identity", "embedding")
         ),

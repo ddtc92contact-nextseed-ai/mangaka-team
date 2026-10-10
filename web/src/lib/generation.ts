@@ -55,3 +55,21 @@ export function workshopHref(chapterId: number, pageId?: number | null, panelId?
   const qs = q.toString();
   return `/chapitres/${chapterId}/atelier${qs ? `?${qs}` : ""}`;
 }
+
+/** Vue « Production » d'un chapitre (planches qui se remplissent en direct). */
+export function productionHref(chapterId: number, pageId?: number | null): string {
+  return `/chapitres/${chapterId}/production${pageId ? `?page=${pageId}` : ""}`;
+}
+
+/** « Étape 4/8 » d'une génération en cours, lue dans le message du job (null si absente). */
+export function generationStep(message: string | null | undefined): string | null {
+  const m = /étape (\d+)\s*\/\s*(\d+)/i.exec(message ?? "");
+  return m ? `Étape ${m[1]}/${m[2]}` : null;
+}
+
+/** Date du moteur (UTC, parfois sans fuseau) → millisecondes. */
+export function engineTime(iso: string | null | undefined): number | null {
+  if (!iso) return null;
+  const t = Date.parse(/[zZ]|[+-]\d\d:?\d\d$/.test(iso) ? iso : `${iso}Z`);
+  return Number.isNaN(t) ? null : t;
+}

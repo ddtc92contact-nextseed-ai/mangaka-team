@@ -3,15 +3,17 @@
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { GenerateChapterButton, missingPanels } from "@/components/generate-chapter";
+import { hasLettering, LetteredPreview } from "@/components/lettered-preview";
 import { modalOpen } from "@/components/modal";
+import { ProductionLink } from "@/components/production-link";
 import { queueItems, useQueue } from "@/components/queue";
 import { Alert, Button, ButtonLink, Card, EmptyState, Loading, Select } from "@/components/ui";
-import { api, fullErrorMessage, type Job, type PageData } from "@/lib/api";
+import { api, fullErrorMessage, type PageData } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
 import { needsReview } from "@/lib/qc";
 import { PAGE_KINDS } from "@/lib/script";
 import { useChapter } from "../chapter-context";
-import { PageCanvas, type PageCanvasHandle, type PanelView } from "./page-canvas";
+import { buildPanelViews, PageCanvas, type PageCanvasHandle } from "./page-canvas";
 import { PanelInspector } from "./panel-inspector";
 import { QCToolbar } from "./qc-toolbar";
 
@@ -36,6 +38,7 @@ function Workshop() {
   const qcStatus = useEngineData(() => api.qcStatus());
   const [onlyReview, setOnlyReview] = useState(false);
   const [showBoxes, setShowBoxes] = useState(false);
+  const [showLettering, setShowLettering] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -60,29 +63,7 @@ function Workshop() {
     router.replace(`${pathname}?${q.toString()}`, { scroll: false });
   }
 
-  // État vivant de chaque case : job en cours / en file (d'après la file), dernier échec (d'après les jobs).
-  const views = useMemo(() => {
-    const items = queueItems(queue);
-    const latest = new Map<number, Job>();
-    for (const j of jobs.data ?? []) {
-      if (j.panel_id != null && !latest.has(j.panel_id)) latest.set(j.panel_id, j);
-    }
-    const map = new Map<number, PanelView>();
-    for (const p of list) {
-      for (const panel of p.panels) {
-        const mine = items.filter((i) => i.panel_id === panel.id && i.job.step !== "qc");
-        const last = latest.get(panel.id);
-        map.set(panel.id, {
-          panel,
-          running: mine.find((i) => i.job.status === "running") ?? null,
-          pending: mine.filter((i) => i.job.status === "pending"),
-          failure: last?.status === "failed" ? last : null,
-          qc: items.find((i) => i.panel_id === panel.id && i.job.step === "qc") ?? null,
-        });
-      }
-    }
-    return map;
-  }, [list, queue, jobs.data]);
+  const views = useMemo(() => buildPanelViews(list, queueItems(queue), jobs.data ?? []), [list, queue, jobs.data]);
 
   // Échap ferme le panneau latéral (sauf si une fenêtre modale est ouverte) et rend le focus à la case.
   useEffect(() => {
@@ -217,7 +198,11 @@ function Workshop() {
       </div>
 
       {error && <Alert>{error}</Alert>}
-      {notice && !error && <Alert tone="info">{notice}</Alert>}
+      {notice && !error && (
+        <Alert tone="info">
+          {notice} <ProductionLink chapterId={chapter.id} pageId={page.id} />
+        </Alert>
+      )}
       {jobs.error && <Alert>Historique des générations indisponible : {jobs.error}</Alert>}
 
       <QCToolbar
@@ -260,17 +245,35 @@ function Workshop() {
                   <Alert tone="info">Mise en page obsolète : recalcule-la dans « Mise en page » pour des tailles justes.</Alert>
                 </div>
               )}
-              <PageCanvas
-                ref={canvasRef}
-                page={page}
-                views={views}
-                selectedPanelId={openPanelId}
-                onOpen={open}
-                showBoxes={showBoxes}
-                onlyReview={onlyReview}
-              />
+              {hasLettering(page) && (
+                <label className="mb-3 flex w-fit items-center gap-2 text-sm text-zinc-300">
+                  <input
+                    type="checkbox"
+                    checked={showLettering}
+                    onChange={(e) => setShowLettering(e.target.checked)}
+                    className="accent-rose-500"
+                    data-testid="toggle-lettering"
+                  />
+                  Afficher les bulles et onomatopées
+                </label>
+              )}
+              {showLettering && hasLettering(page) ? (
+                <LetteredPreview page={page} refreshKey={finished} />
+              ) : (
+                <PageCanvas
+                  ref={canvasRef}
+                  page={page}
+                  views={views}
+                  selectedPanelId={openPanelId}
+                  onOpen={open}
+                  showBoxes={showBoxes}
+                  onlyReview={onlyReview}
+                />
+              )}
               <p className="mt-3 text-center text-xs text-zinc-500">
-                Clique sur une case (ou flèches puis Entrée) pour la générer et choisir sa version · Échap ferme le panneau.
+                {showLettering && hasLettering(page)
+                  ? "Aperçu lettré en lecture seule : décoche la case pour revenir aux cases cliquables."
+                  : "Clique sur une case (ou flèches puis Entrée) pour la générer et choisir sa version · Échap ferme le panneau."}
               </p>
             </Card>
           )}

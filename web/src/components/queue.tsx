@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { api, fullErrorMessage, type Queue, type QueueItem } from "@/lib/api";
-import { formatDuration, workshopHref } from "@/lib/generation";
+import { formatDuration, productionHref, workshopHref } from "@/lib/generation";
 import { Badge, useEngineStatus } from "./engine-status";
 import { ProgressBar } from "./ui";
 
@@ -271,7 +271,6 @@ export function QueueIndicator() {
 
   const comfy = status.state === "online" ? status.health.comfyui : null;
   const offline = comfy !== null && !comfy.online;
-  const mock = comfy?.provider === "mock";
   const pending = queue?.pending.length ?? 0;
   const running = queue?.running ?? null;
 
@@ -306,13 +305,6 @@ export function QueueIndicator() {
           ComfyUI hors ligne
         </Badge>
       )}
-      {mock && (
-        <span className="inline-flex">
-          <Badge tone="warn" title="ComfyUI simulé : images factices, aucun GPU">
-            Mode simulé
-          </Badge>
-        </span>
-      )}
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -340,6 +332,16 @@ export function QueueIndicator() {
         >
           <div className="mb-3 flex items-center justify-between gap-2">
             <h2 className="text-sm font-semibold text-zinc-100">File d&apos;attente</h2>
+            {running?.chapter_id && (
+              <Link
+                href={productionHref(running.chapter_id, running.page_id)}
+                onClick={() => setOpen(false)}
+                className="ml-auto text-xs text-rose-300 hover:text-rose-200"
+                data-testid="see-production"
+              >
+                Voir la production →
+              </Link>
+            )}
             <Link href="/#file-attente" onClick={() => setOpen(false)} className="text-xs text-zinc-400 hover:text-zinc-100">
               Tableau de bord →
             </Link>

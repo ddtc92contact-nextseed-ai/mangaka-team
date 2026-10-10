@@ -762,3 +762,70 @@ def test_chapter_estimate(make_client: Callable[..., TestClient]) -> None:
     assert est["total_s"] == 40 + 20
     assert c.get("/chapters/999999/estimate").status_code == 404
     assert c.get("/projects/999999/estimate").status_code == 404
+
+
+# --- choix automatique de la première version (production en direct) ------------------------
+class OneByOneComfy(MockComfyUIClient):
+    """ComfyUI factice : chaque génération attend `allow.release()` pour se terminer."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = threading.Semaphore(0)
+        self.allow = threading.Semaphore(0)
+
+    def wait_for_images(self, prompt_id: str, output_node: str, **kw: Any):  # type: ignore[no-untyped-def]
+        self.started.release()
+        assert self.allow.acquire(timeout=5)
+        return super().wait_for_images(prompt_id, output_node, **kw)
+
+
+def test_first_finished_version_is_selected_and_visible_before_next(make_client: Callable[..., TestClient]) -> None:
+    comfy = OneByOneComfy()
+    c = make_client(comfy)
+    data = setup_chapter(c)
+    p1, p2, p3 = data["panels"]
+    chapter_id = data["chapter"]["id"]
+    _ok(c.post(f"/chapters/{chapter_id}/generate"), 202)
+
+    assert comfy.started.acquire(timeout=5)  # case 1 en cours
+    comfy.allow.release()
+    assert comfy.started.acquire(timeout=5)  # case 1 finie, case 2 en cours
+    pages = _ok(c.get(f"/chapters/{chapter_id}/pages"))
+    panels = {p["id"]: p for pg in pages for p in pg["panels"]}
+    # la case 1 montre déjà son image (choisie d'office) pendant que la 2 se génère
+    assert panels[p1["id"]]["selected_image_url"] is not None and panels[p1["id"]]["state"] == "review"
+    assert panels[p2["id"]]["selected_image_url"] is None and panels[p2["id"]]["state"] == "generating"
+    assert panels[p3["id"]]["state"] == "queued"
+    comfy.allow.release()
+    comfy.allow.release()
+    _wait(c)
+    for p in (p1, p2, p3):
+        [img] = _ok(c.get(f"/panels/{p['id']}/images"))
+        assert img["selected"] is True
+
+    # une case qui a déjà une version choisie la garde
+    _ok(c.post(f"/panels/{p1['id']}/generate"), 202)
+    comfy.allow.release()
+    _wait(c)
+    v1, v2 = _ok(c.get(f"/panels/{p1['id']}/images"))
+    assert v1["selected"] and not v2["selected"]
+
+    # plus de version choisie (supprimée) : la prochaine version terminée est choisie
+    assert c.delete(f"/panel-images/{v1['id']}").status_code == 204
+    _ok(c.post(f"/panels/{p1['id']}/generate"), 202)
+    comfy.allow.release()
+    _wait(c)
+    imgs = _ok(c.get(f"/panels/{p1['id']}/images"))
+    assert [(i["version"], i["selected"]) for i in imgs] == [(2, False), (3, True)]
+
+
+def test_queue_reports_tier(make_client: Callable[..., TestClient]) -> None:
+    comfy = GatedComfy()
+    c = make_client(comfy)
+    data = setup_chapter(c)
+    _ok(c.post(f"/panels/{data['panels'][1]['id']}/generate"), 202)
+    assert comfy.started.acquire(timeout=5)
+    q = _ok(c.get("/queue"))
+    assert q["running"]["tier"] == "Turbo"
+    comfy.gate.set()
+    _wait(c)

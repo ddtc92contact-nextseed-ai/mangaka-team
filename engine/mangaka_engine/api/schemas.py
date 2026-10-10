@@ -430,6 +430,7 @@ class QueueItemOut(BaseModel):
     project_id: int | None
     series_title: str | None
     preset: str | None
+    tier: str | None = None  # palier du preset (« Turbo », « Rapide », « Qualité »)
     variant: int | None
     count: int | None
     estimated_duration_s: float | None  # médiane des générations réussies du même preset
