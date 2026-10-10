@@ -4,6 +4,7 @@ import { useRef, useState, type FormEvent } from "react";
 import { api, EngineError, errorMessage, type Presets, type Project, type ProjectInput } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
 import { Modal } from "./modal";
+import { LoraPicker } from "./lora-picker";
 import { DIRECTIONS, DirectionPicker } from "./reading-direction";
 import { SERIES_STATUS } from "./status";
 import { Alert, Button, Field, Input, Select, Textarea } from "./ui";
@@ -42,6 +43,7 @@ export function ProjectForm({
     workflow_preset: initial?.workflow_preset,
     style_lora_name: initial?.style_lora_name ?? "",
     style_lora_weight: initial?.style_lora_weight ?? 0.8,
+    style_lora_trigger_words: initial?.style_lora_trigger_words ?? "",
     layout_style: initial?.layout_style,
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -92,6 +94,7 @@ export function ProjectForm({
       workflow_preset: workflow || undefined,
       layout_style: layoutStyle || undefined,
       style_lora_name: form.style_lora_name?.trim() || null,
+      style_lora_trigger_words: form.style_lora_trigger_words?.trim() ?? "",
     };
     try {
       const saved = initial ? await api.updateProject(initial.id, body) : await api.createProject(body);
@@ -174,33 +177,24 @@ export function ProjectForm({
             ))}
           </Select>
         </Field>
-        <Field
-          label="LoRA de style (optionnel)"
-          htmlFor="style_lora_name"
-          error={errors.style_lora_name}
-          hint="Fichier dans ComfyUI/models/loras, appliqué à toutes les cases."
-        >
-          <Input
-            id="style_lora_name"
-            value={form.style_lora_name ?? ""}
-            onChange={(e) => set("style_lora_name", e.target.value)}
-            placeholder="encre-seinen-v2.safetensors"
-            maxLength={255}
-          />
-        </Field>
-        <Field label="Poids du LoRA de style" htmlFor="style_lora_weight" error={errors.style_lora_weight}>
-          <Input
-            id="style_lora_weight"
-            type="number"
-            min={0}
-            max={2}
-            step={0.05}
-            value={form.style_lora_weight ?? 0.8}
-            onChange={(e) => set("style_lora_weight", Number(e.target.value))}
-            aria-invalid={Boolean(errors.style_lora_weight)}
-          />
-        </Field>
       </div>
+      <LoraPicker
+        id="style_lora_name"
+        label="LoRA de style (optionnel)"
+        hint="Appliqué à toutes les cases de la série."
+        placeholder="encre-seinen-v2.safetensors"
+        value={form.style_lora_name ?? ""}
+        onChange={(v) => set("style_lora_name", v)}
+        savedValue={initial?.style_lora_name}
+        error={errors.style_lora_name}
+        weight={String(form.style_lora_weight ?? 0.8)}
+        onWeightChange={(v) => set("style_lora_weight", Number(v))}
+        weightLabel="Poids du LoRA de style"
+        weightError={errors.style_lora_weight}
+        triggerWords={form.style_lora_trigger_words ?? ""}
+        onTriggerWordsChange={(v) => set("style_lora_trigger_words", v)}
+        triggerWordsError={errors.style_lora_trigger_words}
+      />
       <div className="grid gap-5 md:grid-cols-2">
         <Field label="Format de page" htmlFor="page_format" error={errors.page_format}>
           <Select
