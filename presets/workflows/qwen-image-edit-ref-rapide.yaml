@@ -11,6 +11,7 @@ description: >-
 workflow_file: qwen-image-edit-ref-rapide.json
 output_node: "11"
 timeout_s: 900   # au-delà, la génération est interrompue et le job passe en échec
+inpaint_with: qwen-image-inpaint-rapide   # réparation ciblée (inpainting) du même palier
 tier:
   name: Rapide
 # Durée d'une case (s) tant qu'il y a moins de 3 générations terminées avec ce preset.

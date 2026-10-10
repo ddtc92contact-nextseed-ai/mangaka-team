@@ -360,6 +360,8 @@ export interface PanelImage {
     loras?: unknown[];
     /** Emplacements de référence remplis (personnages, puis décor, puis objets). */
     reference_images?: UsedReference[];
+    /** Réparation ciblée : version source et réglages (absent pour une génération). */
+    repair?: RepairParams;
     [key: string]: unknown;
   };
   qc_score: number | null;
@@ -370,6 +372,58 @@ export interface PanelImage {
   /** Jugement humain bonne / mauvaise (banc d'essai du QC), indépendant du verdict QC. */
   annotation: Annotation | null;
   created_at: string;
+}
+
+export type RepairTarget = "face" | "hand" | "zone";
+
+/** Rectangle à repeindre, en px de l'image de la version. */
+export interface RepairRegion {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
+/** Lien d'une version réparée vers sa source (`params.repair`). */
+export interface RepairParams {
+  source_image_id: number;
+  source_version: number;
+  target: RepairTarget;
+  character_id: number | null;
+  character_name: string | null;
+  regions: RepairRegion[];
+  painted: boolean;
+  grow_px: number;
+  feather_px: number;
+  denoise: number;
+}
+
+/** Préremplissage de « Réparer » : preset du palier, réglages par défaut, prompt, personnages. */
+export interface RepairInfo {
+  available: boolean;
+  problem: string | null;
+  preset: string | null;
+  preset_name: string | null;
+  tier: string | null;
+  grow_px: number;
+  feather_px: number;
+  denoise: number;
+  target: RepairTarget;
+  character_id: number | null;
+  characters: { id: number; name: string }[];
+  prompt: string;
+}
+
+export interface RepairInput {
+  regions: RepairRegion[];
+  /** Masque peint : PNG en data URL (opaque = à repeindre). */
+  mask_png?: string | null;
+  target: RepairTarget;
+  character_id: number | null;
+  prompt: string;
+  grow_px: number;
+  feather_px: number;
+  denoise: number;
 }
 
 /** Image de référence envoyée dans un emplacement du workflow. */
@@ -1500,6 +1554,14 @@ export const api = {
     request<BatchGenerateResult>(`/chapters/${id}/generate`, json("POST", body)),
   selectPanelImage: (id: number) => request<PanelImage[]>(`/panel-images/${id}/select`, { method: "POST" }),
   deletePanelImage: (id: number) => request<void>(`/panel-images/${id}`, { method: "DELETE" }),
+  /** `character` : « auto » (le seul personnage de la case), « none » (aucun) ou l'id d'un personnage. */
+  getRepairInfo: (id: number, target: RepairTarget, character: number | "auto" | "none") =>
+    request<RepairInfo>(
+      `/panel-images/${id}/repair?target=${target}${
+        typeof character === "number" ? `&character_id=${character}` : character === "none" ? "&auto_character=false" : ""
+      }`,
+    ),
+  repairPanelImage: (id: number, body: RepairInput) => request<Job[]>(`/panel-images/${id}/repair`, json("POST", body)),
 
   getLettering: (pageId: number) => request<PageLettering>(`/pages/${pageId}/lettering`),
   resetLettering: (pageId: number) => request<PageLettering>(`/pages/${pageId}/lettering/reset`, { method: "POST" }),
