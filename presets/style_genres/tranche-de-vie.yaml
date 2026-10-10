@@ -1,0 +1,13 @@
+# Genre « tranche de vie » — champs : voir presets/README.md (« Packs de style »).
+id: tranche-de-vie
+name: Tranche de vie
+description: Le quotidien — moments ordinaires, petites émotions, ambiance intime.
+order: 60
+prompt_keywords: [slice of life manga style, everyday settings, natural relaxed poses, warm intimate atmosphere]
+layout_style: sage
+reading_direction: rtl
+fonts: { dialogue: baloo2, shout: lilita-one }
+llm_guidelines: >-
+  Tranche de vie, tout public : rythme lent et contemplatif, 5 à 7 cases par page, cases de décor et
+  de détails du quotidien entre les dialogues. Dialogues naturels du quotidien, vocabulaire courant ;
+  pas de cliffhanger forcé, une petite émotion par chapitre.

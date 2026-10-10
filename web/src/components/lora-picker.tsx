@@ -25,7 +25,8 @@ function matches(entry: Entry, query: string): boolean {
 /**
  * Choix d'un LoRA parmi ceux que ComfyUI voit (`GET /comfyui/loras`), avec son poids et ses mots
  * déclencheurs. Recherche, groupes par sous-dossier ; saisie libre quand ComfyUI est hors ligne.
- * `savedValue` : valeur enregistrée, signalée si ComfyUI ne la voit plus.
+ * `savedValue` : valeur enregistrée, signalée si ComfyUI ne la voit plus. Sans `onTriggerWordsChange`,
+ * pas de champ de mots déclencheurs (LoRA de style : ils viennent du catalogue des presets).
  */
 export function LoraPicker({
   id,
@@ -56,8 +57,8 @@ export function LoraPicker({
   onWeightChange: (value: string) => void;
   weightLabel?: string;
   weightError?: string;
-  triggerWords: string;
-  onTriggerWordsChange: (value: string) => void;
+  triggerWords?: string;
+  onTriggerWordsChange?: (value: string) => void;
   triggerWordsError?: string;
 }) {
   const [refresh, setRefresh] = useState(0);
@@ -277,20 +278,22 @@ export function LoraPicker({
           />
         </Field>
       </div>
-      <Field
-        label="Mots déclencheurs (optionnel)"
-        htmlFor={`${id}_triggers`}
-        error={triggerWordsError}
-        hint="Ajoutés au prompt quand ce LoRA est appliqué. Séparés par des virgules."
-      >
-        <Input
-          id={`${id}_triggers`}
-          value={triggerWords}
-          onChange={(e) => onTriggerWordsChange(e.target.value)}
-          placeholder="ex. aiko_v1, ink style"
-          maxLength={500}
-        />
-      </Field>
+      {onTriggerWordsChange && (
+        <Field
+          label="Mots déclencheurs (optionnel)"
+          htmlFor={`${id}_triggers`}
+          error={triggerWordsError}
+          hint="Ajoutés au prompt quand ce LoRA est appliqué. Séparés par des virgules."
+        >
+          <Input
+            id={`${id}_triggers`}
+            value={triggerWords ?? ""}
+            onChange={(e) => onTriggerWordsChange(e.target.value)}
+            placeholder="ex. aiko_v1, ink style"
+            maxLength={500}
+          />
+        </Field>
+      )}
     </div>
   );
 }

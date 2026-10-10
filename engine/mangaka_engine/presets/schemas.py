@@ -645,6 +645,139 @@ class LayoutStyle(_Strict):
         return self
 
 
+# --- Packs de style de la série (presets/style_*/) ------------------------------
+# Le style d'une série se choisit uniquement dans ces listes fermées (genre, rendu, ton, réglages fins) ;
+# pipeline/style.py en compose le $style des prompts image et les consignes des LLM.
+STYLE_ID = r"^[a-z0-9][a-z0-9-]*$"
+# Palier Turbo (cfg 1) : le prompt négatif est quasiment sans effet, les mots-clés disent ce qu'on veut voir.
+_NEGATIVE_KEYWORD = re.compile(r"\b(no|not|without|never|sans|pas|aucun|aucune|jamais|ni)\b", re.IGNORECASE)
+
+
+def _check_keywords(value: list[str]) -> list[str]:
+    out = [" ".join(k.split()) for k in value]
+    if any(not k for k in out):
+        raise ValueError("mot-clé vide")
+    negative = [k for k in out if _NEGATIVE_KEYWORD.search(k)]
+    if negative:
+        raise ValueError(
+            f"formulations positives uniquement (le prompt négatif est sans effet en Turbo) : « {negative[0]} »"
+        )
+    return list(dict.fromkeys(out))
+
+
+class StylePack(_Strict):
+    """Champs communs à un genre, un rendu et un ton."""
+
+    id: str = Field(pattern=STYLE_ID)
+    name: str = Field(min_length=1, description="Nom affiché (français)")
+    description: str = Field(min_length=1, description="Description affichée sous la liste (français)")
+    prompt_keywords: list[str] = Field(min_length=1, description="Mots-clés du prompt image, positifs uniquement")
+    order: int = Field(default=100, description="Ordre dans la liste déroulante")
+
+    @field_validator("prompt_keywords")
+    @classmethod
+    def _keywords(cls, value: list[str]) -> list[str]:
+        return _check_keywords(value)
+
+
+class GenreFonts(_Strict):
+    dialogue: str = Field(description="Police des bulles de parole (fonts.yaml)")
+    shout: str = Field(description="Police des cris (fonts.yaml)")
+
+
+class StyleGenre(StylePack):
+    """Genre et public (`presets/style_genres/*.yaml`) : il pré-remplit la mise en page de la série."""
+
+    layout_style: str = Field(description="Grammaire de mise en page par défaut (layout_styles/)")
+    reading_direction: Literal["ltr", "rtl"]
+    fonts: GenreFonts
+    llm_guidelines: str = Field(min_length=1, description="Consignes du scénariste et du directeur artistique")
+    # Absent : tous les tons. Sinon, seuls ceux-ci (ex. « jeunesse » exclut « dark »).
+    allowed_tones: list[str] | None = None
+    style_lora: str | None = Field(default=None, description="LoRA conseillé (fichier du catalogue style_loras.yaml)")
+
+
+class StyleRendering(StylePack):
+    """Rendu (`presets/style_renderings/*.yaml`) : remplace toute mention de rendu en dur du prompt."""
+
+    monochrome: bool = Field(description="Rendu noir et blanc : seul à accepter le réglage « trames »")
+    default: bool = False
+
+
+class StyleTone(StylePack):
+    """Ton (`presets/style_tones/*.yaml`)."""
+
+    llm_guidelines: str = Field(default="", description="Consignes ajoutées à celles du genre (facultatif)")
+    default: bool = False
+
+
+class StyleOptionChoice(_Strict):
+    name: str = Field(min_length=1)
+    prompt_keywords: list[str] = Field(min_length=1)
+
+    @field_validator("prompt_keywords")
+    @classmethod
+    def _keywords(cls, value: list[str]) -> list[str]:
+        return _check_keywords(value)
+
+
+class StyleOption(_Strict):
+    """Réglage fin borné : une liste de choix, chacun avec ses mots-clés. Non choisi = rien d'ajouté."""
+
+    name: str = Field(min_length=1)
+    description: str = ""
+    monochrome_only: bool = Field(default=False, description="Réservé aux rendus N&B (trames)")
+    choices: dict[str, StyleOptionChoice] = Field(min_length=1)
+
+    @field_validator("choices")
+    @classmethod
+    def _choice_ids(cls, value: dict[str, StyleOptionChoice]) -> dict[str, StyleOptionChoice]:
+        bad = [k for k in value if not re.match(STYLE_ID, k)]
+        if bad:
+            raise ValueError(f"identifiant de choix invalide : « {bad[0]} » (minuscules, chiffres, tirets)")
+        return value
+
+
+class StyleOptions(_Strict):
+    """`presets/style_options.yaml` : réglages fins, dans l'ordre du fichier (= ordre dans le prompt)."""
+
+    options: dict[str, StyleOption] = Field(default_factory=dict)
+
+    @field_validator("options")
+    @classmethod
+    def _option_ids(cls, value: dict[str, StyleOption]) -> dict[str, StyleOption]:
+        bad = [k for k in value if not re.match(r"^[a-z][a-z0-9_]*$", k)]
+        if bad:
+            raise ValueError(f"identifiant de réglage invalide : « {bad[0]} » (minuscules, chiffres, _)")
+        return value
+
+
+class StyleLora(_Strict):
+    file: str = Field(min_length=1, description="Nom du fichier tel que ComfyUI le liste (sous-dossier compris)")
+    name: str = ""
+    trigger_words: list[str] = Field(default_factory=list)
+    weight: float = Field(default=0.8, ge=0, le=2, description="Poids conseillé")
+
+
+class StyleLoraCatalog(_Strict):
+    """`presets/style_loras.yaml` : mots déclencheurs et poids conseillé des LoRA de style connus."""
+
+    loras: list[StyleLora] = Field(default_factory=list)
+
+    @field_validator("loras")
+    @classmethod
+    def _unique(cls, value: list[StyleLora]) -> list[StyleLora]:
+        seen: set[str] = set()
+        for lo in value:
+            if lo.file in seen:
+                raise ValueError(f"fichier en double : {lo.file}")
+            seen.add(lo.file)
+        return value
+
+    def get(self, file: str | None) -> StyleLora | None:
+        return next((lo for lo in self.loras if lo.file == file), None) if file else None
+
+
 # --- Lettrage (étape 5) -------------------------------------------------------
 BUBBLE_KINDS = ("speech", "thought", "shout", "narration", "off")
 HEX_COLOR = r"^#[0-9a-fA-F]{6}$"
@@ -942,7 +1075,7 @@ class ImagePromptSettings(_Strict):
             "$description.",
             "Personnages : $characters.",
             "Style : $style.",
-            "Case de manga, dessin encré, sans aucun texte ni bulle.",
+            "Aucun texte ni bulle dans l'image.",
         ]
     )
     character: str = Field(default="$name ($details)", description="Variables : $name, $details")

@@ -12,6 +12,7 @@ from sqlalchemy import select
 from mangaka_engine.config import Settings
 from mangaka_engine.main import create_app
 from mangaka_engine.store.models import Panel, PanelImage
+from tests.conftest import STYLE
 
 
 @pytest.fixture
@@ -21,7 +22,7 @@ def app_client(make_settings: Callable[..., Settings]) -> Iterator[TestClient]:
 
 
 def _scripted(c: TestClient, **series: Any) -> tuple[dict, list[dict]]:
-    project = c.post("/projects", json={"title": "Série nerveuse", **series})
+    project = c.post("/projects", json={**STYLE, "title": "Série nerveuse", **series})
     assert project.status_code == 201, project.text
     sid = project.json()["id"]
     ch = c.post(
@@ -36,9 +37,9 @@ def _scripted(c: TestClient, **series: Any) -> tuple[dict, list[dict]]:
 
 def test_series_layout_style_defaults_to_dynamique_and_is_validated(app_client: TestClient) -> None:
     c = app_client
-    created = c.post("/projects", json={"title": "Sans style"}).json()
+    created = c.post("/projects", json={**STYLE, "title": "Sans style"}).json()
     assert created["layout_style"] == "dynamique"
-    bad = c.post("/projects", json={"title": "x", "layout_style": "baroque"})
+    bad = c.post("/projects", json={**STYLE, "title": "x", "layout_style": "baroque"})
     assert bad.status_code == 422 and "style de mise en page inconnu" in bad.text
     upd = c.patch(f"/projects/{created['id']}", json={"layout_style": "nerveuse"})
     assert upd.json()["layout_style"] == "nerveuse"

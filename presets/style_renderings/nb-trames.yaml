@@ -1,0 +1,8 @@
+# Rendu « N&B à trames » (par défaut) — champs : voir presets/README.md (« Packs de style »).
+id: nb-trames
+name: N&B à trames
+description: Noir et blanc encré, ombres et volumes en trames, comme un manga imprimé.
+order: 10
+default: true
+monochrome: true
+prompt_keywords: [black and white manga, inked linework, screentone shading]

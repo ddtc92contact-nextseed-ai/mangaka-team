@@ -1,0 +1,26 @@
+# Réglages fins du style d'une série : listes bornées, chacune avec ses mots-clés (positifs uniquement).
+# Un réglage non choisi n'ajoute rien au prompt. Ordre des réglages = ordre dans le prompt.
+# Champs : voir presets/README.md (« Packs de style »).
+options:
+  trait:
+    name: Trait
+    description: Épaisseur du trait d'encrage.
+    choices:
+      fin: { name: Fin, prompt_keywords: [fine thin linework] }
+      moyen: { name: Moyen, prompt_keywords: [medium line weight] }
+      epais: { name: Épais, prompt_keywords: [thick bold linework] }
+  trames:
+    name: Trames
+    description: Densité des trames (rendus noir et blanc seulement).
+    monochrome_only: true
+    choices:
+      legeres: { name: Légères, prompt_keywords: [light sparse screentones] }
+      moyennes: { name: Moyennes, prompt_keywords: [medium screentones] }
+      denses: { name: Denses, prompt_keywords: [dense heavy screentones] }
+  detail:
+    name: Détail des décors
+    description: Niveau de détail des arrière-plans.
+    choices:
+      simple: { name: Simple, prompt_keywords: [simple minimal backgrounds] }
+      moyen: { name: Moyen, prompt_keywords: [moderately detailed backgrounds] }
+      riche: { name: Riche, prompt_keywords: [richly detailed intricate backgrounds] }

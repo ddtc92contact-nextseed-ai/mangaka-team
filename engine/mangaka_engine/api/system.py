@@ -134,6 +134,48 @@ def list_presets(ctx: AppContext = Depends(get_ctx)) -> dict[str, Any]:
             }
             for st in reg.layout_styles.values()
         ],
+        # Packs de style (listes fermées de la fiche série), dans leur ordre d'affichage.
+        "style_genres": [
+            {
+                "id": g.id,
+                "name": g.name,
+                "description": g.description,
+                "layout_style": g.layout_style,
+                "reading_direction": g.reading_direction,
+                "fonts": {"dialogue": g.fonts.dialogue, "shout": g.fonts.shout},
+                "allowed_tones": g.allowed_tones,
+                "style_lora": g.style_lora,
+            }
+            for g in reg.style_genres.values()
+        ],
+        "style_renderings": [
+            {
+                "id": r.id,
+                "name": r.name,
+                "description": r.description,
+                "monochrome": r.monochrome,
+                "is_default": r.id == reg.default_style_rendering,
+            }
+            for r in reg.style_renderings.values()
+        ],
+        "style_tones": [
+            {"id": t.id, "name": t.name, "description": t.description, "is_default": t.id == reg.default_style_tone}
+            for t in reg.style_tones.values()
+        ],
+        "style_options": [
+            {
+                "id": key,
+                "name": o.name,
+                "description": o.description,
+                "monochrome_only": o.monochrome_only,
+                "choices": [{"id": cid, "name": c.name} for cid, c in o.choices.items()],
+            }
+            for key, o in reg.style_options.options.items()
+        ],
+        "style_loras": [
+            {"file": lo.file, "name": lo.name, "trigger_words": lo.trigger_words, "weight": lo.weight}
+            for lo in reg.style_loras.loras
+        ],
         "prompts": sorted(reg.prompts),
         "workflows": [
             {

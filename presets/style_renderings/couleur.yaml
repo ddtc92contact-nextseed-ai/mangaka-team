@@ -1,0 +1,7 @@
+# Rendu « couleur » — champs : voir presets/README.md (« Packs de style »).
+id: couleur
+name: Couleur cel-shading
+description: Couleurs franches en aplats et ombres nettes, comme un anime.
+order: 30
+monochrome: false
+prompt_keywords: [full color, cel shading, clean flat colors, crisp ink outlines]

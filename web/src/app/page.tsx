@@ -166,7 +166,7 @@ export default function DashboardPage() {
                     <span className="truncate">{p.title}</span>
                     <SeriesStatusBadge status={p.status} />
                   </p>
-                  <p className="mt-1 line-clamp-2 text-sm text-zinc-400">{p.style || "Style non défini"}</p>
+                  <p className="mt-1 line-clamp-2 text-sm text-zinc-400">{p.style_label || "Style à choisir"}</p>
                   <p className="mt-3 text-xs text-zinc-500">
                     {p.chapter_count} chapitre{p.chapter_count > 1 ? "s" : ""} · {p.character_count} personnage
                     {p.character_count > 1 ? "s" : ""} ·{" "}

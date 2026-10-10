@@ -26,7 +26,7 @@ from mangaka_engine.pipeline.art_direction import (
 from mangaka_engine.presets import PresetRegistry
 from mangaka_engine.providers.llm import LLMAuthError, MockLLMProvider
 from mangaka_engine.providers.llm.mock import mock_art_direction
-from tests.conftest import PRESETS_DIR
+from tests.conftest import PRESETS_DIR, STYLE
 
 PRESETS = PresetRegistry.load(PRESETS_DIR)
 PROMPT = PRESETS.prompt("direction-artistique")
@@ -198,7 +198,7 @@ def _wait(c: TestClient, job: dict) -> dict:
 
 
 def _series(c: TestClient, title: str = "Série DA", **kw: Any) -> int:
-    r = c.post("/projects", json={"title": title, **kw})
+    r = c.post("/projects", json={**STYLE, "title": title, **kw})
     assert r.status_code == 201, r.text
     return r.json()["id"]
 

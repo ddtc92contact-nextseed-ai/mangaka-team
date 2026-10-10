@@ -1,0 +1,13 @@
+# Genre « magical girl » — champs : voir presets/README.md (« Packs de style »).
+id: magical-girl
+name: Magical girl
+description: Héroïnes aux pouvoirs magiques — transformations, costumes, amitié.
+order: 50
+prompt_keywords: [magical girl manga style, ornate frilly costumes, sparkling magic effects, glowing particles]
+layout_style: dynamique
+reading_direction: rtl
+fonts: { dialogue: fredoka, shout: lilita-one }
+llm_guidelines: >-
+  Magical girl, public adolescent : alternance de vie quotidienne et de combats magiques, 4 à 6 cases
+  par page, une grande case pour chaque transformation ou attaque spéciale. Dialogues enjoués,
+  vocabulaire simple ; amitié et courage au cœur de l'histoire.

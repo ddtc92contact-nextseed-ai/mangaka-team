@@ -39,7 +39,7 @@ from mangaka_engine.store.models import (
     Project,
     SeriesBible,
 )
-from tests.conftest import PRESETS_DIR
+from tests.conftest import PRESETS_DIR, STYLE
 
 FIXTURES = Path(__file__).parent / "fixtures"
 SETTINGS = KnowledgeSettings(small_collection_tokens=0)
@@ -306,7 +306,7 @@ def test_upload_md_and_pdf_then_collection_counts(client: TestClient) -> None:
 
 # --- bible ----------------------------------------------------------------------------
 def _series(client: TestClient, title: str) -> dict:
-    return client.post("/projects", json={"title": title, "style": "encre"}).json()
+    return client.post("/projects", json={**STYLE, "title": title}).json()
 
 
 def test_bible_is_always_included_for_its_series_and_never_leaks(client: TestClient) -> None:

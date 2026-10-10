@@ -2,7 +2,10 @@
 # engine/mangaka_engine/pipeline/art_direction.py et presets/README.md (« Direction artistique »).
 #
 # Variables disponibles ($nom ; écrire $$ pour un « $ » littéral) :
-#   $series_title $series_style $reading_direction $characters
+#   $series_title $reading_direction $characters
+#   $style_packs      (packs de style de la série : genre, rendu, ton, réglages fins — noms et descriptions)
+#   $style_guidelines (consignes du genre et du ton : rythme, cases par page, vocabulaire adapté à l'âge)
+#   ($series_style : ancien nom de $style_packs, gardé pour les prompts personnalisés)
 #   $decors $objets      (bibliothèque de la série : « - id N · nom : description courte », un par ligne)
 #   $layout_style        (style de mise en page de la série) · $layout_styles (styles disponibles)
 #   $chapter_number $chapter_title $synopsis $summary
@@ -31,7 +34,8 @@ system: |
 
 user: |
   Série : « $series_title »
-  Style graphique : $series_style
+  Style de la série :
+  $style_packs
   Sens de lecture : $reading_direction
   Style de mise en page de la série : $layout_style
   Styles de mise en page disponibles :
@@ -60,6 +64,9 @@ user: |
   Résumé : $summary
 
   Audace demandée : $variety
+
+  Consignes du genre et du ton de la série (rythme, cadrage, public) :
+  $style_guidelines
 
   Scénario des pages :
   $pages

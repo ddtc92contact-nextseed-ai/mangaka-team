@@ -46,9 +46,51 @@ def data(title: str, value: Any) -> Section:
 # --- exemple commun ------------------------------------------------------------------------------
 SERIES = {
     "title": "La Lame du vent (série d'essai)",
-    "style": "shōnen, encrage net, trames légères",
     "reading_direction": "rtl",
 }
+# Packs de style de la série d'essai (presets/style_*/) ; un pack absent est remplacé par le premier.
+SERIES_STYLE = {"genre": "shonen", "rendering": "nb-trames", "tone": "lumineux", "options": {"trames": "legeres"}}
+
+
+def _trial_project(presets: PresetRegistry) -> Any:
+    from ..store.models import Project
+
+    def pick(packs: dict[str, Any], wanted: str) -> str | None:
+        return wanted if wanted in packs else next(iter(packs), None)
+
+    genre = pick(presets.style_genres, SERIES_STYLE["genre"])  # type: ignore[arg-type]
+    rendering = pick(presets.style_renderings, SERIES_STYLE["rendering"])  # type: ignore[arg-type]
+    tone = pick(presets.style_tones, SERIES_STYLE["tone"])  # type: ignore[arg-type]
+    allowed = presets.style_genres[genre].allowed_tones if genre else None
+    if allowed is not None and tone not in allowed:
+        tone = allowed[0]
+    r = presets.style_renderings.get(rendering or "")
+    options = SERIES_STYLE["options"] if r is not None and r.monochrome else {}
+    return Project(
+        title=SERIES["title"],
+        legacy_style="",
+        style_genre=genre,
+        style_rendering=rendering,
+        style_tone=tone,
+        style_options=dict(options),  # type: ignore[arg-type]
+    )
+
+
+def trial_series(presets: PresetRegistry) -> dict[str, Any]:
+    """Série d'essai telle que la reçoivent les LLM : packs de style et consignes compris."""
+    from ..pipeline.style import style_brief
+
+    brief = style_brief(presets, _trial_project(presets))
+    return {**SERIES, "style": brief.packs, "style_guidelines": brief.guidelines}
+
+
+def trial_style(presets: PresetRegistry) -> str:
+    """`$style` de la série d'essai."""
+    from ..pipeline.style import series_style
+
+    return series_style(presets, _trial_project(presets))
+
+
 CHARACTERS = [
     {"name": "Aiko", "description": "lycéenne, cheveux courts noirs, bandeau rouge, sabre de bois"},
     {"name": "Ren", "description": "rival au regard froid, long manteau gris, cicatrice à la joue"},
@@ -79,7 +121,9 @@ def trial_script(ctx: TrialContext) -> dict[str, Any]:
 
     prompt = ctx.presets.prompt("script")
     previous = PREVIOUS[-prompt.max_previous_chapters :] if prompt.max_previous_chapters else []
-    script_ctx = ScriptContext(series=SERIES, characters=CHARACTERS, previous_chapters=previous, chapter=CHAPTER)
+    script_ctx = ScriptContext(
+        series=trial_series(ctx.presets), characters=CHARACTERS, previous_chapters=previous, chapter=CHAPTER
+    )
     try:
         messages = render_messages(prompt, script_ctx)
     except PresetError as exc:
@@ -221,7 +265,7 @@ def trial_image_prompt(ctx: TrialContext) -> dict[str, Any]:
         angle=PANEL["angle"],  # type: ignore[arg-type]
         ambiance=PANEL["ambiance"],  # type: ignore[arg-type]
         characters=characters,
-        style=SERIES["style"],
+        style=trial_style(presets),
         settings=presets.image_prompt,
     )
     wf_id = presets.defaults.workflow if presets.defaults else next(iter(presets.workflows), None)
@@ -243,7 +287,7 @@ def trial_image_prompt(ctx: TrialContext) -> dict[str, Any]:
                     "description": PANEL["description"],
                     "plan": PANEL["shot_type"],
                     "personnages": [f"{c.name} : {c.visual_description}" for c in characters],
-                    "style de la série": SERIES["style"],
+                    "style de la série": trial_style(presets),
                     "case (px)": f"{w} × {h}",
                 },
             )

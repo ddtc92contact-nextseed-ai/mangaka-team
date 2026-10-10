@@ -33,7 +33,7 @@ from mangaka_engine.providers.comfyui import (
 from mangaka_engine.providers.comfyui.base import images_from_history
 from mangaka_engine.providers.factory import Providers
 from mangaka_engine.providers.llm import MockLLMProvider
-from tests.conftest import COMFY_FIXTURES, PRESETS_DIR
+from tests.conftest import COMFY_FIXTURES, PRESETS_DIR, STYLE
 
 REG = PresetRegistry.load(PRESETS_DIR)
 OBJECT_INFO: dict[str, Any] = json.loads((COMFY_FIXTURES / "object_info.json").read_text())
@@ -486,7 +486,7 @@ def test_check_endpoint_mock_and_http(make_client: Callable[[ComfyUIClient], Tes
 
     info = _object_info()
     c = make_client(_http(_fixture_server(info)))
-    series = c.post("/projects", json={"title": "Les Lames", "style_lora_name": _installed_lora()}).json()
+    series = c.post("/projects", json={**STYLE, "title": "Les Lames", "style_lora_name": _installed_lora()}).json()
     c.post(f"/projects/{series['id']}/characters", json={"name": "Aiko", "lora_name": "aiko-absent.safetensors"})
     report = c.get("/comfyui/check").json()
     assert report["online"] and report["url"] == "http://127.0.0.1:8188"

@@ -31,7 +31,8 @@ from mangaka_engine.store.models import (
     SeriesAsset,
     SeriesAssetImage,
 )
-from tests.conftest import PRESETS_DIR, png_bytes
+from tests.conftest import PRESETS_DIR, STYLE, png_bytes
+from tests.test_migrations import _drop_v16_style
 
 REG = PresetRegistry.load(PRESETS_DIR)
 
@@ -65,7 +66,7 @@ def _wait_job(c: TestClient, job_id: int) -> dict[str, Any]:
 
 
 def _series(c: TestClient) -> dict[str, Any]:
-    return _ok(c.post("/projects", json={"title": "Robo Lycée", "style": "Shōnen lumineux"}), 201)
+    return _ok(c.post("/projects", json={**STYLE, "title": "Robo Lycée"}), 201)
 
 
 # --- API : même forme que les personnages ---------------------------------------------
@@ -452,6 +453,7 @@ def test_database_from_before_the_library_keeps_working(make_settings: Callable[
             )
         )
     con = sqlite3.connect(settings.database_path)
+    _drop_v16_style(con)  # v16 : packs de style
     for table, column in [
         ("panels", "composition_lock"),  # v15 : verrouillage de composition
         ("projects", "clean_mode"),

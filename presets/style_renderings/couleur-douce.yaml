@@ -1,0 +1,7 @@
+# Rendu « couleur douce » — champs : voir presets/README.md (« Packs de style »).
+id: couleur-douce
+name: Couleur douce
+description: Aquarelle aux tons pastel, dégradés légers.
+order: 40
+monochrome: false
+prompt_keywords: [soft watercolor coloring, pastel color palette, gentle color gradients]

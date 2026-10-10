@@ -23,13 +23,13 @@ from mangaka_engine.pipeline.comfy_loras import (
     lora_loaders,
     split_lora_name,
 )
-from mangaka_engine.pipeline.generation import split_trigger_words, style_with_triggers
+from mangaka_engine.pipeline.generation import split_trigger_words
 from mangaka_engine.presets import LoraSpec, PresetRegistry, build_workflow
 from mangaka_engine.providers.comfyui import ComfyUIClient, HttpComfyUIClient, MockComfyUIClient
 from mangaka_engine.providers.comfyui.mock import MOCK_LORAS
 from mangaka_engine.providers.factory import Providers
 from mangaka_engine.providers.llm import MockLLMProvider
-from tests.conftest import COMFY_FIXTURES, PRESETS_DIR
+from tests.conftest import COMFY_FIXTURES, PRESETS_DIR, STYLE
 from tests.test_generation import _ok, _wait, setup_chapter
 
 REG = PresetRegistry.load(PRESETS_DIR)
@@ -209,21 +209,22 @@ def test_endpoint_mock_http_offline(make_client: Callable[..., TestClient]) -> N
 
 def test_trigger_words_saved_and_cleared(make_client: Callable[..., TestClient]) -> None:
     c = make_client(MockComfyUIClient(online=False))
-    # ComfyUI hors ligne : le nom tapé à la main est enregistré tel quel.
+    # ComfyUI hors ligne : le nom tapé à la main est enregistré tel quel ; hors catalogue, pas de mots déclencheurs.
     s = _ok(
-        c.post(
-            "/projects",
-            json={
-                "title": "Les Lames",
-                "style_lora_name": "persos/encre.safetensors",
-                "style_lora_trigger_words": " encre seinen ",
-            },
-        ),
-        201,
+        c.post("/projects", json={**STYLE, "title": "Les Lames", "style_lora_name": "persos/encre.safetensors"}), 201
     )
-    assert (s["style_lora_name"], s["style_lora_trigger_words"]) == ("persos/encre.safetensors", "encre seinen")
-    s = _ok(c.patch(f"/projects/{s['id']}", json={"style_lora_trigger_words": None}))
-    assert s["style_lora_trigger_words"] == ""
+    assert (s["style_lora_name"], s["style_lora_trigger_words"], s["style_lora_in_catalog"]) == (
+        "persos/encre.safetensors",
+        [],
+        False,
+    )
+    # Les mots déclencheurs du LoRA de style ne se tapent plus : champ refusé.
+    bad = c.patch(f"/projects/{s['id']}", json={"style_lora_trigger_words": "encre seinen"})
+    assert bad.status_code == 422 and bad.json()["errors"][0]["field"] == "style_lora_trigger_words"
+    # LoRA du catalogue (style_loras.yaml) : mots déclencheurs et poids conseillé.
+    s = _ok(c.patch(f"/projects/{s['id']}", json={"style_lora_name": "encre-seinen_v2.safetensors"}))
+    assert s["style_lora_trigger_words"] == ["ink seinen style"] and s["style_lora_in_catalog"] is True
+    assert s["style_prompt"].startswith("ink seinen style, shonen manga style")
     a = _ok(c.post(f"/projects/{s['id']}/characters", json={"name": "Aiko", "lora_trigger_words": "aiko_v1"}), 201)
     assert a["lora_trigger_words"] == "aiko_v1"
     a = _ok(c.patch(f"/characters/{a['id']}", json={"lora_trigger_words": ""}))
@@ -234,9 +235,6 @@ def test_trigger_words_saved_and_cleared(make_client: Callable[..., TestClient])
 def test_trigger_word_helpers() -> None:
     assert split_trigger_words(" aiko_v1, , red kimono ") == ("aiko_v1", "red kimono")
     assert split_trigger_words(None) == ()
-    assert style_with_triggers("Seinen sombre", "inkstyle") == "inkstyle, Seinen sombre"
-    assert style_with_triggers("", "inkstyle") == "inkstyle"
-    assert style_with_triggers("Seinen sombre", "  ") == "Seinen sombre"
 
 
 def test_builder_keeps_subfolder_lora_name() -> None:
@@ -260,7 +258,7 @@ def test_picked_mock_lora_reaches_workflow_graph(make_client: Callable[..., Test
     _ok(
         c.patch(
             f"/projects/{data['series']['id']}",
-            json={"style_lora_name": style, "style_lora_weight": 0.6, "style_lora_trigger_words": "lavis"},
+            json={"style_lora_name": style, "style_lora_weight": 0.6},
         )
     )
     _ok(c.patch(f"/characters/{data['aiko']['id']}", json={"lora_name": aiko_lora, "lora_trigger_words": "aiko_v1"}))
@@ -269,7 +267,8 @@ def test_picked_mock_lora_reaches_workflow_graph(make_client: Callable[..., Test
     _wait(c)
     [img] = _ok(c.get(f"/panels/{p1['id']}/images"))
     assert [(lo["name"], lo["weight"]) for lo in img["params"]["loras"]] == [(style, 0.6), (aiko_lora, 0.9)]
-    assert "lavis, Seinen sombre" in img["params"]["prompt"] and "aiko_v1" in img["params"]["prompt"]
+    assert style == "styles/aquarelle/lavis-doux.safetensors"  # catalogue : « soft wash painting »
+    assert "soft wash painting, seinen manga style" in img["params"]["prompt"] and "aiko_v1" in img["params"]["prompt"]
     [wf] = comfy.prompts.values()
     sent = [n["inputs"]["lora_name"] for n in wf.values() if n["class_type"] == "LoraLoaderModelOnly"]
     assert sent == [style, aiko_lora]

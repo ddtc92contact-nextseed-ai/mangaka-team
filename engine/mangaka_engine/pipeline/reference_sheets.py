@@ -44,9 +44,10 @@ from ..store.models import (
     SeriesAsset,
     SeriesAssetImage,
 )
-from .generation import UPLOAD_SUBFOLDER, GenerationError, split_trigger_words, style_with_triggers
+from .generation import UPLOAD_SUBFOLDER, GenerationError, split_trigger_words
 from .jobs import JobReporter
 from .prompt import build_negative_prompt
+from .style import series_style
 
 STEP = "reference"
 ACTIVE = (JobStatus.pending, JobStatus.running)
@@ -88,16 +89,17 @@ def _clean(text: str | None) -> str:
     return " ".join((text or "").split()).rstrip(" .;,:")
 
 
-def sheet_prompt(sheet: ReferenceSheet, entry: LibraryEntry, series: Project, instruction: str = "") -> str:
+def sheet_prompt(
+    presets: PresetRegistry, sheet: ReferenceSheet, entry: LibraryEntry, series: Project, instruction: str = ""
+) -> str:
     """Prompt positif : morceaux du type de fiche, un morceau dont une variable est vide est omis."""
     triggers = split_trigger_words(entry.lora_trigger_words) if entry.lora_name else ()
     keywords = list(dict.fromkeys(k for k in (_clean(k) for k in (*(entry.prompt_keywords or []), *triggers)) if k))
-    style_triggers = series.style_lora_trigger_words if series.style_lora_name else ""
     values = {
         "name": _clean(entry.name),
         "description": _clean(entry.visual_description),
         "keywords": ", ".join(keywords),
-        "style": _clean(style_with_triggers(series.style or "", style_triggers)),
+        "style": _clean(series_style(presets, series)),
         "instruction": _clean(instruction),
     }
     parts: list[str] = []
@@ -207,7 +209,7 @@ def enqueue_sheet(
         raise GenerationError("série introuvable")
     preset_id = sheet_preset_id(presets, sheet, series, quality=quality, refine=parent is not None)
     loaded = presets.workflow(preset_id)
-    prompt = sheet_prompt(sheet, entry, series, instruction)
+    prompt = sheet_prompt(presets, sheet, entry, series, instruction)
     if not prompt.strip():
         raise GenerationError("prompt vide : décris la fiche (description visuelle ou mots-clés)")
     jobs: list[Job] = []

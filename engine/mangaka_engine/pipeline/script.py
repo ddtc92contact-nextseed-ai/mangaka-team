@@ -41,6 +41,7 @@ from ..validation import format_errors
 from .knowledge import AgentKnowledge, KnowledgeBase
 from .library import SeriesLibrary
 from .pages import layout_pages
+from .style import NO_GUIDELINES, style_brief, style_names
 
 AGENT = "script"  # rôle de l'agent dans presets/knowledge.yaml
 
@@ -258,15 +259,22 @@ class ScriptContext:
 DIRECTION_LABELS = {"rtl": "de droite à gauche (manga)", "ltr": "de gauche à droite (BD, comics)"}
 
 
-def knowledge_query(chapter: Chapter) -> str:
-    """Requête de recherche du savoir-faire pour un chapitre : titre, synopsis, style de la série."""
-    return "\n".join(p for p in (chapter.title, chapter.synopsis, chapter.project.style) if p and p.strip())
+def knowledge_query(presets: PresetRegistry, chapter: Chapter) -> str:
+    """Requête de recherche du savoir-faire pour un chapitre : titre, synopsis, packs de style de la série."""
+    style = style_names(presets, chapter.project)
+    return "\n".join(p for p in (chapter.title, chapter.synopsis, style) if p and p.strip())
 
 
 def build_context(
-    session: Session, chapter: Chapter, *, max_previous: int, knowledge: KnowledgeBase | None = None
+    session: Session,
+    presets: PresetRegistry,
+    chapter: Chapter,
+    *,
+    max_previous: int,
+    knowledge: KnowledgeBase | None = None,
 ) -> ScriptContext:
     series = chapter.project
+    brief = style_brief(presets, series)
     characters = session.scalars(
         select(Character).where(Character.project_id == series.id).order_by(Character.name)
     ).all()
@@ -279,7 +287,8 @@ def build_context(
     return ScriptContext(
         series={
             "title": series.title,
-            "style": series.style,
+            "style": brief.packs,
+            "style_guidelines": brief.guidelines,
             "reading_direction": series.reading_direction.value,
         },
         characters=[{"name": c.name, "description": c.visual_description} for c in characters],
@@ -293,7 +302,9 @@ def build_context(
             "synopsis": chapter.synopsis,
             "target_pages": chapter.target_page_count,
         },
-        knowledge=knowledge.for_agent(session, AGENT, series.id, knowledge_query(chapter)) if knowledge else None,
+        knowledge=knowledge.for_agent(session, AGENT, series.id, knowledge_query(presets, chapter))
+        if knowledge
+        else None,
         library=SeriesLibrary.load(session, series.id),
     )
 
@@ -315,7 +326,10 @@ def render_messages(prompt: PromptPreset, ctx: ScriptContext) -> list[ChatMessag
     )
     values = {
         "series_title": ctx.series["title"],
-        "series_style": ctx.series["style"] or "(non précisé)",
+        # Packs de style de la série (genre, rendu, ton, réglages) et consignes du genre et du ton.
+        "style_packs": ctx.series["style"] or "(non précisé)",
+        "style_guidelines": ctx.series.get("style_guidelines") or NO_GUIDELINES,
+        "series_style": ctx.series["style"] or "(non précisé)",  # ancien nom de $style_packs
         "reading_direction": DIRECTION_LABELS.get(ctx.series["reading_direction"], ctx.series["reading_direction"]),
         "characters": chars or "(aucun personnage enregistré)",
         "decors": ctx.library.text("decors") or "(aucun décor enregistré : « decor » vaut null)",
@@ -479,7 +493,9 @@ def script_job(
             if chapter is None:
                 raise ScriptError("Chapitre introuvable (supprimé pendant le découpage ?)")
             progress(5, "Préparation du contexte (série, personnages, décors et objets, chapitres précédents, bible…)…")
-            ctx = build_context(session, chapter, max_previous=prompt.max_previous_chapters, knowledge=knowledge)
+            ctx = build_context(
+                session, presets, chapter, max_previous=prompt.max_previous_chapters, knowledge=knowledge
+            )
             if ctx.knowledge is not None:
                 record_run(session, chapter, ctx.knowledge, job_id=job_id, model=getattr(llm, "model", llm.name))
                 session.commit()

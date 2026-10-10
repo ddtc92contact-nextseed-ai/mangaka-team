@@ -26,9 +26,10 @@ from ..presets import ImagePromptSettings, LoadedWorkflow, PresetError, PresetRe
 from ..presets.schemas import REPAIR_TARGETS, InpaintSettings
 from ..store.files import FileStore
 from ..store.models import ChapterStatus, Character, ImageKind, Job, JobStatus, PageState, PanelImage, PanelState
-from .generation import STEP, GenerationError, _prompt_entry, panel_cast, panel_target, style_with_triggers
+from .generation import STEP, GenerationError, _prompt_entry, panel_cast, panel_target
 from .inpaint import MaskError, Region, build_mask, is_sketch, png_bytes
 from .prompt import PromptCharacter, _clean, describe_character, strip_quoted
+from .style import series_style
 
 
 # --- preset et prompt ---------------------------------------------------------------------
@@ -118,7 +119,7 @@ def default_repair_prompt(
         target=target,
         character=_prompt_entry(character) if character is not None else None,
         description=image.panel.description,
-        style=style_with_triggers(series.style, series.style_lora_trigger_words if series.style_lora_name else ""),
+        style=series_style(presets, series),
         image_prompt=presets.image_prompt,
     )
 

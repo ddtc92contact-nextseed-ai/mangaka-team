@@ -19,6 +19,11 @@ Arborescence attendue :
       upscalers/*.yaml         # agrandisseurs de la finition d'impression (+ leur JSON API)
       agents/*.yaml            # agents du pipeline (écran « L'équipe ») : rôle et réglages éditables
       reference_sheets/*.yaml  # fiches de référence générées (portrait, turnaround, plan large…)
+      style_genres/*.yaml      # packs de style : genre et public (shōnen, seinen, franco-belge…)
+      style_renderings/*.yaml  # packs de style : rendu (N&B à trames, encre, couleur…)
+      style_tones/*.yaml       # packs de style : ton (lumineux, neutre, dark, humour)
+      style_options.yaml       # réglages fins bornés du style (trait, trames, détail des décors)
+      style_loras.yaml         # catalogue des LoRA de style (mots déclencheurs, poids conseillé)
 
 Un preset invalide n'empêche pas le moteur de démarrer : il est écarté et
 l'erreur est exposée via `GET /presets` et `GET /health`.
@@ -50,6 +55,12 @@ from .schemas import (
     ProvidersPreset,
     QCSettings,
     ReferenceSheet,
+    StyleGenre,
+    StyleLoraCatalog,
+    StyleOptions,
+    StylePack,
+    StyleRendering,
+    StyleTone,
     UpscalerPreset,
     WorkflowPreset,
 )
@@ -103,6 +114,11 @@ class PresetRegistry:
     defaults: Defaults | None = None
     agents: dict[str, AgentPreset] = field(default_factory=dict)
     reference_sheets: dict[str, ReferenceSheet] = field(default_factory=dict)
+    style_genres: dict[str, StyleGenre] = field(default_factory=dict)
+    style_renderings: dict[str, StyleRendering] = field(default_factory=dict)
+    style_tones: dict[str, StyleTone] = field(default_factory=dict)
+    style_options: StyleOptions = field(default_factory=StyleOptions)
+    style_loras: StyleLoraCatalog = field(default_factory=StyleLoraCatalog)
     issues: list[PresetIssue] = field(default_factory=list)
 
     # --- accès -----------------------------------------------------------
@@ -155,6 +171,17 @@ class PresetRegistry:
             return self.reference_sheets[sheet_id]
         except KeyError:
             raise PresetError(f"type de fiche de référence inconnu : « {sheet_id} »") from None
+
+    @property
+    def default_style_rendering(self) -> str | None:
+        """Rendu par défaut (`default: true`, sinon le premier) : celui des séries sans pack."""
+        return next(
+            (r.id for r in self.style_renderings.values() if r.default), next(iter(self.style_renderings), None)
+        )
+
+    @property
+    def default_style_tone(self) -> str | None:
+        return next((t.id for t in self.style_tones.values() if t.default), next(iter(self.style_tones), None))
 
     def prompt(self, preset_id: str) -> PromptPreset:
         try:
@@ -364,7 +391,64 @@ class PresetRegistry:
                 continue
             reg._register(reg.reference_sheets, sheet.id, sheet, path)
         reg.reference_sheets = dict(sorted(reg.reference_sheets.items(), key=lambda kv: (kv[1].order, kv[1].name)))
+        reg._load_styles()
         return reg
+
+    def _load_styles(self) -> None:
+        """Packs de style. Un pack invalide (schéma, ou référence inconnue) est écarté avec un message clair."""
+        root = self.root
+        options_path = root / "style_options.yaml"
+        if options_path.exists():
+            options = self._parse(options_path, StyleOptions)
+            if options is not None:
+                self.style_options = options
+        loras_path = root / "style_loras.yaml"
+        if loras_path.exists():
+            loras = self._parse(loras_path, StyleLoraCatalog)
+            if loras is not None:
+                self.style_loras = loras
+
+        def packs[P: StylePack](folder: str, model: type[P]) -> dict[str, tuple[P, Path]]:
+            out: dict[str, tuple[P, Path]] = {}
+            for path in sorted((root / folder).glob("*.y*ml")):
+                pack = self._parse(path, model)
+                if pack is not None:
+                    if pack.id in out:
+                        self.issues.append(PresetIssue(self._rel(path), f"identifiant en double : {pack.id}"))
+                    else:
+                        out[pack.id] = (pack, path)
+            return dict(sorted(out.items(), key=lambda kv: (kv[1][0].order, kv[1][0].name)))
+
+        renderings = packs("style_renderings", StyleRendering)
+        tones = packs("style_tones", StyleTone)
+        for kind, loaded in (("rendu", renderings), ("ton", tones)):
+            defaults = [p.id for p, _ in loaded.values() if p.default]  # type: ignore[attr-defined]
+            if len(defaults) > 1:
+                path = loaded[defaults[1]][1]
+                self.issues.append(
+                    PresetIssue(self._rel(path), f"plusieurs {kind}s par défaut : {', '.join(defaults)}")
+                )
+        self.style_renderings = {k: p for k, (p, _) in renderings.items()}
+        self.style_tones = {k: p for k, (p, _) in tones.items()}
+        fonts = self.fonts.fonts if self.fonts else {}
+        for genre_id, (genre, path) in packs("style_genres", StyleGenre).items():
+            problems: list[str] = []
+            if genre.layout_style not in self.layout_styles:
+                problems.append(f"layout_style : style de mise en page inconnu « {genre.layout_style} »")
+            for label, font in (("fonts.dialogue", genre.fonts.dialogue), ("fonts.shout", genre.fonts.shout)):
+                if font not in fonts:
+                    problems.append(f"{label} : police inconnue « {font} » (fonts.yaml)")
+            unknown = [t for t in genre.allowed_tones or [] if t not in self.style_tones]
+            if unknown:
+                problems.append(f"allowed_tones : ton inconnu « {unknown[0]} » (style_tones/)")
+            if genre.allowed_tones is not None and not genre.allowed_tones:
+                problems.append("allowed_tones : au moins un ton (ou retire la clé pour les autoriser tous)")
+            if genre.style_lora and self.style_loras.get(genre.style_lora) is None:
+                problems.append(f"style_lora : « {genre.style_lora} » absent du catalogue style_loras.yaml")
+            if problems:
+                self.issues.append(PresetIssue(self._rel(path), " ; ".join(problems)))
+            else:
+                self.style_genres[genre_id] = genre
 
     def _check_reference_pairs(self) -> None:
         """`with_references` doit désigner un workflow chargé qui a des emplacements de référence.

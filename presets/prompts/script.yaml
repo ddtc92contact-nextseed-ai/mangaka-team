@@ -1,7 +1,10 @@
 # Étape 1 — découpage d'un chapitre en pages → cases (prompt du LLM texte).
 #
 # Variables disponibles ($nom ; écrire $$ pour un « $ » littéral) :
-#   $series_title $series_style $reading_direction $characters $previous_chapters
+#   $series_title $reading_direction $characters $previous_chapters
+#   $style_packs      (packs de style de la série : genre, rendu, ton, réglages fins — noms et descriptions)
+#   $style_guidelines (consignes du genre et du ton : rythme, cases par page, vocabulaire adapté à l'âge)
+#   ($series_style : ancien nom de $style_packs, gardé pour les prompts personnalisés)
 #   $decors $objets (bibliothèque de la série : « - id N · nom : description courte », un par ligne)
 #   $chapter_number $chapter_title $synopsis $target_pages $shot_types $bubble_kinds
 #   $intensities $rythmes  (indices de mise en page, cf. presets/README.md « Direction artistique »)
@@ -24,7 +27,8 @@ system: |
 
 user: |
   Série : « $series_title »
-  Style : $series_style
+  Style de la série :
+  $style_packs
   Sens de lecture : $reading_direction
 
   Personnages connus :
@@ -48,6 +52,9 @@ user: |
   Chapitre $chapter_number — « $chapter_title »
   Synopsis ou script brut :
   $synopsis
+
+  Consignes du genre et du ton de la série (priment sur les valeurs indicatives ci-dessous) :
+  $style_guidelines
 
   Contraintes :
   - environ $target_pages pages ; 3 à 7 cases par page (1 seule pour une pleine page) ;

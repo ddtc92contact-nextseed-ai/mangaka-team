@@ -67,6 +67,8 @@ settings:
     source: prompts/script.yaml#system
     variables: &script_vars
       - series_title
+      - style_packs
+      - style_guidelines
       - series_style
       - reading_direction
       - characters

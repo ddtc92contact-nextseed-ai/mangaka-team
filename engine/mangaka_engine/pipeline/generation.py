@@ -75,6 +75,7 @@ from .knowledge import KnowledgeBase
 from .layout import target_size
 from .library import panel_assets
 from .prompt import PromptCharacter, build_negative_prompt, build_prompt
+from .style import series_style
 
 log = logging.getLogger("mangaka_engine")
 
@@ -157,14 +158,6 @@ def split_trigger_words(raw: str | None) -> tuple[str, ...]:
     return tuple(w.strip() for w in (raw or "").split(",") if w.strip())
 
 
-def style_with_triggers(style: str, triggers: str | None) -> str:
-    """Mots déclencheurs du LoRA de style en tête du style de la série."""
-    words = split_trigger_words(triggers)
-    if not words:
-        return style
-    return ", ".join([*words, style.strip()]) if style.strip() else ", ".join(words)
-
-
 def build_panel_prompt(
     presets: PresetRegistry,
     panel: Panel,
@@ -185,7 +178,7 @@ def build_panel_prompt(
         characters=[_prompt_entry(c) for c in characters],
         decor=_prompt_entry(decor) if decor is not None else None,
         objects=[_prompt_entry(o) for o in objects],
-        style=style_with_triggers(series.style, series.style_lora_trigger_words if series.style_lora_name else ""),
+        style=series_style(presets, series),
         savoir_faire=savoir_faire,
         bible=bible,
         settings=presets.image_prompt,
