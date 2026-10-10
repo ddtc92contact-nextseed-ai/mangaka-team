@@ -27,6 +27,7 @@ from ..pipeline.reference_sheets import (
     keep_variant,
     kept_image,
     load_entry,
+    sheet_for,
 )
 from ..presets import PresetError, PresetRegistry
 from ..store.models import Character, Project, ReferenceVariant
@@ -242,10 +243,16 @@ def refine_variant(
     _require_comfyui(ctx)
     variant = _variant_or_404(session, variant_id)
     entry = _entry_or_404(session, variant.entry_kind, variant.entry_id)
+    presets = _presets(ctx, entry.project_id)
+    if body.sheet:
+        try:
+            sheet_for(presets, entry, body.sheet)
+        except (PresetError, GenerationError) as exc:
+            raise FieldError("sheet", str(exc)) from None
     try:
         jobs = enqueue_sheet(
             session,
-            _presets(ctx, entry.project_id),
+            presets,
             entry,
             body.sheet or variant.sheet,
             count=body.count,

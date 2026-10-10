@@ -281,7 +281,7 @@ export function ReferenceImages({
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={engineUrl(img.url)} alt={img.original_name} className="aspect-square w-full object-cover" />
               </a>
-              <div className="flex items-center justify-between gap-2 px-2 py-1.5 text-xs text-zinc-400">
+              <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 px-2 py-1.5 text-xs text-zinc-400">
                 <span className="flex shrink-0 items-center gap-1">
                   <button
                     type="button"
@@ -304,7 +304,7 @@ export function ReferenceImages({
                     →
                   </button>
                 </span>
-                <span className="truncate" title={img.original_name}>
+                <span className="whitespace-nowrap tabular-nums" title={img.original_name}>
                   {img.width}×{img.height}
                 </span>
                 <button

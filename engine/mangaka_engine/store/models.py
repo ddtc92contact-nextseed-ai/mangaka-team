@@ -233,6 +233,9 @@ class ReferenceVariant(Base):
     """
 
     __tablename__ = "reference_variants"
+    # Ids jamais réutilisés : /reference-variants/{id}/file est mis en cache « immutable », un id
+    # recyclé après suppression afficherait l'image supprimée.
+    __table_args__ = {"sqlite_autoincrement": True}
 
     id: Mapped[int] = mapped_column(primary_key=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)

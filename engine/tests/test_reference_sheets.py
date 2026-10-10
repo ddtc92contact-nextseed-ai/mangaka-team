@@ -422,6 +422,33 @@ def test_quality_option_and_history_cleanup(c: TestClient) -> None:
     assert not any(variants_dir.glob("*")) if variants_dir.exists() else True
 
 
+def test_a_deleted_variant_id_is_never_reused(c: TestClient) -> None:
+    # /reference-variants/{id}/file est mis en cache « immutable » : un id recyclé servirait l'image supprimée.
+    _, entry = _create_entry(c, "decor")
+    url = f"/decors/{entry['id']}/reference-variants"
+    _ok(c.post(url, json={"sheet": "decor-plan-large", "count": 1}), 202)
+    _idle(c)
+    [deleted] = _ok(c.get(url))["variants"]
+    assert c.delete(f"/reference-variants/{deleted['id']}").status_code == 204  # la plus récente
+
+    _ok(c.post(url, json={"sheet": "decor-autre-angle", "count": 1}), 202)
+    _idle(c)
+    [variant] = _ok(c.get(url))["variants"]
+    assert variant["id"] > deleted["id"] and variant["url"] != deleted["url"]
+    assert c.get(deleted["url"]).status_code == 404
+
+
+def test_refine_with_a_sheet_of_another_kind_is_a_sheet_error(c: TestClient) -> None:
+    _, entry = _create_entry(c, "object")
+    _ok(c.post(f"/objects/{entry['id']}/reference-variants", json={"sheet": "objet-trois-quarts", "count": 1}), 202)
+    _idle(c)
+    [variant] = _ok(c.get(f"/objects/{entry['id']}/reference-variants"))["variants"]
+    for sheet in ("personnage-portrait", "inconnue"):
+        bad = c.post(f"/reference-variants/{variant['id']}/refine", json={"sheet": sheet, "instruction": "plus sombre"})
+        assert bad.status_code == 422, bad.text
+        assert [e["field"] for e in bad.json()["errors"]] == ["sheet"]
+
+
 def test_max_kept_is_enforced(c: TestClient) -> None:
     _, entry = _create_entry(c, "character")
     files = [("files", (f"{i}.png", png_bytes(), "image/png")) for i in range(MAX_KEPT)]
@@ -466,3 +493,8 @@ def test_database_v11_keeps_reference_order(make_settings: Callable[..., Setting
     fresh = settings.database_path.parent / "fresh.db"
     create_db_engine(fresh).dispose()
     assert _columns(settings.database_path) == _columns(fresh)
+    for db in (settings.database_path, fresh):  # ids de variantes jamais réutilisés, migrée comme neuve
+        con = sqlite3.connect(db)
+        [(sql,)] = con.execute("SELECT sql FROM sqlite_master WHERE name = 'reference_variants'").fetchall()
+        con.close()
+        assert "AUTOINCREMENT" in sql

@@ -173,6 +173,15 @@ def sheet_params(
 
 
 # --- mise en file ----------------------------------------------------------------------
+def sheet_for(presets: PresetRegistry, entry: LibraryEntry, sheet_id: str) -> ReferenceSheet:
+    """Type de fiche `sheet_id`, s'il s'applique à la sorte de la fiche (PresetError s'il est inconnu)."""
+    kind = entry_kind(entry)
+    sheet = presets.reference_sheet(sheet_id)
+    if kind not in sheet.kinds:
+        raise GenerationError(f"la fiche « {sheet.name} » ne s'applique pas à un {KIND_LABELS[kind]}")
+    return sheet
+
+
 def enqueue_sheet(
     session: Session,
     presets: PresetRegistry,
@@ -189,9 +198,7 @@ def enqueue_sheet(
     if not 1 <= count <= MAX_VARIANTS:
         raise GenerationError(f"entre 1 et {MAX_VARIANTS} variantes par demande")
     kind = entry_kind(entry)
-    sheet = presets.reference_sheet(sheet_id)
-    if kind not in sheet.kinds:
-        raise GenerationError(f"la fiche « {sheet.name} » ne s'applique pas à un {KIND_LABELS[kind]}")
+    sheet = sheet_for(presets, entry, sheet_id)
     instruction = _clean(instruction)
     if parent is not None and not instruction:
         raise GenerationError("décris ce qu'il faut changer (ex. « cheveux plus courts »)")
