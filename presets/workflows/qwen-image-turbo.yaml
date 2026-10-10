@@ -17,7 +17,7 @@ inpaint_with: qwen-image-inpaint-turbo   # réparation ciblée (inpainting) du m
 with_control: qwen-image-turbo-controlnet   # composition verrouillée (ControlNet), même palier
 tier:
   name: Turbo
-  choice: "Turbo (rapide, production)"   # libellé du palier dans la fiche série
+  choice: "Turbo (production en volume, ~35 s par case)"   # libellé du palier dans la fiche série
   order: 1
 # Durée d'une case (s) tant qu'il y a moins de 3 générations terminées avec ce preset.
 estimated_s: 20

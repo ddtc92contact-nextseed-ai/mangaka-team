@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import shutil
 import sqlite3
 from collections.abc import Callable, Iterator
@@ -247,7 +248,12 @@ def test_refine_uses_the_variant_as_reference_with_the_instruction() -> None:
 def test_quality_tier_and_imposed_workflow() -> None:
     sheet = REG.reference_sheet("objet-trois-quarts")
     series = _series(workflow_preset="qwen-image-base-rapide")
-    assert sheet_preset_id(REG, sheet, series) == "qwen-image-base-rapide"
+    # Fiches au palier `workflow_library` (Turbo), quel que soit celui de la série…
+    assert sheet_preset_id(REG, sheet, series) == "qwen-image-turbo"
+    # … ou à celui de la série sans ce réglage.
+    no_library = REG.defaults.model_copy(update={"workflow_library": None})  # type: ignore[union-attr]
+    reg = dataclasses.replace(REG, defaults=no_library)
+    assert sheet_preset_id(reg, sheet, series) == "qwen-image-base-rapide"
     quality = REG.defaults.workflow_quality  # type: ignore[union-attr]
     assert sheet_preset_id(REG, sheet, series, quality=True) == quality
     assert (

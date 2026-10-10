@@ -104,6 +104,12 @@ export function ProjectForm({
     .filter((w) => w.tier_choice)
     .sort((a, b) => (a.tier_order ?? 0) - (b.tier_order ?? 0));
   const currentWorkflow = presets.data?.workflows.find((w) => w.id === workflow);
+  // Palier des nouvelles séries (Rapide) : proposé en un clic à une série restée sur un palier inférieur.
+  const recommendedTier = tiers.find((w) => w.id === defaults?.workflow);
+  const suggestRecommended =
+    recommendedTier !== undefined &&
+    currentWorkflow?.tier_order != null &&
+    currentWorkflow.tier_order < (recommendedTier.tier_order ?? 0);
   const sketchEnabled = form.sketch_enabled ?? defaults?.sketch_enabled ?? true;
   // Débruitage livré : celui du preset « propre depuis croquis » du palier choisi.
   const cleanPreset = presets.data?.workflows.find((w) => w.id === currentWorkflow?.from_sketch);
@@ -543,6 +549,17 @@ export function ProjectForm({
             )}
           </Select>
           <WorkflowHint presets={presets.data?.workflows} workflow={workflow} />
+          {suggestRecommended && (
+            <div
+              className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-zinc-800 bg-zinc-900/60 px-3 py-2"
+              data-testid="tier-suggestion"
+            >
+              <Button type="button" variant="secondary" onClick={() => set("workflow_preset", recommendedTier.id)}>
+                Passer en {recommendedTier.tier ?? recommendedTier.name}
+              </Button>
+              <p className="text-xs text-zinc-400">recommandé pour la qualité, ~1 min par case (puis Enregistrer)</p>
+            </div>
+          )}
         </Field>
       </div>
       <fieldset className="min-w-0 space-y-3 rounded-lg border border-zinc-800 p-4" data-testid="sketch-settings">

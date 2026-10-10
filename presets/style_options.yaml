@@ -22,6 +22,6 @@ options:
     name: Détail des décors
     description: Niveau de détail des arrière-plans.
     choices:
-      simple: { name: Simple, lang: en, prompt_keywords: [simple background, minimal, plain] }
+      simple: { name: Simple, lang: en, prompt_keywords: [uncluttered background, few details] }
       moyen: { name: Moyen, lang: fr, prompt_keywords: [décor moyennement détaillé] }
       riche: { name: Riche, lang: fr, prompt_keywords: [décor très détaillé et riche] }

@@ -38,6 +38,12 @@ character_separator: " ; "
 # ces termes sont toujours ajoutés au prompt négatif s'ils n'y sont pas déjà.
 forbidden_text_terms: [texte, lettres, bulles, phylactères, onomatopées, filigrane, signature]
 
+# Longueur maximale de $style (caractères, séparateurs compris ; null = sans plafond). Le bloc « Style »
+# pesait ~1/3 du prompt et noyait la description de la case : les packs y entrent tour à tour (1er
+# mot-clé de chaque pack, puis le 2e…, le rendu en premier à chaque tour), sans doublon. Les mots-clés
+# calibrés des packs ne changent pas, seule leur sélection (pipeline/style.py).
+style_max_chars: 240
+
 # Retire de la description les répliques entre guillemets (« … », "…") pour ne pas
 # inciter le modèle à les écrire.
 strip_quotes: true

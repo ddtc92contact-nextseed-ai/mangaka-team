@@ -153,7 +153,7 @@ def sheet_preset_id(
     """Workflow d'une génération de fiche.
 
     Workflow imposé par le type de fiche > palier Qualité (`defaults.workflow_quality`) si demandé >
-    palier de la série. Dès qu'une image est envoyée (`refine` : « Affiner », image de départ ou référence
+    palier des fiches (`defaults.workflow_library`) > palier de la série. Dès qu'une image est envoyée (`refine` : « Affiner », image de départ ou référence
     de style), son pendant « avec références » (`with_references`, sinon `defaults.workflow_with_references`).
     """
     defaults = presets.defaults
@@ -163,6 +163,8 @@ def sheet_preset_id(
         if not (defaults and defaults.workflow_quality):
             raise GenerationError("aucun palier Qualité configuré (workflow_quality de presets/defaults.yaml)")
         base_id = defaults.workflow_quality
+    elif defaults and defaults.workflow_library:
+        base_id = defaults.workflow_library
     else:
         base_id = series.workflow_preset
     base = presets.workflow(base_id)

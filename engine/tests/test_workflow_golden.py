@@ -160,8 +160,11 @@ def test_turbo_presets_sampler_and_files(preset_id: str) -> None:
 
 
 def test_tier_pairing_and_defaults() -> None:
-    assert REG.defaults is not None and REG.defaults.workflow == "qwen-image-turbo"  # Turbo par défaut
-    assert REG.defaults.workflow_with_references == "qwen-image-edit-ref-turbo"
+    # Rapide par défaut (10/10/2026) ; Turbo pour les fiches de référence et la planche de style
+    assert REG.defaults is not None and REG.defaults.workflow == "qwen-image-base-rapide"
+    assert REG.defaults.workflow_with_references == "qwen-image-edit-ref-rapide"
+    assert REG.defaults.workflow_library == "qwen-image-turbo"
+    assert REG.defaults.workflow_sketch == "qwen-image-croquis"
     assert REG.defaults.workflow_quality == "qwen-image-base"
     for base, edit in TIERS.values():
         assert REG.workflow(base).preset.with_references == edit
@@ -176,7 +179,11 @@ def test_tier_pairing_and_defaults() -> None:
         for w in REG.workflows.values()
         if w.preset.tier and w.preset.tier.choice
     )
-    assert [c for _, c in choices] == ["Turbo (rapide, production)", "Rapide", "Qualité (finitions)"]
+    assert [c for _, c in choices] == [
+        "Turbo (production en volume, ~35 s par case)",
+        "Rapide (recommandé pour la qualité, ~1 min par case)",
+        "Qualité (finitions)",
+    ]
     # estimations des presets (s / case) : Turbo 20, Rapide 60, Qualité 70, ×4 avec références
     for (base, edit), seconds in zip(TIERS.values(), (70, 60, 20), strict=True):
         assert REG.workflow(base).preset.estimated_s == seconds

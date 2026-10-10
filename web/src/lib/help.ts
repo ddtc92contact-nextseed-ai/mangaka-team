@@ -28,7 +28,7 @@ export const HELP = {
   "serie.page_format":
     "La taille des pages à l'impression (B4 manga, A4…) en 300 dpi. Il fixe le ratio de la mise en page et la résolution visée à l'export.",
   "serie.tier":
-    "Turbo génère vite pour avancer, Rapide est un compromis, Qualité est plus lent mais plus fin. Choisis Turbo ou Rapide pour produire, puis régénère en Qualité les cases importantes depuis l'atelier.",
+    "Rapide (par défaut) est recommandé pour la qualité : 25 pas, ~1 min par case, des cases plus fidèles à la scène et aux références. Turbo génère plus vite (~35 s) pour avancer en volume. Qualité est plus lent mais plus fin : régénère en Qualité les cases importantes depuis l'atelier. Les croquis restent au palier rapide du croquis.",
   "serie.sketch":
     "Avec le palier croquis, chaque case est d'abord esquissée en quelques secondes : tu tries les compositions au clavier, puis seules celles validées passent au propre. Pratique pour ne pas gaspiller de longues générations.",
   "serie.sketch_denoise":

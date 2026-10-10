@@ -1,14 +1,23 @@
 # Presets appliqués aux nouveaux projets (modifiables projet par projet).
 page_format: a4-300dpi
-# Palier des nouvelles séries : Turbo (production en volume). Les séries existantes gardent le leur.
-workflow: qwen-image-turbo
+# Palier des nouvelles séries : Rapide (int8, 25 pas — le réglage du workflow officiel « Image Edit
+# (Qwen Image 2.1) »). Mesuré le 10/10/2026 : avec des références, 8 pas (Turbo) contre 25 pas changent
+# ~60 % de l'image ; ~1 min par case au lieu de ~35 s, accepté pour la qualité. Les séries existantes
+# gardent le leur (Turbo reste proposé dans la fiche série ; croquis, fiches de référence et planche de
+# style restent au palier croquis / Turbo).
+workflow: qwen-image-base-rapide
 # Images de référence d'une case, par fiche (personnage, décor, objet) : principale = la seule image
 # principale de la fiche (la 1re de sa galerie — une vue simple, pas une planche multi-poses que le
 # modèle recopierait) ; toutes = la principale d'abord, puis les suivantes s'il reste des emplacements.
 panel_references: principale
 # Workflow choisi automatiquement pour une case dont un personnage a des images de référence
 # (sinon : le workflow de la série). Une case peut imposer le sien (`generation_preset`).
-workflow_with_references: qwen-image-edit-ref-turbo
+# Rapide (25 pas) comme le palier par défaut ; le `with_references` du palier de la série prime.
+workflow_with_references: qwen-image-edit-ref-rapide
+# Palier des fiches de référence et du passage au propre de la planche de style, quel que soit le palier
+# de la série : Turbo (ce sont des images de travail, refaites souvent ; les cases passent en Rapide).
+# Son `with_references` sert dès qu'une image est envoyée. Absent = palier de la série.
+workflow_library: qwen-image-turbo
 # Palier « Régénérer en Qualité » de l'atelier (son `with_references` sert aux cases avec références).
 workflow_quality: qwen-image-base
 # Style de mise en page des nouvelles séries (presets/layout_styles/) : sage, dynamique, nerveuse.
@@ -28,7 +37,8 @@ finishing_tolerance: 0.9
 workflow_inpaint: qwen-image-inpaint-turbo
 # Planche de style (fiche série) : essais au palier croquis (`workflow_sketch`) de la scène test du genre
 # (`scene_test` de presets/style_genres/), avec le `$style` de la série et une graine par essai.
-# L'essai retenu passe au propre (`from_sketch` du palier de la série) et devient la référence de style.
+# L'essai retenu passe au propre (`from_sketch` de `workflow_library`, sinon du palier de la série) et
+# devient la référence de style.
 style_board:
   trials: 4
   # Taille du propre ; le croquis garde ce ratio (grand côté : `long_side` du palier croquis).
@@ -52,4 +62,7 @@ style_board:
   # d'un personnage, de son décor ou d'un objet : jamais seule (le modèle d'édition la redessinerait
   # telle quelle) — une case sans autre référence passe par le workflow texte ;
   # free_slot = jointe s'il reste un emplacement, même seule ; never = jamais.
-  panels: with_subject
+  # never (10/10/2026) : jointe à une case, la planche fait apparaître ses propres sujets (l'enfant et
+  # son chat, le cerf-volant) malgré « référence de style seulement » (A/B à graine figée). Le style
+  # des cases (génération, passage au propre, réparation) passe par les mots-clés `$style`.
+  panels: never

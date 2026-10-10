@@ -102,7 +102,8 @@ def test_every_genre_has_a_french_scene_test() -> None:
         assert len(genre.scene_test) > 30, genre.id
     settings = REG.defaults.style_board  # type: ignore[union-attr]
     assert settings is not None and settings.trials == 4
-    assert (settings.reference_sheets, settings.panels) == ("with_subject", "with_subject")
+    # Cases : jamais (10/10/2026, la planche faisait apparaître ses propres sujets dans la case).
+    assert (settings.reference_sheets, settings.panels) == ("with_subject", "never")
 
 
 def test_a_genre_without_scene_test_is_refused_at_load(tmp_path: Path) -> None:
@@ -184,7 +185,9 @@ def test_choosing_a_trial_cleans_it_and_makes_the_only_active_style_reference(
     trials = _board(c, s["id"])["trials"]
     chosen = trials[2]
     job = _ok(c.post(f"/style-trials/{chosen['id']}/choose"), 202)
-    clean_id = REG.workflow(s["workflow_preset"]).preset.from_sketch
+    # Passage au propre au palier des fiches (`workflow_library` : Turbo), pas à celui de la série (Rapide).
+    clean_id = REG.workflow(REG.defaults.workflow_library).preset.from_sketch  # type: ignore[union-attr,arg-type]
+    assert clean_id == "qwen-image-turbo-from-sketch" and s["workflow_preset"] == "qwen-image-base-rapide"
     assert job["step"] == "style_board" and job["params"]["mode"] == "clean"
     assert job["params"]["preset"] == clean_id and job["params"]["seed"] == chosen["seed"]
     _idle(c)
@@ -244,17 +247,22 @@ def test_errors_series_without_pack_and_engine_offline(make_settings: Callable[.
 STYLE_ROLE = "référence de style uniquement — trait, trames, encrage ; ne pas reprendre son personnage"
 
 
-def _sheet_client(make_settings: Callable[..., Settings], tmp_path: Path, mode: str | None) -> TestClient:
-    """Client dont `style_board.reference_sheets` vaut `mode` (None : presets du dépôt)."""
-    if mode is None:
+def _sheet_client(
+    make_settings: Callable[..., Settings], tmp_path: Path, mode: str | None, panels: str | None = None
+) -> TestClient:
+    """Client dont `style_board.reference_sheets` vaut `mode` et `style_board.panels` vaut `panels`
+    (None : presets du dépôt)."""
+    if mode is None and panels is None:
         return TestClient(create_app(make_settings(), providers=_providers(MockComfyUIClient())))
     root = tmp_path / "presets"
     shutil.copytree(PRESETS_DIR, root)
     path = root / "defaults.yaml"
-    path.write_text(
-        path.read_text(encoding="utf-8").replace("reference_sheets: with_subject", f"reference_sheets: {mode}"),
-        encoding="utf-8",
-    )
+    text = path.read_text(encoding="utf-8")
+    if mode is not None:
+        text = text.replace("reference_sheets: with_subject", f"reference_sheets: {mode}")
+    if panels is not None:
+        text = text.replace("  panels: never", f"  panels: {panels}")
+    path.write_text(text, encoding="utf-8")
     settings = make_settings(mangaka_presets_dir=root)
     return TestClient(create_app(settings, providers=_providers(MockComfyUIClient())))
 
@@ -294,7 +302,8 @@ def test_sheet_from_scratch_is_text_to_image_despite_the_style_board(
     with _sheet_client(make_settings, tmp_path, None) as c:
         s, _style, entry = _dragon(c)
         job, variant = _sheet(c, entry["id"])
-        assert job["params"]["preset"] == s["workflow_preset"] == "qwen-image-turbo"
+        # Fiches au palier Turbo (`workflow_library`), même dans une série Rapide.
+        assert (job["params"]["preset"], s["workflow_preset"]) == ("qwen-image-turbo", "qwen-image-base-rapide")
         assert job["params"]["style_asset_id"] is None and job["params"]["start_image_id"] is None
         assert variant["params"]["reference_images"] == []
         assert "petit dragon vert, ventre rond." in variant["prompt"]
@@ -380,7 +389,7 @@ def test_reference_sheets_setting_never_and_always(
             )
             assert f"Dernière image (image 1) : {STYLE_ROLE}" in variant["prompt"]
         else:
-            assert job["params"]["preset"] == s["workflow_preset"] and "Dernière image" not in variant["prompt"]
+            assert job["params"]["preset"] == "qwen-image-turbo" and "Dernière image" not in variant["prompt"]
         _ok(c.post(f"/reference-variants/{variant['id']}/refine", json={"instruction": "plus sombre", "count": 1}), 202)
         _idle(c)
         refined = _ok(c.get(f"/characters/{entry['id']}/reference-variants"))["variants"][0]
@@ -394,9 +403,16 @@ def test_reference_sheets_setting_never_and_always(
 
 # --- cases : seulement s'il reste un emplacement libre, jamais seule ------------------------
 @pytest.mark.parametrize(("images", "taken"), [(0, 0), (1, 1), (3, 1)])
-def test_style_reference_takes_a_free_panel_slot_only(c: TestClient, images: int, taken: int) -> None:
-    """with_subject : jamais la seule image (case sans référence → workflow texte, sans style) ;
-    principale : une image par fiche, même si la fiche en a trois."""
+def test_style_reference_takes_a_free_panel_slot_only(
+    make_settings: Callable[..., Settings], tmp_path: Path, images: int, taken: int
+) -> None:
+    """with_subject (réglage possible, plus celui du dépôt) : jamais la seule image (case sans référence
+    → workflow texte, sans style) ; principale : une image par fiche, même si la fiche en a trois."""
+    with _sheet_client(make_settings, tmp_path, None, panels="with_subject") as c:
+        _style_reference_in_free_slot(c, images, taken)
+
+
+def _style_reference_in_free_slot(c: TestClient, images: int, taken: int) -> None:
     s = _series(c)
     style = _make_style_reference(c, s["id"])
     panel_body: dict[str, Any] = {"description": "Une case"}
@@ -413,7 +429,7 @@ def test_style_reference_takes_a_free_panel_slot_only(c: TestClient, images: int
     if not images:
         assert job["params"]["preset"] == s["workflow_preset"] and used == []  # texte → image, sans style
         return
-    assert job["params"]["preset"] == "qwen-image-edit-ref-turbo"  # workflow à références existant
+    assert job["params"]["preset"] == "qwen-image-edit-ref-rapide"  # workflow à références existant
     assert [r["kind"] for r in used] == ["character"] * taken + ["style"]
     assert used[-1]["id"] == style["id"] and used[-1]["slot"] == taken + 1
 
@@ -434,6 +450,36 @@ def test_pick_references_puts_style_last_after_every_other_image() -> None:
     # `principale` : une seule image par fiche (la 1re), le style prend la place libre.
     picked = pick_references([char(1, 3), char(2, 2), style], 3, "principale")
     assert [img.id for _, img in picked] == [10, 20, 990]
+
+
+def test_style_board_is_never_sent_with_a_panel(c: TestClient, comfy: MockComfyUIClient) -> None:
+    """Réglage du dépôt (`panels: never`) : une case avec personnage, décor et planche de style active
+    n'envoie jamais la planche à ComfyUI, ni sa ligne « référence de style » dans le prompt."""
+    s = _series(c)
+    style = _make_style_reference(c, s["id"])
+    char = _ok(c.post(f"/projects/{s['id']}/characters", json={"name": "Aiko"}), 201)
+    _ok(c.post(f"/characters/{char['id']}/images", files=[("files", ("a.png", png_bytes(), "image/png"))]), 201)
+    decor = _ok(c.post(f"/projects/{s['id']}/decors", json={"name": "Le labo", "visual_description": "x"}), 201)
+    _ok(c.post(f"/decors/{decor['id']}/images", files=[("files", ("d.png", png_bytes(), "image/png"))]), 201)
+    ch = _ok(c.post(f"/projects/{s['id']}/chapters", json={"title": "Un"}), 201)
+    body = {"description": "Aiko au labo", "characters": ["Aiko"], "decor": decor["id"]}
+    [page] = _ok(c.put(f"/chapters/{ch['id']}/pages", json={"pages": [{"panels": [body]}]}))
+    panel_id = page["panels"][0]["id"]
+    [job] = _ok(c.post(f"/panels/{panel_id}/generate"), 202)
+    _idle(c)
+    assert job["params"]["preset"] == "qwen-image-edit-ref-rapide"
+    used = _ok(c.get(f"/jobs/{job['id']}"))["params"]["references"]
+    assert [r["kind"] for r in used] == ["character", "decor"]
+    assert style["id"] not in [r["id"] for r in used if r["kind"] == "style"]
+    sent = list(comfy.prompts.values())[-1]
+    loads = [n["inputs"]["image"] for n in sent.values() if n["class_type"] == "LoadImage"]
+    assert len(loads) == 2 and not [name for name in loads if "style" in name]
+    positive = sent["6"]["inputs"]["prompt"]
+    assert "Image 1 : référence d'identité de Aiko" in positive and "Image 2 : référence du lieu Le labo" in positive
+    assert "référence de style" not in positive and "Image 3" not in positive
+    with c.app.state.ctx.db.session_scope() as session:  # type: ignore[attr-defined]
+        image = session.scalars(select(PanelImage).where(PanelImage.panel_id == panel_id)).one()
+        assert [r["kind"] for r in image.params["reference_images"]] == ["character", "decor"]
 
 
 # --- série sans planche : graphes identiques à aujourd'hui ----------------------------------
@@ -459,7 +505,7 @@ def test_series_without_style_board_keeps_identical_graphs(c: TestClient, comfy:
     [job] = _ok(
         c.post(f"/decors/{entry['id']}/reference-variants", json={"sheet": "decor-plan-large", "count": 1}), 202
     )
-    assert job["params"]["preset"] == s["workflow_preset"] and job["params"]["style_asset_id"] is None
+    assert job["params"]["preset"] == "qwen-image-turbo" and job["params"]["style_asset_id"] is None
     _idle(c)
     sent = list(comfy.prompts.values())[-1]
     assert not [n for n in sent.values() if n["class_type"] == "LoadImage"]

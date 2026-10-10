@@ -231,7 +231,7 @@ def test_lock_from_sketch_then_regenerate(make_client: Callable[..., TestClient]
     assert lock["source"] == "croquis" and lock["image_id"] == sketch["id"]
     assert lock["source_label"] == f"croquis v{sketch['version']}" and lock["source_url"] == sketch["url"]
     assert (lock["type"], lock["type_name"], lock["strength"]) == ("lineart", "Trait", 1.0)
-    assert lock["preset"] == "qwen-image-turbo-controlnet" and lock["problem"] is None
+    assert lock["preset"] == "qwen-image-base-rapide-controlnet" and lock["problem"] is None
     assert lock["preview"]["status"] in ("pending", "running", "ready") and lock["preview"]["job_id"]
 
     # Aperçu de la carte de contrôle : prétraitement seul, enregistré sur le verrou.
@@ -258,8 +258,8 @@ def test_lock_from_sketch_then_regenerate(make_client: Callable[..., TestClient]
 
     # Régénérer : pendant ControlNet du palier, image guide = le croquis verrouillé.
     [job] = _ok(c.post(f"/panels/{p2['id']}/generate"), 202)
-    assert job["params"]["preset"] == "qwen-image-turbo-controlnet" and job["params"]["locked"] is True
-    assert job["params"]["base_preset"] == "qwen-image-turbo"
+    assert job["params"]["preset"] == "qwen-image-base-rapide-controlnet" and job["params"]["locked"] is True
+    assert job["params"]["base_preset"] == "qwen-image-base-rapide"
     assert job["params"]["control"]["image_id"] == sketch["id"] and job["params"]["control"]["type"] == "lineart"
     _wait(c)
     final = next(i for i in _images(c, p2["id"]) if i["kind"] == "final")
@@ -282,10 +282,10 @@ def test_lock_from_sketch_then_regenerate(make_client: Callable[..., TestClient]
     detail = _ok(c.post(f"/panels/{p1['id']}/composition-lock/import", files=upload, data={"type": "pose"}))
     lock = detail["composition_lock"]
     assert lock["source"] == "import" and lock["source_label"] == "image importée" and lock["type"] == "pose"
-    assert lock["preset"] == "qwen-image-edit-ref-turbo-controlnet"
+    assert lock["preset"] == "qwen-image-edit-ref-rapide-controlnet"
     assert c.get(lock["source_url"]).status_code == 200
     [job] = _ok(c.post(f"/panels/{p1['id']}/generate"), 202)
-    assert job["params"]["preset"] == "qwen-image-edit-ref-turbo-controlnet"
+    assert job["params"]["preset"] == "qwen-image-edit-ref-rapide-controlnet"
     assert job["params"]["control"]["source"] == "import" and job["params"]["control"]["path"]
     _wait(c)
     final1 = next(i for i in _images(c, p1["id"]) if i["kind"] == "final")
@@ -296,7 +296,7 @@ def test_lock_from_sketch_then_regenerate(make_client: Callable[..., TestClient]
     detail = _ok(c.delete(f"/panels/{p2['id']}/composition-lock"))
     assert detail["composition_lock"] is None
     [job] = _ok(c.post(f"/panels/{p2['id']}/generate"), 202)
-    assert job["params"]["preset"] == "qwen-image-turbo" and "control" not in job["params"]
+    assert job["params"]["preset"] == "qwen-image-base-rapide" and "control" not in job["params"]
     _wait(c)
 
 
@@ -406,14 +406,14 @@ def test_lock_from_version_update_and_delete_source(make_client: Callable[..., T
     assert bad.status_code == 422 and "Aucun croquis validé" in bad.text
     bad = c.patch(f"/panels/{p3['id']}/composition-lock", json={"type": "aquarelle"})
     assert bad.status_code == 422 and "Type de contrôle inconnu" in bad.text
-    bad = c.patch(f"/panels/{p3['id']}", json={"generation_preset": "qwen-image-turbo-controlnet"})
+    bad = c.patch(f"/panels/{p3['id']}", json={"generation_preset": "qwen-image-base-rapide-controlnet"})
     assert bad.status_code == 422 and "verrouille plutôt" in bad.text
 
     # Supprimer l'image guide déverrouille la case (jamais de case cassée).
     assert c.delete(f"/panel-images/{v1['id']}").status_code == 204
     assert _ok(c.get(f"/panels/{p3['id']}"))["composition_lock"] is None
     [job] = _ok(c.post(f"/panels/{p3['id']}/generate"), 202)
-    assert job["params"]["preset"] == "qwen-image-turbo"
+    assert job["params"]["preset"] == "qwen-image-base-rapide"
     _wait(c)
 
 
@@ -430,7 +430,7 @@ def test_clean_mode_img2img_or_controlnet(make_client: Callable[..., TestClient]
 
     # img2img (défaut de #51).
     [job] = _ok(c.post(f"/panels/{p3['id']}/clean"), 202)
-    assert job["params"]["preset"] == "qwen-image-turbo-from-sketch" and "control" not in job["params"]
+    assert job["params"]["preset"] == "qwen-image-base-rapide-from-sketch" and "control" not in job["params"]
 
     # ControlNet : pendant ControlNet du palier, croquis validé comme image guide, même graine.
     bad = c.patch(f"/projects/{series['id']}", json={"clean_mode": "controlnet", "clean_control": "aquarelle"})
@@ -440,13 +440,13 @@ def test_clean_mode_img2img_or_controlnet(make_client: Callable[..., TestClient]
     sketch2 = [i for i in _images(c, p2["id"]) if i["kind"] == "croquis"][-1]
     [job] = _ok(c.post(f"/panels/{p2['id']}/clean"), 202)
     params = job["params"]
-    assert params["preset"] == "qwen-image-turbo-controlnet" and "denoise" not in params
+    assert params["preset"] == "qwen-image-base-rapide-controlnet" and "denoise" not in params
     assert params["seed"] == sketch2["seed"] and params["source_image_id"] == sketch2["id"]
     assert params["control"]["source"] == "croquis" and params["control"]["image_id"] == sketch2["id"]
     assert params["control"]["type"] == "scribble"
     # Case avec références : variante ControlNet avec références.
     res = _ok(c.post(f"/pages/{data['pages'][0]['id']}/clean"), 202)
-    assert [j["params"]["preset"] for j in res["jobs"]] == ["qwen-image-edit-ref-turbo-controlnet"]
+    assert [j["params"]["preset"] for j in res["jobs"]] == ["qwen-image-edit-ref-rapide-controlnet"]
     _wait(c)
     final = next(i for i in _images(c, p2["id"]) if i["kind"] == "final")
     assert final["params"]["prompt"] == sketch2["params"]["prompt"] and final["seed"] == sketch2["seed"]

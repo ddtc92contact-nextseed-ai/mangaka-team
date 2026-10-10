@@ -16,7 +16,7 @@ inpaint_with: qwen-image-inpaint-rapide   # réparation ciblée (inpainting) du 
 with_control: qwen-image-base-rapide-controlnet   # composition verrouillée (ControlNet), même palier
 tier:
   name: Rapide
-  choice: Rapide   # libellé du palier dans la fiche série
+  choice: "Rapide (recommandé pour la qualité, ~1 min par case)"   # libellé du palier dans la fiche série
   order: 2
 # Durée d'une case (s) tant qu'il y a moins de 3 générations terminées avec ce preset.
 estimated_s: 60

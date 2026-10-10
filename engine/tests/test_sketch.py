@@ -186,7 +186,7 @@ def test_sketch_page_then_triage_then_clean(make_client: Callable[..., TestClien
     assert detail["sketch_image_id"] == sk1["id"]
     est = _ok(c.get(f"/pages/{page1['id']}/sketch-estimate"))
     assert (est["to_sketch"], est["validated"], est["to_clean"]) == (1, 1, 1)
-    assert est["clean"]["total_s"] == pytest.approx(55)  # Turbo avec références depuis croquis
+    assert est["clean"]["total_s"] == pytest.approx(160)  # Rapide avec références depuis croquis
     # « Croquer la page » ne re-croque pas une case validée.
     again = _ok(c.post(f"/pages/{page1['id']}/sketch"), 202)
     assert again["panel_ids"] == [p2["id"]]
@@ -195,14 +195,14 @@ def test_sketch_page_then_triage_then_clean(make_client: Callable[..., TestClien
     res = _ok(c.post(f"/pages/{page1['id']}/clean"), 202)
     assert res["panel_ids"] == [p1["id"]]
     [job] = res["jobs"]
-    assert job["params"]["preset"] == "qwen-image-edit-ref-turbo-from-sketch"
+    assert job["params"]["preset"] == "qwen-image-edit-ref-rapide-from-sketch"
     assert job["params"]["seed"] == sk1["seed"] and job["params"]["source_image_id"] == sk1["id"]
     assert job["params"]["denoise"] == pytest.approx(0.65)
     _wait(c)
 
     final = next(i for i in _images(c, p1["id"]) if i["kind"] == "final")
     assert final["selected"]  # 1re version propre choisie d'office (#45)
-    assert final["seed"] == sk1["seed"] and final["tier"] == "Turbo"
+    assert final["seed"] == sk1["seed"] and final["tier"] == "Rapide"
     assert final["params"]["prompt"] == sk1["params"]["prompt"]
     comp = final["params"]["composition"]
     assert comp["image_id"] == sk1["id"] and comp["source"] == "croquis" and comp["method"] == "img2img"
@@ -318,7 +318,7 @@ def test_chapter_sketch_and_clean_keep_regenerate_quality(make_client: Callable[
         _ok(c.post(f"/panels/{p['id']}/sketch/validate"))
     est = _ok(c.get(f"/chapters/{chapter_id}/sketch-estimate"))
     assert (est["to_sketch"], est["validated"], est["to_clean"]) == (0, 3, 3)
-    assert est["clean"]["total_s"] == pytest.approx(55 + 15 + 15)
+    assert est["clean"]["total_s"] == pytest.approx(160 + 40 + 40)
     assert len(_ok(c.post(f"/chapters/{chapter_id}/clean"), 202)["panel_ids"]) == 3
     _wait(c)
     p3 = data["panels"][2]

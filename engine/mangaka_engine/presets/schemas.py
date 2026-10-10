@@ -393,6 +393,9 @@ class Defaults(_Strict):
     workflow_with_references: str | None = None
     # Style de mise en page des nouvelles séries (presets/layout_styles/).
     layout_style: str | None = None
+    # Palier des fiches de référence et du passage au propre de la planche de style, quel que soit le
+    # palier de la série (son `with_references` dès qu'une image est envoyée) ; None = palier de la série.
+    workflow_library: str | None = None
     # Palier de « Régénérer en Qualité » (atelier) ; son `with_references` sert aux cases avec références.
     workflow_quality: str | None = None
     # Palier croquis : activé pour les nouvelles séries, et workflow des croquis (rôle `croquis`).
@@ -1190,6 +1193,9 @@ class ImagePromptSettings(_Strict):
         default_factory=lambda: ["texte", "lettres", "bulles", "phylactères", "onomatopées", "filigrane", "signature"]
     )
     strip_quotes: bool = Field(default=True, description="Retire les répliques entre guillemets de la description")
+    # Longueur maximale de `$style` (caractères) : les packs y entrent tour à tour (pipeline/style.py).
+    # null = aucun plafond (tous les mots-clés des packs).
+    style_max_chars: int | None = Field(default=240, ge=40)
     # Cadrage des images de référence (workflows avec références).
     references: ReferencePromptSettings = Field(default_factory=ReferencePromptSettings)
 
@@ -1224,7 +1230,8 @@ class ReferenceSheet(_Strict):
     negative_prompt: str = Field(default="", description="Ajouté au prompt négatif du workflow")
     width: int = Field(ge=256, le=2048, multiple_of=8)
     height: int = Field(ge=256, le=2048, multiple_of=8)
-    # None : palier de la série (Turbo par défaut), ou Qualité si demandé. Un id impose ce workflow.
+    # None : `defaults.workflow_library` (Turbo), sinon palier de la série, ou Qualité si demandé. Un id
+    # impose ce workflow.
     workflow: str | None = None
     order: int = Field(default=100, description="Ordre dans la liste déroulante")
 

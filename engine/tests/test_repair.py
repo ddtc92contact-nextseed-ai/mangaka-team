@@ -270,12 +270,12 @@ def test_repair_creates_a_linked_version_and_keeps_the_rest(make_client: Callabl
     hand = _ok(c.get(f"/panels/{p1['id']}"))["images"][0]["detections"]["hands"][0]
 
     info = _ok(c.get(f"/panel-images/{v1['id']}/repair", params={"target": "hand"}))
-    assert info["available"] and info["preset"] == "qwen-image-inpaint-turbo"  # palier de la version (Turbo)
+    assert info["available"] and info["preset"] == "qwen-image-inpaint-rapide"  # palier de la version (Rapide)
     assert info["character_id"] == data["aiko"]["id"]  # seul personnage de la case : concerné d'office
     assert "Aiko (cheveux noirs courts, kimono rouge)" in info["prompt"] and "Aiko sur un toit" in info["prompt"]
     none = _ok(c.get(f"/panel-images/{v1['id']}/repair", params={"target": "hand", "auto_character": False}))
     assert none["character_id"] is None and "Aiko (" not in none["prompt"]
-    assert info["denoise"] == REG.workflow("qwen-image-inpaint-turbo").preset.defaults["denoise"]
+    assert info["denoise"] == REG.workflow("qwen-image-inpaint-rapide").preset.defaults["denoise"]
 
     [job] = _ok(
         c.post(
@@ -294,14 +294,15 @@ def test_repair_creates_a_linked_version_and_keeps_the_rest(make_client: Callabl
         202,
     )
     assert (
-        job["params"]["preset"] == "qwen-image-inpaint-turbo" and job["params"]["repair"]["source_image_id"] == v1["id"]
+        job["params"]["preset"] == "qwen-image-inpaint-rapide"
+        and job["params"]["repair"]["source_image_id"] == v1["id"]
     )
     _wait(c)
     assert _job(c, job["id"])["status"] == "succeeded"
 
     v1_after, v2 = _ok(c.get(f"/panels/{p1['id']}/images"))
     assert v1_after["selected"] and not v2["selected"]  # l'auteur choisit de la retenir ou non
-    assert v2["version"] == 2 and v2["seed"] == 1234 and v2["tier"] == "Turbo"
+    assert v2["version"] == 2 and v2["seed"] == 1234 and v2["tier"] == "Rapide"
     repair = v2["params"]["repair"]
     assert (repair["source_image_id"], repair["source_version"], repair["target"]) == (v1["id"], 1, "hand")
     assert (repair["grow_px"], repair["feather_px"], repair["denoise"]) == (8, 6, 0.5)

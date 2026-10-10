@@ -384,6 +384,17 @@ class PresetRegistry:
                         )
                     )
                     reg.defaults = reg.defaults.model_copy(update={"workflow_inpaint": None})
+                library_id = reg.defaults.workflow_library if reg.defaults else None
+                if library_id and (
+                    library_id not in reg.workflows or reg.workflows[library_id].preset.role != "generation"
+                ):
+                    reg.issues.append(
+                        PresetIssue(
+                            reg._rel(defaults_path),
+                            f"workflow_library : workflow inconnu ou pas de génération : {library_id}",
+                        )
+                    )
+                    reg.defaults = reg.defaults.model_copy(update={"workflow_library": None})
         else:
             reg.issues.append(PresetIssue(reg._rel(defaults_path), "fichier absent"))
 
