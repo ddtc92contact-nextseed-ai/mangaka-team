@@ -1,0 +1,57 @@
+# Réparation ciblée (inpainting) · palier Qualité — mêmes modèles que « qwen-image-edit-ref ».
+# La version à réparer est encodée (VAEEncode), le bruit est limité au masque (SetLatentNoiseMask, nœud
+# natif) et le KSampler ne débruite que partiellement (`denoise`). Le moteur recolle ensuite la zone
+# masquée (adoucie) sur l'original, hors ComfyUI : le reste de l'image ne bouge pas d'un pixel.
+# Option prévue pour plus tard (pas en v1) : FaceDetailer (Impact Pack) + SAM sam_vit_b_01ec64.
+# Voir presets/README.md (« Réparation ciblée »).
+id: qwen-image-inpaint
+name: "Qwen-Image 2.1 · Qualité — réparation ciblée"
+description: >-
+  Repeint seulement la zone masquée d'une version (bf16, 50 étapes), avec les LoRA de la série et du personnage concerné et jusqu'à 3 images de référence.
+workflow_file: qwen-image-inpaint.json
+output_node: "11"
+timeout_s: 1500   # au-delà, la réparation est interrompue et le job passe en échec
+tier:
+  name: Qualité
+estimated_s: 140
+mapping:
+  positive_prompt: { node: "6", input: prompt }
+  negative_prompt: { node: "6", input: negative_prompt }
+  seed: { node: "9", input: seed }
+  steps: { node: "9", input: steps }
+  cfg: { node: "9", input: cfg }
+  denoise: { node: "9", input: denoise }
+  filename_prefix: { node: "11", input: filename_prefix }
+# Mêmes emplacements de référence que le workflow « avec références » du palier (retirés si inutilisés).
+reference_images:
+  - { node: "20", input: image }
+  - { node: "21", input: image }
+  - { node: "22", input: image }
+lora_chain:
+  class_type: LoraLoaderModelOnly
+  model_from: { node: "1", output: 0 }
+  model_input: model
+  name_input: lora_name
+  strength_input: strength_model
+defaults:
+  negative_prompt: "texte, lettres, bulles, filigrane, signature, flou, mains déformées, doigts en trop"
+  steps: 50
+  cfg: 1
+  denoise: 0.45      # 0,3 = retouche légère ; 0,6 = la zone est redessinée franchement
+  filename_prefix: mangaka/reparation
+inpaint:
+  source_image: { node: "30", input: image }   # LoadImage : la version à réparer
+  mask_image: { node: "31", input: image }     # LoadImageMask (canal rouge) : blanc = à repeindre
+  grow_px: 24        # marge ajoutée autour de la zone (réglable dans l'atelier)
+  feather_px: 16     # bords fondus : le raccord avec l'original se fait sur cette largeur
+  # Prompt prérempli (modifiable dans l'atelier) ; un morceau dont une variable est vide est omis.
+  prompt_parts:
+    - "$target."
+    - "Personnage : $character."
+    - "Case : $description."
+    - "Style : $style."
+    - "Dessin encré de manga, sans aucun texte."
+  targets:
+    face: "Gros plan sur un visage net et expressif, yeux symétriques, traits fins"
+    hand: "Main bien dessinée, cinq doigts, anatomie correcte, articulations nettes"
+    zone: "Détail redessiné proprement, raccord invisible avec le reste de la case"

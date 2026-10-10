@@ -47,6 +47,7 @@ def test_presets_endpoint(client: TestClient) -> None:
         "workflow": "qwen-image-turbo",
         "workflow_with_references": "qwen-image-edit-ref-turbo",
         "workflow_quality": "qwen-image-base",
+        "workflow_inpaint": "qwen-image-inpaint-turbo",
         "layout_style": "dynamique",
     }
     assert {st["id"] for st in data["layout_styles"]} >= {"sage", "dynamique", "nerveuse"}

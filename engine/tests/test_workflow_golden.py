@@ -129,3 +129,30 @@ def test_tier_pairing_and_defaults() -> None:
     for (base, edit), seconds in zip(TIERS.values(), (70, 60, 20), strict=True):
         assert REG.workflow(base).preset.estimated_s == seconds
         assert REG.workflow(edit).preset.estimated_s == seconds * 4
+
+
+# Réparation ciblée (inpainting) : image source, masque, denoise, seed, références et LoRA injectés.
+INPAINT_PRESETS = ["qwen-image-inpaint", "qwen-image-inpaint-rapide", "qwen-image-inpaint-turbo"]
+INPAINT_PARAMS = {
+    "positive_prompt": "Main bien dessinée, cinq doigts. Personnage : Aiko (cheveux noirs).",
+    "negative_prompt": "texte, bulles",
+    "seed": 424242,
+    "denoise": 0.4,
+    "filename_prefix": "mangaka/serie-1/chapitre-1/page-1/case-1",
+}
+
+
+@pytest.mark.parametrize("preset_id", INPAINT_PRESETS)
+def test_inpaint_workflow_matches_golden(preset_id: str) -> None:
+    built = build_workflow(
+        REG.workflow(preset_id),
+        INPAINT_PARAMS,
+        reference_images=REFERENCES[:1],
+        loras=LORAS,
+        inpaint_images=("mangaka/source_img12.png", "mangaka/masque_job34.png"),
+    ).workflow
+    path = GOLDEN / f"{preset_id}.json"
+    text = json.dumps(built, indent=2, ensure_ascii=False, sort_keys=True) + "\n"
+    if os.environ.get("UPDATE_GOLDEN"):
+        path.write_text(text, encoding="utf-8")
+    assert json.loads(path.read_text(encoding="utf-8")) == built

@@ -17,6 +17,7 @@ Aucun nom de modèle, de LoRA ni de nœud ici : tout vient des presets et des fi
 from __future__ import annotations
 
 import contextlib
+import io
 import logging
 import threading
 import time
@@ -25,6 +26,7 @@ from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Any
 
+from PIL import Image, UnidentifiedImageError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
@@ -56,6 +58,7 @@ from ..store.models import (
     SeriesAssetImage,
 )
 from .art_direction import applied_panel_direction
+from .inpaint import png_bytes, recompose, soften_mask
 from .jobs import JobReporter
 from .knowledge import KnowledgeBase
 from .layout import target_size
@@ -311,7 +314,8 @@ def enqueue_panel(
     if panel_target(presets, page, panel) is None:
         raise GenerationError(f"la page {page.number} n'est pas mise en page : lance « Recalculer » d'abord")
     preset_id = resolve_preset_id(presets, panel, panel_cast(session, panel).entries, preset)
-    presets.workflow(preset_id)  # PresetError si inconnu
+    if presets.workflow(preset_id).preset.inpaint is not None:  # PresetError si inconnu
+        raise GenerationError(f"le workflow {preset_id} sert à réparer une version, pas à générer une case")
     if prompt_override is not None and prompt_override.strip():
         panel.final_prompt = prompt_override.strip()
         panel.final_prompt_manual = True
@@ -436,6 +440,10 @@ class _Plan:
     folder: str
     prompt: str
     panel_id: int
+    # Réparation ciblée : version source, masque adouci (PNG) et réglages (`params.repair` du job).
+    repair: dict[str, Any] | None = None
+    source_data: bytes = b""
+    mask_data: bytes = b""
 
 
 def _capitalize(text: str) -> str:
@@ -511,8 +519,23 @@ class GenerationExecutor:
             presets = self.presets_for(chapter.project_id)
             preset_id = str(job.params.get("preset") or resolve_preset_id(presets, panel, entries))
             loaded = presets.workflow(preset_id)
-            prompt = update_panel_prompt(presets, session, panel, self.knowledge)
-            size = panel_target(presets, page, panel)
+            repair = job.params.get("repair") if isinstance(job.params.get("repair"), dict) else None
+            source_data = mask_data = b""
+            size: dict[str, int] | None
+            if repair is not None:
+                if loaded.preset.inpaint is None:
+                    raise GenerationError(f"le workflow {preset_id} n'est pas un preset de réparation")
+                source, source_data, mask_data, size = self._repair_inputs(session, panel.id, repair)
+                prompt = str(repair.get("prompt") or "")
+                concerned = [c for c in cast.characters if c.id == repair.get("character_id")]
+                if concerned:
+                    # Le personnage concerné d'abord (références et LoRA d'identité), puis le style de la série.
+                    entries = concerned
+            else:
+                if loaded.preset.inpaint is not None:
+                    raise GenerationError(f"le workflow {preset_id} sert à réparer une version, pas à générer une case")
+                prompt = update_panel_prompt(presets, session, panel, self.knowledge)
+                size = panel_target(presets, page, panel)
             if size is None:
                 raise GenerationError(f"la page {page.number} n'est pas mise en page")
             references: list[dict[str, Any]] = []
@@ -543,8 +566,11 @@ class GenerationExecutor:
                     str(loaded.preset.defaults.get("negative_prompt", "")), presets.image_prompt
                 ),
                 "seed": job.params.get("seed"),
-                **size,
             }
+            if repair is not None:
+                params["denoise"] = float(repair.get("denoise") or loaded.preset.defaults.get("denoise") or 0.45)
+            else:
+                params.update(size)
             if "filename_prefix" in loaded.preset.mapping:
                 params["filename_prefix"] = (
                     f"mangaka/serie-{chapter.project_id}/chapitre-{chapter.number}/page-{page.number}"
@@ -559,9 +585,33 @@ class GenerationExecutor:
                 folder=f"projects/{chapter.project_id}/chapters/{chapter.id}/panels/{panel.id}",
                 prompt=prompt,
                 panel_id=panel.id,
+                repair={**repair, "image_width": size["width"], "image_height": size["height"]} if repair else None,
+                source_data=source_data,
+                mask_data=mask_data,
             )
             session.commit()  # prompt final éventuellement reconstruit
             return plan
+
+    def _repair_inputs(
+        self, session: Session, panel_id: int, repair: dict[str, Any]
+    ) -> tuple[PanelImage, bytes, bytes, dict[str, int]]:
+        """Version source (octets), masque agrandi et adouci (PNG) et taille de l'image source."""
+        source = session.get(PanelImage, repair.get("source_image_id"))
+        if source is None or source.panel_id != panel_id:
+            raise GenerationError("version source introuvable (supprimée entre-temps ?)")
+        source_path = self.files.absolute(source.path)
+        mask_path = self.files.absolute(str(repair.get("mask_path") or ""))
+        if not source_path.is_file():
+            raise GenerationError(f"image de la version {source.version} absente de data/ ({source.path})")
+        if not mask_path.is_file():
+            raise GenerationError("masque de la réparation absent de data/")
+        source_data = source_path.read_bytes()
+        with Image.open(io.BytesIO(source_data)) as img:
+            width, height = img.size
+        with Image.open(mask_path) as raw:
+            mask = raw.convert("L").resize((width, height), Image.Resampling.NEAREST)
+        soft = soften_mask(mask, int(repair.get("grow_px") or 0), int(repair.get("feather_px") or 0))
+        return source, source_data, png_bytes(soft), {"width": width, "height": height}
 
     def __call__(self, job_id: int, report: JobReporter, cancel: threading.Event) -> str:
         if self.comfyui is None:
@@ -577,7 +627,17 @@ class GenerationExecutor:
         for i, (ref, data) in enumerate(zip(plan.references, plan.reference_data, strict=True), start=1):
             report(4, f"Envoi de l'image de référence {i}/{len(plan.references)} à ComfyUI…")
             uploaded.append(comfy.upload_image(data, ref["filename"], subfolder=UPLOAD_SUBFOLDER))
-        built = build_workflow(plan.loaded, plan.params, reference_images=uploaded, loras=plan.loras)
+        inpaint_images: tuple[str, str] | None = None
+        if plan.repair is not None:
+            report(6, "Envoi de la version source et du masque à ComfyUI…")
+            source_id = plan.repair.get("source_image_id")
+            inpaint_images = (
+                comfy.upload_image(plan.source_data, f"source_img{source_id}.png", subfolder=UPLOAD_SUBFOLDER),
+                comfy.upload_image(plan.mask_data, f"masque_job{job_id}.png", subfolder=UPLOAD_SUBFOLDER),
+            )
+        built = build_workflow(
+            plan.loaded, plan.params, reference_images=uploaded, loras=plan.loras, inpaint_images=inpaint_images
+        )
         if cancel.is_set():
             raise ComfyUIInterruptedError("génération annulée")
 
@@ -614,6 +674,18 @@ class GenerationExecutor:
 
         report(92, "Récupération de l'image…")
         data = comfy.fetch_image(refs[0])
+        if plan.repair is not None:
+            # Seule la zone masquée (adoucie) est reprise : le reste est l'original, au pixel près.
+            report(95, "Recollage de la zone réparée sur l'original…")
+            try:
+                with (
+                    Image.open(io.BytesIO(plan.source_data)) as source,
+                    Image.open(io.BytesIO(data)) as generated,
+                    Image.open(io.BytesIO(plan.mask_data)) as soft,
+                ):
+                    data = png_bytes(recompose(source, generated, soft))
+            except (UnidentifiedImageError, OSError) as exc:
+                raise GenerationError(f"image renvoyée par ComfyUI illisible : {exc}") from None
         stored = self.files.save_image(data, plan.folder)
         duration_ms = int((time.monotonic() - t0) * 1000)
 
@@ -641,8 +713,8 @@ class GenerationExecutor:
                     "prompt": built.params["positive_prompt"],
                     "negative_prompt": built.params["negative_prompt"],
                     "seed": built.params["seed"],
-                    "width": built.params["width"],
-                    "height": built.params["height"],
+                    "width": built.params.get("width", stored.width),
+                    "height": built.params.get("height", stored.height),
                     "workflow_params": built.params,
                     "loras": [lo.as_dict() for lo in built.loras],
                     "reference_images": [
@@ -661,6 +733,7 @@ class GenerationExecutor:
                     "job_id": job_id,
                     "comfyui_prompt_id": prompt_id,
                     "comfyui": comfy.name,
+                    **({"repair": _repair_params(plan.repair)} if plan.repair is not None else {}),
                 },
             )
             session.add(image)
@@ -672,4 +745,25 @@ class GenerationExecutor:
                 except Exception:  # noqa: BLE001 — la version est gardée même si le QC ne peut être mis en file
                     log.exception("job %s : mise en file du contrôle qualité impossible", job_id)
             session.commit()
+        if plan.repair is not None:
+            return f"Version {version} — réparation de la v{plan.repair.get('source_version')}, seed {built.params['seed']}"
         return f"Version {version} — {stored.width}×{stored.height}, seed {built.params['seed']}"
+
+
+def _repair_params(repair: dict[str, Any]) -> dict[str, Any]:
+    """Lien d'une version réparée vers sa source et réglages de la réparation (sans le prompt, déjà noté)."""
+    keys = (
+        "source_image_id",
+        "source_version",
+        "target",
+        "character_id",
+        "character_name",
+        "regions",
+        "painted",
+        "mask_path",
+        "mask_bbox",
+        "grow_px",
+        "feather_px",
+        "denoise",
+    )
+    return {k: repair.get(k) for k in keys}

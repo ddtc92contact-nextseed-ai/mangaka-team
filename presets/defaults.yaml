@@ -9,3 +9,5 @@ workflow_with_references: qwen-image-edit-ref-turbo
 workflow_quality: qwen-image-base
 # Style de mise en page des nouvelles séries (presets/layout_styles/) : sage, dynamique, nerveuse.
 layout_style: dynamique
+# Réparation ciblée (atelier) pour un workflow qui ne déclare pas `inpaint_with` (preset avec bloc `inpaint`).
+workflow_inpaint: qwen-image-inpaint-turbo
