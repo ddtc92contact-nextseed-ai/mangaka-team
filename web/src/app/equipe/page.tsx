@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { InfoTip } from "@/components/info-tip";
 import { Alert, Card, EmptyState, Loading, PageHeader } from "@/components/ui";
 import { api, type AgentSummary } from "@/lib/api";
 import { STATE_TONE, formatDateTime } from "@/lib/agents";
@@ -16,7 +17,12 @@ export default function TeamPage() {
     <>
       <PageHeader
         title="L'équipe"
-        subtitle="Les agents qui font le travail, étape par étape. Ouvre un agent pour l'essayer et l'adapter."
+        subtitle={
+          <span className="inline-flex items-center gap-1.5">
+            Les agents qui font le travail, étape par étape. Ouvre un agent pour l&apos;essayer et l&apos;adapter.
+            <InfoTip help="equipe.agents" label="L'équipe" />
+          </span>
+        }
       />
       {agents.loading && <Loading />}
       {agents.error && <Alert>{agents.error}</Alert>}

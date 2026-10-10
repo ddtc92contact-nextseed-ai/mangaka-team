@@ -2,6 +2,7 @@
 
 import { useRef, useState, type FormEvent, type KeyboardEvent, type PointerEvent } from "react";
 import { Modal } from "@/components/modal";
+import { InfoTip } from "@/components/info-tip";
 import { Alert, Button, Field, Loading, Select, Textarea } from "@/components/ui";
 import {
   api,
@@ -13,6 +14,7 @@ import {
   type RepairRegion,
   type RepairTarget,
 } from "@/lib/api";
+import type { HelpId } from "@/lib/help";
 import { useEngineData } from "@/lib/hooks";
 
 /** Détection du QC à présélectionner (« Réparer cette main »). */
@@ -377,7 +379,10 @@ export function RepairDialog({
           ) : null}
 
           <div className="space-y-1.5">
-            <span className="block text-sm font-medium text-zinc-300">Détections du QC</span>
+            <span className="flex items-center gap-1.5 text-sm font-medium text-zinc-300">
+              Détections du QC
+              <InfoTip help="atelier.repair" label="Réparer une zone" />
+            </span>
             {detectionButtons.length === 0 ? (
               <p className="text-xs text-zinc-500">
                 {det ? "Aucun visage ni main détecté." : "Pas de détections pour cette version (lance le QC) : trace la zone à la main."}
@@ -443,11 +448,12 @@ export function RepairDialog({
             </Field>
           </div>
 
-          <Slider id="repair-grow" label="Marge autour de la zone" value={growPx} min={0} max={128} step={2} unit="px" onChange={setGrow} />
-          <Slider id="repair-feather" label="Bords fondus" value={featherPx} min={0} max={64} step={2} unit="px" onChange={setFeather} />
+          <Slider id="repair-grow" label="Marge autour de la zone" help="atelier.repair_grow" value={growPx} min={0} max={128} step={2} unit="px" onChange={setGrow} />
+          <Slider id="repair-feather" label="Bords fondus" help="atelier.repair_feather" value={featherPx} min={0} max={64} step={2} unit="px" onChange={setFeather} />
           <Slider
             id="repair-denoise"
             label="Force de la retouche (denoise)"
+            help="atelier.repair_denoise"
             value={denoiseValue}
             min={0.1}
             max={0.9}
@@ -498,6 +504,7 @@ function Slider({
   step,
   unit,
   hint,
+  help,
   onChange,
 }: {
   id: string;
@@ -508,14 +515,18 @@ function Slider({
   step: number;
   unit?: string;
   hint?: string;
+  help?: HelpId;
   onChange: (v: number) => void;
 }) {
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between gap-2 text-sm">
-        <label htmlFor={id} className="font-medium text-zinc-300">
-          {label}
-        </label>
+        <span className="flex items-center gap-1.5">
+          <label htmlFor={id} className="font-medium text-zinc-300">
+            {label}
+          </label>
+          {help && <InfoTip help={help} label={label} />}
+        </span>
         <span className="tabular-nums text-xs text-zinc-400">
           {value.toLocaleString("fr-FR", { maximumFractionDigits: 2 })}
           {unit ? ` ${unit}` : ""}

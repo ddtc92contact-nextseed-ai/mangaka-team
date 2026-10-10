@@ -43,7 +43,10 @@ export function InfoTip({ help, label, className = "" }: { help: HelpId; label: 
   useEffect(() => {
     if (!state.open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") dispatch("escape");
+      if (e.key !== "Escape") return;
+      // Ne ferme que la bulle, pas la fenêtre modale (`<dialog>`) ni le panneau qui la contient.
+      e.preventDefault();
+      dispatch("escape");
     };
     const onDown = (e: PointerEvent) => {
       if (!button.current?.contains(e.target as Node)) dispatch("outside");
@@ -82,7 +85,7 @@ export function InfoTip({ help, label, className = "" }: { help: HelpId; label: 
         id={bubbleId}
         role="tooltip"
         hidden={!state.open}
-        data-testid="help-bubble"
+        data-testid="tip-bubble"
         style={place ? { top: place.top, left: place.left } : { top: 0, left: 0, visibility: "hidden" }}
         className="pointer-events-none fixed z-50 w-max max-w-[min(18rem,calc(100vw-16px))] rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-left text-xs font-normal normal-case leading-relaxed tracking-normal text-zinc-200 shadow-xl shadow-black/50"
       >

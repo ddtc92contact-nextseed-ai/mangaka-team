@@ -1,5 +1,6 @@
 // Sens de lecture d'une série : libellés, badge et choix en grandes cartes (groupe de boutons radio).
 import type { ReadingDirection } from "@/lib/api";
+import { InfoTip } from "./info-tip";
 
 export const DIRECTIONS: Record<ReadingDirection, string> = {
   rtl: "Droite → gauche (manga)",
@@ -85,8 +86,11 @@ export function DirectionPicker({
   error?: string;
 }) {
   return (
-    <fieldset aria-describedby="reading_direction-help" className="space-y-2">
-      <legend className="text-sm font-medium text-zinc-300">Sens de lecture</legend>
+    <fieldset aria-describedby="reading_direction-help" className="min-w-0 space-y-2">
+      <legend className="flex items-center gap-1.5 text-sm font-medium text-zinc-300">
+        Sens de lecture
+        <InfoTip help="serie.direction" label="Sens de lecture" />
+      </legend>
       <p id="reading_direction-help" className={`text-xs ${error ? "text-red-400" : "text-zinc-500"}`} role={error ? "alert" : undefined}>
         {error || "Il décide de l'ordre des cases, de la reliure et de la place des bulles. Modifiable ensuite."}
       </p>

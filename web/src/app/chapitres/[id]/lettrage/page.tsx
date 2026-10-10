@@ -2,6 +2,8 @@
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { HelpLabel, InfoTip } from "@/components/info-tip";
+import { useToast } from "@/components/toast";
 import { Alert, Button, ButtonLink, Card, EmptyState, Loading, Select } from "@/components/ui";
 import { api, fullErrorMessage, type BubbleUpdate, type Intensity, type SfxUpdate } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
@@ -40,6 +42,7 @@ function Lettering() {
   const [notice, setNotice] = useState<string | null>(null);
   const [showGuides, setShowGuides] = useState(true);
   const canvasRef = useRef<LetteringCanvasHandle>(null);
+  const toast = useToast();
 
   const data = lettering.data && page && lettering.data.page_id === page.id ? lettering.data : null;
   const selectedId = selection && page && selection.page === page.id ? selection.id : null;
@@ -90,6 +93,12 @@ function Lettering() {
       if (!ok) lettering.reload();
     });
   };
+  // Enregistrement depuis un panneau d'édition (pas les glisser-déposer, trop fréquents pour une notification).
+  const save = (id: number, body: BubbleUpdate, message: string) =>
+    update(id, body).then((ok) => {
+      if (ok) toast(message);
+      return ok;
+    });
   const commitSfx = (id: number, sfx: SfxUpdate) => {
     update(id, { sfx }).then((ok) => {
       if (!ok) lettering.reload();
@@ -102,11 +111,13 @@ function Lettering() {
       const created = (next.sfx ?? []).filter((x) => x.panel_id === panelId).sort((a, b) => b.id - a.id)[0];
       if (created) select(created.id);
       setNotice(`Onomatopée « ${text} » ajoutée.`);
+      toast("Onomatopée ajoutée");
     });
   const deleteSfx = (id: number) =>
     run(async () => {
       lettering.setData(await api.deleteSfx(id));
       select(null);
+      toast("Onomatopée supprimée");
     });
   const recompute = () => {
     if (!page || !data) return;
@@ -123,6 +134,7 @@ function Lettering() {
     run(async () => {
       lettering.setData(await api.resetLettering(page.id));
       setNotice("Lettrage recalculé.");
+      toast("Lettrage recalculé");
     });
   };
 
@@ -173,19 +185,25 @@ function Lettering() {
           {sfxCount > 0 && ` · ${sfxCount} onomatopée${sfxCount > 1 ? "s" : ""}`}
         </p>
         <div className="ml-auto flex flex-wrap items-center gap-2">
-          <label className="flex items-center gap-2 text-sm text-zinc-400">
-            <input
-              type="checkbox"
-              checked={showGuides}
-              onChange={(e) => setShowGuides(e.target.checked)}
-              className="h-4 w-4 accent-rose-500"
-            />
-            Zones de bulles et visages
-          </label>
+          <span className="flex items-center gap-1.5">
+            <label className="flex items-center gap-2 text-sm text-zinc-400">
+              <input
+                type="checkbox"
+                checked={showGuides}
+                onChange={(e) => setShowGuides(e.target.checked)}
+                className="h-4 w-4 accent-rose-500"
+              />
+              Zones de bulles et visages
+            </label>
+            <InfoTip help="lettrage.guides" label="Zones de bulles et visages" />
+          </span>
           {data && (
-            <Button variant="secondary" onClick={recompute} disabled={busy} data-testid="recompute-lettering">
-              Recalculer le lettrage
-            </Button>
+            <span className="flex items-center gap-1.5">
+              <Button variant="secondary" onClick={recompute} disabled={busy} data-testid="recompute-lettering">
+                Recalculer le lettrage
+              </Button>
+              <InfoTip help="lettrage.recompute" label="Recalculer le lettrage" />
+            </span>
           )}
           <ButtonLink variant="ghost" href={`/chapitres/${chapter.id}/atelier?page=${page.id}`}>
             Atelier
@@ -240,7 +258,7 @@ function Lettering() {
               index={selectedIndex}
               warnings={data.warnings}
               busy={busy}
-              onSave={(body) => update(selected.id, body)}
+              onSave={(body) => save(selected.id, body, "Bulle enregistrée")}
               onClose={() => {
                 const id = selected.id;
                 select(null);
@@ -255,7 +273,7 @@ function Lettering() {
               fonts={data.sfx_fonts ?? {}}
               warnings={data.warnings}
               busy={busy}
-              onSave={(body) => update(selectedSfx.id, body)}
+              onSave={(body) => save(selectedSfx.id, body, "Onomatopée enregistrée")}
               onDelete={() => deleteSfx(selectedSfx.id)}
               onClose={() => {
                 const id = selectedSfx.id;
@@ -267,7 +285,9 @@ function Lettering() {
           {data && <AddSfx key={data.page_id} panels={data.panels} busy={busy} onAdd={addSfx} />}
           {data && (
             <Card data-testid="lettering-warnings">
-              <h2 className="mb-2 font-semibold text-zinc-100">Avertissements</h2>
+              <h2 className="mb-2 font-semibold text-zinc-100">
+                <HelpLabel help="lettrage.warnings">Avertissements</HelpLabel>
+              </h2>
               {data.warnings.length ? (
                 <ul className="space-y-2 text-sm">
                   {data.warnings.map((w, i) => (

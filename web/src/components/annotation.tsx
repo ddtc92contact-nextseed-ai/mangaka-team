@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { InfoTip } from "@/components/info-tip";
 import { modalOpen } from "@/components/modal";
 import { api, fullErrorMessage, type Annotation, type AnnotationLabel, type DefectId, type PanelImage } from "@/lib/api";
 import { ANNOTATION_LABEL, DEFECTS } from "@/lib/qc";
@@ -140,8 +141,11 @@ export function AnnotationBar({
   return (
     <div className="space-y-2 rounded-lg border border-zinc-800 bg-zinc-950/60 p-3" data-testid="annotation-bar">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-medium text-zinc-300">
-          Annotation <span className="font-normal text-zinc-500">· v{image.version} · banc d&apos;essai QC</span>
+        <h3 className="flex items-center gap-1.5 text-sm font-medium text-zinc-300">
+          <span>
+            Annotation <span className="font-normal text-zinc-500">· v{image.version} · banc d&apos;essai QC</span>
+          </span>
+          <InfoTip help="atelier.annotation" label="Annotation" />
         </h3>
         <div className="flex gap-1.5" role="group" aria-label="Jugement de la version">
           <button type="button" className={pill(ann?.label === "good", "good")} aria-pressed={ann?.label === "good"} onClick={() => mark("good")} disabled={busy} data-testid="annotate-good">

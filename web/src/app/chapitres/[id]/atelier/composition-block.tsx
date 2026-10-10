@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ImageDropzone } from "@/components/image-dropzone";
+import { InfoTip } from "@/components/info-tip";
 import { Alert, Button, Field, Input, Select } from "@/components/ui";
 import {
   api,
@@ -12,6 +13,17 @@ import {
   type PanelDetail,
   type PanelImage,
 } from "@/lib/api";
+import type { HelpId } from "@/lib/help";
+
+/** Bulle d'aide de chaque type de contrôle connu (ids des presets `control.types`). */
+const CONTROL_HELP: Record<string, HelpId> = {
+  lineart: "atelier.control_lineart",
+  depth: "atelier.control_depth",
+  pose: "atelier.control_pose",
+  scribble: "atelier.control_scribble",
+  canny: "atelier.control_canny",
+  carte: "atelier.control_carte",
+};
 
 const PREVIEW_POLL_MS = 1500;
 
@@ -57,7 +69,7 @@ export function CompositionBlock({
   status: ControlStatus | null;
   statusError: string | null;
   busy: boolean;
-  run: (action: () => Promise<void>) => Promise<void>;
+  run: (action: () => Promise<void>, done?: string) => Promise<void>;
   onDetail: (detail: PanelDetail) => void;
   onReload: () => void;
   onDone: (message: string) => void;
@@ -75,7 +87,10 @@ export function CompositionBlock({
   return (
     <div className="space-y-3 rounded-lg border border-zinc-800 p-3" data-testid="panel-composition">
       <div className="flex items-center justify-between gap-2">
-        <h3 className="text-sm font-medium text-zinc-300">Composition</h3>
+        <h3 className="flex items-center gap-1.5 text-sm font-medium text-zinc-300">
+          Composition
+          <InfoTip help="atelier.composition" label="Verrouillage de composition" />
+        </h3>
         {lock && <LockBadge />}
       </div>
       {statusError && !status ? (
@@ -129,6 +144,22 @@ function TypeSelect({
   );
 }
 
+/** Une bulle par type de contrôle : le `<select>` ne peut pas en porter sur ses options. */
+function TypeTips({ types }: { types: ControlTypeInfo[] }) {
+  const known = types.filter((t) => CONTROL_HELP[t.id]);
+  if (!known.length) return null;
+  return (
+    <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-zinc-500" data-testid="control-type-tips">
+      {known.map((t) => (
+        <span key={t.id} className="inline-flex items-center gap-1">
+          {t.name}
+          <InfoTip help={CONTROL_HELP[t.id]} label={`Type de contrôle ${t.name}`} />
+        </span>
+      ))}
+    </p>
+  );
+}
+
 function LockForm({
   panel,
   status,
@@ -140,7 +171,7 @@ function LockForm({
   panel: PanelDetail;
   status: ControlStatus;
   busy: boolean;
-  run: (action: () => Promise<void>) => Promise<void>;
+  run: (action: () => Promise<void>, done?: string) => Promise<void>;
   onDetail: (detail: PanelDetail) => void;
   onDone: (message: string) => void;
 }) {
@@ -180,7 +211,7 @@ function LockForm({
       onDone(
         `Composition verrouillée (${detail.composition_lock?.type_name ?? type}) : toute régénération de la case suivra cette image guide jusqu'au déverrouillage.`,
       );
-    });
+    }, "Composition verrouillée");
 
   return (
     <div className="space-y-3">
@@ -235,6 +266,7 @@ function LockForm({
         <Field
           label="Force"
           htmlFor="control-strength"
+          help="atelier.control_strength"
           error={strength === null ? "Entre 0 et 2" : undefined}
           hint="1 = composition tenue ; plus bas = plus libre."
         >
@@ -247,6 +279,7 @@ function LockForm({
           />
         </Field>
       </div>
+      <TypeTips types={status.types} />
       <Button onClick={lock} disabled={busy || !ready} data-testid="lock-composition">
         Verrouiller la composition
       </Button>
@@ -301,7 +334,7 @@ function LockedView({
   lock: CompositionLock;
   status: ControlStatus;
   busy: boolean;
-  run: (action: () => Promise<void>) => Promise<void>;
+  run: (action: () => Promise<void>, done?: string) => Promise<void>;
   onDetail: (detail: PanelDetail) => void;
   onDone: (message: string) => void;
 }) {
@@ -327,16 +360,16 @@ function LockedView({
       setTypeDraft(null);
       setStrengthText(null);
       onDone(type !== lock.type ? "Type de contrôle changé : nouvelle carte en calcul." : "Force du contrôle enregistrée.");
-    });
+    }, "Verrouillage enregistré");
   const unlock = () =>
     run(async () => {
       onDetail(await api.unlockComposition(panelId));
       onDone("Composition déverrouillée : les prochaines générations repartent du texte seul.");
-    });
+    }, "Composition déverrouillée");
   const recompute = () =>
     run(async () => {
       onDetail(await api.refreshCompositionPreview(panelId));
-    });
+    }, "Recalcul de la carte lancé");
 
   return (
     <div className="space-y-3" data-testid="composition-locked">
@@ -392,7 +425,7 @@ function LockedView({
         <Field label="Type de contrôle" htmlFor="lock-type">
           <TypeSelect id="lock-type" types={types} value={type} onChange={setTypeDraft} disabled={busy || !status.available} />
         </Field>
-        <Field label="Force" htmlFor="lock-strength" error={strength === null ? "Entre 0 et 2" : undefined}>
+        <Field label="Force" htmlFor="lock-strength" help="atelier.control_strength" error={strength === null ? "Entre 0 et 2" : undefined}>
           <Input
             id="lock-strength"
             inputMode="decimal"
@@ -402,6 +435,7 @@ function LockedView({
           />
         </Field>
       </div>
+      {status.available && <TypeTips types={types} />}
       <div className="flex flex-wrap gap-2">
         {dirty && (
           <Button variant="secondary" className="!px-2.5 !py-1 text-xs" onClick={save} disabled={busy || strength === null}>

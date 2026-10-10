@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
+import { HelpLabel, InfoTip } from "@/components/info-tip";
 import { Modal } from "@/components/modal";
+import { useToast } from "@/components/toast";
 import { Alert, Button, Card, EmptyState, Loading, PageHeader, ProgressBar, Select } from "@/components/ui";
 import {
   api,
@@ -63,6 +65,7 @@ function Bench() {
   const [vision, setVision] = useState(true);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const toast = useToast();
 
   const runList = runs.data ?? [];
   const active = runList.find((r) => r.status === "pending" || r.status === "running") ?? null;
@@ -78,6 +81,7 @@ function Bench() {
       const run = await api.startBenchRun({ project_id: projectId, chapter_id: chapterId, vision });
       runs.reload();
       setQuery({ run: run.id });
+      toast("Banc d'essai lancé");
     } catch (e) {
       setError(fullErrorMessage(e));
     } finally {
@@ -102,7 +106,9 @@ function Bench() {
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]">
         <Card className="space-y-4">
-          <h2 className="font-semibold text-zinc-100">Ensemble annoté</h2>
+          <h2 className="font-semibold text-zinc-100">
+            <HelpLabel help="bench.dataset">Ensemble annoté</HelpLabel>
+          </h2>
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label htmlFor="bench-serie" className="mb-1 block text-xs text-zinc-400">
@@ -134,13 +140,19 @@ function Bench() {
           </div>
           <DatasetSummary dataset={dataset.data} error={dataset.error} loading={dataset.loading} />
           <div className="flex flex-wrap items-center gap-3 border-t border-zinc-800 pt-4">
-            <Button onClick={start} disabled={starting || running || !dataset.data?.total} data-testid="bench-start">
-              {running ? "Banc d'essai en cours…" : "Lancer"}
-            </Button>
-            <label className="flex items-center gap-1.5 text-xs text-zinc-400">
-              <input type="checkbox" checked={vision} onChange={(e) => setVision(e.target.checked)} className="accent-rose-500" />
-              Inclure la vision (lente, jamais pendant une génération)
-            </label>
+            <span className="flex items-center gap-1.5">
+              <Button onClick={start} disabled={starting || running || !dataset.data?.total} data-testid="bench-start">
+                {running ? "Banc d'essai en cours…" : "Lancer"}
+              </Button>
+              <InfoTip help="bench.run" label="Lancer le banc d'essai" />
+            </span>
+            <span className="flex items-center gap-1.5">
+              <label className="flex items-center gap-1.5 text-xs text-zinc-400">
+                <input type="checkbox" checked={vision} onChange={(e) => setVision(e.target.checked)} className="accent-rose-500" />
+                Inclure la vision (lente, jamais pendant une génération)
+              </label>
+              <InfoTip help="bench.vision" label="Inclure la vision" />
+            </span>
           </div>
           {active && running && (
             <div className="space-y-1.5" aria-live="polite" data-testid="bench-progress">
@@ -156,7 +168,9 @@ function Bench() {
 
         <Card className="space-y-3">
           <div className="flex items-center justify-between gap-2">
-            <h2 className="font-semibold text-zinc-100">Historique des runs</h2>
+            <h2 className="font-semibold text-zinc-100">
+              <HelpLabel help="bench.history">Historique des runs</HelpLabel>
+            </h2>
             {runList.length > 0 && <span className="text-xs text-zinc-500">{runList.length} run{runList.length > 1 ? "s" : ""}</span>}
           </div>
           {runs.loading && !runs.data ? (
@@ -265,6 +279,7 @@ function RunReport({ runId, onApplied }: { runId: number; onApplied: () => void 
   const [applyBusy, setApplyBusy] = useState(false);
   const [applyError, setApplyError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const toast = useToast();
 
   if (run.loading && !run.data) return <Loading />;
   if (run.error && !run.data) return <Alert>Impossible de charger le run {runId} : {run.error}</Alert>;
@@ -292,6 +307,7 @@ function RunReport({ runId, onApplied }: { runId: number; onApplied: () => void 
       const res = await api.applyBenchThresholds(data.id, true);
       setPreview(null);
       setNotice(res.message + ".");
+      toast("Seuils enregistrés dans presets/qc.yaml");
       run.reload();
       onApplied();
     } catch (e) {
@@ -321,9 +337,12 @@ function RunReport({ runId, onApplied }: { runId: number; onApplied: () => void 
           <a href={api.benchExportUrl(r.id, "csv")} download className="rounded-md bg-zinc-800 px-3 py-1.5 text-xs font-medium text-zinc-100 hover:bg-zinc-700" data-testid="export-csv">
             Export CSV
           </a>
-          <Button className="!py-1.5 text-xs" onClick={() => askApply(r)} disabled={applyBusy} data-testid="apply-thresholds">
-            Appliquer les seuils suggérés
-          </Button>
+          <span className="flex items-center gap-1.5">
+            <Button className="!py-1.5 text-xs" onClick={() => askApply(r)} disabled={applyBusy} data-testid="apply-thresholds">
+              Appliquer les seuils suggérés
+            </Button>
+            <InfoTip help="bench.apply" label="Appliquer les seuils suggérés" />
+          </span>
         </div>
       )}
     </div>
@@ -376,17 +395,25 @@ function RunReport({ runId, onApplied }: { runId: number; onApplied: () => void 
           </caption>
           <thead className="border-b border-zinc-800 text-xs text-zinc-500">
             <tr>
-              <th className="py-2 pr-3 font-normal">Couche</th>
+              <th className="py-2 pr-3 font-normal">
+                <HelpLabel help="bench.layers">Couche</HelpLabel>
+              </th>
               <th className="py-2 pr-3 font-normal">Cases</th>
-              <th className="py-2 pr-3 font-normal">Précision</th>
-              <th className="py-2 pr-3 font-normal">Rappel</th>
-              <th className="py-2 pr-3 font-normal" title="Bonnes cases signalées à tort">
-                Faux positifs
+              <th className="py-2 pr-3 font-normal">
+                <HelpLabel help="bench.precision">Précision</HelpLabel>
               </th>
-              <th className="py-2 pr-3 font-normal" title="Mauvaises cases laissées passer">
-                Faux négatifs
+              <th className="py-2 pr-3 font-normal">
+                <HelpLabel help="bench.recall">Rappel</HelpLabel>
               </th>
-              <th className="py-2 pr-3 font-normal">Seuil actuel → suggéré</th>
+              <th className="py-2 pr-3 font-normal">
+                <HelpLabel help="bench.fp">Faux positifs</HelpLabel>
+              </th>
+              <th className="py-2 pr-3 font-normal">
+                <HelpLabel help="bench.fn">Faux négatifs</HelpLabel>
+              </th>
+              <th className="py-2 pr-3 font-normal">
+                <HelpLabel help="bench.threshold">Seuil actuel → suggéré</HelpLabel>
+              </th>
               <th className="py-2 font-normal">Temps moyen</th>
             </tr>
           </thead>
@@ -471,7 +498,9 @@ function RunReport({ runId, onApplied }: { runId: number; onApplied: () => void 
           </div>
           <div className="space-y-4 text-sm">
             <div>
-              <h3 className="mb-2 text-xs font-medium text-zinc-400">Matrice de confusion (seuil actuel)</h3>
+              <h3 className="mb-2 text-xs font-medium text-zinc-400">
+                <HelpLabel help="bench.confusion">Matrice de confusion (seuil actuel)</HelpLabel>
+              </h3>
               <table className="w-full text-center text-xs tabular-nums" data-testid="confusion-matrix">
                 <thead>
                   <tr className="text-zinc-500">

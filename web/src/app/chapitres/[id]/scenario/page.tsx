@@ -264,7 +264,7 @@ function UsedSources({ sources }: { sources: ScriptSources }) {
         <div>
           <h2 className="font-semibold text-zinc-100">Sources utilisées</h2>
           <p className="text-xs text-zinc-500">
-            Dernier découpage du {new Date(sources.created_at).toLocaleString("fr-FR")} ·{" "}
+            Dernier découpage du {engineDate(sources.created_at).toLocaleString("fr-FR")} ·{" "}
             {count} passage{count > 1 ? "s" : ""} du savoir-faire
             {sources.collections.length > 0 && ` (${sources.collections.join(", ")})`} ·{" "}
             {sources.bible ? `bible de la série (${formatTokens(sources.bible.tokens)})` : "pas de bible pour cette série"}
@@ -302,8 +302,13 @@ function saveLabel(dirty: boolean, saving: boolean, label: string): string {
   return saving ? "Enregistrement…" : dirty ? label : "Enregistré ✓";
 }
 
+/** Les dates du moteur sont en UTC sans fuseau (« 2026-10-10T11:49:57 ») : à lire comme telles. */
+function engineDate(at: string | number): Date {
+  return new Date(typeof at === "string" && !/[zZ]|[+-]\d\d:?\d\d$/.test(at) ? `${at}Z` : at);
+}
+
 function formatTime(at: string | number): string {
-  return new Date(at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+  return engineDate(at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
 }
 
 function readableField(path: string): string {

@@ -76,7 +76,7 @@ export default function ProjectPage() {
       <div className="mb-6">
         <AgentOverrides projectId={id} />
       </div>
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
         <Card>
           <h2 className="mb-4 font-semibold text-zinc-100">Paramètres</h2>
           {saved && (

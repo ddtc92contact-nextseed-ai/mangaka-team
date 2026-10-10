@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { HelpLabel } from "@/components/info-tip";
 import { Alert, ButtonLink, Card } from "@/components/ui";
 import { api } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
@@ -11,7 +12,9 @@ export function AgentOverrides({ projectId }: { projectId: number }) {
   return (
     <Card data-testid="series-agents">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="font-semibold text-zinc-100">Réglages des agents pour cette série</h2>
+        <h2 className="font-semibold text-zinc-100">
+          <HelpLabel help="equipe.series_overrides">Réglages des agents pour cette série</HelpLabel>
+        </h2>
         <ButtonLink href="/equipe" variant="secondary">
           L&apos;équipe
         </ButtonLink>

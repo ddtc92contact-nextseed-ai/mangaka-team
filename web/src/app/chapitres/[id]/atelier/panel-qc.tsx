@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { InfoTip } from "@/components/info-tip";
 import { DetectionLegend, DetectionOverlay, QCBadge } from "@/components/qc";
 import { Alert, Button, ProgressBar } from "@/components/ui";
 import { engineUrl, type PanelImage, type QCStatus, type QueueItem, type VisionMode } from "@/lib/api";
@@ -39,7 +40,10 @@ export function PanelQC({
   return (
     <div className="space-y-3" data-testid="panel-qc">
       <div className="flex items-center justify-between gap-2">
-        <h3 className="text-sm font-medium text-zinc-300">Contrôle qualité</h3>
+        <h3 className="flex items-center gap-1.5 text-sm font-medium text-zinc-300">
+          Contrôle qualité
+          <InfoTip help="atelier.qc" label="Contrôle qualité" />
+        </h3>
         {image && <QCBadge verdict={image.qc_verdict} score={image.qc_score} override={Boolean(qc.override)} />}
       </div>
 
@@ -88,6 +92,18 @@ export function PanelQC({
             </p>
           )}
 
+          {qc.layers && (
+            <p className="flex items-center gap-3 text-[11px] text-zinc-500">
+              <span className="inline-flex items-center gap-1">
+                Scores des couches
+                <InfoTip help="atelier.qc_scores" label="Scores des couches" />
+              </span>
+              <span className="inline-flex items-center gap-1">
+                Zone de doute
+                <InfoTip help="atelier.qc_doubt" label="Zone de doute" />
+              </span>
+            </p>
+          )}
           {qc.layers && (
             <dl className="divide-y divide-zinc-800 rounded-md border border-zinc-800 text-xs">
               {QC_LAYERS.map((l) => {
@@ -177,7 +193,7 @@ export function PanelQC({
 
           {unavailable && <Alert>Contrôle qualité indisponible : {status?.detail}</Alert>}
 
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button variant="secondary" className="!py-1.5 text-xs" onClick={() => onRun("auto")} disabled={busy || unavailable || job !== null} data-testid="qc-run">
               {image.qc_verdict ? "Relancer le QC" : "Lancer le QC"}
             </Button>
@@ -186,20 +202,23 @@ export function PanelQC({
               className="!px-2 !py-1.5 text-xs"
               onClick={() => onRun("force")}
               disabled={busy || unavailable || job !== null || !visionOk}
-              title={visionOk ? "Ajoute la couche vision (lente) même si les détecteurs suffisent" : (status?.layers.vision.detail ?? undefined)}
+              title={visionOk ? undefined : (status?.layers.vision.detail ?? undefined)}
             >
               Avec la vision
             </Button>
+            <InfoTip help="atelier.qc_doubt" label="Avec la vision" />
             {onRepair && !isSketch(image) && (
               <Button variant="ghost" className="!px-2 !py-1.5 text-xs" onClick={() => onRepair(image)} disabled={busy} data-testid="qc-repair">
                 Réparer une zone…
               </Button>
             )}
+            {onRepair && !isSketch(image) && <InfoTip help="atelier.repair" label="Réparer une zone" />}
             {image.qc_verdict && image.qc_verdict !== "ok" && (
               <Button className="!py-1.5 text-xs" onClick={() => onOverride(image)} disabled={busy} data-testid="qc-override-button">
                 Valider quand même
               </Button>
             )}
+            {image.qc_verdict && image.qc_verdict !== "ok" && <InfoTip help="atelier.qc_override" label="Valider quand même" />}
           </div>
         </>
       )}

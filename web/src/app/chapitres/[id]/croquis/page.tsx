@@ -3,9 +3,11 @@
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { InfoTip } from "@/components/info-tip";
 import { modalOpen } from "@/components/modal";
 import { ProductionLink } from "@/components/production-link";
 import { queueItems, useQueue } from "@/components/queue";
+import { useToast } from "@/components/toast";
 import { Alert, Button, ButtonLink, Card, EmptyState, Loading, ProgressBar, Select, Textarea } from "@/components/ui";
 import {
   api,
@@ -92,6 +94,7 @@ function SketchTriage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ text: string; queued: boolean } | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
+  const toast = useToast();
   const editRef = useRef<HTMLTextAreaElement>(null);
 
   const list = useMemo(() => pages.data ?? [], [pages.data]);
@@ -136,7 +139,10 @@ function SketchTriage() {
     setError(null);
     try {
       const msg = await action();
-      if (msg) setNotice(msg);
+      if (msg) {
+        setNotice(msg);
+        toast(msg.text);
+      }
       setVersion((v) => v + 1);
     } catch (e) {
       setError(fullErrorMessage(e));
@@ -290,13 +296,15 @@ function SketchTriage() {
           {cleanCount > 0 && <span className="text-zinc-500"> (dont {cleanCount} au propre)</span>}
           <span className="ml-2 text-zinc-500">· chapitre {chapterValidated}/{chapterPanels.length}</span>
         </p>
-        <div className="ml-auto flex flex-wrap gap-2">
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          <InfoTip help="croquis.croquer" label="Croquer" />
           <Button onClick={() => sketchPage(page)} disabled={busy || !page.layout || !est?.to_sketch} data-testid="sketch-page">
             Croquer la page{est?.to_sketch ? ` (${est.to_sketch})` : ""}
           </Button>
           <Button variant="secondary" onClick={sketchChapter} disabled={busy || !cEst?.to_sketch} data-testid="sketch-chapter">
             Croquer le chapitre{cEst?.to_sketch ? ` (${cEst.to_sketch})` : ""}
           </Button>
+          <InfoTip help="croquis.propre" label="Passer au propre" />
           <Button onClick={() => cleanPage(page)} disabled={busy || !est?.to_clean} data-testid="clean-page">
             Passer au propre les cases validées{est?.to_clean ? ` (${est.to_clean})` : ""}
           </Button>
@@ -639,6 +647,7 @@ function CurrentPanel({
       </div>
 
       <section aria-label="Raccourcis clavier" className="rounded-md border border-zinc-800 p-2 text-[11px] leading-relaxed text-zinc-400">
+        <InfoTip help="croquis.clavier" label="Tri au clavier" className="mr-1.5" />
         <Kbd>V</Kbd> ou <Kbd>Entrée</Kbd> valider et passer à la suivante · <Kbd>R</Kbd> re-croquer (nouvelle graine) ·{" "}
         <Kbd>E</Kbd> modifier la description · <Kbd>U</Kbd> retirer la validation · <Kbd>→</Kbd>/<Kbd>N</Kbd> case suivante ·{" "}
         <Kbd>←</Kbd>/<Kbd>P</Kbd> précédente · <Kbd>C</Kbd> croquer la page

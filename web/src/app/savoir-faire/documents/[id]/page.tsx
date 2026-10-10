@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { SOURCE_LABELS, Tags, formatTokens } from "@/components/knowledge";
+import { useToast } from "@/components/toast";
 import { Alert, Button, Card, Field, Input, Loading, PageHeader, Textarea } from "@/components/ui";
 import { api, EngineError, errorMessage, parseTags, type KnowledgeDocument } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
@@ -13,11 +14,13 @@ export default function DocumentPage() {
   const router = useRouter();
   const doc = useEngineData(() => api.getDocument(id), [id]);
   const [error, setError] = useState<string | null>(null);
+  const toast = useToast();
 
   async function remove() {
     if (!doc.data || !window.confirm(`Supprimer « ${doc.data.title} » et ses passages ?`)) return;
     try {
       await api.deleteDocument(id);
+      toast("Document supprimé");
       router.push(`/savoir-faire/${doc.data.collection_id}`);
     } catch (err) {
       setError(errorMessage(err));
@@ -98,6 +101,7 @@ function DocumentForm({ doc, onSaved }: { doc: KnowledgeDocument; onSaved: (d: K
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
+  const toast = useToast();
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -107,6 +111,7 @@ function DocumentForm({ doc, onSaved }: { doc: KnowledgeDocument; onSaved: (d: K
     try {
       onSaved(await api.updateDocument(doc.id, { title, content, tags: parseTags(tags) }));
       setSaved(true);
+      toast("Document enregistré et réindexé");
     } catch (err) {
       setErrors(err instanceof EngineError && Object.keys(err.fieldErrors).length ? err.fieldErrors : { form: errorMessage(err) });
     } finally {
@@ -119,7 +124,7 @@ function DocumentForm({ doc, onSaved }: { doc: KnowledgeDocument; onSaved: (d: K
       <Field label="Titre" htmlFor="doc-title" error={errors.title}>
         <Input id="doc-title" value={title} onChange={(e) => setTitle(e.target.value)} />
       </Field>
-      <Field label="Étiquettes" htmlFor="doc-tags" hint="Séparées par des virgules.">
+      <Field label="Étiquettes" htmlFor="doc-tags" hint="Séparées par des virgules." help="knowledge.tags">
         <Input id="doc-tags" value={tags} onChange={(e) => setTags(e.target.value)} />
       </Field>
       <Field

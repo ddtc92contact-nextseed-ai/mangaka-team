@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
+import { HelpLabel } from "@/components/info-tip";
 import { DocumentDropzone, RetrievalTester, SOURCE_LABELS, Tags, formatTokens } from "@/components/knowledge";
+import { useToast } from "@/components/toast";
 import { Alert, Button, Card, EmptyState, Field, Input, Loading, PageHeader, Select, Textarea } from "@/components/ui";
 import { api, EngineError, errorMessage, parseTags, type KnowledgeCollection } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
@@ -16,6 +18,7 @@ export default function CollectionPage() {
   const projects = useEngineData(() => api.listProjects());
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const toast = useToast();
 
   function refresh() {
     documents.reload();
@@ -27,6 +30,7 @@ export default function CollectionPage() {
     if (!window.confirm(`Supprimer la collection « ${collection.data.name} » et tous ses documents ?`)) return;
     try {
       await api.deleteCollection(id);
+      toast("Collection supprimée");
       router.push("/savoir-faire");
     } catch (err) {
       setError(errorMessage(err));
@@ -79,6 +83,7 @@ export default function CollectionPage() {
             onSaved={(next) => {
               collection.setData(next);
               setEditing(false);
+              toast("Collection enregistrée");
             }}
           />
         </Card>
@@ -117,7 +122,9 @@ export default function CollectionPage() {
             </ul>
           )}
           <Card className="mt-6">
-            <h2 className="mb-4 font-semibold text-zinc-100">Tester la recherche dans cette collection</h2>
+            <h2 className="mb-4 font-semibold text-zinc-100">
+              <HelpLabel help="knowledge.search">Tester la recherche dans cette collection</HelpLabel>
+            </h2>
             <RetrievalTester collections={[c]} projects={[]} defaultScope={`c${c.id}`} />
           </Card>
         </section>
@@ -170,7 +177,7 @@ function CollectionForm({
       <Field label="Nom" htmlFor="edit-name" error={errors.name}>
         <Input id="edit-name" value={name} onChange={(e) => setName(e.target.value)} />
       </Field>
-      <Field label="Portée" htmlFor="edit-scope">
+      <Field label="Portée" htmlFor="edit-scope" help="knowledge.scope">
         <Select id="edit-scope" value={scope} onChange={(e) => setScope(e.target.value)}>
           <option value="">Globale (toutes les séries)</option>
           {projects.map((p) => (
@@ -204,6 +211,7 @@ function UploadForm({ collectionId, onUploaded }: { collectionId: number; onUplo
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const toast = useToast();
 
   async function upload(files: File[]) {
     setBusy(true);
@@ -212,6 +220,7 @@ function UploadForm({ collectionId, onUploaded }: { collectionId: number; onUplo
     try {
       const docs = await api.uploadDocuments(collectionId, files, parseTags(tags));
       const chunks = docs.reduce((n, d) => n + d.chunks.length, 0);
+      toast(`${docs.length} document${docs.length > 1 ? "s" : ""} ajouté${docs.length > 1 ? "s" : ""}`);
       setMessage(
         `${docs.length} document${docs.length > 1 ? "s" : ""} ajouté${docs.length > 1 ? "s" : ""}, ${chunks} passage${chunks > 1 ? "s" : ""}.`,
       );
@@ -225,7 +234,7 @@ function UploadForm({ collectionId, onUploaded }: { collectionId: number; onUplo
 
   return (
     <div className="space-y-3">
-      <Field label="Étiquettes (séparées par des virgules)" htmlFor="upload-tags">
+      <Field label="Étiquettes (séparées par des virgules)" htmlFor="upload-tags" help="knowledge.tags">
         <Input id="upload-tags" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="méthode, rythme" />
       </Field>
       <DocumentDropzone onFiles={upload} disabled={busy} />
@@ -246,6 +255,7 @@ function PasteForm({ collectionId, onCreated }: { collectionId: number; onCreate
   const [content, setContent] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  const toast = useToast();
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -253,6 +263,7 @@ function PasteForm({ collectionId, onCreated }: { collectionId: number; onCreate
     setErrors({});
     try {
       await api.createDocument(collectionId, { title, content, tags: parseTags(tags) });
+      toast("Texte ajouté à la collection");
       setTitle("");
       setTags("");
       setContent("");
@@ -269,7 +280,7 @@ function PasteForm({ collectionId, onCreated }: { collectionId: number; onCreate
       <Field label="Titre" htmlFor="paste-title" error={errors.title}>
         <Input id="paste-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Le cliffhanger" />
       </Field>
-      <Field label="Étiquettes" htmlFor="paste-tags" hint="Séparées par des virgules.">
+      <Field label="Étiquettes" htmlFor="paste-tags" hint="Séparées par des virgules." help="knowledge.tags">
         <Input id="paste-tags" value={tags} onChange={(e) => setTags(e.target.value)} />
       </Field>
       <Field label="Texte (Markdown accepté)" htmlFor="paste-content" error={errors.content}>

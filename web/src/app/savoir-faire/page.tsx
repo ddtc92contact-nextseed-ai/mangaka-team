@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { useState, type FormEvent } from "react";
+import { HelpLabel } from "@/components/info-tip";
 import { RetrievalTester, SUGGESTED_COLLECTIONS, formatTokens } from "@/components/knowledge";
+import { useToast } from "@/components/toast";
 import { Alert, Button, Card, EmptyState, Field, Input, Loading, PageHeader, Select, Textarea } from "@/components/ui";
 import { api, EngineError, errorMessage, type KnowledgeStatus } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
@@ -18,7 +20,7 @@ export default function KnowledgeLibraryPage() {
         title="Bibliothèque de savoir-faire"
         subtitle="Tes fiches de méthode, découpées en passages et injectées dans les agents : le scénariste et le constructeur de prompts image."
       />
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
         <section aria-label="Collections" className="space-y-4">
           {collections.loading ? (
             <Loading />
@@ -54,7 +56,9 @@ export default function KnowledgeLibraryPage() {
             </ul>
           )}
           <Card>
-            <h2 className="mb-1 font-semibold text-zinc-100">Tester la recherche</h2>
+            <h2 className="mb-1 font-semibold text-zinc-100">
+              <HelpLabel help="knowledge.search">Tester la recherche</HelpLabel>
+            </h2>
             <p className="mb-4 text-sm text-zinc-400">
               Pose une question comme le ferait un agent : les passages sont classés par score hybride (vecteurs +
               mots-clés).
@@ -69,11 +73,15 @@ export default function KnowledgeLibraryPage() {
 
         <aside className="space-y-6">
           <Card>
-            <h2 className="mb-4 font-semibold text-zinc-100">Nouvelle collection</h2>
+            <h2 className="mb-4 font-semibold text-zinc-100">
+              <HelpLabel help="knowledge.collections">Nouvelle collection</HelpLabel>
+            </h2>
             <NewCollectionForm projects={projects.data ?? []} onCreated={collections.reload} />
           </Card>
           <Card>
-            <h2 className="mb-3 font-semibold text-zinc-100">Indexation</h2>
+            <h2 className="mb-3 font-semibold text-zinc-100">
+              <HelpLabel help="knowledge.indexing">Indexation</HelpLabel>
+            </h2>
             {status.data ? (
               <IndexStatus status={status.data} onReindexed={() => (status.reload(), collections.reload())} />
             ) : status.error ? (
@@ -101,6 +109,7 @@ function NewCollectionForm({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const toast = useToast();
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -109,6 +118,7 @@ function NewCollectionForm({
     setError(null);
     try {
       await api.createCollection({ name, description, project_id: scope ? Number(scope) : null });
+      toast("Collection créée");
       setName("");
       setDescription("");
       onCreated();
@@ -146,11 +156,7 @@ function NewCollectionForm({
           placeholder="Fiches de synthèse sur la structure d'un chapitre hebdomadaire…"
         />
       </Field>
-      <Field
-        label="Portée"
-        htmlFor="collection-scope"
-        hint="Globale : lue par les agents de toutes les séries. Rattachée : seulement par ceux de cette série."
-      >
+      <Field label="Portée" htmlFor="collection-scope" help="knowledge.scope">
         <Select id="collection-scope" value={scope} onChange={(e) => setScope(e.target.value)}>
           <option value="">Globale (toutes les séries)</option>
           {projects.map((p) => (
@@ -177,6 +183,7 @@ function IndexStatus({
 }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const toast = useToast();
 
   async function reindex() {
     setBusy(true);
@@ -188,6 +195,7 @@ function IndexStatus({
           ? `Réindexation incomplète : ${r.errors.join(" · ")}`
           : `${r.documents} document${r.documents > 1 ? "s" : ""} réindexé${r.documents > 1 ? "s" : ""}.`,
       );
+      toast(r.errors.length ? "Réindexation incomplète" : "Réindexation terminée", r.errors.length ? "error" : "success");
       onReindexed();
     } catch (err) {
       setMessage(errorMessage(err));
@@ -211,7 +219,9 @@ function IndexStatus({
           {status.chunks}
           {status.stale_chunks > 0 && <span className="text-amber-300"> · {status.stale_chunks} à réindexer</span>}
         </dd>
-        <dt className="text-zinc-500">Petite collection</dt>
+        <dt className="text-zinc-500">
+          <HelpLabel help="knowledge.whole">Petite collection</HelpLabel>
+        </dt>
         <dd className="text-zinc-200">moins de {formatTokens(status.small_collection_tokens)} : injectée entière</dd>
       </dl>
       {status.detail && <Alert>{status.detail}</Alert>}
@@ -222,7 +232,9 @@ function IndexStatus({
       )}
       {message && <p className="text-xs text-zinc-400">{message}</p>}
       <div>
-        <h3 className="mb-2 mt-4 text-xs uppercase tracking-wide text-zinc-500">Ce que lit chaque agent</h3>
+        <h3 className="mb-2 mt-4 text-xs uppercase tracking-wide text-zinc-500">
+          <HelpLabel help="knowledge.agents">Ce que lit chaque agent</HelpLabel>
+        </h3>
         <ul className="space-y-2">
           {status.agents.map((a) => (
             <li key={a.role}>

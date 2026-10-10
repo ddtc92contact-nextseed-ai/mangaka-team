@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { useState, type FormEvent } from "react";
+import { InfoTip } from "@/components/info-tip";
 import { formatTokens } from "@/components/knowledge";
+import { useToast } from "@/components/toast";
 import { Alert, Button, Card, Field, Loading, Textarea } from "@/components/ui";
 import { api, EngineError, errorMessage, type Bible, type ChapterSummaryEntry } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
@@ -21,7 +23,10 @@ export function SeriesBible({ projectId }: { projectId: number }) {
   return (
     <Card data-testid="series-bible">
       <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="font-semibold text-zinc-100">Bible de la série</h2>
+        <h2 className="flex items-center gap-1.5 font-semibold text-zinc-100">
+          Bible de la série
+          <InfoTip help="serie.bible" label="Bible de la série" />
+        </h2>
         {bible.data?.rendered && (
           <span className="text-xs text-zinc-500">
             {formatTokens(bible.data.rendered.tokens)} injectés
@@ -58,6 +63,7 @@ function BibleForm({ projectId, initial, onSaved }: { projectId: number; initial
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
+  const toast = useToast();
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -67,6 +73,7 @@ function BibleForm({ projectId, initial, onSaved }: { projectId: number; initial
     try {
       onSaved(await api.saveBible(projectId, { ...values, character_notes: notes, chapter_summaries: summaries }));
       setSaved(true);
+      toast("Bible enregistrée");
     } catch (err) {
       setErrors(err instanceof EngineError && Object.keys(err.fieldErrors).length ? err.fieldErrors : { form: errorMessage(err) });
     } finally {

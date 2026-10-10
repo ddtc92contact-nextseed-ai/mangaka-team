@@ -3,10 +3,12 @@
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { GenerateChapterButton, missingPanels } from "@/components/generate-chapter";
+import { InfoTip } from "@/components/info-tip";
 import { hasLettering, LetteredPreview } from "@/components/lettered-preview";
 import { modalOpen } from "@/components/modal";
 import { ProductionLink } from "@/components/production-link";
 import { queueItems, useQueue } from "@/components/queue";
+import { useToast } from "@/components/toast";
 import { Alert, Button, ButtonLink, Card, EmptyState, Loading, Select } from "@/components/ui";
 import { api, fullErrorMessage, type PageData } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
@@ -42,6 +44,7 @@ function Workshop() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const toast = useToast();
   const canvasRef = useRef<PageCanvasHandle>(null);
   const inspectorRef = useRef<HTMLDivElement>(null);
 
@@ -102,6 +105,7 @@ function Workshop() {
       pages.reload();
       reloadChapter();
       const n = res.panel_ids.length;
+      toast(n ? `Génération lancée (${n} en file)` : "Rien à générer sur cette page", n ? "success" : "info");
       setNotice(
         n
           ? `${n} case${n > 1 ? "s" : ""} mise${n > 1 ? "s" : ""} en file${res.skipped ? ` (${res.skipped} déjà prête${res.skipped > 1 ? "s" : ""} ou en file)` : ""}.`
@@ -124,6 +128,7 @@ function Workshop() {
       pages.reload();
       finishJobs.reload();
       const n = res.panel_ids.length;
+      toast(n ? `Finition lancée (${n} en file)` : "Rien à finaliser sur cette page", n ? "success" : "info");
       setNotice(
         n
           ? `Finition d'impression de ${n} case${n > 1 ? "s" : ""} mise en file (agrandissement jusqu'au dpi du format).`
@@ -201,12 +206,13 @@ function Workshop() {
         <p className="text-sm text-zinc-400">
           {done}/{page.panels.length} case{page.panels.length > 1 ? "s" : ""} prête{page.panels.length > 1 ? "s" : ""}
         </p>
-        <div className="ml-auto flex flex-wrap gap-2">
+        <div className="ml-auto flex flex-wrap items-center gap-2">
           {page.layout && page.panels.length > 0 && (
             <ButtonLink variant="ghost" href={`/chapitres/${chapter.id}/lettrage?page=${page.id}`} data-testid="open-lettering">
               Lettrage de la page
             </ButtonLink>
           )}
+          {page.layout && page.panels.length > 0 && <InfoTip help="atelier.generate_missing" label="Générer les cases manquantes" />}
           {page.layout && page.panels.length > 0 && (
             <Button onClick={() => generateMissing(page)} disabled={busy || missing === 0} data-testid="generate-page">
               Générer les cases manquantes{missing ? ` (${missing})` : ""}
@@ -217,7 +223,6 @@ function Workshop() {
               variant="secondary"
               onClick={() => finishPage(page)}
               disabled={busy || toFinish === 0}
-              title="Agrandit la version retenue des cases sous le seuil de dpi avant l'assemblage (quelques secondes par case, composition gardée)"
               data-testid="finish-page"
             >
               {finishingNow
@@ -225,6 +230,7 @@ function Workshop() {
                 : `Finaliser la page${toFinish ? ` (${toFinish})` : ""}`}
             </Button>
           )}
+          {page.layout && page.panels.length > 0 && <InfoTip help="atelier.finish" label="Finaliser la page" />}
           <GenerateChapterButton
             chapterId={chapter.id}
             onQueued={(m) => {

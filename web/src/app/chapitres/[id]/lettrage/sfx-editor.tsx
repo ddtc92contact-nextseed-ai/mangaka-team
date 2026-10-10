@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import { HelpLabel } from "@/components/info-tip";
 import { Alert, Button, Card, Field, Input, Select } from "@/components/ui";
 import type { BubbleUpdate, Intensity, LetteredSfx, LetteringWarning, PageLettering } from "@/lib/api";
 import { INTENSITIES } from "@/lib/layout";
@@ -78,7 +79,7 @@ export function SfxEditor({
           <Input id="sfx-text" value={text} onChange={(e) => setText(e.target.value)} maxLength={60} required data-testid="sfx-text" />
         </Field>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Intensité" htmlFor="sfx-intensity">
+          <Field label="Intensité" htmlFor="sfx-intensity" help="lettrage.sfx_intensity">
             <Select id="sfx-intensity" value={intensity} onChange={(e) => setIntensity(e.target.value as Intensity)}>
               {(Object.keys(SFX_INTENSITIES) as Intensity[]).map((k) => (
                 <option key={k} value={k}>
@@ -102,7 +103,7 @@ export function SfxEditor({
           <Field label="Angle (°)" htmlFor="sfx-angle">
             <Input id="sfx-angle" type="number" min={-180} max={180} step={0.5} value={angle} onChange={(e) => setAngle(e.target.value)} data-testid="sfx-angle" />
           </Field>
-          <Field label="Italique (°)" htmlFor="sfx-skew">
+          <Field label="Italique (°)" htmlFor="sfx-skew" help="lettrage.sfx_skew">
             <Input id="sfx-skew" type="number" min={-45} max={45} step={0.5} value={skew} onChange={(e) => setSkew(e.target.value)} />
           </Field>
         </div>
@@ -161,7 +162,9 @@ export function AddSfx({
 
   return (
     <Card data-testid="add-sfx-card">
-      <h2 className="mb-2 font-semibold text-zinc-100">Onomatopées</h2>
+      <h2 className="mb-2 font-semibold text-zinc-100">
+        <HelpLabel help="lettrage.sfx">Onomatopées</HelpLabel>
+      </h2>
       <form onSubmit={submit} className="space-y-3">
         <Field label="Texte" htmlFor="new-sfx-text" hint="« CLIC », « BIIIP ! », « VROUM ! » : lettrage hors bulle, peut déborder de la case.">
           <Input id="new-sfx-text" value={text} onChange={(e) => setText(e.target.value)} maxLength={60} placeholder="VROUM !" data-testid="new-sfx-text" />
@@ -176,7 +179,7 @@ export function AddSfx({
               ))}
             </Select>
           </Field>
-          <Field label="Intensité" htmlFor="new-sfx-intensity">
+          <Field label="Intensité" htmlFor="new-sfx-intensity" help="lettrage.sfx_intensity">
             <Select id="new-sfx-intensity" value={intensity} onChange={(e) => setIntensity(e.target.value as Intensity)}>
               {(Object.keys(SFX_INTENSITIES) as Intensity[]).map((k) => (
                 <option key={k} value={k}>

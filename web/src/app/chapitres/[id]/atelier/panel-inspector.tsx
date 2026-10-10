@@ -3,9 +3,11 @@
 import Link from "next/link";
 import { useState } from "react";
 import { AnnotationBar } from "@/components/annotation";
+import { InfoTip } from "@/components/info-tip";
 import { DpiBadge } from "@/components/print-dpi";
 import { ProductionLink } from "@/components/production-link";
 import { useQueue } from "@/components/queue";
+import { useToast } from "@/components/toast";
 import { Alert, Button, Field, Input, Loading, ProgressBar, Select, Textarea } from "@/components/ui";
 import {
   api,
@@ -61,6 +63,7 @@ export function PanelInspector({
   const control = useEngineData(() => api.controlStatus());
   const { refresh, cancel } = useQueue();
   const { series } = useChapter();
+  const toast = useToast();
   // Prompt en cours d'édition (null = pas touché), rattaché à la case pour repartir à zéro en changeant de case.
   const [draftState, setDraft] = useState<{ panelId: number; text: string } | null>(null);
   const [seed, setSeed] = useState("");
@@ -86,13 +89,15 @@ export function PanelInspector({
   const chosen = d?.images.find((i) => i.selected) ?? null;
   const seedError = seed.trim() !== "" && !isValidSeed(seed.trim()) ? "Entier de 0 à 9 223 372 036 854 775 807" : undefined;
 
-  async function run(action: () => Promise<void>) {
+  /** `done` : confirmation courte affichée en notification une fois l'action réussie. */
+  async function run(action: () => Promise<void>, done?: string) {
     setBusy(true);
     setError(null);
     setNotice(null);
     setGenerated(false);
     try {
       await action();
+      if (done) toast(done);
     } catch (e) {
       setError(fullErrorMessage(e));
     } finally {
@@ -114,6 +119,7 @@ export function PanelInspector({
       setNotice(
         jobs.length > 1 ? `${jobs.length} variantes mises en file.` : "Génération mise en file.",
       );
+      toast(`Génération lancée (${jobs.length} en file)`);
     });
 
   const regenerateQuality = () =>
@@ -126,32 +132,34 @@ export function PanelInspector({
       detail.reload();
       setGenerated(true);
       setNotice("Nouvelle version en Qualité mise en file (même prompt, nouvelle seed) : les autres versions ne bougent pas.");
-    });
+    }, "Génération en Qualité lancée");
 
   const savePrompt = () =>
     run(async () => {
       detail.setData(await api.updatePanel(panelId, { final_prompt: draft }));
       setDraft(null);
-    });
+    }, "Prompt enregistré");
   const rebuild = () =>
     run(async () => {
       detail.setData(await api.rebuildPrompt(panelId));
       setDraft(null);
-    });
+    }, "Prompt reconstruit");
   const setPreset = (value: string) =>
     run(async () => {
       detail.setData(await api.updatePanel(panelId, { generation_preset: value || null }));
-    });
+    }, "Workflow de la case enregistré");
 
   async function selectImage(img: PanelImage) {
     const images = await api.selectPanelImage(img.id);
     if (d) detail.setData({ ...d, images });
     onChanged();
+    toast(`Version ${img.version} choisie`);
   }
   async function deleteImage(img: PanelImage) {
     await api.deletePanelImage(img.id);
     detail.reload();
     onChanged();
+    toast(`Version ${img.version} supprimée`);
   }
   const cancelJob = (jobId: number) => run(() => cancel(jobId));
 
@@ -162,7 +170,7 @@ export function PanelInspector({
       onChanged();
       detail.reload();
       setNotice("Finition d'impression mise en file : la version retenue est agrandie jusqu'au dpi du format (composition gardée).");
-    });
+    }, "Finition d'impression lancée");
 
   const runQC = (vision: VisionMode, image?: PanelImage) =>
     run(async () => {
@@ -170,14 +178,14 @@ export function PanelInspector({
       refresh();
       onChanged();
       setNotice(vision === "force" ? "Contrôle avec la vision mis en file." : "Contrôle qualité mis en file.");
-    });
+    }, "Contrôle qualité lancé");
   const overrideQC = (img: PanelImage) =>
     run(async () => {
       const updated = await api.overrideQC(img.id);
       if (d) detail.setData({ ...d, images: d.images.map((i) => (i.id === updated.id ? updated : i)) });
       onChanged();
       setNotice("Version validée à la main (décision tracée dans le QC).");
-    });
+    }, "Version validée");
 
   const repairQueued = (source: PanelImage) => {
     setRepair(null);
@@ -186,6 +194,7 @@ export function PanelInspector({
     onChanged();
     detail.reload();
     setGenerated(true);
+    toast("Réparation lancée");
     setNotice(
       `Réparation de la version ${source.version} mise en file : elle deviendra une nouvelle version (le reste de l'image ne bouge pas), à retenir ou non.`,
     );
@@ -323,14 +332,17 @@ export function PanelInspector({
 
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-2">
-              <label htmlFor="final-prompt" className="text-sm font-medium text-zinc-300">
-                Prompt final
-                {d.final_prompt_manual && !promptDirty && (
-                  <span className="ml-2 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-300">
-                    édité à la main
-                  </span>
-                )}
-              </label>
+              <span className="flex items-center gap-1.5">
+                <label htmlFor="final-prompt" className="text-sm font-medium text-zinc-300">
+                  Prompt final
+                  {d.final_prompt_manual && !promptDirty && (
+                    <span className="ml-2 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-300">
+                      édité à la main
+                    </span>
+                  )}
+                </label>
+                <InfoTip help="atelier.prompt" label="Prompt final" />
+              </span>
               <button
                 type="button"
                 onClick={rebuild}
@@ -365,7 +377,7 @@ export function PanelInspector({
 
           <div className="grid grid-cols-2 gap-3">
             <div className="col-span-2">
-              <Field label="Workflow" htmlFor="preset">
+              <Field label="Workflow" htmlFor="preset" help="atelier.workflow">
                 <Select id="preset" value={d.generation_preset ?? ""} onChange={(e) => setPreset(e.target.value)} disabled={busy || !presets}>
                   <option value="">Automatique ({resolvedName})</option>
                   {(presets ?? []).filter((p) => (p.role ?? "generation") === "generation").map((p) => (
@@ -377,7 +389,7 @@ export function PanelInspector({
                 </Select>
               </Field>
             </div>
-            <Field label="Seed" htmlFor="seed" error={seedError} hint="Vide = au hasard">
+            <Field label="Seed" htmlFor="seed" error={seedError} hint="Vide = au hasard" help="atelier.seed">
               <Input
                 id="seed"
                 inputMode="numeric"
@@ -388,8 +400,11 @@ export function PanelInspector({
               />
             </Field>
             <div className="space-y-1.5">
-              <span id="variants-label" className="block text-sm font-medium text-zinc-300">
-                Variantes
+              <span className="flex items-center gap-1.5">
+                <span id="variants-label" className="block text-sm font-medium text-zinc-300">
+                  Variantes
+                </span>
+                <InfoTip help="atelier.variants" label="Variantes" />
               </span>
               <div role="group" aria-labelledby="variants-label" className="flex gap-1">
                 {Array.from({ length: MAX_VARIANTS }, (_, i) => i + 1).map((n) => (
@@ -422,7 +437,7 @@ export function PanelInspector({
             </Alert>
           )}
 
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button onClick={() => generate()} disabled={busy || Boolean(seedError)} data-testid="generate-panel">
               {hasImages ? "Régénérer cette case" : "Générer"}
               {count > 1 ? ` (${count})` : ""}
@@ -443,13 +458,15 @@ export function PanelInspector({
                 !quality
                   ? "Aucun palier Qualité configuré (presets/defaults.yaml)"
                   : hasImages
-                    ? "Nouvelle version de cette case seulement, en Qualité (avec les références si la case en a), même prompt, nouvelle seed"
+                    ? undefined
                     : "Génère d'abord une première version"
               }
               data-testid="regenerate-quality"
             >
               Régénérer en Qualité
             </Button>
+            <InfoTip help="atelier.regenerate" label="Régénérer et Même seed" />
+            <InfoTip help="atelier.quality" label="Régénérer en Qualité" />
           </div>
 
           <PrintSection
@@ -488,6 +505,7 @@ export function PanelInspector({
               busy={busy}
               run={run}
               onDone={(message, queued) => {
+                toast(message);
                 if (queued) refresh();
                 onChanged();
                 detail.reload();
@@ -515,8 +533,9 @@ export function PanelInspector({
           />
 
           <div className="space-y-2">
-            <h3 className="text-sm font-medium text-zinc-300">
+            <h3 className="flex items-center gap-1.5 text-sm font-medium text-zinc-300">
               Versions <span className="text-zinc-500">({d.images.length})</span>
+              <InfoTip help="atelier.versions" label="Versions" />
             </h3>
             <VersionsStrip
               images={d.images}
@@ -566,7 +585,10 @@ function PrintSection({
   return (
     <div className="space-y-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3" data-testid="print-section">
       <div className="flex items-center justify-between gap-2">
-        <h3 className="text-sm font-medium text-zinc-300">Impression</h3>
+        <h3 className="flex items-center gap-1.5 text-sm font-medium text-zinc-300">
+          Impression
+          <InfoTip help="atelier.dpi" label="Impression" />
+        </h3>
         {info && <DpiBadge info={info} />}
       </div>
       {!info ? (
@@ -608,19 +630,22 @@ function PrintSection({
                 <strong className="font-semibold">Dernière finition en échec.</strong> {failure.error ?? "Erreur inconnue."}
               </Alert>
             )}
-            <Button
-              variant="secondary"
-              onClick={onFinish}
-              disabled={busy || !upscaler}
-              title={
-                upscaler
-                  ? `Agrandit la version retenue avec ${upscaler} (quelques secondes, composition gardée)`
-                  : "Aucun agrandisseur configuré (upscaler de presets/defaults.yaml)"
-              }
-              data-testid="finish-panel"
-            >
-              Finaliser cette case
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="secondary"
+                onClick={onFinish}
+                disabled={busy || !upscaler}
+                title={
+                  upscaler
+                    ? `Agrandit la version retenue avec ${upscaler} (quelques secondes, composition gardée)`
+                    : "Aucun agrandisseur configuré (upscaler de presets/defaults.yaml)"
+                }
+                data-testid="finish-panel"
+              >
+                Finaliser cette case
+              </Button>
+              <InfoTip help="atelier.finish" label="Finaliser cette case" />
+            </div>
           </div>
         )
       )}
@@ -686,7 +711,10 @@ function SketchBlock({
   return (
     <div className="space-y-2 rounded-lg border border-zinc-800 p-3" data-testid="panel-sketch">
       <div className="flex items-baseline justify-between gap-2">
-        <h3 className="text-sm font-medium text-zinc-300">Croquis</h3>
+        <h3 className="flex items-center gap-1.5 text-sm font-medium text-zinc-300">
+          Croquis
+          <InfoTip help="croquis.croquer" label="Croquis" />
+        </h3>
         <Link href={`/chapitres/${chapterId}/croquis?page=${pageId}&case=${panelId}`} className="text-xs text-zinc-400 hover:text-zinc-100">
           Trier la page →
         </Link>
@@ -698,7 +726,7 @@ function SketchBlock({
             ? `Composition validée : croquis v${validated.version} (seed ${validated.seed ?? "—"}).`
             : `${sketches.length} croquis, aucun validé.`}
       </p>
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <Button
           variant="secondary"
           className="!px-2.5 !py-1 text-xs"
@@ -743,10 +771,12 @@ function SketchBlock({
         >
           Passer au propre
         </Button>
+        <InfoTip help="croquis.propre" label="Passer au propre" />
       </div>
       <Field
         label="Débruitage du passage au propre (cette case)"
         htmlFor="sketch-denoise"
+        help="croquis.denoise"
         error={invalid ? "Entre 0,05 et 1" : undefined}
         hint={`Vide : ${seriesDenoise !== null ? `celui de la série (${seriesDenoise})` : "celui du preset"}. Plus bas = plus fidèle au croquis.`}
       >
