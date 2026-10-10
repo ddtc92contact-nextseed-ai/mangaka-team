@@ -2,18 +2,19 @@
 
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { AgentOverrides } from "@/components/agent-overrides";
 import { ChapterList } from "@/components/chapter-list";
 import { LibraryList, LibraryTabs } from "@/components/library";
 import { EstimateLabel } from "@/components/estimate";
+import { LayoutStyleNotices } from "@/components/layout-style-notice";
 import { ProjectForm } from "@/components/project-form";
 import { SeriesBible } from "@/components/series-bible";
 import { StyleBoardBanner, StyleBoardCard, useStyleBoard } from "@/components/style-board";
 import { DIRECTIONS, DirectionBadge } from "@/components/reading-direction";
 import { SeriesStatusBadge } from "@/components/status";
 import { Alert, Button, ButtonLink, Card, Loading, PageHeader } from "@/components/ui";
-import { api, errorMessage, type LibraryKind } from "@/lib/api";
+import { api, errorMessage, type LibraryKind, type Project } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
 import { libraryHref, newEntryHref } from "@/lib/library";
 
@@ -25,6 +26,17 @@ export default function ProjectPage() {
   const [tab, setTab] = useState<LibraryKind>("character");
   const [saved, setSaved] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  // Style de mise en page changé : « Remettre en page les pages non générées » est proposé.
+  const [relayoutOffer, setRelayoutOffer] = useState(false);
+  const noticesRef = useRef<HTMLDivElement>(null);
+
+  function onProject(p: Project, styleChanged: boolean) {
+    project.setData(p);
+    if (styleChanged && p.relayout_page_count > 0) {
+      setRelayoutOffer(true);
+      requestAnimationFrame(() => noticesRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }));
+    }
+  }
 
   async function remove() {
     if (!project.data) return;
@@ -67,6 +79,14 @@ export default function ProjectPage() {
         </div>
       )}
       <StyleBoardBanner board={styleBoard} />
+      <div ref={noticesRef}>
+        <LayoutStyleNotices
+          project={project.data}
+          offerRelayout={relayoutOffer}
+          onProject={onProject}
+          onDone={() => setRelayoutOffer(false)}
+        />
+      </div>
       <div className="mb-6">
         <ChapterList projectId={id} />
       </div>
@@ -89,7 +109,7 @@ export default function ProjectPage() {
             initial={project.data}
             submitLabel="Enregistrer"
             onSaved={(p) => {
-              project.setData(p);
+              onProject(p, p.layout_style !== project.data?.layout_style);
               setSaved(true);
               styleBoard.reload(); // packs changés : scène test et style des essais à jour
             }}

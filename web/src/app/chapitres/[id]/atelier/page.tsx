@@ -212,10 +212,15 @@ function Workshop() {
               Lettrage de la page
             </ButtonLink>
           )}
-          {page.layout && page.panels.length > 0 && <InfoTip help="atelier.generate_missing" label="Générer les cases manquantes" />}
+          {page.layout && page.panels.length > 0 && <InfoTip help="atelier.generate_missing" label="Générer cette page" />}
           {page.layout && page.panels.length > 0 && (
-            <Button onClick={() => generateMissing(page)} disabled={busy || missing === 0} data-testid="generate-page">
-              Générer les cases manquantes{missing ? ` (${missing})` : ""}
+            <Button
+              variant="secondary"
+              onClick={() => generateMissing(page)}
+              disabled={busy || missing === 0}
+              data-testid="generate-page"
+            >
+              Générer cette page{missing ? ` (${missing})` : ""}
             </Button>
           )}
           {page.layout && page.panels.length > 0 && (
@@ -233,6 +238,7 @@ function Workshop() {
           {page.layout && page.panels.length > 0 && <InfoTip help="atelier.finish" label="Finaliser la page" />}
           <GenerateChapterButton
             chapterId={chapter.id}
+            variant="primary"
             onQueued={(m) => {
               setError(null);
               setNotice(m);
@@ -276,7 +282,8 @@ function Workshop() {
             </EmptyState>
           ) : !page.layout ? (
             <EmptyState title="Page pas encore mise en page">
-              La géométrie des cases vient de la mise en page : calcule-la avant de générer.
+              La géométrie des cases vient de la mise en page : « Générer le chapitre » la calcule automatiquement, ou
+              ajuste-la d&apos;abord à la main.
               <div className="mt-4">
                 <ButtonLink href={`/chapitres/${chapter.id}/mise-en-page`}>Aller à la Mise en page</ButtonLink>
               </div>

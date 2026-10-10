@@ -1,8 +1,8 @@
-# Style « dynamique » (par défaut) : quelques biais sur les cases fortes, comme un shōnen classique.
+# Style « dynamique » (par défaut) : des biais sur la plupart des pages, plus marqués sur les cases fortes.
 # Champs : voir presets/README.md (« Styles de mise en page »).
 id: dynamique
 name: Dynamique
-description: Quelques découpes en biais sur les cases fortes et les temps d'action.
+description: Des découpes en biais sur la plupart des pages, plus marquées sur les cases fortes ; pages calmes posées.
 
 gutters_mm:
   horizontal: { min: 4, max: 6 }   # entre deux bandes

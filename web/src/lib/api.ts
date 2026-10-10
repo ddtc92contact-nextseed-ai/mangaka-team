@@ -56,6 +56,10 @@ export interface Project {
   chapter_count: number;
   /** Pages déjà mises en page : changer le sens de lecture les met en miroir. */
   laid_out_page_count: number;
+  /** Pages avec des cases mais sans aucune image (croquis compris) : « Remettre en page » les recalcule. */
+  relayout_page_count: number;
+  /** Série restée en « sage » depuis une ancienne mise à jour (pas un choix) : note unique de la fiche série. */
+  layout_style_notice: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -84,6 +88,13 @@ export type ProjectInput = Pick<
 >;
 
 export type CleanMode = "img2img" | "controlnet";
+
+/** « Remettre en page les pages non générées » d'une série. */
+export interface RelayoutResult {
+  relaid_page_ids: number[];
+  /** Pages déjà (en partie) générées : inchangées. */
+  kept_pages: number;
+}
 
 export interface Chapter {
   id: number;
@@ -780,6 +791,30 @@ export interface GenerateInput {
   prompt_override?: string | null;
 }
 
+/** « Générer le chapitre » : croquis d'abord (palier croquis de la série) ou versions finales. */
+export type ProductionMode = "sketch" | "final";
+
+export interface ChapterProductionPlan {
+  mode: ProductionMode;
+  /** Cases à croquer (sketch) ou à générer (final). */
+  panels: number;
+  /** Croquis validés à passer au propre (sketch). */
+  to_clean: number;
+  pages: number;
+  /** Numéros des pages sans mise en page : calculée juste avant la génération. */
+  unlaid_pages: number[];
+  total: number;
+}
+
+export interface ChapterProductionResult {
+  mode: ProductionMode;
+  jobs: Job[];
+  panel_ids: number[];
+  cleaned_panel_ids: number[];
+  laid_out_pages: number[];
+  skipped: number;
+}
+
 export interface BatchGenerateResult {
   jobs: Job[];
   panel_ids: number[];
@@ -925,7 +960,8 @@ export interface StyleGenre {
   id: string;
   name: string;
   description: string;
-  layout_style: string;
+  /** Style de mise en page suggéré (jamais « sage ») ; null : celui des nouvelles séries. */
+  layout_style: string | null;
   reading_direction: ReadingDirection;
   fonts: { dialogue: string; shout: string };
   /** null : tous les tons. */
@@ -1769,7 +1805,9 @@ export const api = {
   listProjects: () => request<Project[]>("/projects"),
   getProject: (id: number) => request<Project>(`/projects/${id}`),
   createProject: (body: Partial<ProjectInput>) => request<Project>("/projects", json("POST", body)),
-  updateProject: (id: number, body: Partial<ProjectInput>) => request<Project>(`/projects/${id}`, json("PATCH", body)),
+  updateProject: (id: number, body: Partial<ProjectInput> & { layout_style_notice?: false }) =>
+    request<Project>(`/projects/${id}`, json("PATCH", body)),
+  relayoutProject: (id: number) => request<RelayoutResult>(`/projects/${id}/relayout`, { method: "POST" }),
   deleteProject: (id: number) => request<void>(`/projects/${id}`, { method: "DELETE" }),
 
   listLibrary: <T extends LibraryEntry = LibraryEntry>(kind: LibraryKind, projectId: number) =>
@@ -1895,6 +1933,8 @@ export const api = {
     request<BatchGenerateResult>(`/pages/${id}/generate`, json("POST", body)),
   generateChapter: (id: number, body: { force?: boolean; count?: number } = {}) =>
     request<BatchGenerateResult>(`/chapters/${id}/generate`, json("POST", body)),
+  chapterProductionPlan: (id: number) => request<ChapterProductionPlan>(`/chapters/${id}/produce`),
+  produceChapter: (id: number) => request<ChapterProductionResult>(`/chapters/${id}/produce`, { method: "POST" }),
   sketchPanel: (id: number, body: { seed?: Seed | null } = {}) => request<Job[]>(`/panels/${id}/sketch`, json("POST", body)),
   validateSketch: (id: number, imageId?: number) =>
     request<PanelDetail>(`/panels/${id}/sketch/validate`, json("POST", imageId ? { image_id: imageId } : {})),
