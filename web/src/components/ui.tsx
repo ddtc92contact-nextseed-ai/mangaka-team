@@ -1,6 +1,8 @@
 // Petits composants d'interface partagés (sombres, sobres).
 import Link from "next/link";
 import type { ComponentProps, ReactNode } from "react";
+import type { HelpId } from "@/lib/help";
+import { InfoTip } from "./info-tip";
 
 type Variant = "primary" | "secondary" | "danger" | "ghost";
 
@@ -50,19 +52,25 @@ export function Field({
   htmlFor,
   error,
   hint,
+  help,
   children,
 }: {
   label: string;
   htmlFor: string;
   error?: string;
   hint?: string;
+  /** Bulle d'aide « ? » à côté du libellé (texte dans `lib/help.ts`). */
+  help?: HelpId;
   children: ReactNode;
 }) {
   return (
     <div className="space-y-1.5">
-      <label htmlFor={htmlFor} className="block text-sm font-medium text-zinc-300">
-        {label}
-      </label>
+      <div className="flex items-center gap-1.5">
+        <label htmlFor={htmlFor} className="block text-sm font-medium text-zinc-300">
+          {label}
+        </label>
+        {help && <InfoTip help={help} label={label} />}
+      </div>
       {children}
       {error ? (
         <p className="text-xs text-red-400" role="alert">
