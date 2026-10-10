@@ -159,6 +159,10 @@ class Project(TimestampMixin, Base):
     clean_control: Mapped[str | None] = mapped_column(String(40), default=None)
     # Agrandisseur de la finition d'impression (presets/upscalers/) ; None = celui de defaults.yaml.
     upscaler: Mapped[str | None] = mapped_column(String(100), default=None)
+    # « Prompt rédigé par l'IA » : le LLM du dessinateur écrit le prompt image de chaque case en un
+    # paragraphe (pipeline/prompt_writer.py) ; False = assemblage par fragments (image_prompt.yaml#parts).
+    # Nouvelles séries : `enabled` de presets/prompts/redacteur-image.yaml ; séries d'avant la v21 : False.
+    ai_prompt: Mapped[bool] = mapped_column(default=True)
 
     characters: Mapped[list[Character]] = relationship(
         back_populates="project", cascade="all, delete-orphan", order_by="Character.name"
@@ -383,6 +387,13 @@ class Panel(TimestampMixin, Base):
     final_prompt: Mapped[str | None] = mapped_column(Text, default=None)
     # True : prompt final édité à la main, conservé tant qu'on ne demande pas de le reconstruire.
     final_prompt_manual: Mapped[bool] = mapped_column(default=False)
+    # Origine du prompt automatique : "ia" (rédigé par le LLM) | "fragments" (assemblage) ; None = jamais
+    # construit. `prompt_key` : empreinte des données de la case au moment de la rédaction (le prompt
+    # rédigé n'est redemandé que si elle change, ou sur « Reconstruire le prompt ») ; `prompt_warning` :
+    # rédaction en échec, repli par fragments (affiché sur la case).
+    prompt_source: Mapped[str | None] = mapped_column(String(20), default=None)
+    prompt_key: Mapped[str | None] = mapped_column(String(64), default=None)
+    prompt_warning: Mapped[str | None] = mapped_column(Text, default=None)
     generation_preset: Mapped[str | None] = mapped_column(String(100), default=None)
     # Croquis validé au tri (composition retenue, id de `panel_images` de sorte croquis) ; None = aucun.
     sketch_image_id: Mapped[int | None] = mapped_column(Integer, default=None)

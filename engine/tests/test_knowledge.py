@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -305,8 +306,8 @@ def test_upload_md_and_pdf_then_collection_counts(client: TestClient) -> None:
 
 
 # --- bible ----------------------------------------------------------------------------
-def _series(client: TestClient, title: str) -> dict:
-    return client.post("/projects", json={**STYLE, "title": title}).json()
+def _series(client: TestClient, title: str, **kw: Any) -> dict:
+    return client.post("/projects", json={**STYLE, "title": title, **kw}).json()
 
 
 def test_bible_is_always_included_for_its_series_and_never_leaks(client: TestClient) -> None:
@@ -449,7 +450,7 @@ def test_image_prompt_gets_bible_notes_and_style_passages(make_settings: Callabl
         c.post(
             f"/knowledge/collections/{col['id']}/documents", json={"title": "Yeux", "content": "Aiko : yeux immenses."}
         )
-        series = _series(c, "Prompt")
+        series = _series(c, "Prompt", ai_prompt=False)  # prompt par fragments
         aiko = c.post(f"/projects/{series['id']}/characters", json={"name": "Aiko"}).json()
         c.put(f"/projects/{series['id']}/bible", json={"character_notes": {str(aiko["id"]): "cicatrice à la joue"}})
         ch = c.post(f"/projects/{series['id']}/chapters", json={"synopsis": "Aiko.", "target_page_count": 1}).json()
@@ -502,7 +503,7 @@ def test_image_prompt_never_carries_quoted_text_from_bible_or_knowledge(
             f"/knowledge/collections/{col['id']}/documents",
             json={"title": "Léa", "content": 'Léa : frange courte, crie "Halte !" en pointant du doigt.'},
         )
-        series = _series(c, "Enquêtes")
+        series = _series(c, "Enquêtes", ai_prompt=False)  # prompt par fragments
         lea = c.post(f"/projects/{series['id']}/characters", json={"name": "Léa"}).json()
         note = "Détective en herbe, têtue, dit « ça cloche ! ». Imperméable jaune."
         c.put(f"/projects/{series['id']}/bible", json={"character_notes": {str(lea["id"]): note}})

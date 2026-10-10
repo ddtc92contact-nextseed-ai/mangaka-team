@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from ..agents.profiles import ProfileInvalid
 from ..pipeline.comfy_check import control_types
-from ..pipeline.generation import ACTIVE
+from ..pipeline.generation import ACTIVE, ai_prompt_default, drop_written_prompts
 from ..pipeline.generation import STEP as GENERATION_STEP
 from ..pipeline.layout import LayoutError
 from ..pipeline.pages import change_reading_direction, layout_page
@@ -72,6 +72,7 @@ def project_out(
         clean_mode=project.clean_mode or "img2img",
         clean_control=project.clean_control,
         upscaler=project.upscaler,
+        ai_prompt=project.ai_prompt,
         character_count=character_count,
         chapter_count=chapter_count,
         laid_out_page_count=laid_out,
@@ -239,6 +240,8 @@ def create_project(
         clean_mode=body.clean_mode,
         clean_control=body.clean_control,
         upscaler=body.upscaler,
+        # Prompt rédigé par l'IA : réglage global de l'écran « L'équipe » (dessinateur), oui par défaut.
+        ai_prompt=body.ai_prompt if body.ai_prompt is not None else ai_prompt_default(ctx.agents.presets_for(None)),
     )
     fonts = {
         "dialogue_font": body.dialogue_font or genre.fonts.dialogue,
@@ -282,6 +285,7 @@ def update_project(
         "sketch_enabled",
         "clean_mode",
         "layout_style_notice",
+        "ai_prompt",
     ):
         if key in changes and changes[key] is None:
             raise FieldError(key, "ne peut pas être vide")
@@ -312,8 +316,11 @@ def update_project(
         changes["status"] = SeriesStatus(changes["status"])
     if "style_lora_name" in changes:
         changes["style_lora_name"] = changes["style_lora_name"] or None
+    ai_off = changes.get("ai_prompt") is False and project.ai_prompt
     for key, value in changes.items():
         setattr(project, key, value)
+    if ai_off:
+        drop_written_prompts(ctx.agents.presets_for(project.id), session, project.id)
     if direction is not None:
         # Après les autres champs : un changement de format en même temps fait tout recalculer.
         change_reading_direction(ctx.agents.presets_for(project.id), project, ReadingDirection(direction))

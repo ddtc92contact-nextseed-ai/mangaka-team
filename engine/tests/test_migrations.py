@@ -63,7 +63,14 @@ def _version(path: Path) -> int:
     return v
 
 
+def _drop_v21_ai_prompt(con: sqlite3.Connection) -> None:
+    con.execute("ALTER TABLE projects DROP COLUMN ai_prompt")
+    for column in ("prompt_source", "prompt_key", "prompt_warning"):
+        con.execute(f"ALTER TABLE panels DROP COLUMN {column}")
+
+
 def _drop_v20_scene(con: sqlite3.Connection) -> None:
+    _drop_v21_ai_prompt(con)
     con.execute("ALTER TABLE panels DROP COLUMN setting")
     con.execute("ALTER TABLE panels DROP COLUMN staging")
     con.execute("ALTER TABLE characters DROP COLUMN aliases")
@@ -686,6 +693,36 @@ def test_v19_database_gets_panel_scene_and_aliases(make_settings: Callable[..., 
         panel = c.get(f"/chapters/{chapter['id']}/pages").json()[0]["panels"][0]
         assert panel["setting"] == "" and panel["staging"] == ""
         assert panel["characters"] == ["Urus"] and panel["unmatched_characters"] == []
+    assert _version(settings.database_path) == SCHEMA_VERSION
+    fresh = settings.database_path.parent / "fresh.db"
+    create_db_engine(fresh).dispose()
+    assert _columns(settings.database_path) == _columns(fresh)
+
+
+def test_v20_database_keeps_fragment_prompts(make_settings: Callable[..., Settings]) -> None:
+    """v20 → v21 : les séries existantes gardent le prompt par fragments (« Prompt rédigé par l'IA » : non),
+    les prompts déjà construits sont notés « fragments » ; les nouvelles séries passent en oui."""
+    settings = make_settings()
+    with TestClient(create_app(settings)) as c:
+        project = c.post("/projects", json={**STYLE, "title": "Série v20"}).json()
+        chapter = c.post(f"/projects/{project['id']}/chapters", json={"title": "Un"}).json()
+        pages = c.put(
+            f"/chapters/{chapter['id']}/pages", json={"pages": [{"panels": [{"description": "Urus vole"}]}]}
+        ).json()
+        panel_id = pages[0]["panels"][0]["id"]
+        prompt = c.post(f"/panels/{panel_id}/prompt/rebuild").json()["final_prompt"]
+    con = sqlite3.connect(settings.database_path)
+    _drop_v21_ai_prompt(con)
+    con.execute("PRAGMA user_version = 20")
+    con.commit()
+    con.close()
+
+    with TestClient(create_app(settings)) as c:
+        assert c.get(f"/projects/{project['id']}").json()["ai_prompt"] is False
+        panel = c.get(f"/panels/{panel_id}").json()
+        assert panel["final_prompt"] == prompt and panel["prompt_source"] == "fragments"
+        assert panel["prompt_pending"] is False and panel["prompt_warning"] is None
+        assert c.post("/projects", json={**STYLE, "title": "Neuve"}).json()["ai_prompt"] is True
     assert _version(settings.database_path) == SCHEMA_VERSION
     fresh = settings.database_path.parent / "fresh.db"
     create_db_engine(fresh).dispose()

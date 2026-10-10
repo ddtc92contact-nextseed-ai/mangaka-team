@@ -49,6 +49,7 @@ from .pipeline.generation import STEP as GENERATION_STEP
 from .pipeline.generation import GenerationExecutor, describe_error, recover_states
 from .pipeline.jobs import JobRunner
 from .pipeline.knowledge import KnowledgeBase
+from .pipeline.prompt_writer import AGENT_ID as WRITER_AGENT
 from .pipeline.qc import STEP as QC_STEP
 from .pipeline.qc import AutoQC, QCExecutor
 from .pipeline.qc import describe_error as describe_qc_error
@@ -96,6 +97,8 @@ def build_context(settings: Settings, providers: Providers | None = None) -> App
         on_generated=AutoQC(presets, providers, presets_for=agents_service.presets_for),
         presets_for=agents_service.presets_for,
         knowledge=kb,
+        # LLM du dessinateur (écran « L'équipe ») : rédaction du prompt de chaque case.
+        llm_for=lambda project_id: agents_service.llm_for(WRITER_AGENT, project_id),
     )
     comfy = providers.comfyui
 

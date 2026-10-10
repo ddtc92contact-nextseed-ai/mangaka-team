@@ -76,7 +76,7 @@ from .models import (
 
 log = logging.getLogger("mangaka_engine")
 
-SCHEMA_VERSION = 20
+SCHEMA_VERSION = 21
 
 
 class MigrationError(RuntimeError):
@@ -319,6 +319,26 @@ def _v19_to_v20(cur: sqlite3.Cursor) -> None:
         cur.execute("ALTER TABLE characters ADD COLUMN aliases JSON NOT NULL DEFAULT '[]'")
 
 
+def _v20_to_v21(cur: sqlite3.Cursor) -> None:
+    # Prompt rédigé par l'IA : les séries existantes gardent l'assemblage par fragments (réglable dans
+    # la fiche série) ; les nouvelles suivent presets/prompts/redacteur-image.yaml#enabled.
+    # Tables reconstruites par une migration antérieure depuis le modèle courant : colonnes déjà là.
+    existing = {
+        table: {row[1] for row in cur.execute(f"PRAGMA table_info({table})")} for table in ("projects", "panels")
+    }
+    if "ai_prompt" not in existing["projects"]:
+        cur.execute("ALTER TABLE projects ADD COLUMN ai_prompt BOOLEAN NOT NULL DEFAULT 0")
+    cur.execute("UPDATE projects SET ai_prompt = 0")
+    for column, kind in (("prompt_source", "VARCHAR(20)"), ("prompt_key", "VARCHAR(64)"), ("prompt_warning", "TEXT")):
+        if column not in existing["panels"]:
+            cur.execute(f"ALTER TABLE panels ADD COLUMN {column} {kind}")
+    # Prompts déjà construits : par fragments.
+    cur.execute(
+        "UPDATE panels SET prompt_source = 'fragments' "
+        "WHERE final_prompt IS NOT NULL AND final_prompt != '' AND final_prompt_manual = 0"
+    )
+
+
 MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     # version de départ → (version d'arrivée, fonction)
     0: (2, _v0_to_v2),
@@ -341,6 +361,7 @@ MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     17: (18, _v17_to_v18),
     18: (19, _v18_to_v19),
     19: (20, _v19_to_v20),
+    20: (21, _v20_to_v21),
 }
 
 

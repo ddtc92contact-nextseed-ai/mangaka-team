@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import APIRouter, Depends
 
 from .. import __version__
+from ..pipeline.generation import ai_prompt_default
 from .deps import AppContext, get_ctx
 
 router = APIRouter(tags=["système"])
@@ -110,6 +111,8 @@ def list_presets(ctx: AppContext = Depends(get_ctx)) -> dict[str, Any]:
     reg = ctx.presets
     return {
         "defaults": reg.defaults.model_dump() if reg.defaults else None,
+        # « Prompt rédigé par l'IA » des nouvelles séries (réglage global du dessinateur, « L'équipe »).
+        "ai_prompt_default": ai_prompt_default(ctx.agents.presets_for(None)),
         "page_formats": [
             {
                 "id": f.id,

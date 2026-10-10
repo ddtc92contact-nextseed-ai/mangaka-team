@@ -379,6 +379,7 @@ def test_workflow_graph_has_library_keywords_loras_and_references_in_order() -> 
 def test_generation_records_references_used_on_job_and_version(c: TestClient, comfy: MockComfyUIClient) -> None:
     data = _library_series(c)
     s, ch, decor, obj = data["series"], data["chapter"], data["decor"]["id"], data["object"]["id"]
+    _ok(c.patch(f"/projects/{s['id']}", json={"ai_prompt": False}))  # prompt par fragments
     aiko = _ok(c.post(f"/projects/{s['id']}/characters", json={"name": "Aiko"}), 201)
     _ok(c.post(f"/characters/{aiko['id']}/images", files=[("files", ("a.png", png_bytes(), "image/png"))]), 201)
     for url in (f"/decors/{decor}/images", f"/objects/{obj}/images"):

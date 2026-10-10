@@ -283,6 +283,7 @@ def trial_image_prompt(ctx: TrialContext) -> dict[str, Any]:
     w, h = PANEL["size"]  # type: ignore[misc]
     size = target_size(w, h, presets.layout)
     params = {k: v for k, v in wf.preset.defaults.items() if k in ("steps", "cfg")}
+    written, written_info = _trial_written_prompt(ctx, characters)
     return {
         "input": [
             data(
@@ -299,7 +300,9 @@ def trial_image_prompt(ctx: TrialContext) -> dict[str, Any]:
             )
         ],
         "output": [
-            text("Prompt positif", positive),
+            text("Prompt rédigé par l'IA", written),
+            *([data("Rédaction", written_info)] if written_info else []),
+            text("Prompt par fragments", positive),
             text(
                 "Avec images de référence (une par personnage)",
                 frame_references(
@@ -310,6 +313,50 @@ def trial_image_prompt(ctx: TrialContext) -> dict[str, Any]:
             data("Envoyé à ComfyUI", {"workflow": wf.preset.name, **params, **size}),
         ],
     }
+
+
+def _trial_written_prompt(ctx: TrialContext, characters: list[Any]) -> tuple[str, dict[str, Any]]:
+    """Prompt de la case d'essai rédigé par le LLM du formulaire (une référence par personnage), ou l'erreur
+    qui ferait retomber une vraie case sur les fragments."""
+    from ..pipeline.prompt import ReferenceSlot
+    from ..pipeline.prompt_writer import PROMPT_ID, PromptBrief, PromptWriterError, write_prompt
+
+    presets = ctx.presets
+    prompt = presets.prompts.get(PROMPT_ID)
+    if prompt is None:
+        return f"(presets/prompts/{PROMPT_ID}.yaml absent : seul le prompt par fragments est disponible)", {}
+    brief = PromptBrief.build(
+        description=PANEL["description"],  # type: ignore[arg-type]
+        setting=PANEL["setting"],  # type: ignore[arg-type]
+        staging=PANEL["staging"],  # type: ignore[arg-type]
+        shot_type=PANEL["shot_type"],  # type: ignore[arg-type]
+        plan=PANEL["plan"],  # type: ignore[arg-type]
+        angle=PANEL["angle"],  # type: ignore[arg-type]
+        ambiance=PANEL["ambiance"],  # type: ignore[arg-type]
+        characters=characters,
+        absent=["Sensei Okada"],
+        references=[ReferenceSlot("character", c.name) for c in characters],
+        style=trial_style(presets),
+        prompt=prompt,
+    )
+    llm, error = ctx.llm()
+    if llm is None:
+        return f"LLM indisponible ({error or 'non configuré'}) : une vraie case retomberait sur les fragments.", {}
+    try:
+        run = write_prompt(llm, prompt, brief)
+    except (PromptWriterError, PresetError) as exc:
+        return f"Rédaction en échec ({exc}) : une vraie case retomberait sur les fragments.", {}
+    out = run.output
+    info: dict[str, Any] = {
+        "langue": out.language,
+        "mots": len(out.prompt.split()),
+        "longueur visée": f"{brief.min_words} à {brief.max_words} mots",
+        "essais": run.attempts,
+        "modèle": getattr(llm, "model", llm.name),
+    }
+    if out.notes:
+        info["notes"] = out.notes
+    return out.prompt, info
 
 
 # --- 4. contrôle qualité -------------------------------------------------------------------------

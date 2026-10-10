@@ -89,8 +89,9 @@ def test_reference_framing_names_each_image_in_slot_order() -> None:
 
 
 # --- de bout en bout (mock) ---------------------------------------------------------------------
-def _dragons(c: TestClient, *, images: bool = True) -> dict[str, Any]:
-    s = _ok(c.post("/projects", json={**STYLE, "title": "Dragons"}), 201)
+def _dragons(c: TestClient, *, images: bool = True, ai_prompt: bool = False) -> dict[str, Any]:
+    # Prompt par fragments par défaut : ces tests vérifient l'assemblage (voir test_prompt_writer.py).
+    s = _ok(c.post("/projects", json={**STYLE, "title": "Dragons", "ai_prompt": ai_prompt}), 201)
     urus = _ok(
         c.post(
             f"/projects/{s['id']}/characters",

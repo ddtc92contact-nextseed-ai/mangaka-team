@@ -69,6 +69,8 @@ class ProjectCreate(_In):
     clean_control: ControlTypeId | None = None  # null : type par défaut du preset ControlNet
     # Agrandisseur de la finition d'impression (None : celui de defaults.yaml).
     upscaler: PresetId | None = None
+    # « Prompt rédigé par l'IA » ; absent : `enabled` de presets/prompts/redacteur-image.yaml (oui).
+    ai_prompt: bool | None = None
 
 
 class ProjectUpdate(_In):
@@ -91,6 +93,7 @@ class ProjectUpdate(_In):
     clean_mode: CleanModeName | None = None
     clean_control: ControlTypeId | None = None  # null : type par défaut du preset ControlNet
     upscaler: PresetId | None = None  # null : revient à l'agrandisseur de defaults.yaml
+    ai_prompt: bool | None = None  # « Prompt rédigé par l'IA » (false : assemblage par fragments)
     # false : masque la note « série passée en sage par une ancienne mise à jour » (seule valeur admise).
     layout_style_notice: Literal[False] | None = None
 
@@ -124,6 +127,7 @@ class ProjectOut(BaseModel):
     clean_mode: CleanModeName = "img2img"
     clean_control: str | None = None
     upscaler: str | None = None
+    ai_prompt: bool = False
     character_count: int
     chapter_count: int
     # Pages déjà mises en page : changer le sens de lecture les recalcule (confirmation dans l'UI).
@@ -696,6 +700,13 @@ class PanelDetailOut(BaseModel):
     bbox: dict[str, int] | None
     final_prompt: str | None
     final_prompt_manual: bool
+    # Origine du prompt automatique : "ia" (rédigé par le LLM) | "fragments" ; `ai_prompt` : réglage de la
+    # série ; `prompt_pending` : sera rédigé par l'IA à la prochaine génération (ou « Reconstruire ») ;
+    # `prompt_warning` : rédaction en échec, repli par fragments.
+    prompt_source: Literal["ia", "fragments"] | None = None
+    ai_prompt: bool = False
+    prompt_pending: bool = False
+    prompt_warning: str | None = None
     generation_preset: str | None
     resolved_preset: str | None
     target: dict[str, int] | None

@@ -1095,6 +1095,18 @@ class PromptPreset(_Strict):
     max_previous_chapters: int = Field(default=8, ge=0, le=100)
     # Audace de la direction artistique (prompts/direction-artistique.yaml) : sobre, équilibrée, audacieuse.
     variety: Literal["sobre", "equilibree", "audacieuse"] | None = None
+    # Rédacteur de prompt image (prompts/redacteur-image.yaml) : réglage « Prompt rédigé par l'IA » des
+    # nouvelles séries, langue du paragraphe et longueur visée (mots).
+    enabled: bool | None = None
+    language: Literal["fr", "en"] | None = None
+    min_words: int | None = Field(default=None, ge=10, le=1000)
+    max_words: int | None = Field(default=None, ge=10, le=1000)
+
+    @model_validator(mode="after")
+    def _check_words(self) -> PromptPreset:
+        if self.min_words is not None and self.max_words is not None and self.min_words > self.max_words:
+            raise ValueError("min_words doit être ≤ max_words")
+        return self
 
     @field_validator("system", "user", "retry")
     @classmethod

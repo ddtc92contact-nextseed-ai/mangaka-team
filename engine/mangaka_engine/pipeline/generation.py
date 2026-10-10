@@ -53,6 +53,7 @@ from ..providers.comfyui import (
     ComfyUIUnavailableError,
     ComfyUIWorkflowError,
 )
+from ..providers.llm import LLMProvider
 from ..store.db import Database
 from ..store.files import FileStore, InvalidImageError
 from ..store.models import (
@@ -79,7 +80,10 @@ from .jobs import JobReporter
 from .knowledge import KnowledgeBase
 from .layout import target_size
 from .library import panel_assets, style_for
+from .names import CharacterMatcher
 from .prompt import PromptCharacter, ReferenceSlot, build_negative_prompt, build_prompt, frame_references
+from .prompt_writer import PROMPT_ID as WRITER_PROMPT_ID
+from .prompt_writer import PromptBrief, PromptWriterError, WriteRun, write_prompt
 from .style import series_style
 
 log = logging.getLogger("mangaka_engine")
@@ -424,15 +428,193 @@ def panel_label(panel: Panel) -> str:
 
 # --- mise en file ---------------------------------------------------------------------
 def update_panel_prompt(
-    presets: PresetRegistry, session: Session, panel: Panel, knowledge: KnowledgeBase | None = None
+    presets: PresetRegistry,
+    session: Session,
+    panel: Panel,
+    knowledge: KnowledgeBase | None = None,
+    *,
+    reset: bool = False,
 ) -> str:
-    """Reconstruit le prompt final, sauf s'il a été édité à la main."""
-    if not panel.final_prompt_manual or not (panel.final_prompt or "").strip():
-        cast = panel_cast(session, panel)
-        notes = panel_knowledge(session, knowledge, panel, cast.characters)
-        panel.final_prompt = build_panel_prompt(presets, panel, cast.characters, notes, cast.decor, cast.objects)
-        panel.final_prompt_manual = False
+    """Reconstruit le prompt final par fragments, sauf s'il a été édité à la main ou rédigé par l'IA
+    (série en « Prompt rédigé par l'IA »).
+
+    `reset` : la case a changé (description, lieu, mise en scène) ou le prompt automatique est redemandé :
+    un prompt rédigé est remplacé par les fragments et sera rédigé de nouveau à la prochaine génération.
+    """
+    if reset:
+        panel.prompt_key = None
+        panel.prompt_warning = None
+    text = (panel.final_prompt or "").strip()
+    if panel.final_prompt_manual and text:
+        return panel.final_prompt or ""
+    if not reset and text and panel.prompt_source == "ia" and ai_prompt_enabled(panel):
+        return panel.final_prompt or ""
+    cast = panel_cast(session, panel)
+    notes = panel_knowledge(session, knowledge, panel, cast.characters)
+    panel.final_prompt = build_panel_prompt(presets, panel, cast.characters, notes, cast.decor, cast.objects)
+    panel.final_prompt_manual = False
+    panel.prompt_source = "fragments"
+    if not ai_prompt_enabled(panel):
+        panel.prompt_warning = None
     return panel.final_prompt or ""
+
+
+# --- prompt rédigé par l'IA (pipeline/prompt_writer.py) ---------------------------------
+def ai_prompt_enabled(panel: Panel) -> bool:
+    """La série de la case fait rédiger ses prompts par le LLM (« Prompt rédigé par l'IA »)."""
+    return bool(panel.page.chapter.project.ai_prompt)
+
+
+def ai_prompt_default(presets: PresetRegistry) -> bool:
+    """« Prompt rédigé par l'IA » des nouvelles séries (`enabled` de prompts/redacteur-image.yaml, oui)."""
+    prompt = presets.prompts.get(WRITER_PROMPT_ID)
+    return prompt is not None and prompt.enabled is not False
+
+
+def drop_written_prompts(presets: PresetRegistry, session: Session, project_id: int) -> int:
+    """Série repassée aux fragments : chaque prompt rédigé par l'IA (non retouché) redevient le prompt par
+    fragments (le savoir-faire s'y ajoute à la prochaine génération). Renvoie le nombre de cases."""
+    panels = session.scalars(
+        select(Panel)
+        .join(Page, Panel.page_id == Page.id)
+        .join(Chapter, Page.chapter_id == Chapter.id)
+        .where(Chapter.project_id == project_id, Panel.prompt_source == "ia", Panel.final_prompt_manual.is_(False))
+    ).all()
+    for panel in panels:
+        update_panel_prompt(presets, session, panel, reset=True)
+    return len(panels)
+
+
+def panel_brief(
+    presets: PresetRegistry,
+    session: Session,
+    panel: Panel,
+    knowledge: KnowledgeBase | None = None,
+    preset_id: str | None = None,
+) -> PromptBrief:
+    """Données de la case pour le rédacteur : celles du prompt par fragments, plus les images de référence
+    du workflow (`preset_id`, sinon celui résolu pour la case) et les personnages de la série absents."""
+    cast = panel_cast(session, panel, presets)
+    entries = cast.entries
+    loaded = presets.workflows.get(preset_id or resolve_preset_id(presets, panel, entries))
+    slots = len(loaded.preset.reference_images) if loaded is not None else 0
+    per_entry = presets.defaults.panel_references if presets.defaults else "toutes"
+    references = [ReferenceSlot(entry_kind(e), e.name) for e, _ in pick_references(entries, slots, per_entry)]
+    project = panel.page.chapter.project
+    present = {c.id for c in cast.characters}
+    series = list(session.scalars(select(Character).where(Character.project_id == project.id).order_by(Character.id)))
+    savoir_faire, bible = panel_knowledge(session, knowledge, panel, cast.characters)
+    da = applied_panel_direction(panel)
+    return PromptBrief.build(
+        description=panel.description,
+        setting=panel.setting,
+        staging=panel.staging,
+        shot_type=panel.shot_type,
+        plan=da.get("plan"),
+        angle=da.get("angle"),
+        ambiance=da.get("ambiance"),
+        characters=[_prompt_entry(c) for c in cast.characters],
+        extras=CharacterMatcher(series).unmatched(panel.character_names or []),
+        absent=[c.name for c in series if c.id not in present],
+        decor=_prompt_entry(cast.decor) if cast.decor is not None else None,
+        objects=[_prompt_entry(o) for o in cast.objects],
+        references=references,
+        style=series_style(presets, project),
+        bible=bible,
+        savoir_faire=savoir_faire,
+        prompt=presets.prompts.get(WRITER_PROMPT_ID),
+    )
+
+
+def prompt_pending(presets: PresetRegistry, session: Session, panel: Panel) -> bool:
+    """Le prompt de la case sera rédigé par l'IA à la prochaine génération (jamais rédigé, ou la case a
+    changé depuis)."""
+    if not ai_prompt_enabled(panel) or WRITER_PROMPT_ID not in presets.prompts:
+        return False
+    if panel.final_prompt_manual and (panel.final_prompt or "").strip():
+        return False
+    if panel.prompt_source != "ia" and not panel.prompt_warning:
+        return True
+    return panel.prompt_key != panel_brief(presets, session, panel).key()
+
+
+@dataclass
+class PromptRequest:
+    """Rédaction à demander au LLM pour une case (données rassemblées, aucune session ouverte ensuite)."""
+
+    panel_id: int
+    project_id: int
+    key: str
+    brief: PromptBrief
+
+
+def prompt_request(
+    presets: PresetRegistry,
+    session: Session,
+    panel: Panel,
+    knowledge: KnowledgeBase | None = None,
+    preset_id: str | None = None,
+    *,
+    force: bool = False,
+) -> PromptRequest | None:
+    """Rédaction à faire pour la case, ou None : série par fragments, prompt édité à la main, ou prompt
+    déjà rédigé (ou déjà retombé sur les fragments) pour les mêmes données — une fois par case, pas à
+    chaque génération. `force` (« Reconstruire le prompt ») : toujours redemandé."""
+    if not ai_prompt_enabled(panel) or WRITER_PROMPT_ID not in presets.prompts:
+        return None
+    if panel.final_prompt_manual and (panel.final_prompt or "").strip():
+        return None
+    key = panel_brief(presets, session, panel, None, preset_id).key()
+    if not force and panel.prompt_key == key and (panel.prompt_source == "ia" or panel.prompt_warning):
+        return None
+    brief = panel_brief(presets, session, panel, knowledge, preset_id)  # avec la bible et le savoir-faire
+    return PromptRequest(panel_id=panel.id, project_id=panel.page.chapter.project_id, key=key, brief=brief)
+
+
+def run_prompt_request(
+    presets: PresetRegistry,
+    llm: LLMProvider | None,
+    llm_error: str | None,
+    request: PromptRequest,
+    progress: Callable[[str], None] | None = None,
+) -> tuple[WriteRun | None, str | None]:
+    """Appel du LLM (hors de toute session) : (rédaction, None) ou (None, erreur lisible). Jamais d'exception :
+    une panne du rédacteur ne bloque pas la génération (repli par fragments)."""
+    if llm is None:
+        return None, f"LLM indisponible : {llm_error or 'non configuré'}"
+    try:
+        return write_prompt(llm, presets.prompt(WRITER_PROMPT_ID), request.brief, progress), None
+    except (PromptWriterError, PresetError) as exc:
+        return None, str(exc)
+    except Exception as exc:  # noqa: BLE001 — repli par fragments plutôt qu'une génération bloquée
+        log.exception("rédaction du prompt de la case %s impossible", request.panel_id)
+        return None, f"erreur interne ({exc.__class__.__name__})"
+
+
+def apply_prompt_request(
+    presets: PresetRegistry,
+    session: Session,
+    panel: Panel,
+    request: PromptRequest,
+    run: WriteRun | None,
+    error: str | None,
+    knowledge: KnowledgeBase | None = None,
+) -> None:
+    """Stocke le prompt rédigé sur la case ; en échec, le prompt par fragments et un avertissement."""
+    if panel.final_prompt_manual and (panel.final_prompt or "").strip():
+        return  # édité à la main pendant la rédaction : l'édition l'emporte
+    if run is not None:
+        panel.final_prompt = run.output.prompt
+        panel.final_prompt_manual = False
+        panel.prompt_source = "ia"
+        panel.prompt_warning = None
+    else:
+        update_panel_prompt(presets, session, panel, knowledge, reset=True)
+        panel.prompt_warning = (
+            f"Prompt rédigé par l'IA indisponible ({error}) : prompt par fragments utilisé. "
+            "« Reconstruire le prompt » pour réessayer."
+        )
+    panel.prompt_key = request.key
 
 
 def enqueue_panel(
@@ -648,9 +830,12 @@ class GenerationExecutor:
         on_generated: Callable[[Session, Job, PanelImage], None] | None = None,
         presets_for: Callable[[int | None], PresetRegistry] | None = None,
         knowledge: KnowledgeBase | None = None,
+        llm_for: Callable[[int | None], tuple[LLMProvider | None, str | None]] | None = None,
     ) -> None:
         self.db = db
         self.knowledge = knowledge
+        # LLM qui rédige le prompt des cases d'une série (« Prompt rédigé par l'IA ») ; None : aucun.
+        self.llm_for = llm_for
         # Presets effectifs d'une série (profils des agents, écran « L'équipe ») ; sans profil : `presets`.
         self.presets_for = presets_for or (lambda _project_id: presets)
         # Appelé avec la nouvelle version, avant le commit (mise en file du QC automatique).
@@ -674,6 +859,32 @@ class GenerationExecutor:
             job = session.get(Job, job_id)
             if job is not None and job.panel_id is not None:
                 refresh_states(session, [job.panel_id])
+                session.commit()
+
+    def _write_prompt(self, job_id: int, report: JobReporter) -> None:
+        """Prompt rédigé par l'IA, une fois par case, avant la préparation du workflow. Le LLM est appelé
+        hors de toute session ; en échec, la case retombe sur les fragments (avertissement sur la case)."""
+        with self.db.session_scope() as session:
+            job = session.get(Job, job_id)
+            if job is None or job.panel_id is None or job.params.get("repair") or job.params.get("sketch_prompt"):
+                return  # réparation, passage au propre : leur propre prompt
+            panel = session.get(Panel, job.panel_id)
+            if panel is None:
+                return
+            presets = self.presets_for(panel.page.chapter.project_id)
+            preset_id = job.params.get("preset")
+            request = prompt_request(
+                presets, session, panel, self.knowledge, preset_id if isinstance(preset_id, str) else None
+            )
+        if request is None:
+            return
+        report(2, "Rédaction du prompt par l'IA…")
+        llm, llm_error = self.llm_for(request.project_id) if self.llm_for is not None else (None, None)
+        run, error = run_prompt_request(presets, llm, llm_error, request, lambda message: report(2, message))
+        with self.db.session_scope() as session:
+            panel = session.get(Panel, request.panel_id)
+            if panel is not None:
+                apply_prompt_request(presets, session, panel, request, run, error, self.knowledge)
                 session.commit()
 
     def _plan(self, job_id: int) -> _Plan:
@@ -868,6 +1079,7 @@ class GenerationExecutor:
         comfy = self.comfyui
         t0 = time.monotonic()
         self.after(job_id)  # case et page → « generating »
+        self._write_prompt(job_id, report)
         report(2, "Préparation du prompt et du workflow…")
         plan = self._plan(job_id)
         preset = plan.loaded.preset

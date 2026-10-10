@@ -52,6 +52,8 @@ export interface Project {
   clean_control: string | null;
   /** Agrandisseur de la finition d'impression (presets/upscalers/) ; null = celui de defaults.yaml. */
   upscaler: string | null;
+  /** « Prompt rédigé par l'IA » : le LLM écrit le prompt de chaque case (false : assemblage par fragments). */
+  ai_prompt: boolean;
   character_count: number;
   chapter_count: number;
   /** Pages déjà mises en page : changer le sens de lecture les met en miroir. */
@@ -85,6 +87,7 @@ export type ProjectInput = Pick<
   | "clean_mode"
   | "clean_control"
   | "upscaler"
+  | "ai_prompt"
 >;
 
 export type CleanMode = "img2img" | "controlnet";
@@ -727,6 +730,14 @@ export interface PanelDetail {
   bbox: Rect | null;
   final_prompt: string | null;
   final_prompt_manual: boolean;
+  /** Origine du prompt automatique : rédigé par l'IA ou assemblé par fragments (null : jamais construit). */
+  prompt_source?: "ia" | "fragments" | null;
+  /** La série fait rédiger ses prompts par l'IA. */
+  ai_prompt?: boolean;
+  /** Sera rédigé par l'IA à la prochaine génération (ou « Reconstruire le prompt »). */
+  prompt_pending?: boolean;
+  /** Rédaction en échec : prompt par fragments utilisé (message lisible). */
+  prompt_warning?: string | null;
   generation_preset: string | null;
   resolved_preset: string | null;
   target: { width: number; height: number } | null;
@@ -1224,6 +1235,8 @@ export interface ActiveProvider {
 export type ActiveProviders = Record<"llm" | "vision" | "comfyui", ActiveProvider>;
 
 export interface Presets {
+  /** « Prompt rédigé par l'IA » des nouvelles séries (réglage global du dessinateur). */
+  ai_prompt_default?: boolean;
   defaults: {
     page_format: string;
     workflow: string;
@@ -1936,7 +1949,9 @@ export const api = {
     },
   ) =>
     request<PanelDetail>(`/panels/${id}`, json("PATCH", body)),
-  rebuildPrompt: (id: number) => request<PanelDetail>(`/panels/${id}/prompt/rebuild`, { method: "POST" }),
+  // Prompt rédigé par l'IA : jusqu'à 2 appels au LLM (le proxy laisse 3 min à cette route).
+  rebuildPrompt: (id: number) =>
+    request<PanelDetail>(`/panels/${id}/prompt/rebuild`, { method: "POST", signal: AbortSignal.timeout(180_000) }),
   controlStatus: (refresh = false) =>
     request<ControlStatus>(`/comfyui/control${refresh ? "?refresh=true" : ""}`, { signal: AbortSignal.timeout(30_000) }),
   lockComposition: (
