@@ -2,6 +2,9 @@
 
 - `enqueue_panel` : prépare le prompt final, choisit le workflow et crée `count` jobs
   `generation` (variantes) en attente ;
+- `pick_references` : emplacements d'images de référence du workflow (3 au plus), remplis par
+  ordre de priorité — personnages de la case, puis son décor, puis ses objets (voir la fonction) ;
+  les emplacements retenus sont notés sur le job (`params.references`) et sur la version produite ;
 - `GenerationExecutor` : exécuté par la file sérielle (`pipeline/queue.py`) pour un job :
   envoi des images de référence, construction du workflow (références + LoRA via le preset),
   file ComfyUI, progression, récupération de l'image → nouvelle `PanelImage` (version n+1) ;
@@ -18,7 +21,7 @@ import logging
 import threading
 import time
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Any
 
@@ -49,11 +52,14 @@ from ..store.models import (
     PanelImage,
     PanelState,
     QCVerdict,
+    SeriesAsset,
+    SeriesAssetImage,
 )
 from .art_direction import applied_panel_direction
 from .jobs import JobReporter
 from .knowledge import KnowledgeBase
 from .layout import target_size
+from .library import panel_assets
 from .prompt import PromptCharacter, build_negative_prompt, build_prompt
 
 log = logging.getLogger("mangaka_engine")
@@ -84,6 +90,37 @@ def panel_characters(session: Session, panel: Panel) -> list[Character]:
     return [found[i] for i in dict.fromkeys(ids) if i in found]
 
 
+# Une fiche de la bibliothèque citée par une case : personnage, décor ou objet.
+LibraryEntry = Character | SeriesAsset
+
+
+@dataclass
+class PanelCast:
+    """Ce que la case cite dans la bibliothèque de la série."""
+
+    characters: list[Character] = field(default_factory=list)
+    decor: SeriesAsset | None = None
+    objects: list[SeriesAsset] = field(default_factory=list)
+
+    @property
+    def entries(self) -> list[LibraryEntry]:
+        """Fiches dans l'ordre de priorité des images de référence : personnages, décor, objets."""
+        return [*self.characters, *([self.decor] if self.decor is not None else []), *self.objects]
+
+
+def panel_cast(session: Session, panel: Panel) -> PanelCast:
+    decor, objects = panel_assets(session, panel, panel.page.chapter.project_id)
+    return PanelCast(characters=panel_characters(session, panel), decor=decor, objects=objects)
+
+
+def entry_kind(entry: LibraryEntry) -> str:
+    return "character" if isinstance(entry, Character) else entry.kind.value
+
+
+def _prompt_entry(entry: LibraryEntry) -> PromptCharacter:
+    return PromptCharacter(entry.name, entry.visual_description, tuple(entry.prompt_keywords or []))
+
+
 def panel_knowledge(
     session: Session, knowledge: KnowledgeBase | None, panel: Panel, characters: Sequence[Character]
 ) -> tuple[str, str]:
@@ -91,6 +128,8 @@ def panel_knowledge(
     if knowledge is None:
         return "", ""
     query = " ".join(p for p in (panel.shot_type or "", panel.description, *(c.name for c in characters)) if p)
+    decor, objects = panel_assets(session, panel, panel.page.chapter.project_id)
+    query = " ".join([query, *(a.name for a in ([decor] if decor else []) + objects)])
     try:
         return knowledge.for_panel(session, panel.page.chapter.project_id, query, [c.id for c in characters])
     except Exception:  # noqa: BLE001 — le prompt se construit sans notes plutôt que d'échouer
@@ -103,6 +142,8 @@ def build_panel_prompt(
     panel: Panel,
     characters: Sequence[Character],
     notes: tuple[str, str] = ("", ""),
+    decor: SeriesAsset | None = None,
+    objects: Sequence[SeriesAsset] = (),
 ) -> str:
     series = panel.page.chapter.project
     savoir_faire, bible = notes
@@ -113,7 +154,9 @@ def build_panel_prompt(
         plan=da.get("plan"),
         angle=da.get("angle"),
         ambiance=da.get("ambiance"),
-        characters=[PromptCharacter(c.name, c.visual_description, tuple(c.prompt_keywords or [])) for c in characters],
+        characters=[_prompt_entry(c) for c in characters],
+        decor=_prompt_entry(decor) if decor is not None else None,
+        objects=[_prompt_entry(o) for o in objects],
         style=series.style,
         savoir_faire=savoir_faire,
         bible=bible,
@@ -122,12 +165,13 @@ def build_panel_prompt(
 
 
 def resolve_preset_id(
-    presets: PresetRegistry, panel: Panel, characters: Sequence[Character], requested: str | None = None
+    presets: PresetRegistry, panel: Panel, characters: Sequence[LibraryEntry], requested: str | None = None
 ) -> str:
     """Demande > preset de la case > workflow « avec références » si besoin > workflow de la série.
 
     Le workflow « avec références » est celui du palier de la série (`with_references` de son
     preset) ; `defaults.workflow_with_references` ne sert qu'aux presets qui n'en déclarent pas.
+    `characters` : fiches de la case (personnages, et aussi décor et objets : `PanelCast.entries`).
     """
     if requested:
         return requested
@@ -149,7 +193,7 @@ def resolve_preset_id(
     return series_id
 
 
-def quality_preset_id(presets: PresetRegistry, characters: Sequence[Character]) -> str:
+def quality_preset_id(presets: PresetRegistry, characters: Sequence[LibraryEntry]) -> str:
     """Preset de « Régénérer en Qualité » : `defaults.workflow_quality`, ou son pendant « avec
     références » (`with_references`) si un personnage de la case a une planche de référence."""
     defaults = presets.defaults
@@ -182,8 +226,17 @@ def panel_target(presets: PresetRegistry, page: Page, panel: Panel) -> dict[str,
     return None
 
 
-def pick_references(characters: Sequence[Character], slots: int) -> list[tuple[Character, CharacterImage]]:
-    """Remplit les emplacements à tour de rôle : 1re image de chaque personnage, puis 2e…"""
+def pick_references(
+    characters: Sequence[LibraryEntry], slots: int
+) -> list[tuple[LibraryEntry, CharacterImage | SeriesAssetImage]]:
+    """Remplit les emplacements par tours, dans l'ordre de priorité des fiches.
+
+    Ordre de priorité (`PanelCast.entries`) : personnages de la case (dans l'ordre de la case), puis
+    son décor, puis ses objets. 1er tour : la 1re image de chaque fiche, dans cet ordre ; 2e tour :
+    la 2e image… jusqu'à remplir les emplacements (3 au plus dans les presets livrés). Ainsi chaque
+    personnage passe avant le décor, qui passe avant les objets, et une fiche n'a une 2e image que si
+    toutes les autres ont déjà leur 1re.
+    """
     out: list[tuple[Character, CharacterImage]] = []
     depth = 0
     while len(out) < slots and any(depth < len(c.reference_images) for c in characters):
@@ -194,8 +247,8 @@ def pick_references(characters: Sequence[Character], slots: int) -> list[tuple[C
     return out
 
 
-def collect_loras(panel: Panel, characters: Sequence[Character]) -> list[LoraSpec]:
-    """LoRA de style de la série puis LoRA d'identité de chaque personnage, dans l'ordre."""
+def collect_loras(panel: Panel, characters: Sequence[LibraryEntry]) -> list[LoraSpec]:
+    """LoRA de style de la série puis LoRA de chaque fiche (personnages, décor, objets), dans l'ordre."""
     series = panel.page.chapter.project
     loras: list[LoraSpec] = []
     if series.style_lora_name:
@@ -218,9 +271,9 @@ def update_panel_prompt(
 ) -> str:
     """Reconstruit le prompt final, sauf s'il a été édité à la main."""
     if not panel.final_prompt_manual or not (panel.final_prompt or "").strip():
-        characters = panel_characters(session, panel)
-        notes = panel_knowledge(session, knowledge, panel, characters)
-        panel.final_prompt = build_panel_prompt(presets, panel, characters, notes)
+        cast = panel_cast(session, panel)
+        notes = panel_knowledge(session, knowledge, panel, cast.characters)
+        panel.final_prompt = build_panel_prompt(presets, panel, cast.characters, notes, cast.decor, cast.objects)
         panel.final_prompt_manual = False
     return panel.final_prompt or ""
 
@@ -243,8 +296,7 @@ def enqueue_panel(
     page = panel.page
     if panel_target(presets, page, panel) is None:
         raise GenerationError(f"la page {page.number} n'est pas mise en page : lance « Recalculer » d'abord")
-    characters = panel_characters(session, panel)
-    preset_id = resolve_preset_id(presets, panel, characters, preset)
+    preset_id = resolve_preset_id(presets, panel, panel_cast(session, panel).entries, preset)
     presets.workflow(preset_id)  # PresetError si inconnu
     if prompt_override is not None and prompt_override.strip():
         panel.final_prompt = prompt_override.strip()
@@ -364,7 +416,8 @@ def recover_states(db: Database) -> None:
 class _Plan:
     loaded: LoadedWorkflow
     params: dict[str, Any]
-    references: list[tuple[int, int, str, bytes]]  # (personnage, image, nom de fichier, contenu)
+    references: list[dict[str, Any]]  # emplacements retenus : {kind, id, name, image_id, filename}, dans l'ordre
+    reference_data: list[bytes]
     loras: list[LoraSpec]
     folder: str
     prompt: str
@@ -439,23 +492,37 @@ class GenerationExecutor:
                 raise GenerationError("case introuvable (supprimée entre-temps ?)")
             page = panel.page
             chapter: Chapter = page.chapter
-            characters = panel_characters(session, panel)
+            cast = panel_cast(session, panel)
+            entries = cast.entries
             presets = self.presets_for(chapter.project_id)
-            preset_id = str(job.params.get("preset") or resolve_preset_id(presets, panel, characters))
+            preset_id = str(job.params.get("preset") or resolve_preset_id(presets, panel, entries))
             loaded = presets.workflow(preset_id)
             prompt = update_panel_prompt(presets, session, panel, self.knowledge)
             size = panel_target(presets, page, panel)
             if size is None:
                 raise GenerationError(f"la page {page.number} n'est pas mise en page")
-            references: list[tuple[int, int, str, bytes]] = []
-            for character, image in pick_references(characters, len(loaded.preset.reference_images)):
+            references: list[dict[str, Any]] = []
+            reference_data: list[bytes] = []
+            for entry, image in pick_references(entries, len(loaded.preset.reference_images)):
                 path = self.files.absolute(image.path)
                 if not path.is_file():
-                    raise GenerationError(f"image de référence de {character.name} absente de data/ ({image.path})")
+                    raise GenerationError(f"image de référence de {entry.name} absente de data/ ({image.path})")
                 ext = PurePosixPath(image.path).suffix or ".png"
+                kind = entry_kind(entry)
+                prefix = {"character": "perso", "decor": "decor", "object": "objet"}[kind]
                 references.append(
-                    (character.id, image.id, f"perso{character.id}_img{image.id}{ext}", path.read_bytes())
+                    {
+                        "slot": len(references) + 1,
+                        "kind": kind,
+                        "id": entry.id,
+                        "name": entry.name,
+                        "image_id": image.id,
+                        "filename": f"{prefix}{entry.id}_img{image.id}{ext}",
+                    }
                 )
+                reference_data.append(path.read_bytes())
+            # « Références utilisées » : notées sur le job dès la préparation (visibles dans l'atelier).
+            job.params = {**(job.params or {}), "references": references}
             params: dict[str, Any] = {
                 "positive_prompt": prompt,
                 "negative_prompt": build_negative_prompt(
@@ -473,7 +540,8 @@ class GenerationExecutor:
                 loaded=loaded,
                 params=params,
                 references=references,
-                loras=collect_loras(panel, characters),
+                reference_data=reference_data,
+                loras=collect_loras(panel, entries),
                 folder=f"projects/{chapter.project_id}/chapters/{chapter.id}/panels/{panel.id}",
                 prompt=prompt,
                 panel_id=panel.id,
@@ -492,9 +560,9 @@ class GenerationExecutor:
         preset = plan.loaded.preset
 
         uploaded: list[str] = []
-        for i, (_, _, filename, data) in enumerate(plan.references, start=1):
+        for i, (ref, data) in enumerate(zip(plan.references, plan.reference_data, strict=True), start=1):
             report(4, f"Envoi de l'image de référence {i}/{len(plan.references)} à ComfyUI…")
-            uploaded.append(comfy.upload_image(data, filename, subfolder=UPLOAD_SUBFOLDER))
+            uploaded.append(comfy.upload_image(data, ref["filename"], subfolder=UPLOAD_SUBFOLDER))
         built = build_workflow(plan.loaded, plan.params, reference_images=uploaded, loras=plan.loras)
         if cancel.is_set():
             raise ComfyUIInterruptedError("génération annulée")
@@ -564,8 +632,12 @@ class GenerationExecutor:
                     "workflow_params": built.params,
                     "loras": [lo.as_dict() for lo in built.loras],
                     "reference_images": [
-                        {"character_id": cid, "image_id": iid, "comfyui_name": name}
-                        for (cid, iid, _, _), name in zip(plan.references, uploaded, strict=True)
+                        {
+                            **{k: v for k, v in ref.items() if k != "filename"},
+                            **({"character_id": ref["id"]} if ref["kind"] == "character" else {}),
+                            "comfyui_name": name,
+                        }
+                        for ref, name in zip(plan.references, uploaded, strict=True)
                     ],
                     "removed_nodes": built.removed_nodes,
                     "image_width": stored.width,

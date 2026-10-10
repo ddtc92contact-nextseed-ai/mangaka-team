@@ -710,6 +710,8 @@ IMAGE_PROMPT_VARIABLES = {
     "ambiance",
     "description",
     "characters",
+    "decor",
+    "objects",
     "style",
     "savoir_faire",
     "bible",
@@ -720,7 +722,8 @@ class ImagePromptSettings(_Strict):
     """Construction du prompt final d'une case (voir pipeline/prompt.py)."""
 
     # Morceaux assemblés dans l'ordre ; un morceau dont une variable est vide est omis.
-    # Variables : $shot, $description, $characters, $style, $savoir_faire (passages du savoir-faire),
+    # Variables : $shot, $description, $characters, $decor, $objects (bibliothèque de la série), $style,
+    # $savoir_faire (passages du savoir-faire),
     # $bible (notes de la bible sur les personnages de la case) ; direction artistique appliquée :
     # $plan (son type de plan, sinon celui du scénario), $angle, $ambiance.
     parts: list[str] = Field(

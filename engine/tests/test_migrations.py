@@ -62,7 +62,15 @@ def _version(path: Path) -> int:
     return v
 
 
+def _drop_v10_library(con: sqlite3.Connection) -> None:
+    con.execute("ALTER TABLE panels DROP COLUMN decor_id")
+    con.execute("ALTER TABLE panels DROP COLUMN object_ids")
+    con.execute("DROP TABLE series_asset_images")
+    con.execute("DROP TABLE series_assets")
+
+
 def _drop_v9_columns(con: sqlite3.Connection) -> None:
+    _drop_v10_library(con)
     con.execute("ALTER TABLE panels DROP COLUMN frame")
     con.execute("ALTER TABLE bubbles DROP COLUMN sfx")
 

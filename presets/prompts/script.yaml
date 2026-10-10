@@ -2,6 +2,7 @@
 #
 # Variables disponibles ($nom ; écrire $$ pour un « $ » littéral) :
 #   $series_title $series_style $reading_direction $characters $previous_chapters
+#   $decors $objets (bibliothèque de la série : « - id N · nom : description courte », un par ligne)
 #   $chapter_number $chapter_title $synopsis $target_pages $shot_types $bubble_kinds
 #   $intensities $rythmes  (indices de mise en page, cf. presets/README.md « Direction artistique »)
 #   $context_json  (le même contexte, en JSON)
@@ -28,6 +29,12 @@ user: |
 
   Personnages connus :
   $characters
+
+  Décors récurrents de la série (bibliothèque) :
+  $decors
+
+  Objets récurrents de la série (bibliothèque) :
+  $objets
 
   Résumé des chapitres précédents :
   $previous_chapters
@@ -56,11 +63,15 @@ user: |
     chacune avec « text » (court, en majuscules) et « intensity » ($intensities) ; jamais dans « description » :
     le dessinateur ne dessine aucun texte, le lettreur les pose ;
   - « characters » liste les noms des personnages visibles dans la case ;
+  - « decor » : l'id (nombre) du décor récurrent où se passe la case, pris UNIQUEMENT dans la liste
+    des décors ci-dessus, ou null si la case se passe ailleurs ;
+  - « objets » : les ids (nombres) des objets récurrents visibles dans la case, pris UNIQUEMENT dans
+    la liste des objets ci-dessus ([] s'il n'y en a pas) ; n'invente jamais d'id ;
   - répliques courtes, en français, comme dans un vrai manga ;
   - « summary » : résumé du chapitre en 3 à 6 phrases, pour assurer la continuité des chapitres suivants.
 
   Format de réponse :
-  {"pages": [{"rythme": "normal", "panels": [{"description": "…", "characters": ["…"],
+  {"pages": [{"rythme": "normal", "panels": [{"description": "…", "characters": ["…"], "decor": null, "objets": [],
      "shot_type": "plan moyen", "importance": 2, "intensity": "normal",
      "dialogues": [{"speaker": "…", "text": "…", "kind": "speech"}],
      "sfx": [{"text": "VROUM !", "intensity": "choc"}]}]}],

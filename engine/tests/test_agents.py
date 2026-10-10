@@ -214,7 +214,7 @@ def test_knowledge_is_stored_even_without_a_knowledge_base(c: TestClient) -> Non
         ("controleur-qualite", {"reject_below": 90}, "reject_below", "reject_below doit être inférieur ou égal"),
         ("metteur-en-page", {"templates": "- id: [cassé"}, "templates", "YAML invalide"),
         ("metteur-en-page", {"templates": "- id: x\n  name: X\n"}, "templates", "champ obligatoire"),
-        ("dessinateur", {"parts": ["$shot.", "Avec $decor."]}, "parts", "ligne 2 : variable inconnue : $decor"),
+        ("dessinateur", {"parts": ["$shot.", "Avec $meteo."]}, "parts", "ligne 2 : variable inconnue : $meteo"),
         ("scenariste", {"inconnu": 1}, "inconnu", "réglage inconnu"),
     ],
 )

@@ -42,6 +42,7 @@ from ..store.models import (
     KnowledgeDocument,
     SeriesBible,
 )
+from .library import SeriesLibrary
 
 CHARS_PER_TOKEN = 4
 SOURCES = {".md": "md", ".markdown": "md", ".txt": "txt", ".pdf": "pdf"}
@@ -488,22 +489,36 @@ def _character_lines(session: Session, bible: SeriesBible, character_ids: Sequen
     return [f"- {by_id[i].name} : {notes[i]}" for i in order]
 
 
+def _library_sections(session: Session, project_id: int) -> list[str]:
+    """Décors et objets récurrents de la bibliothèque de la série (id, nom, description courte)."""
+    library = SeriesLibrary.load(session, project_id)
+    out = []
+    for key, label in (("decors", "Décors récurrents"), ("objets", "Objets récurrents")):
+        text = library.text(key)
+        if text:
+            out.append(f"{label} :\n{text}")
+    return out
+
+
 def render_bible(session: Session, project_id: int, *, max_tokens: int) -> BibleText | None:
-    """Bible complète en texte ; au-delà du budget, les plus anciens résumés de chapitres partent d'abord."""
+    """Bible complète en texte ; au-delà du budget, les plus anciens résumés de chapitres partent d'abord.
+
+    Les décors et objets de la bibliothèque de la série y figurent toujours (même sans bible écrite).
+    """
     bible = get_bible(session, project_id)
-    if bible is None:
-        return None
     head: list[str] = []
-    for key, label in BIBLE_SECTIONS:
-        value = (getattr(bible, key) or "").strip()
-        if value:
-            head.append(f"{label} :\n{value}")
-    chars = _character_lines(session, bible)
-    if chars:
-        head.append("Personnages :\n" + "\n".join(chars))
+    if bible is not None:
+        for key, label in BIBLE_SECTIONS:
+            value = (getattr(bible, key) or "").strip()
+            if value:
+                head.append(f"{label} :\n{value}")
+        chars = _character_lines(session, bible)
+        if chars:
+            head.append("Personnages :\n" + "\n".join(chars))
+    head += _library_sections(session, project_id)
     summaries = [
         f"- Chapitre {s.get('number', '?')}{' — ' + s['title'] if s.get('title') else ''} : {s.get('summary', '')}"
-        for s in sorted(bible.chapter_summaries or [], key=lambda s: s.get("number") or 0)
+        for s in sorted((bible.chapter_summaries if bible else None) or [], key=lambda s: s.get("number") or 0)
         if str(s.get("summary") or "").strip()
     ]
     if not head and not summaries:

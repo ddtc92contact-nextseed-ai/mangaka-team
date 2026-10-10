@@ -1,14 +1,16 @@
 """LLM factice, déterministe, sans réseau (mode par défaut sans .env et dans les tests).
 
 Pour l'étape « scénario », il reconnaît le bloc `<contexte>{"task": "script", …}</contexte>` du
-prompt et renvoie un découpage plausible (nombre de pages visé, personnages de la série).
+prompt et renvoie un découpage plausible (nombre de pages visé, personnages de la série ; chaque page
+se passe dans un décor de la bibliothèque, à tour de rôle, et une case sur deux montre un objet).
 
 Pour la direction artistique (`"task": "art_direction"`), il renvoie des choix variés mais
 déterministes : même chapitre, même audace, même relance → mêmes choix (`mock_art_direction`).
 
 Pour tester les relances sans vrai LLM, les `invalid_attempts` premiers essais d'une conversation
 renvoient une réponse invalide (variable MOCK_LLM_INVALID_ATTEMPTS, ou `[mock:invalide:N]` dans le
-synopsis du chapitre ; `[mock:da-invalide:N]` pour la seule direction artistique). L'essai courant se
+synopsis du chapitre ; `[mock:da-invalide:N]` pour la seule direction artistique ;
+`[mock:id-invalide:N]` : découpage bien formé qui cite un décor inexistant). L'essai courant se
 déduit des messages : aucun état entre deux appels.
 """
 
@@ -26,6 +28,8 @@ Responder = Callable[[list[ChatMessage], bool], str]
 _CONTEXT = re.compile(r"<contexte>\s*(\{.*\})\s*</contexte>", re.DOTALL)
 _INVALID_MARK = re.compile(r"\[mock:invalide:(\d+)\]")
 _DA_INVALID_MARK = re.compile(r"\[mock:da-invalide:(\d+)\]")
+_ID_INVALID_MARK = re.compile(r"\[mock:id-invalide:(\d+)\]")
+UNKNOWN_ID = 999_999  # id de décor cité par `[mock:id-invalide:N]` (absent de toute bibliothèque)
 TASKS = ("script", "art_direction")
 
 _SHOTS = ["plan large", "plan moyen", "gros plan", "plan américain", "contre-plongée", "plan rapproché", "plongée"]
@@ -57,7 +61,7 @@ def _task_context(messages: list[ChatMessage]) -> dict[str, Any] | None:
 
 
 def _sentences(text: str) -> list[str]:
-    text = _DA_INVALID_MARK.sub("", _INVALID_MARK.sub("", text))
+    text = _ID_INVALID_MARK.sub("", _DA_INVALID_MARK.sub("", _INVALID_MARK.sub("", text)))
     parts = [p.strip() for p in re.split(r"(?<=[.!?…])\s+|\n+", text) if p.strip()]
     return parts or ["La scène s'installe."]
 
@@ -68,6 +72,8 @@ def mock_script(ctx: dict[str, Any]) -> dict[str, Any]:
     beats = _sentences(str(chapter.get("synopsis") or ""))
     n_pages = max(1, min(40, int(chapter.get("target_pages") or 15)))
     previous = ctx.get("previous_chapters") or []
+    decors = [d["id"] for d in ctx.get("decors") or [] if isinstance(d.get("id"), int)]
+    objets = [o["id"] for o in ctx.get("objets") or [] if isinstance(o.get("id"), int)]
     pages = []
     beat = 0
     for p in range(n_pages):
@@ -103,6 +109,8 @@ def mock_script(ctx: dict[str, Any]) -> dict[str, Any]:
                     "intensity": intensity,
                     "dialogues": dialogues,
                     "sfx": sfx,
+                    "decor": decors[p % len(decors)] if decors else None,
+                    "objets": [objets[(p + i // 2) % len(objets)]] if objets and i % 2 == 0 else [],
                 }
             )
         pages.append({"rythme": _RYTHMES[p % len(_RYTHMES)], "panels": panels})
@@ -268,6 +276,11 @@ class MockLLMProvider:
             if attempt % 2:
                 return "Voici le découpage : pages 1 à 3…"
             return json.dumps({"pages": [{"panels": [{"description": "", "shot_type": "travelling"}]}]})
+        mark = _ID_INVALID_MARK.search(str((ctx.get("chapter") or {}).get("synopsis") or ""))
+        if mark and attempt <= int(mark.group(1)):
+            out = mock_script(ctx)
+            out["pages"][0]["panels"][0]["decor"] = UNKNOWN_ID
+            return json.dumps(out, ensure_ascii=False)
         return json.dumps(mock_script(ctx), ensure_ascii=False)
 
     def _direction_answer(self, messages: list[ChatMessage], ctx: dict[str, Any]) -> str:

@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from ..presets import PresetRegistry
 from ..store.models import Job, JobStatus, Page, Panel, PanelImage
-from .generation import STEP, panel_characters, preset_tier, resolve_preset_id
+from .generation import STEP, panel_cast, preset_tier, resolve_preset_id
 
 MIN_MEASURED = 3  # en dessous : `estimated_s` du preset
 SAMPLE = 20  # dernières générations prises en compte par preset
@@ -77,7 +77,7 @@ def estimate_panels(
     registries: dict[str, PresetRegistry] = {}
     for panel in panels:
         presets = presets_for(panel.page.chapter.project_id)
-        preset_id = resolve_preset_id(presets, panel, panel_characters(session, panel))
+        preset_id = resolve_preset_id(presets, panel, panel_cast(session, panel).entries)
         counts[preset_id] = counts.get(preset_id, 0) + 1
         registries.setdefault(preset_id, presets)
     durations = measured_durations(session) if counts else {}
