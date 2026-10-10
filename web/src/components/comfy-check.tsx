@@ -112,6 +112,12 @@ function CheckReport({ report }: { report: ComfyCheck }) {
   );
 }
 
+/** `?v=<nom du fichier>` : l'image d'essai ne peut être gardée en cache que sous sa version. */
+function trialVersion(path: unknown): string {
+  const stem = typeof path === "string" ? (path.split("/").pop() ?? "").replace(/\.[^.]+$/, "") : "";
+  return stem ? `?v=${encodeURIComponent(stem)}` : "";
+}
+
 /** Suivi d'une case d'essai : progression, puis image et durée (ou l'erreur en clair). */
 function TrialResult({ job, simulated }: { job: Job; simulated: boolean }) {
   const params = job.params ?? {};
@@ -132,7 +138,7 @@ function TrialResult({ job, simulated }: { job: Job; simulated: boolean }) {
     <figure className="space-y-2" data-testid="comfy-trial">
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
-        src={engineUrl(`/comfyui/trial/${job.id}/image`)}
+        src={engineUrl(`/comfyui/trial/${job.id}/image${trialVersion(params.image_path)}`)}
         alt="Case d'essai générée par ComfyUI"
         className="max-h-80 rounded-md border border-zinc-800"
       />

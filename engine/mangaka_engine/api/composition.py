@@ -19,7 +19,7 @@ from ..pipeline.composition import (
 )
 from ..pipeline.generation import GenerationError
 from ..presets import PresetError
-from ..store.files import InvalidImageError
+from ..store.files import InvalidImageError, cache_headers
 from ..store.models import Panel
 from .deps import AppContext, get_ctx, get_session
 from .errors import FieldError
@@ -163,7 +163,7 @@ def unlock_panel(
     return panel_detail(session, ctx, panel)
 
 
-def _lock_file(ctx: AppContext, panel: Panel, key: str) -> FileResponse:
+def _lock_file(ctx: AppContext, panel: Panel, key: str, v: str | None) -> FileResponse:
     lock = panel.composition_lock if isinstance(panel.composition_lock, dict) else {}
     holder = lock.get("preview") if key == "preview" else lock
     rel = holder.get("path") if isinstance(holder, dict) else None
@@ -172,20 +172,20 @@ def _lock_file(ctx: AppContext, panel: Panel, key: str) -> FileResponse:
     path = ctx.files.absolute(rel)
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Fichier image manquant dans data/")
-    return FileResponse(path, headers={"Cache-Control": "private, max-age=31536000, immutable"})
+    return FileResponse(path, headers=cache_headers(rel, v))
 
 
 @router.get("/panels/{panel_id}/composition-lock/source")
 def lock_source_file(
-    panel_id: int, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
+    panel_id: int, v: str | None = None, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
 ) -> FileResponse:
-    """Image guide importée du verrou."""
-    return _lock_file(ctx, get_panel_or_404(session, panel_id), "source")
+    """Image guide importée du verrou (l'URL change à chaque import : `?v=<fichier>`)."""
+    return _lock_file(ctx, get_panel_or_404(session, panel_id), "source", v)
 
 
 @router.get("/panels/{panel_id}/composition-lock/preview")
 def lock_preview_file(
-    panel_id: int, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
+    panel_id: int, v: str | None = None, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
 ) -> FileResponse:
-    """Dernière carte de contrôle calculée (l'URL change à chaque aperçu : `?v=<job>`)."""
-    return _lock_file(ctx, get_panel_or_404(session, panel_id), "preview")
+    """Dernière carte de contrôle calculée (l'URL change à chaque aperçu : `?v=<fichier>`)."""
+    return _lock_file(ctx, get_panel_or_404(session, panel_id), "preview", v)

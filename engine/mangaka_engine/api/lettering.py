@@ -58,7 +58,10 @@ def _lettering(ctx: AppContext, page: Page) -> dict[str, Any]:
 
 def _render_out(info: dict[str, Any]) -> dict[str, Any]:
     page_id = info["page_id"]
-    return {**info, "png_url": f"/pages/{page_id}/render.png", "svg_url": f"/pages/{page_id}/render.svg"}
+    # Rendu servi en « no-store » ; la version (date du rendu) change quand même l'URL à chaque rendu.
+    v = "".join(ch for ch in str(info.get("rendered_at") or "") if ch.isdigit())
+    tag = f"?v={v}" if v else ""
+    return {**info, "png_url": f"/pages/{page_id}/render.png{tag}", "svg_url": f"/pages/{page_id}/render.svg{tag}"}
 
 
 # --- lettrage ------------------------------------------------------------------------------

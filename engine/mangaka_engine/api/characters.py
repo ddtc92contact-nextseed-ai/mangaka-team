@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from ..pipeline.reference_sheets import MAX_KEPT, delete_entry_variants, next_position
-from ..store.files import InvalidImageError, StoredImage
+from ..store.files import InvalidImageError, StoredImage, cache_headers, versioned_url
 from ..store.models import Character, CharacterImage, SeriesAsset, SeriesAssetImage
 from .deps import AppContext, get_ctx, get_session
 from .errors import FieldError
@@ -23,7 +23,7 @@ MAX_FILES_PER_UPLOAD = 10
 
 
 def image_url(img: CharacterImage) -> str:
-    return f"/characters/{img.character_id}/images/{img.id}/file"
+    return versioned_url(f"/characters/{img.character_id}/images/{img.id}/file", img.path)
 
 
 def reference_image_out(img: CharacterImage | SeriesAssetImage, url: str) -> ReferenceImageOut:
@@ -211,6 +211,7 @@ def _get_image(session: Session, character_id: int, image_id: int) -> CharacterI
 def get_reference_image(
     character_id: int,
     image_id: int,
+    v: str | None = None,
     session: Session = Depends(get_session),
     ctx: AppContext = Depends(get_ctx),
 ) -> FileResponse:
@@ -218,7 +219,7 @@ def get_reference_image(
     path = ctx.files.absolute(img.path)
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Fichier image manquant dans data/")
-    return FileResponse(path, media_type=img.content_type, headers={"Cache-Control": "private, max-age=3600"})
+    return FileResponse(path, media_type=img.content_type, headers=cache_headers(img.path, v))
 
 
 @router.delete("/characters/{character_id}/images/{image_id}", status_code=204)

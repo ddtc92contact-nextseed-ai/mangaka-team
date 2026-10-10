@@ -26,6 +26,7 @@ from ..pipeline.style_board import (
     trials,
 )
 from ..presets import PresetError, PresetRegistry
+from ..store.files import cache_headers, versioned_url
 from ..store.models import AssetKind, Project, ReferenceVariant, SeriesAsset
 from .deps import AppContext, get_ctx, get_session
 from .jobs import job_out
@@ -61,7 +62,7 @@ def reference_out(asset: SeriesAsset, current_style: str, trial_ids: dict[int, i
     return StyleReferenceOut(
         id=asset.id,
         name=asset.name,
-        url=f"/style-references/{asset.id}/file",
+        url=versioned_url(f"/style-references/{asset.id}/file", image.path),
         width=image.width,
         height=image.height,
         active=asset.active,
@@ -76,7 +77,7 @@ def trial_out(v: ReferenceVariant) -> StyleTrialOut:
     params = v.params or {}
     return StyleTrialOut(
         id=v.id,
-        url=f"/reference-variants/{v.id}/file",
+        url=versioned_url(f"/reference-variants/{v.id}/file", v.path),
         batch=params.get("batch"),
         variant=params.get("variant"),
         count=params.get("count"),
@@ -174,10 +175,10 @@ def activate_reference(
 
 @router.get("/style-references/{asset_id}/file")
 def get_reference_file(
-    asset_id: int, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
+    asset_id: int, v: str | None = None, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
 ) -> FileResponse:
     image = _style_or_404(session, asset_id).reference_images[0]
     path = ctx.files.absolute(image.path)
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Fichier image manquant dans data/")
-    return FileResponse(path, media_type=image.content_type, headers={"Cache-Control": "private, max-age=3600"})
+    return FileResponse(path, media_type=image.content_type, headers=cache_headers(image.path, v))

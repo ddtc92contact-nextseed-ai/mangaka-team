@@ -27,8 +27,11 @@
 - 16 : packs de style (genre, rendu, ton, réglages fins). L'ancien texte libre `style` devient
   `legacy_style` (lecture seule, utilisé tant qu'aucun pack n'est choisi) ; les mots déclencheurs saisis
   du LoRA de style disparaissent (ils viennent du catalogue presets/style_loras.yaml).
-- 17 : référence de style active (planche de style).
-- 18 : note « mise en page sage héritée » : les séries encore en « sage » (réglé par la v8, pas par
+- 17 : planche de style (référence de style active ou en historique).
+- 18 : ids jamais réutilisés (AUTOINCREMENT) sur les tables dont l'id entre dans l'URL d'un fichier
+  (personnages, objets, décors et leurs images, cases, versions de case, jobs) : tables reconstruites,
+  données et ids gardés.
+- 19 : note « mise en page sage héritée » : les séries encore en « sage » (réglé par la v8, pas par
   l'utilisateur) gardent leur style, mais la fiche série le signale une fois. Rien d'autre ne change.
 
 Une base neuve est créée directement à la dernière version. Chaque migration tourne dans une
@@ -43,7 +46,7 @@ import logging
 import sqlite3
 from collections.abc import Callable
 
-from sqlalchemy import Engine, inspect
+from sqlalchemy import Engine, Table, inspect
 from sqlalchemy.dialects import sqlite
 from sqlalchemy.schema import CreateIndex, CreateTable
 
@@ -52,10 +55,15 @@ from .models import (
     AgentProfileVersion,
     Base,
     Chapter,
+    Character,
+    CharacterImage,
+    Job,
     KnowledgeChunk,
     KnowledgeCollection,
     KnowledgeDocument,
     LLMRun,
+    Panel,
+    PanelImage,
     PanelImageAnnotation,
     QCBenchRun,
     ReferenceVariant,
@@ -66,7 +74,7 @@ from .models import (
 
 log = logging.getLogger("mangaka_engine")
 
-SCHEMA_VERSION = 18
+SCHEMA_VERSION = 19
 
 
 class MigrationError(RuntimeError):
@@ -272,7 +280,26 @@ def _v16_to_v17(cur: sqlite3.Cursor) -> None:
         cur.execute("ALTER TABLE series_assets ADD COLUMN active BOOLEAN NOT NULL DEFAULT 1")
 
 
+def _rebuild(cur: sqlite3.Cursor, table: Table) -> None:
+    """Reconstruit `table` selon le modèle (recette « 12 étapes ») en gardant ses lignes et leurs ids."""
+    name = table.name
+    old = {row[1] for row in cur.execute(f'PRAGMA table_info("{name}")')}
+    cols = ", ".join(f'"{c.name}"' for c in table.columns if c.name in old)
+    create, *indexes = _ddl(table)
+    cur.execute(create.replace(f"CREATE TABLE {name} (", f"CREATE TABLE {name}__new (", 1))
+    cur.execute(f'INSERT INTO "{name}__new" ({cols}) SELECT {cols} FROM "{name}"')
+    cur.execute(f'DROP TABLE "{name}"')
+    cur.execute(f'ALTER TABLE "{name}__new" RENAME TO "{name}"')
+    for stmt in indexes:
+        cur.execute(stmt)
+
+
 def _v17_to_v18(cur: sqlite3.Cursor) -> None:
+    for model in (Character, CharacterImage, SeriesAsset, SeriesAssetImage, Panel, PanelImage, Job):
+        _rebuild(cur, model.__table__)  # type: ignore[arg-type]
+
+
+def _v18_to_v19(cur: sqlite3.Cursor) -> None:
     cur.execute("ALTER TABLE projects ADD COLUMN layout_style_notice BOOLEAN NOT NULL DEFAULT 0")
     cur.execute("UPDATE projects SET layout_style_notice = 1 WHERE layout_style = 'sage'")
 
@@ -297,6 +324,7 @@ MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     15: (16, _v15_to_v16),
     16: (17, _v16_to_v17),
     17: (18, _v17_to_v18),
+    18: (19, _v18_to_v19),
 }
 
 

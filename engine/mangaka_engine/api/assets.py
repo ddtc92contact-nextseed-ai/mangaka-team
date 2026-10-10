@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from ..pipeline.reference_sheets import delete_entry_variants, next_position
-from ..store.files import StoredImage
+from ..store.files import StoredImage, cache_headers, versioned_url
 from ..store.models import AssetKind, Chapter, Page, Panel, SeriesAsset, SeriesAssetImage
 from .characters import apply_changes, check_room, read_uploads, reference_image_out, store_uploads
 from .deps import AppContext, get_ctx, get_session
@@ -28,7 +28,7 @@ ROUTES = {
 
 
 def asset_image_url(asset: SeriesAsset, img: SeriesAssetImage) -> str:
-    return f"/{ROUTES[asset.kind][0]}/{asset.id}/images/{img.id}/file"
+    return versioned_url(f"/{ROUTES[asset.kind][0]}/{asset.id}/images/{img.id}/file", img.path)
 
 
 def asset_out(a: SeriesAsset) -> AssetOut:
@@ -163,6 +163,7 @@ def _router(kind: AssetKind) -> APIRouter:
     def get_image(
         asset_id: int,
         image_id: int,
+        v: str | None = None,
         session: Session = Depends(get_session),
         ctx: AppContext = Depends(get_ctx),
     ) -> FileResponse:
@@ -170,7 +171,7 @@ def _router(kind: AssetKind) -> APIRouter:
         path = ctx.files.absolute(img.path)
         if not path.is_file():
             raise HTTPException(status_code=404, detail="Fichier image manquant dans data/")
-        return FileResponse(path, media_type=img.content_type, headers={"Cache-Control": "private, max-age=3600"})
+        return FileResponse(path, media_type=img.content_type, headers=cache_headers(img.path, v))
 
     @router.delete(f"/{segment}/{{asset_id}}/images/{{image_id}}", status_code=204, name=f"delete_{segment}_image")
     def delete_image(

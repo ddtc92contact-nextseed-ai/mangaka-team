@@ -26,7 +26,7 @@ from ..pipeline.pages import (
 from ..pipeline.script import normalize_shot_type, script_job
 from ..pipeline.sketch import cleaned_from, latest_sketch, validated_sketch
 from ..presets import PresetError, PresetRegistry
-from ..store.files import FileStore
+from ..store.files import FileStore, versioned_url
 from ..store.models import (
     Bubble,
     BubbleKind,
@@ -107,7 +107,7 @@ def _sketch_fields(panel: Panel) -> dict[str, Any]:
     return {
         "sketch_count": sum(1 for i in panel.images if i.kind == ImageKind.croquis),
         "sketch_image_id": shown.id if shown else None,
-        "sketch_image_url": f"/panel-images/{shown.id}/file" if shown else None,
+        "sketch_image_url": versioned_url(f"/panel-images/{shown.id}/file", shown.path) if shown else None,
         "sketch_validated": validated is not None,
         "sketch_denoise": panel.sketch_denoise,
         "sketch_cleaned": validated is not None and cleaned_from(panel, validated) is not None,
@@ -186,7 +186,9 @@ def page_out(
                 image_count=sum(1 for i in p.images if i.kind == ImageKind.final),
                 **_sketch_fields(p),
                 selected_image_id=next((i.id for i in p.images if i.selected), None),
-                selected_image_url=next((f"/panel-images/{i.id}/file" for i in p.images if i.selected), None),
+                selected_image_url=next(
+                    (versioned_url(f"/panel-images/{i.id}/file", i.path) for i in p.images if i.selected), None
+                ),
                 qc_verdict=c.qc_verdict.value if (c := chosen[p.id]) and c.qc_verdict else None,
                 qc_score=c.qc_score if c else None,
                 qc_reasons=list(c.qc_reasons or []) if c else [],
