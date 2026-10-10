@@ -1016,7 +1016,7 @@ ollama pull bge-m3            # suggestion : multilingue, bon en français (≈ 
 ```
 
 puis `EMBEDDING_PROVIDER=ollama` dans `.env` ; le modèle se règle dans `providers.yaml`
-(`ollama.embedding_model`). Rien n'est téléchargé automatiquement. Après un changement de modèle,
+(`ollama.embedding_model`, contexte `ollama.embedding_num_ctx: 8192`, le maximum de bge-m3). Rien n'est téléchargé automatiquement. Après un changement de modèle,
 les passages déjà indexés sont signalés « à réindexer » : bouton « Réindexer » de la bibliothèque
 (ou `POST /knowledge/reindex`). Ollama éteint : les documents s'enregistrent quand même (recherche
 par mots-clés seule), avec l'erreur affichée sur le document.

@@ -16,4 +16,10 @@ ollama:
   # français (≈ 1,2 Go). Rien n'est téléchargé automatiquement : `ollama pull bge-m3` une fois validé.
   embedding_model: bge-m3
   keep_alive: 0
+  # Taille de contexte envoyée à Ollama (options.num_ctx). Sans elle, Ollama charge le modèle à son
+  # contexte maximal (262 144 jetons pour qwen3-vl : ≈ 45 Go et ~20 s par case). 4096 suffit pour une
+  # case (≈ 1 400 jetons d'image) + le prompt + la réponse JSON : ≈ 4,7 Go et ~3 s.
+  vision_num_ctx: 4096
+  # Idem pour les embeddings : 8192 = contexte natif maximal de bge-m3.
+  embedding_num_ctx: 8192
   timeout_s: 120

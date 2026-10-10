@@ -15,7 +15,7 @@ import hashlib
 import math
 import re
 import unicodedata
-from typing import Protocol
+from typing import Any, Protocol
 
 import httpx
 
@@ -177,6 +177,7 @@ class OllamaEmbeddingProvider:
         *,
         base_url: str,
         model: str,
+        num_ctx: int | None = None,
         timeout_s: float = 120,
         batch_size: int = 32,
         transport: httpx.BaseTransport | None = None,
@@ -184,6 +185,7 @@ class OllamaEmbeddingProvider:
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.model_id = f"ollama:{model}"
+        self.num_ctx = num_ctx
         self.batch_size = batch_size
         self._client = httpx.Client(
             base_url=self.base_url,
@@ -198,8 +200,11 @@ class OllamaEmbeddingProvider:
         return out
 
     def _embed(self, texts: list[str]) -> list[list[float]]:
+        payload: dict[str, Any] = {"model": self.model, "input": texts}
+        if self.num_ctx is not None:
+            payload["options"] = {"num_ctx": self.num_ctx}
         try:
-            resp = self._client.post("/api/embed", json={"model": self.model, "input": texts})
+            resp = self._client.post("/api/embed", json=payload)
         except httpx.TimeoutException as exc:
             raise EmbeddingError(f"Ollama n'a pas répondu à temps ({self.model})") from exc
         except httpx.HTTPError as exc:

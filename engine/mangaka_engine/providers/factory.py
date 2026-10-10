@@ -105,7 +105,11 @@ def build_vision(settings: Settings, presets: PresetRegistry | None = None) -> V
     if cfg is None:
         raise ProviderSelectionError("section « ollama » absente de presets/providers.yaml")
     return OllamaVisionProvider(
-        base_url=cfg.base_url, model=cfg.vision_model, keep_alive=cfg.keep_alive, timeout_s=cfg.timeout_s
+        base_url=cfg.base_url,
+        model=cfg.vision_model,
+        keep_alive=cfg.keep_alive,
+        num_ctx=cfg.vision_num_ctx,
+        timeout_s=cfg.timeout_s,
     )
 
 
@@ -139,7 +143,9 @@ def build_embedding(settings: Settings, presets: PresetRegistry | None = None) -
     cfg = presets.providers.ollama if presets is not None and presets.providers is not None else None
     if cfg is None or not cfg.embedding_model:
         raise ProviderSelectionError("ollama.embedding_model absent de presets/providers.yaml (ex. bge-m3)")
-    return OllamaEmbeddingProvider(base_url=cfg.base_url, model=cfg.embedding_model, timeout_s=cfg.timeout_s)
+    return OllamaEmbeddingProvider(
+        base_url=cfg.base_url, model=cfg.embedding_model, num_ctx=cfg.embedding_num_ctx, timeout_s=cfg.timeout_s
+    )
 
 
 def build_comfyui(settings: Settings) -> ComfyUIClient:
