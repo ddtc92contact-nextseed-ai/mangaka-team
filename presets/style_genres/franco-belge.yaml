@@ -8,6 +8,9 @@ prompt_keywords: [bande dessinée européenne classique, ligne claire, aplats de
 layout_style: sage
 reading_direction: ltr
 fonts: { dialogue: comic-neue, shout: bowlby-one }
+# Planche de style : scène test des essais (français, aucun personnage de la série).
+scene_test: >-
+  un jeune reporter anonyme et son chien traversent en courant le quai animé d'un port méditerranéen, bateaux, mouettes et façades colorées à l'arrière-plan
 llm_guidelines: >-
   Bande dessinée franco-belge, tout public : planches denses de 6 à 9 cases en gaufrier régulier,
   narration claire, récitatifs pour les ellipses. Dialogues plus fournis qu'en manga, vocabulaire

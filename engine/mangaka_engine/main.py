@@ -32,6 +32,7 @@ from .api import (
     qc_bench,
     reference_sheets,
     sketch,
+    style_board,
     system,
 )
 from .api.deps import AppContext
@@ -55,6 +56,8 @@ from .pipeline.qc_bench import QCBenchExecutor
 from .pipeline.queue import QueueStep, SerialJobQueue
 from .pipeline.reference_sheets import STEP as REFERENCE_STEP
 from .pipeline.reference_sheets import ReferenceExecutor
+from .pipeline.style_board import STEP as STYLE_BOARD_STEP
+from .pipeline.style_board import StyleBoardExecutor
 from .presets import PresetRegistry
 from .providers.factory import Providers, build_providers
 from .store.db import Database
@@ -161,6 +164,20 @@ def build_context(settings: Settings, providers: Providers | None = None) -> App
     queue.add_step(
         REFERENCE_STEP, QueueStep(execute=references, describe_error=describe_error, interrupt=references.interrupt)
     )
+    # Planche de style de la série (essais au palier croquis, passage au propre) : même file.
+    style_executor = StyleBoardExecutor(
+        db,
+        presets,
+        files,
+        providers.comfyui,
+        comfyui_error=providers.errors.get("comfyui"),
+        poll_s=settings.comfyui_poll_s,
+        presets_for=agents_service.presets_for,
+    )
+    queue.add_step(
+        STYLE_BOARD_STEP,
+        QueueStep(execute=style_executor, describe_error=describe_error, interrupt=style_executor.interrupt),
+    )
     # Aperçu de la carte de contrôle (composition verrouillée) : un prétraitement ComfyUI, même file.
     control_map = ControlMapExecutor(
         db,
@@ -207,6 +224,7 @@ def create_app(settings: Settings | None = None, providers: Providers | None = N
     app.include_router(characters.router)
     app.include_router(assets.router)
     app.include_router(reference_sheets.router)
+    app.include_router(style_board.router)
     app.include_router(comfyui.router)
     app.include_router(chapters.router)
     app.include_router(art_direction.router)

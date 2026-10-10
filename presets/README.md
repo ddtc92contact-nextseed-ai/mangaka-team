@@ -11,13 +11,13 @@ Après modification d'un preset, redémarre le moteur (`npm run dev`).
 
 | Fichier | Rôle |
 | --- | --- |
-| `defaults.yaml` | Format de page, workflow (palier **Turbo**) et style de mise en page (`layout_style`) appliqués aux nouvelles séries ; workflow « avec références » de repli pour un preset qui ne déclare pas `with_references` (`workflow_with_references`) ; palier de « Régénérer en Qualité » (`workflow_quality`) ; agrandisseur de la finition d'impression (`upscaler`) et tolérance de dpi (`finishing_tolerance`) ; preset de réparation ciblée de repli (`workflow_inpaint`) ; palier croquis (`sketch_enabled`, `workflow_sketch`) |
+| `defaults.yaml` | Format de page, workflow (palier **Turbo**) et style de mise en page (`layout_style`) appliqués aux nouvelles séries ; workflow « avec références » de repli pour un preset qui ne déclare pas `with_references` (`workflow_with_references`) ; palier de « Régénérer en Qualité » (`workflow_quality`) ; agrandisseur de la finition d'impression (`upscaler`) et tolérance de dpi (`finishing_tolerance`) ; preset de réparation ciblée de repli (`workflow_inpaint`) ; palier croquis (`sketch_enabled`, `workflow_sketch`) ; planche de style (`style_board`) |
 | `providers.yaml` | Paramètres des fournisseurs (URL, modèle LLM, timeouts). **Aucune clé d'API ici** : elles vont dans `.env` |
 | `page_formats/*.yaml` | Formats de page (dimensions en mm, DPI, marges, gouttières) : A4 (défaut) et B4 JIS à 300 DPI |
 | `layout.yaml` | Découpage : taille mini d'une case, taille cible de génération, zones de bulles, seuil de régénération conseillée |
 | `layouts/*.yaml` | Bibliothèque de gabarits de planche (arbres de découpes) |
 | `layout_styles/*.yaml` | Grammaires de mise en page par série : `sage`, `dynamique` (défaut), `nerveuse` — biais, gouttières, gabarits favoris |
-| `style_genres/*.yaml` | Packs de style : **genre et public** (shōnen, seinen, shōjo, jeunesse, magical girl, tranche de vie, franco-belge) — mots-clés, mise en page, sens de lecture, polices, consignes LLM, tons autorisés |
+| `style_genres/*.yaml` | Packs de style : **genre et public** (shōnen, seinen, shōjo, jeunesse, magical girl, tranche de vie, franco-belge) — mots-clés, mise en page, sens de lecture, polices, consignes LLM, tons autorisés, scène test de la planche de style |
 | `style_renderings/*.yaml` | Packs de style : **rendu** (N&B à trames par défaut, N&B encre, couleur, couleur douce) |
 | `style_tones/*.yaml` | Packs de style : **ton** (lumineux, neutre par défaut, dark, humour) |
 | `style_options.yaml` | Réglages fins bornés du style : trait, trames (N&B seulement), détail des décors |
@@ -286,6 +286,8 @@ reading_direction: rtl        # rtl (manga) | ltr (BD)
 fonts: { dialogue: baloo2, shout: bowlby-one }   # polices de fonts.yaml
 llm_guidelines: >-            # consignes du scénariste et du directeur artistique
   Sport, public adolescent : 4 à 6 cases par page, grandes cases pour les actions décisives…
+scene_test: >-                # obligatoire : scène test de la planche de style (français, aucun personnage de la série)
+  une joueuse anonyme smashe au filet dans un gymnase bondé, ballon flou de vitesse
 allowed_tones: [lumineux, neutre, humour]        # facultatif (absent = tous les tons)
 style_lora: encre-seinen_v2.safetensors          # facultatif : LoRA conseillé (catalogue style_loras.yaml)
 ```
@@ -336,6 +338,38 @@ dans la fiche pour un rendu couleur, 422 à l'API). Un réglage non choisi n'ajo
 en tête de `$style`) et `weight` (pré-rempli quand on choisit ce LoRA). Le LoRA de style se choisit
 dans la liste de ComfyUI ; **les mots déclencheurs ne se tapent plus**. Un LoRA hors catalogue
 s'applique sans mots déclencheurs (indice visible dans la fiche série).
+
+### Planche de style (`style_board` de `defaults.yaml`)
+
+Sur la fiche série, « Générer 4 essais » met en file `trials` croquis (palier `workflow_sketch`) de la
+**scène test** du genre (`scene_test`, obligatoire : un genre sans scène test est écarté au chargement)
+avec le `$style` de la série et une graine différente par essai. Le manager en choisit un (clic ou
+touches 1-4) ou relance 4 autres (touche R). L'essai retenu passe au propre (`from_sketch` du palier
+de la série, même graine, même prompt, débruitage de la série ou du preset) à la taille
+`width` × `height`, puis devient la **référence de style** de la série (une seule active ; les
+précédentes restent dans l'historique et peuvent être reprises).
+
+```yaml
+style_board:
+  trials: 4                 # essais par demande (1 à 4)
+  width: 1024               # taille du propre ; le croquis garde ce ratio (long_side du palier croquis)
+  height: 1024
+  prompt:                   # morceaux ; variables $scene (scène test du genre) et $style
+    - "Planche de style, scène test : $scene."
+    - "Style : $style."
+  negative_prompt: "texte, bulles"   # ajouté au négatif du workflow
+  reference_sheets: always  # always | never : référence jointe à chaque fiche de référence
+  panels: free_slot         # free_slot | never : jointe à une case s'il reste un emplacement libre
+```
+
+- **Fiches de référence** (`always`) : la génération passe par le pendant « avec références » du
+  palier, la référence de style en image (après la variante de départ d'« Affiner »). Sans pendant
+  « avec références », la fiche se génère sans elle.
+- **Cases** (`free_slot`) : priorité inchangée — personnages > décor > objets > **style**. La
+  référence de style ne prend qu'un emplacement resté libre une fois toutes les images des fiches
+  servies ; une case sans aucune référence passe donc au workflow « avec références » de son palier.
+- Sans planche de style (ou sans bloc `style_board`), les graphes envoyés à ComfyUI sont exactement
+  ceux d'avant.
 
 ### Séries d'avant les packs
 

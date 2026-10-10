@@ -8,6 +8,9 @@ prompt_keywords: [manga seinen, style réaliste et mature]
 layout_style: nerveuse
 reading_direction: rtl
 fonts: { dialogue: comic-neue, shout: titan-one }
+# Planche de style : scène test des essais (français, aucun personnage de la série).
+scene_test: >-
+  un homme anonyme en imperméable sous la pluie dans une ruelle de nuit, néons qui se reflètent dans les flaques, cadrage cinématographique
 llm_guidelines: >-
   Seinen, public adulte : rythme posé qui accélère dans les scènes de tension, 5 à 7 cases par page,
   silences et cases muettes bienvenus. Dialogues naturels et nuancés, vocabulaire adulte ; personnages

@@ -90,7 +90,7 @@ def estimate_panels(
     registries: dict[str, PresetRegistry] = {}
     for panel in panels:
         presets = presets_for(panel.page.chapter.project_id)
-        entries = panel_cast(session, panel).entries
+        entries = panel_cast(session, panel, presets).entries
         try:
             preset_id = resolve(presets, panel, entries) if resolve else resolve_preset_id(presets, panel, entries)
         except GenerationError:

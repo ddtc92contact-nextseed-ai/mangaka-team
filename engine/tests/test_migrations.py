@@ -63,7 +63,12 @@ def _version(path: Path) -> int:
     return v
 
 
+def _drop_v17_style_board(con: sqlite3.Connection) -> None:
+    con.execute("ALTER TABLE series_assets DROP COLUMN active")
+
+
 def _drop_v16_style(con: sqlite3.Connection) -> None:
+    _drop_v17_style_board(con)
     for column in ("style_genre", "style_rendering", "style_tone", "style_options"):
         con.execute(f"ALTER TABLE projects DROP COLUMN {column}")
     con.execute("ALTER TABLE projects RENAME COLUMN legacy_style TO style")
@@ -503,6 +508,31 @@ def test_v15_database_keeps_its_old_style_read_only(make_settings: Callable[...,
         assert chosen["legacy_style"] == "Seinen sombre, encrage épais"  # conservé, en lecture seule
         assert "Seinen sombre" not in chosen["style_prompt"] and "manga seinen" in chosen["style_prompt"]
         assert c.patch(f"/projects/{project['id']}", json={"legacy_style": "x"}).status_code == 422
+    assert _version(settings.database_path) == SCHEMA_VERSION
+    fresh = settings.database_path.parent / "fresh.db"
+    create_db_engine(fresh).dispose()
+    assert _columns(settings.database_path) == _columns(fresh)
+
+
+def test_v16_database_gets_style_references(make_settings: Callable[..., Settings]) -> None:
+    """v16 → v17 : planche de style. Les objets et décors existants restent actifs (colonne `active`)."""
+    settings = make_settings()
+    with TestClient(create_app(settings)) as c:
+        project = c.post("/projects", json={**STYLE, "title": "Série v16"}).json()
+        decor = c.post(f"/projects/{project['id']}/decors", json={"name": "Le labo"}).json()
+    con = sqlite3.connect(settings.database_path)
+    _drop_v17_style_board(con)
+    con.execute("PRAGMA user_version = 16")
+    con.commit()
+    con.close()
+
+    with TestClient(create_app(settings)) as c:
+        assert c.get(f"/decors/{decor['id']}").json()["name"] == "Le labo"
+        board = c.get(f"/projects/{project['id']}/style-board").json()
+        assert board["active"] is None and board["history"] == []
+    con = sqlite3.connect(settings.database_path)
+    assert con.execute("SELECT active FROM series_assets").fetchall() == [(1,)]
+    con.close()
     assert _version(settings.database_path) == SCHEMA_VERSION
     fresh = settings.database_path.parent / "fresh.db"
     create_db_engine(fresh).dispose()

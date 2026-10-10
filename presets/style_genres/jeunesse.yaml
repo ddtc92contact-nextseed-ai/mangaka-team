@@ -8,6 +8,9 @@ prompt_keywords: [manga pour enfants, style simple et mignon, tout public]
 layout_style: sage
 reading_direction: rtl
 fonts: { dialogue: fredoka, shout: titan-one }
+# Planche de style : scène test des essais (français, aucun personnage de la série).
+scene_test: >-
+  deux enfants anonymes et un petit chat jouent au cerf-volant dans un parc ensoleillé, arbres ronds et nuages moelleux
 llm_guidelines: >-
   Jeunesse, enfants de 6 à 10 ans : rythme simple et lisible, 3 à 5 cases par page, une action par
   case. Phrases courtes, vocabulaire adapté à l'âge, aucune violence graphique ni peur durable ;

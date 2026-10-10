@@ -11,6 +11,10 @@
 - `keep_variant` : « Garder comme référence » copie la variante parmi les images de référence de la
   fiche (en dernière position ; l'ordre se règle ensuite à la main).
 
+Référence de style (planche de style de la série) : jointe à chaque génération de fiche si
+`style_board.reference_sheets` de defaults.yaml vaut `always` (workflow « avec références » du palier),
+après la variante de départ d'« Affiner ». Sans planche de style, rien ne change.
+
 Aucun nom de modèle, de LoRA ni de nœud ici : tout vient des presets et des fiches.
 """
 
@@ -46,6 +50,7 @@ from ..store.models import (
 )
 from .generation import UPLOAD_SUBFOLDER, GenerationError, split_trigger_words
 from .jobs import JobReporter
+from .library import active_style, style_for
 from .prompt import build_negative_prompt
 from .style import series_style
 
@@ -70,6 +75,8 @@ def entry_kind(entry: LibraryEntry) -> str:
 
 def load_entry(session: Session, kind: str, entry_id: int) -> LibraryEntry | None:
     """Fiche de la bibliothèque (avec ses images de référence), None si absente ou d'une autre sorte."""
+    if kind not in ENTRY_KINDS:
+        return None
     if kind == "character":
         return session.get(Character, entry_id, options=[selectinload(Character.reference_images)])
     asset = session.get(SeriesAsset, entry_id, options=[selectinload(SeriesAsset.reference_images)])
@@ -207,7 +214,17 @@ def enqueue_sheet(
     series = session.get(Project, entry.project_id)
     if series is None:
         raise GenerationError("série introuvable")
-    preset_id = sheet_preset_id(presets, sheet, series, quality=quality, refine=parent is not None)
+    style = style_for(session, presets, series.id, "reference_sheets")
+    try:
+        preset_id = sheet_preset_id(
+            presets, sheet, series, quality=quality, refine=parent is not None or style is not None
+        )
+    except GenerationError:
+        if parent is not None or style is None:
+            raise
+        # Aucun workflow « avec références » pour ce palier : la fiche se génère sans la référence de style.
+        style = None
+        preset_id = sheet_preset_id(presets, sheet, series, quality=quality)
     loaded = presets.workflow(preset_id)
     prompt = sheet_prompt(presets, sheet, entry, series, instruction)
     if not prompt.strip():
@@ -234,6 +251,7 @@ def enqueue_sheet(
                 "count": count,
                 "parent_id": parent.id if parent is not None else None,
                 "instruction": instruction,
+                "style_asset_id": style.id if style is not None else None,
             },
         )
         session.add(job)
@@ -318,8 +336,10 @@ class _Plan:
     loaded: LoadedWorkflow
     params: dict[str, Any]
     loras: list[LoraSpec]
-    reference: dict[str, Any] | None  # variante de départ d'« Affiner » : {variant_id, filename}
-    reference_data: bytes | None
+    # Images de référence envoyées, dans l'ordre : variante de départ d'« Affiner » ({kind: variant,
+    # variant_id, filename}), puis référence de style ({kind: style, asset_id, image_id, filename}).
+    references: list[dict[str, Any]]
+    reference_data: list[bytes]
     folder: str
 
 
@@ -362,8 +382,8 @@ class ReferenceExecutor:
             presets = self.presets_for(entry.project_id)
             sheet = presets.reference_sheet(str(params.get("sheet")))
             loaded = presets.workflow(str(params.get("preset")))
-            reference: dict[str, Any] | None = None
-            reference_data: bytes | None = None
+            references: list[dict[str, Any]] = []
+            reference_data: list[bytes] = []
             parent_id = params.get("parent_id")
             if parent_id is not None:
                 parent = session.get(ReferenceVariant, int(parent_id))
@@ -373,11 +393,27 @@ class ReferenceExecutor:
                 if not loaded.preset.reference_images:
                     raise GenerationError(f"le workflow {loaded.preset.id} n'accepte pas d'image de référence")
                 ext = PurePosixPath(parent.path).suffix or ".png"
-                reference = {
-                    "variant_id": parent.id,
-                    "filename": f"{FOLDERS[entry_kind(entry)][:-1]}{entry.id}_variante{parent.id}{ext}",
-                }
-                reference_data = path.read_bytes()
+                references.append(
+                    {
+                        "kind": "variant",
+                        "variant_id": parent.id,
+                        "filename": f"{FOLDERS[entry_kind(entry)][:-1]}{entry.id}_variante{parent.id}{ext}",
+                    }
+                )
+                reference_data.append(path.read_bytes())
+            if params.get("style_asset_id") is not None and len(references) < len(loaded.preset.reference_images):
+                style = self._style(session, entry.project_id, int(params["style_asset_id"]))
+                image = style.reference_images[0]
+                ext = PurePosixPath(image.path).suffix or ".png"
+                references.append(
+                    {
+                        "kind": "style",
+                        "asset_id": style.id,
+                        "image_id": image.id,
+                        "filename": f"style{style.id}_img{image.id}{ext}",
+                    }
+                )
+                reference_data.append(self.files.absolute(image.path).read_bytes())
             slug = f"{FOLDERS[entry_kind(entry)][:-1]}-{entry.id}"
             prefix = (
                 f"mangaka/serie-{entry.project_id}/references/{slug}/{sheet.id}/variante-{params.get('variant', 1)}"
@@ -393,10 +429,19 @@ class ReferenceExecutor:
                     filename_prefix=prefix,
                 ),
                 loras=sheet_loras(series, entry),
-                reference=reference,
+                references=references,
                 reference_data=reference_data,
                 folder=f"{entry_folder(entry)}/variantes",
             )
+
+    def _style(self, session: Session, project_id: int, asset_id: int) -> SeriesAsset:
+        """Référence de style notée sur le job ; si elle a disparu entre-temps, la référence active."""
+        style = session.get(SeriesAsset, asset_id, options=[selectinload(SeriesAsset.reference_images)])
+        if style is None or style.project_id != project_id or not style.reference_images:
+            style = active_style(session, project_id)
+        if style is None or not self.files.absolute(style.reference_images[0].path).is_file():
+            raise GenerationError("référence de style introuvable (supprimée entre-temps ?) : relance la génération")
+        return style
 
     def __call__(self, job_id: int, report: JobReporter, cancel: threading.Event) -> str:
         if self.comfyui is None:
@@ -408,11 +453,10 @@ class ReferenceExecutor:
         preset = plan.loaded.preset
 
         uploaded: list[str] = []
-        if plan.reference is not None and plan.reference_data is not None:
-            report(4, "Envoi de la variante de départ à ComfyUI…")
-            uploaded.append(
-                comfy.upload_image(plan.reference_data, plan.reference["filename"], subfolder=UPLOAD_SUBFOLDER)
-            )
+        for ref, data in zip(plan.references, plan.reference_data, strict=True):
+            what = "la variante de départ" if ref["kind"] == "variant" else "la référence de style"
+            report(4, f"Envoi de {what} à ComfyUI…")
+            uploaded.append(comfy.upload_image(data, ref["filename"], subfolder=UPLOAD_SUBFOLDER))
         built = build_workflow(plan.loaded, plan.params, reference_images=uploaded, loras=plan.loras)
         if cancel.is_set():
             raise ComfyUIInterruptedError("génération annulée")
@@ -484,11 +528,10 @@ class ReferenceExecutor:
                     "width": built.params["width"],
                     "height": built.params["height"],
                     "loras": [lo.as_dict() for lo in built.loras],
-                    "reference_images": (
-                        [{**{k: v for k, v in plan.reference.items() if k != "filename"}, "comfyui_name": uploaded[0]}]
-                        if plan.reference is not None
-                        else []
-                    ),
+                    "reference_images": [
+                        {**{k: v for k, v in ref.items() if k != "filename"}, "comfyui_name": name}
+                        for ref, name in zip(plan.references, uploaded, strict=True)
+                    ],
                     "removed_nodes": built.removed_nodes,
                     "duration_ms": duration_ms,
                     "comfyui_prompt_id": prompt_id,

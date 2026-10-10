@@ -942,6 +942,56 @@ class ReferenceStudioOut(BaseModel):
     reference_slots: int  # emplacements d'images de référence d'une case (workflow « avec références »)
 
 
+# --- Planche de style ---------------------------------------------------------------
+class StyleTrialOut(BaseModel):
+    """Essai de la planche de style (palier croquis)."""
+
+    id: int
+    url: str
+    batch: int | None  # numéro de la série d'essais (« Relancer » en crée une nouvelle)
+    variant: int | None
+    count: int | None
+    seed: int | None
+    width: int
+    height: int
+    prompt: str
+    preset: str | None
+    chosen: bool  # passé au propre : devenu une référence de style
+    created_at: datetime
+
+
+class StyleReferenceOut(BaseModel):
+    """Référence de style de la série (essai retenu passé au propre)."""
+
+    id: int
+    name: str
+    url: str
+    width: int
+    height: int
+    active: bool
+    style: str  # `$style` de la série au moment des essais
+    outdated: bool  # le style de la série a changé depuis
+    trial_id: int | None
+    created_at: datetime
+
+
+class StyleBoardOut(BaseModel):
+    """Planche de style d'une série : référence active, historique, essais et jobs en cours."""
+
+    configured: bool  # `style_board` présent dans defaults.yaml
+    problem: str | None  # pourquoi les essais sont impossibles (genre non choisi…), sinon None
+    scene_test: str | None
+    style: str
+    style_names: str
+    trials_per_batch: int
+    use_reference_sheets: Literal["always", "never"] | None
+    use_panels: Literal["free_slot", "never"] | None
+    active: StyleReferenceOut | None
+    history: list[StyleReferenceOut]
+    trials: list[StyleTrialOut]
+    active_jobs: list[JobOut]
+
+
 # --- Banc d'essai du QC -----------------------------------------------------------
 AnnotationLabelName = Literal["good", "bad"]
 DefectName = Literal["face", "hands", "identity", "description", "text", "other"]

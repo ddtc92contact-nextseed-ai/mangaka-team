@@ -3,7 +3,8 @@
 - `enqueue_panel` : prépare le prompt final, choisit le workflow et crée `count` jobs
   `generation` (variantes) en attente ;
 - `pick_references` : emplacements d'images de référence du workflow (3 au plus), remplis par
-  ordre de priorité — personnages de la case, puis son décor, puis ses objets (voir la fonction) ;
+  ordre de priorité — personnages de la case, puis son décor, puis ses objets, puis la référence de
+  style de la série s'il reste un emplacement libre (voir la fonction) ;
   les emplacements retenus sont notés sur le job (`params.references`) et sur la version produite ;
 - `GenerationExecutor` : exécuté par la file sérielle (`pipeline/queue.py`) pour un job :
   envoi des images de référence, construction du workflow (références + LoRA via le preset),
@@ -52,6 +53,7 @@ from ..providers.comfyui import (
 from ..store.db import Database
 from ..store.files import FileStore, InvalidImageError
 from ..store.models import (
+    AssetKind,
     Chapter,
     ChapterStatus,
     Character,
@@ -73,7 +75,7 @@ from .inpaint import png_bytes, recompose, soften_mask
 from .jobs import JobReporter
 from .knowledge import KnowledgeBase
 from .layout import target_size
-from .library import panel_assets
+from .library import panel_assets, style_for
 from .prompt import PromptCharacter, build_negative_prompt, build_prompt
 from .style import series_style
 
@@ -116,20 +118,35 @@ class PanelCast:
     characters: list[Character] = field(default_factory=list)
     decor: SeriesAsset | None = None
     objects: list[SeriesAsset] = field(default_factory=list)
+    # Référence de style de la série (planche de style), jointe seulement s'il reste un emplacement.
+    style: SeriesAsset | None = None
 
     @property
     def entries(self) -> list[LibraryEntry]:
-        """Fiches dans l'ordre de priorité des images de référence : personnages, décor, objets."""
-        return [*self.characters, *([self.decor] if self.decor is not None else []), *self.objects]
+        """Fiches dans l'ordre de priorité des images de référence : personnages, décor, objets, style."""
+        return [
+            *self.characters,
+            *([self.decor] if self.decor is not None else []),
+            *self.objects,
+            *([self.style] if self.style is not None else []),
+        ]
 
 
-def panel_cast(session: Session, panel: Panel) -> PanelCast:
-    decor, objects = panel_assets(session, panel, panel.page.chapter.project_id)
-    return PanelCast(characters=panel_characters(session, panel), decor=decor, objects=objects)
+def panel_cast(session: Session, panel: Panel, presets: PresetRegistry | None = None) -> PanelCast:
+    """Fiches citées par la case ; avec `presets`, la référence de style de la série si `style_board.panels`
+    de defaults.yaml le permet (sans `presets` : jamais, pour qui ne lit que les personnages)."""
+    project_id = panel.page.chapter.project_id
+    decor, objects = panel_assets(session, panel, project_id)
+    style = style_for(session, presets, project_id, "panels") if presets is not None else None
+    return PanelCast(characters=panel_characters(session, panel), decor=decor, objects=objects, style=style)
 
 
 def entry_kind(entry: LibraryEntry) -> str:
     return "character" if isinstance(entry, Character) else entry.kind.value
+
+
+def is_style(entry: LibraryEntry) -> bool:
+    return isinstance(entry, SeriesAsset) and entry.kind == AssetKind.style
 
 
 def _prompt_entry(entry: LibraryEntry) -> PromptCharacter:
@@ -342,14 +359,21 @@ def pick_references(
     la 2e image… jusqu'à remplir les emplacements (3 au plus dans les presets livrés). Ainsi chaque
     personnage passe avant le décor, qui passe avant les objets, et une fiche n'a une 2e image que si
     toutes les autres ont déjà leur 1re.
+
+    La référence de style (planche de style) ne prend qu'un emplacement resté libre une fois toutes
+    les images des autres fiches servies.
     """
-    out: list[tuple[Character, CharacterImage]] = []
+    fiches = [c for c in characters if not is_style(c)]
+    out: list[tuple[LibraryEntry, CharacterImage | SeriesAssetImage]] = []
     depth = 0
-    while len(out) < slots and any(depth < len(c.reference_images) for c in characters):
-        for c in characters:
+    while len(out) < slots and any(depth < len(c.reference_images) for c in fiches):
+        for c in fiches:
             if depth < len(c.reference_images) and len(out) < slots:
                 out.append((c, c.reference_images[depth]))
         depth += 1
+    for style in (c for c in characters if is_style(c)):
+        if len(out) < slots and style.reference_images:
+            out.append((style, style.reference_images[0]))
     return out
 
 
@@ -402,7 +426,7 @@ def enqueue_panel(
     page = panel.page
     if panel_target(presets, page, panel) is None:
         raise GenerationError(f"la page {page.number} n'est pas mise en page : lance « Recalculer » d'abord")
-    entries = panel_cast(session, panel).entries
+    entries = panel_cast(session, panel, presets).entries
     preset_id = resolve_preset_id(presets, panel, entries, preset)
     loaded = presets.workflow(preset_id)  # PresetError si inconnu
     if loaded.preset.inpaint is not None:
@@ -634,9 +658,9 @@ class GenerationExecutor:
                 raise GenerationError("case introuvable (supprimée entre-temps ?)")
             page = panel.page
             chapter: Chapter = page.chapter
-            cast = panel_cast(session, panel)
-            entries = cast.entries
             presets = self.presets_for(chapter.project_id)
+            cast = panel_cast(session, panel, presets)
+            entries = cast.entries
             preset_id = str(job.params.get("preset") or resolve_preset_id(presets, panel, entries))
             loaded = presets.workflow(preset_id)
             repair = job.params.get("repair") if isinstance(job.params.get("repair"), dict) else None
@@ -673,7 +697,7 @@ class GenerationExecutor:
                     raise GenerationError(f"image de référence de {entry.name} absente de data/ ({image.path})")
                 ext = PurePosixPath(image.path).suffix or ".png"
                 kind = entry_kind(entry)
-                prefix = {"character": "perso", "decor": "decor", "object": "objet"}[kind]
+                prefix = {"character": "perso", "decor": "decor", "object": "objet", "style": "style"}[kind]
                 references.append(
                     {
                         "slot": len(references) + 1,

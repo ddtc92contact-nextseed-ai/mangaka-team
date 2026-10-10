@@ -8,6 +8,9 @@ prompt_keywords: [shonen manga, dynamic energetic style, determined young hero]
 layout_style: dynamique
 reading_direction: rtl
 fonts: { dialogue: baloo2, shout: bowlby-one }
+# Planche de style : scène test des essais (français, aucun personnage de la série).
+scene_test: >-
+  deux combattants anonymes s'affrontent sur un toit d'immeuble au coucher du soleil, poings tendus, poussière et traits de vitesse
 llm_guidelines: >-
   Shōnen, public adolescent : rythme soutenu, 4 à 6 cases par page, grandes cases pour les temps
   d'action, cliffhanger en fin de chapitre. Dialogues courts et directs, vocabulaire simple et

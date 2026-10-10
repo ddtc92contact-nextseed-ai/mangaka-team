@@ -41,6 +41,7 @@ from ..pipeline.reference_sheets import KIND_LABELS
 from ..pipeline.reference_sheets import STEP as REFERENCE_STEP
 from ..pipeline.repair import concerned_character, default_repair_prompt, enqueue_repair, repair_context
 from ..pipeline.sketch import validated_sketch
+from ..pipeline.style_board import STEP as STYLE_BOARD_STEP
 from ..presets import PresetError, PresetRegistry
 from ..store.models import (
     Chapter,
@@ -159,8 +160,8 @@ def _active_jobs(session: Session, panel_id: int) -> list[Job]:
 
 def panel_detail(session: Session, ctx: AppContext, panel: Panel) -> PanelDetailOut:
     page = panel.page
-    cast = panel_cast(session, panel)
     presets = _presets(ctx, panel)
+    cast = panel_cast(session, panel, presets)
     resolved = resolve_preset_id(presets, panel, cast.entries)
     try:
         upscaler: str | None = resolve_upscaler(presets, page.chapter.project).preset.name
@@ -373,7 +374,8 @@ def regenerate_panel_quality(
     panel = get_panel_or_404(session, panel_id)
     _require_lock_available(ctx, panel)
     try:
-        preset = quality_preset_id(_presets(ctx, panel), panel_cast(session, panel).entries)
+        presets = _presets(ctx, panel)
+        preset = quality_preset_id(presets, panel_cast(session, panel, presets).entries)
     except GenerationError as exc:
         raise FieldError("preset", str(exc)) from None
     jobs = _enqueue(session, ctx, panel, count=1, preset=preset, extra_params={"regenerate": "quality"})
@@ -699,7 +701,18 @@ def get_queue(session: Session = Depends(get_session), ctx: AppContext = Depends
         session.scalars(
             select(Job)
             .where(
-                Job.step.in_([STEP, QC_STEP, BENCH_STEP, TRIAL_STEP, REFERENCE_STEP, FINISH_STEP, CONTROL_MAP_STEP]),
+                Job.step.in_(
+                    [
+                        STEP,
+                        QC_STEP,
+                        BENCH_STEP,
+                        TRIAL_STEP,
+                        REFERENCE_STEP,
+                        STYLE_BOARD_STEP,
+                        FINISH_STEP,
+                        CONTROL_MAP_STEP,
+                    ]
+                ),
                 Job.status.in_(ACTIVE),
             )
             .order_by((Job.status == JobStatus.running).desc(), Job.id)
@@ -750,6 +763,14 @@ def get_queue(session: Session = Depends(get_session), ctx: AppContext = Depends
             kind = KIND_LABELS.get(str(params.get("entry_kind")), "fiche")
             action = "Affiner" if params.get("parent_id") is not None else "Références"
             label = f"{action} · {params.get('entry_name') or kind} ({kind}) · {params.get('sheet_name') or ''}"
+            if series is not None:
+                label = f"{series.title} · {label}"
+        elif job.step == STYLE_BOARD_STEP:
+            label = (
+                "Planche de style · passage au propre de l'essai retenu"
+                if params.get("mode") == "clean"
+                else "Planche de style · essai"
+            )
             if series is not None:
                 label = f"{series.title} · {label}"
         elif job.step == TRIAL_STEP:

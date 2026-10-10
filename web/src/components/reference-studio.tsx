@@ -146,7 +146,8 @@ export function ReferenceStudio({
   return (
     <div className="space-y-5">
       <p className="text-sm text-zinc-500">
-        À partir de la description visuelle, des mots-clés, du LoRA de style de la série et du LoRA de la fiche. Les
+        À partir de la description visuelle, des mots-clés, du LoRA de style de la série, de sa référence de style
+        (planche de style, si elle en a une) et du LoRA de la fiche. Les
         variantes non gardées restent dans l&apos;historique : tu peux les garder plus tard ou les supprimer.
       </p>
       {!sheetList.length ? (
@@ -269,6 +270,12 @@ function PendingVariant({
   );
 }
 
+/** La référence de style de la série (planche de style) faisait partie des images envoyées. */
+function usedStyleReference(v: ReferenceVariant): boolean {
+  const refs = v.params?.reference_images;
+  return Array.isArray(refs) && refs.some((r) => typeof r === "object" && r !== null && (r as { kind?: unknown }).kind === "style");
+}
+
 function VariantCard({
   variant: v,
   kept,
@@ -329,6 +336,11 @@ function VariantCard({
             </span>
           )}
           {kept && <span className="rounded bg-emerald-500/15 px-1 py-px text-[10px] text-emerald-300">Gardée</span>}
+          {usedStyleReference(v) && (
+            <span className="rounded bg-sky-500/15 px-1 py-px text-[10px] text-sky-200" title="La référence de style de la série a été jointe à cette génération" data-testid="variant-style-reference">
+              Référence de style
+            </span>
+          )}
         </div>
         {v.instruction && <p className="text-zinc-300">« {v.instruction} »</p>}
         <details>

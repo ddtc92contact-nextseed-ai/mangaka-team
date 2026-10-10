@@ -9,6 +9,7 @@ import { LibraryList, LibraryTabs } from "@/components/library";
 import { EstimateLabel } from "@/components/estimate";
 import { ProjectForm } from "@/components/project-form";
 import { SeriesBible } from "@/components/series-bible";
+import { StyleBoardBanner, StyleBoardCard, useStyleBoard } from "@/components/style-board";
 import { DIRECTIONS, DirectionBadge } from "@/components/reading-direction";
 import { SeriesStatusBadge } from "@/components/status";
 import { Alert, Button, ButtonLink, Card, Loading, PageHeader } from "@/components/ui";
@@ -20,6 +21,7 @@ export default function ProjectPage() {
   const id = Number(useParams<{ id: string }>().id);
   const router = useRouter();
   const project = useEngineData(() => api.getProject(id), [id]);
+  const styleBoard = useStyleBoard(id);
   const [tab, setTab] = useState<LibraryKind>("character");
   const [saved, setSaved] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -64,8 +66,12 @@ export default function ProjectPage() {
           <Alert>{deleteError}</Alert>
         </div>
       )}
+      <StyleBoardBanner board={styleBoard} />
       <div className="mb-6">
         <ChapterList projectId={id} />
+      </div>
+      <div className="mb-6">
+        <StyleBoardCard projectId={id} board={styleBoard} />
       </div>
       <div className="mb-6">
         <AgentOverrides projectId={id} />
@@ -85,6 +91,7 @@ export default function ProjectPage() {
             onSaved={(p) => {
               project.setData(p);
               setSaved(true);
+              styleBoard.reload(); // packs changés : scène test et style des essais à jour
             }}
           />
         </Card>
