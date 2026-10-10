@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState, type FormEvent } from "react";
-import { api, EngineError, errorMessage, type Presets, type Project, type ProjectInput } from "@/lib/api";
+import { api, EngineError, errorMessage, type CleanMode, type Presets, type Project, type ProjectInput } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
 import { Modal } from "./modal";
 import { LoraPicker } from "./lora-picker";
@@ -33,6 +33,8 @@ export function ProjectForm({
   onSaved: (project: Project) => void;
 }) {
   const presets = useEngineData(() => api.presets());
+  // Passage au propre par ControlNet : proposé seulement si ComfyUI a le patch et son nœud.
+  const control = useEngineData(() => api.controlStatus());
   const [form, setForm] = useState<Partial<ProjectInput>>({
     title: initial?.title ?? "",
     style: initial?.style ?? "",
@@ -47,6 +49,8 @@ export function ProjectForm({
     layout_style: initial?.layout_style,
     sketch_enabled: initial?.sketch_enabled,
     sketch_denoise: initial?.sketch_denoise ?? null,
+    clean_mode: initial?.clean_mode ?? "img2img",
+    clean_control: initial?.clean_control ?? null,
     upscaler: initial?.upscaler ?? null,
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -71,6 +75,10 @@ export function ProjectForm({
   // Débruitage livré : celui du preset « propre depuis croquis » du palier choisi.
   const cleanPreset = presets.data?.workflows.find((w) => w.id === currentWorkflow?.from_sketch);
   const presetDenoise = cleanPreset?.denoise ?? null;
+  const cleanMode: CleanMode = form.clean_mode ?? "img2img";
+  const controlAvailable = control.data?.available ?? false;
+  const controlTypes = (control.data?.types ?? []).filter((t) => t.available || t.id === form.clean_control);
+  const controlDefault = control.data?.types.find((t) => t.id === control.data?.default_type);
   const upscalers = presets.data?.upscalers ?? [];
   const defaultUpscaler = upscalers.find((u) => u.is_default);
   const upscalerInfo = upscalers.find((u) => u.id === form.upscaler) ?? defaultUpscaler;
@@ -287,11 +295,57 @@ export function ProjectForm({
             className="!w-32"
             value={form.sketch_denoise ?? ""}
             placeholder={presetDenoise !== null ? String(presetDenoise) : ""}
-            disabled={!sketchEnabled}
+            disabled={!sketchEnabled || cleanMode === "controlnet"}
             onChange={(e) => set("sketch_denoise", e.target.value === "" ? null : Number(e.target.value))}
             aria-invalid={Boolean(errors.sketch_denoise)}
           />
         </Field>
+        <Field
+          label="Passage au propre"
+          htmlFor="clean_mode"
+          error={errors.clean_mode}
+          hint={
+            cleanMode === "controlnet"
+              ? "Le croquis validé guide la version propre (ControlNet) : cadrage et poses imposés, même graine et même prompt."
+              : "Le croquis validé est redessiné en partie (débruitage ci-dessus), même graine et même prompt."
+          }
+        >
+          <Select
+            id="clean_mode"
+            value={cleanMode}
+            disabled={!sketchEnabled}
+            onChange={(e) => set("clean_mode", e.target.value as CleanMode)}
+            className="!w-auto"
+          >
+            <option value="img2img">Image → image depuis le croquis (débruitage)</option>
+            {(controlAvailable || cleanMode === "controlnet") && (
+              <option value="controlnet">ControlNet : composition verrouillée sur le croquis</option>
+            )}
+          </Select>
+        </Field>
+        {control.data && !controlAvailable && (
+          <p className="text-xs text-amber-300" data-testid="clean-controlnet-unavailable">
+            {control.data.message ?? "Verrouillage de composition indisponible."} Passage au propre par ControlNet masqué.
+          </p>
+        )}
+        {cleanMode === "controlnet" && controlTypes.length > 0 && (
+          <Field label="Type de contrôle du passage au propre" htmlFor="clean_control" error={errors.clean_control}>
+            <Select
+              id="clean_control"
+              value={form.clean_control ?? ""}
+              disabled={!sketchEnabled}
+              onChange={(e) => set("clean_control", e.target.value || null)}
+              className="!w-auto"
+            >
+              <option value="">Par défaut{controlDefault ? ` (${controlDefault.name})` : ""}</option>
+              {controlTypes.map((t) => (
+                <option key={t.id} value={t.id} title={t.description}>
+                  {t.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        )}
       </fieldset>
       <Field
         label="Agrandisseur (finition d'impression)"

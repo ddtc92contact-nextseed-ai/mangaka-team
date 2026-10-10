@@ -182,7 +182,7 @@ export function PageCanvas({
             onClick={() => onOpen(panel.id)}
             onKeyDown={(e) => onKeyDown(e, lp)}
             aria-pressed={selected}
-            aria-label={`Case ${panel.index + 1} — ${stateLabel}${isSketch ? ` — croquis${panel.sketch_validated ? " validé" : ""}` : ""}${qcLabel}${panel.print_info ? ` — ${dpiLabel(panel.print_info)}` : ""}${panel.shot_type ? ` — ${panel.shot_type}` : ""}`}
+            aria-label={`Case ${panel.index + 1} — ${stateLabel}${isSketch ? ` — croquis${panel.sketch_validated ? " validé" : ""}` : ""}${qcLabel}${panel.print_info ? ` — ${dpiLabel(panel.print_info)}` : ""}${panel.shot_type ? ` — ${panel.shot_type}` : ""}${panel.composition_lock ? " — composition verrouillée" : ""}`}
             data-testid="workshop-panel"
             data-state={running ? "generating" : queued ? "queued" : failure ? "failed" : panel.state}
             data-qc={panel.qc_verdict ?? "none"}
@@ -238,6 +238,11 @@ export function PageCanvas({
                   {panel.index + 1}
                 </span>
                 <span className="text-[11px] font-medium leading-tight">{stateLabel}</span>
+                {panel.composition_lock && (
+                  <span className="text-[10px] font-medium leading-tight text-sky-800" data-testid="panel-lock-badge">
+                    🔒 composition verrouillée
+                  </span>
+                )}
               </span>
             )}
             {imageUrl && (
@@ -250,6 +255,11 @@ export function PageCanvas({
                 )}
                 {(running || queued || failure || checking || panel.state === "review") && (
                   <span className="ml-1 font-normal text-zinc-300">· {stateLabel}</span>
+                )}
+                {panel.composition_lock && (
+                  <span className="ml-1 font-normal text-sky-200" title="Composition verrouillée" data-testid="panel-lock-badge">
+                    · 🔒
+                  </span>
                 )}
               </span>
             )}

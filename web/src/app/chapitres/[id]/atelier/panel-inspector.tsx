@@ -26,6 +26,7 @@ import { dpiLabel, dpiTitle } from "@/lib/finishing";
 import { useJob } from "@/lib/jobs";
 import { LIBRARY_KINDS } from "@/lib/library";
 import { useChapter } from "../chapter-context";
+import { CompositionBlock, LockBadge } from "./composition-block";
 import type { PanelView } from "./page-canvas";
 import { PanelQC } from "./panel-qc";
 import { RepairDialog, type RepairPreset } from "./repair-dialog";
@@ -55,6 +56,8 @@ export function PanelInspector({
   onNext?: () => void;
 }) {
   const detail = useEngineData(() => api.getPanel(panelId), [panelId, refreshKey]);
+  // Verrouillage de composition disponible dans ComfyUI ? (nœud et fichier du patch ControlNet)
+  const control = useEngineData(() => api.controlStatus());
   const { refresh, cancel } = useQueue();
   const { series } = useChapter();
   // Prompt en cours d'édition (null = pas touché), rattaché à la case pour repartir à zéro en changeant de case.
@@ -216,6 +219,13 @@ export function PanelInspector({
             Case {d ? d.index + 1 : "…"}
             {d && <span className="ml-2 text-sm font-normal text-zinc-500">page {d.page_number}</span>}
           </h2>
+          {d?.composition_lock && (
+            <div className="mt-1">
+              <LockBadge
+                title={`Composition verrouillée : ${d.composition_lock.source_label}, ${d.composition_lock.type_name}`}
+              />
+            </div>
+          )}
           {d && (
             <p className="mt-0.5 text-xs text-zinc-400">
               {running
@@ -485,6 +495,23 @@ export function PanelInspector({
               }}
             />
           )}
+
+          <CompositionBlock
+            panel={d}
+            status={control.data}
+            statusError={control.error}
+            busy={busy}
+            run={run}
+            onDetail={(next) => {
+              detail.setData(next);
+              onChanged();
+            }}
+            onReload={detail.reload}
+            onDone={(message) => {
+              setGenerated(false);
+              setNotice(message);
+            }}
+          />
 
           <div className="space-y-2">
             <h3 className="text-sm font-medium text-zinc-300">

@@ -30,6 +30,10 @@ export interface Project {
   sketch_enabled: boolean;
   /** Débruitage du passage au propre (null : celui du preset). */
   sketch_denoise: number | null;
+  /** Passage au propre : image → image depuis le croquis (défaut) ou ControlNet (composition verrouillée). */
+  clean_mode: CleanMode;
+  /** Type de contrôle du passage au propre par ControlNet (null : celui du preset). */
+  clean_control: string | null;
   /** Agrandisseur de la finition d'impression (presets/upscalers/) ; null = celui de defaults.yaml. */
   upscaler: string | null;
   character_count: number;
@@ -54,8 +58,12 @@ export type ProjectInput = Pick<
   | "layout_style"
   | "sketch_enabled"
   | "sketch_denoise"
+  | "clean_mode"
+  | "clean_control"
   | "upscaler"
 >;
+
+export type CleanMode = "img2img" | "controlnet";
 
 export interface Chapter {
   id: number;
@@ -136,6 +144,8 @@ export interface PanelData {
   sketch_denoise?: number | null;
   /** Une version propre a déjà été tirée du croquis validé. */
   sketch_cleaned?: boolean;
+  /** Composition verrouillée (ControlNet) : type de contrôle du verrou, null = composition libre. */
+  composition_lock?: string | null;
   /** Dpi de la version retenue à l'impression (null : pas de version retenue ou pas de mise en page). */
   print_info?: PrintInfo | null;
 }
@@ -680,6 +690,61 @@ export interface PanelDetail {
   print_info?: PrintInfo | null;
   /** Nom de l'agrandisseur de la série (finition d'impression), null : aucun configuré. */
   upscaler?: string | null;
+  /** Composition verrouillée (ControlNet) ; null : composition libre. */
+  composition_lock?: CompositionLock | null;
+}
+
+export type CompositionSource = "croquis" | "version" | "import";
+
+/** Verrou de composition d'une case : image guide, type de contrôle, force, aperçu de la carte. */
+export interface CompositionLock {
+  source: CompositionSource;
+  /** « croquis v2 », « version 3 », « image importée ». */
+  source_label: string;
+  image_id: number | null;
+  version: number | null;
+  source_url: string;
+  type: string;
+  type_name: string;
+  strength: number;
+  locked_at: string | null;
+  /** Preset ControlNet des prochaines générations. */
+  preset: string | null;
+  preset_name: string | null;
+  /** Le palier de la case ne propose pas de ControlNet… */
+  problem: string | null;
+  preview: {
+    status: "none" | "pending" | "running" | "ready" | "failed" | "cancelled";
+    /** Dernière carte calculée (celle d'un type précédent pendant un nouveau calcul). */
+    url: string | null;
+    type: string | null;
+    job_id: number | null;
+    error: string | null;
+    width: number | null;
+    height: number | null;
+  };
+}
+
+/** `GET /comfyui/control` : le verrouillage de composition est-il utilisable dans ComfyUI ? */
+export interface ControlStatus {
+  available: boolean;
+  /** Message en français quand le verrouillage est indisponible (nœud ou fichier du patch absent…). */
+  message: string | null;
+  problems: string[];
+  default_type: string | null;
+  default_strength: number | null;
+  types: ControlTypeInfo[];
+  simulated?: boolean;
+  error?: string | null;
+}
+
+export interface ControlTypeInfo {
+  id: string;
+  name: string;
+  description: string;
+  preprocessor: string | null;
+  available: boolean;
+  problem: string | null;
 }
 
 export interface GenerateInput {
@@ -744,9 +809,12 @@ export interface WorkflowPreset {
   estimated_s: number | null;
   /** Palier de « Régénérer en Qualité ». */
   is_quality: boolean;
-  /** generation : palier de série ; croquis ; propre : version finale depuis un croquis validé. */
-  role?: "generation" | "croquis" | "propre";
+  /** generation : palier de série ; croquis ; propre : version finale depuis un croquis validé ;
+   * controle : composition verrouillée (ControlNet). */
+  role?: "generation" | "croquis" | "propre" | "controle";
   from_sketch?: string | null;
+  /** Workflow ControlNet (composition verrouillée) du même palier. */
+  with_control?: string | null;
   is_sketch?: boolean;
 }
 
@@ -794,8 +862,11 @@ export interface ComfyCheck {
     ram_free: number | null;
     devices: { name: string; type: string; vram_total: number | null; vram_free: number | null }[];
   } | null;
-  presets: { id: string; name: string; ok: boolean; problems: string[] }[];
+  /** `optional` : preset ControlNet (son absence masque seulement le verrouillage de composition). */
+  presets: { id: string; name: string; ok: boolean; problems: string[]; optional?: boolean }[];
   loras: { checked: number; problems: string[] };
+  /** Verrouillage de composition (ControlNet) : null si ComfyUI n'a pas pu être interrogé. */
+  control?: ControlStatus | null;
 }
 
 /** `GET /comfyui/loras` : LoRA que ComfyUI accepte (sous-dossiers de models/loras compris). */
@@ -1005,7 +1076,7 @@ export interface Presets {
     tier_choice: string | null;
     tier_order: number | null;
     estimated_s: number | null;
-    role?: "generation" | "croquis" | "propre";
+    role?: "generation" | "croquis" | "propre" | "controle";
     /** Workflow « propre depuis croquis » du même palier. */
     from_sketch?: string | null;
     /** Débruitage livré (workflows « propre »). */
@@ -1664,6 +1735,24 @@ export const api = {
   ) =>
     request<PanelDetail>(`/panels/${id}`, json("PATCH", body)),
   rebuildPrompt: (id: number) => request<PanelDetail>(`/panels/${id}/prompt/rebuild`, { method: "POST" }),
+  controlStatus: (refresh = false) =>
+    request<ControlStatus>(`/comfyui/control${refresh ? "?refresh=true" : ""}`, { signal: AbortSignal.timeout(30_000) }),
+  lockComposition: (
+    id: number,
+    body: { source: "croquis" | "version"; image_id?: number | null; type?: string | null; strength?: number | null },
+  ) => request<PanelDetail>(`/panels/${id}/composition-lock`, json("POST", body)),
+  lockCompositionFromImport: (id: number, file: File, type?: string | null, strength?: number | null) => {
+    const form = new FormData();
+    form.append("file", file);
+    if (type) form.append("type", type);
+    if (strength != null) form.append("strength", String(strength));
+    return request<PanelDetail>(`/panels/${id}/composition-lock/import`, { method: "POST", body: form });
+  },
+  updateCompositionLock: (id: number, body: { type?: string | null; strength?: number | null }) =>
+    request<PanelDetail>(`/panels/${id}/composition-lock`, json("PATCH", body)),
+  refreshCompositionPreview: (id: number) =>
+    request<PanelDetail>(`/panels/${id}/composition-lock/preview`, { method: "POST" }),
+  unlockComposition: (id: number) => request<PanelDetail>(`/panels/${id}/composition-lock`, { method: "DELETE" }),
   generatePanel: (id: number, body: GenerateInput = {}) => request<Job[]>(`/panels/${id}/generate`, json("POST", body)),
   regeneratePanelQuality: (id: number) => request<Job[]>(`/panels/${id}/regenerate-quality`, { method: "POST" }),
   chapterEstimate: (id: number) => request<Estimate>(`/chapters/${id}/estimate`),

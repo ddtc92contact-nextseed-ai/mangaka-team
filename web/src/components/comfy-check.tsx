@@ -49,10 +49,13 @@ function CheckReport({ report }: { report: ComfyCheck }) {
       <ul className="space-y-2 text-sm">
         {report.presets.map((p) => (
           <li key={p.id}>
-            <span className={p.ok ? "text-emerald-300" : "text-red-300"}>{p.ok ? "✓" : "✗"}</span>{" "}
+            <span className={p.ok ? "text-emerald-300" : p.optional ? "text-amber-300" : "text-red-300"}>
+              {p.ok ? "✓" : p.optional ? "!" : "✗"}
+            </span>{" "}
             <span className="text-zinc-200">{p.name}</span>
+            {p.optional && !p.ok && <span className="ml-1 text-xs text-zinc-500">(optionnel)</span>}
             {p.problems.length > 0 && (
-              <ul className="ml-5 mt-1 list-disc text-xs text-red-300">
+              <ul className={`ml-5 mt-1 list-disc text-xs ${p.optional ? "text-amber-300" : "text-red-300"}`}>
                 {p.problems.map((m) => (
                   <li key={m}>{m}</li>
                 ))}
@@ -75,6 +78,34 @@ function CheckReport({ report }: { report: ComfyCheck }) {
             </ul>
           )}
         </li>
+        {report.control && (
+          <li data-testid="comfy-control">
+            <span className={report.control.available ? "text-emerald-300" : "text-amber-300"}>
+              {report.control.available ? "✓" : "!"}
+            </span>{" "}
+            <span className="text-zinc-200">Verrouillage de composition (ControlNet)</span>
+            {report.control.available ? (
+              <span className="ml-1 text-xs text-zinc-500">
+                types : {report.control.types.filter((t) => t.available).map((t) => t.name).join(", ")}
+              </span>
+            ) : (
+              <p className="ml-5 mt-1 text-xs text-amber-300">
+                {report.control.message} L&apos;option est masquée dans l&apos;atelier ; le reste fonctionne.
+              </p>
+            )}
+            {report.control.available && report.control.types.some((t) => !t.available) && (
+              <ul className="ml-5 mt-1 list-disc text-xs text-amber-300">
+                {report.control.types
+                  .filter((t) => !t.available)
+                  .map((t) => (
+                    <li key={t.id}>
+                      {t.name} : {t.problem}
+                    </li>
+                  ))}
+              </ul>
+            )}
+          </li>
+        )}
       </ul>
     </div>
   );
