@@ -226,3 +226,38 @@ def test_deleting_project_removes_characters_and_files(make_settings: Callable[.
         c.delete(f"/projects/{pid}")
         assert c.get(f"/characters/{cid}").status_code == 404
     assert not (settings.data_dir / "projects" / str(pid)).exists()
+
+
+# --- fournisseurs actifs (badge de l'en-tête) ----------------------------------------
+def test_providers_default_env_is_simulated(client: TestClient) -> None:
+    data = _ok(client.get("/providers"))
+    assert set(data) == {"llm", "vision", "comfyui"}
+    llm = data["llm"]
+    assert (llm["name"], llm["label"], llm["mock"], llm["env"]) == ("mock", "simulé", True, "LLM_PROVIDER")
+    assert data["comfyui"]["label"] == "simulé" and data["comfyui"]["env"] == "COMFYUI_PROVIDER"
+    assert data["vision"]["mock"] is True and data["vision"]["env"] == "VISION_PROVIDER"
+    assert client.get("/health").json()["active"] == data
+
+
+def test_providers_real_llm_never_leaks_key(make_settings: Callable[..., Settings]) -> None:
+    settings = make_settings(llm_provider="deepseek", deepseek_api_key="sk-secret-456")
+    with TestClient(create_app(settings)) as c:
+        resp = c.get("/providers")
+        health = c.get("/health").text
+    data = _ok(resp)
+    llm = data["llm"]
+    assert (llm["name"], llm["label"], llm["mock"], llm["ok"]) == ("deepseek", "DeepSeek", False, True)
+    assert (llm["key_env"], llm["key_set"]) == ("DEEPSEEK_API_KEY", True)
+    assert "sk-secret-456" not in resp.text and "sk-secret-456" not in health
+
+
+def test_providers_real_llm_without_key(make_settings: Callable[..., Settings]) -> None:
+    with TestClient(create_app(make_settings(llm_provider="deepseek"))) as c:
+        llm = _ok(c.get("/providers"))["llm"]
+    assert llm["name"] == "deepseek" and llm["ok"] is False and llm["key_set"] is False
+    assert "DEEPSEEK_API_KEY" in llm["detail"]
+
+
+def _ok(resp) -> dict:  # type: ignore[no-untyped-def]
+    assert resp.status_code == 200, resp.text
+    return resp.json()

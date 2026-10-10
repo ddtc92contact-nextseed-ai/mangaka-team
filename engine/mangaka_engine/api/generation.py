@@ -503,6 +503,11 @@ def get_queue(session: Session = Depends(get_session), ctx: AppContext = Depends
                 project_id=chapter.project_id if chapter else None,
                 series_title=chapter.project.title if chapter else None,
                 preset=preset if isinstance(preset, str) and not is_qc else None,
+                tier=(
+                    preset_tier(ctx.agents.presets_for(chapter.project_id if chapter else None), preset)
+                    if isinstance(preset, str) and not is_qc
+                    else None
+                ),
                 variant=params.get("variant"),
                 count=params.get("count"),
                 estimated_duration_s=round(estimate, 1) if estimate is not None else None,
