@@ -13,6 +13,7 @@ timeout_s: 1200   # au-delà, la génération est interrompue et le job passe en
 from_sketch: qwen-image-base-from-sketch   # « Passer au propre » depuis un croquis validé, même palier
 with_references: qwen-image-edit-ref   # cases avec images de référence
 inpaint_with: qwen-image-inpaint   # réparation ciblée (inpainting) du même palier
+with_control: qwen-image-base-controlnet   # composition verrouillée (ControlNet), même palier
 tier:
   name: Qualité
   choice: "Qualité (finitions)"   # libellé du palier dans la fiche série

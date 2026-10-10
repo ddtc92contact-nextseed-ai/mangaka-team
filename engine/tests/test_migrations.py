@@ -62,7 +62,14 @@ def _version(path: Path) -> int:
     return v
 
 
+def _drop_v15_composition(con: sqlite3.Connection) -> None:
+    con.execute("ALTER TABLE panels DROP COLUMN composition_lock")
+    con.execute("ALTER TABLE projects DROP COLUMN clean_mode")
+    con.execute("ALTER TABLE projects DROP COLUMN clean_control")
+
+
 def _drop_v14_sketch(con: sqlite3.Connection) -> None:
+    _drop_v15_composition(con)
     con.execute("ALTER TABLE panel_images DROP COLUMN kind")
     con.execute("ALTER TABLE panels DROP COLUMN sketch_image_id")
     con.execute("ALTER TABLE panels DROP COLUMN sketch_denoise")
@@ -419,6 +426,26 @@ def test_v13_database_gets_sketch_columns(make_settings: Callable[..., Settings]
     with TestClient(create_app(settings)) as c:
         got = c.get(f"/projects/{project['id']}").json()
         assert got["sketch_enabled"] is True and got["sketch_denoise"] is None
+    assert _version(settings.database_path) == SCHEMA_VERSION
+    fresh = settings.database_path.parent / "fresh.db"
+    create_db_engine(fresh).dispose()
+    assert _columns(settings.database_path) == _columns(fresh)
+
+
+def test_v14_database_gets_composition_lock_columns(make_settings: Callable[..., Settings]) -> None:
+    """v14 → v15 : verrouillage de composition. Aucune case verrouillée, passage au propre en img2img."""
+    settings = make_settings()
+    with TestClient(create_app(settings)) as c:
+        project = c.post("/projects", json={"title": "Série v14"}).json()
+    con = sqlite3.connect(settings.database_path)
+    _drop_v15_composition(con)
+    con.execute("PRAGMA user_version = 14")
+    con.commit()
+    con.close()
+
+    with TestClient(create_app(settings)) as c:
+        got = c.get(f"/projects/{project['id']}").json()
+        assert got["clean_mode"] == "img2img" and got["clean_control"] is None
     assert _version(settings.database_path) == SCHEMA_VERSION
     fresh = settings.database_path.parent / "fresh.db"
     create_db_engine(fresh).dispose()

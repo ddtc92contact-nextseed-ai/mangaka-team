@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .loader import LoadedUpscaler, LoadedWorkflow, PresetError
-from .schemas import LoraChain
+from .schemas import ControlSettings, LoraChain
 
 MAX_SEED = 2**63 - 1
 
@@ -28,6 +28,15 @@ class LoraSpec:
         return {"name": self.name, "weight": self.weight, "source": self.source}
 
 
+@dataclass(frozen=True)
+class ControlInput:
+    """Composition verrouillée : image guide (nom côté ComfyUI), type de contrôle et force du patch."""
+
+    image: str
+    type: str
+    strength: float
+
+
 @dataclass
 class BuiltWorkflow:
     workflow: dict[str, Any]
@@ -37,6 +46,8 @@ class BuiltWorkflow:
     loras: list[LoraSpec] = field(default_factory=list)
     removed_nodes: list[str] = field(default_factory=list)
     source_image: str | None = None  # image de composition (nom côté ComfyUI)
+    # Contrôle appliqué : {type, name, strength, preprocessor, patch, image} (preset ControlNet).
+    control: dict[str, Any] | None = None
 
 
 def is_link(value: Any) -> bool:
@@ -59,6 +70,7 @@ def build_workflow(
     loras: Sequence[LoraSpec] = (),
     source_image: str | None = None,
     inpaint_images: tuple[str, str] | None = None,
+    control: ControlInput | None = None,
 ) -> BuiltWorkflow:
     """Applique `defaults` puis `params` sur une copie du JSON API.
 
@@ -71,6 +83,10 @@ def build_workflow(
       dans le nœud `source_image` du preset : obligatoire pour un workflow qui en déclare un.
     - preset de réparation (bloc `inpaint`) : `inpaint_images` = (image source, masque), noms côté
       ComfyUI ; pas de taille à fournir (celle de l'image source).
+    - preset ControlNet (bloc `control`) : `control` = image guide, type et force ; le prétraitement
+      du type remplace le nœud `preprocessor`, la carte est mise à la taille de la case, le nœud
+      d'aperçu (`map_output`) est retiré. Les LoRA restent chaînés AVANT le patch (le patch consomme
+      la sortie du modèle, comme le reste : la chaîne LoRA s'insère entre les deux).
     """
     preset = loaded.preset
     unknown = sorted(set(params) - set(preset.mapping))
@@ -105,6 +121,10 @@ def build_workflow(
         raise PresetError(f"le workflow {preset.id} n'accepte pas d'image de composition (source_image)")
     if loras and preset.lora_chain is None:
         raise PresetError(f"le workflow {preset.id} ne déclare pas de point d'insertion LoRA (lora_chain)")
+    if preset.control is not None and control is None:
+        raise PresetError(f"le workflow {preset.id} verrouille la composition : il attend une image guide")
+    if control is not None and preset.control is None:
+        raise PresetError(f"le workflow {preset.id} n'accepte pas d'image guide (bloc control)")
 
     workflow = copy.deepcopy(loaded.workflow)
     for name, value in resolved.items():
@@ -118,7 +138,12 @@ def build_workflow(
     if preset.source_image is not None:
         workflow[preset.source_image.node]["inputs"][preset.source_image.input] = source_image
 
+    applied: dict[str, Any] | None = None
     removed: list[str] = []
+    if preset.control is not None and control is not None:
+        applied = apply_control(workflow, preset.id, preset.control, control, resolved)
+        if preset.control.map_output is not None:
+            removed.append(preset.control.map_output)  # l'aperçu de la carte n'est pas enregistré ici
     for i, slot in enumerate(slots):
         if i < len(reference_images):
             workflow[slot.node]["inputs"][slot.input] = reference_images[i]
@@ -139,7 +164,108 @@ def build_workflow(
         loras=list(loras),
         removed_nodes=removed,
         source_image=source_image,
+        control=applied,
     )
+
+
+def control_type(settings: ControlSettings, preset_id: str, type_id: str) -> Any:
+    try:
+        return settings.types[type_id]
+    except KeyError:
+        known = ", ".join(settings.types)
+        raise PresetError(
+            f"type de contrôle inconnu pour le workflow {preset_id} : « {type_id} » (possibles : {known})"
+        ) from None
+
+
+def apply_control(
+    workflow: dict[str, Any],
+    preset_id: str,
+    settings: ControlSettings,
+    control: ControlInput,
+    size: dict[str, Any],
+) -> dict[str, Any]:
+    """Branche l'image guide, le prétraitement du type choisi, la taille et la force du patch."""
+    ctype = control_type(settings, preset_id, control.type)
+    if not 0 <= control.strength <= 2:
+        raise PresetError(f"force du contrôle hors limites (0 à 2) : {control.strength}")
+    workflow[settings.image.node]["inputs"][settings.image.input] = control.image
+    workflow[settings.apply.node]["inputs"][settings.apply.input] = control.strength
+    if settings.resize is not None:
+        for key in ("width", "height"):
+            if size.get(key) is not None:
+                workflow[settings.resize]["inputs"][key] = size[key]
+    image_link = [settings.image.node, 0]
+    pre = settings.preprocessor
+    if ctype.class_type is None:
+        # Pas de prétraitement : l'image guide est déjà une carte (croquis à la main, scribble).
+        for node_id, key in _consumers(workflow, [pre, 0]):
+            workflow[node_id]["inputs"][key] = image_link
+        workflow.pop(pre, None)
+    else:
+        workflow[pre] = {
+            "class_type": ctype.class_type,
+            "inputs": {**copy.deepcopy(ctype.inputs), ctype.image_input: image_link},
+            "_meta": {"title": f"Prétraitement : {ctype.name}"},
+        }
+    patch = workflow[settings.patch.node]["inputs"].get(settings.patch.input)
+    return {
+        "type": control.type,
+        "name": ctype.name,
+        "strength": control.strength,
+        "preprocessor": ctype.class_type,
+        "patch": patch,
+        "image": control.image,
+    }
+
+
+def build_control_map_workflow(
+    loaded: LoadedWorkflow,
+    image: str,
+    type_id: str,
+    width: int,
+    height: int,
+    *,
+    filename_prefix: str | None = None,
+) -> BuiltWorkflow:
+    """Aperçu de la carte de contrôle : seuls les nœuds qui mènent à `map_output` (image guide,
+    prétraitement, mise à la taille, enregistrement) ; ni modèle, ni patch, ni échantillonneur."""
+    preset = loaded.preset
+    settings = preset.control
+    if settings is None or settings.map_output is None:
+        raise PresetError(f"le workflow {preset.id} ne déclare pas d'aperçu de carte de contrôle (control.map_output)")
+    workflow = copy.deepcopy(loaded.workflow)
+    applied = apply_control(
+        workflow,
+        preset.id,
+        settings,
+        ControlInput(image=image, type=type_id, strength=settings.default_strength),
+        {"width": int(width), "height": int(height)},
+    )
+    keep = _ancestors(workflow, settings.map_output)
+    for node_id in [k for k in workflow if k not in keep]:
+        del workflow[node_id]
+    out = workflow[settings.map_output]["inputs"]
+    if filename_prefix is not None and "filename_prefix" in out:
+        out["filename_prefix"] = filename_prefix
+    return BuiltWorkflow(
+        workflow=workflow,
+        params={"width": int(width), "height": int(height)},
+        output_node=settings.map_output,
+        control=applied,
+    )
+
+
+def _ancestors(workflow: dict[str, Any], node_id: str) -> set[str]:
+    seen: set[str] = set()
+    todo = [node_id]
+    while todo:
+        current = todo.pop()
+        if current in seen or not isinstance(workflow.get(current), dict):
+            continue
+        seen.add(current)
+        todo += [v[0] for v in workflow[current].get("inputs", {}).values() if is_link(v)]
+    return seen
 
 
 def build_upscale_workflow(

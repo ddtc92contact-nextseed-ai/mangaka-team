@@ -453,6 +453,9 @@ def test_database_from_before_the_library_keeps_working(make_settings: Callable[
         )
     con = sqlite3.connect(settings.database_path)
     for table, column in [
+        ("panels", "composition_lock"),  # v15 : verrouillage de composition
+        ("projects", "clean_mode"),
+        ("projects", "clean_control"),
         ("panel_images", "kind"),
         ("panels", "sketch_image_id"),
         ("panels", "sketch_denoise"),

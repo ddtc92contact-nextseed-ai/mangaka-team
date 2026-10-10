@@ -138,6 +138,10 @@ class Project(TimestampMixin, Base):
     # passage au propre (None = `denoise` du preset « propre »).
     sketch_enabled: Mapped[bool] = mapped_column(default=True)
     sketch_denoise: Mapped[float | None] = mapped_column(Float, default=None)
+    # Passage au propre : `img2img` (débruitage partiel du croquis) ou `controlnet` (composition
+    # verrouillée sur le croquis, type `clean_control` ; None = type par défaut du preset).
+    clean_mode: Mapped[str] = mapped_column(String(20), default="img2img")
+    clean_control: Mapped[str | None] = mapped_column(String(40), default=None)
     # Agrandisseur de la finition d'impression (presets/upscalers/) ; None = celui de defaults.yaml.
     upscaler: Mapped[str | None] = mapped_column(String(100), default=None)
 
@@ -353,6 +357,11 @@ class Panel(TimestampMixin, Base):
     sketch_image_id: Mapped[int | None] = mapped_column(Integer, default=None)
     # Débruitage du passage au propre imposé à cette case (None = celui de la série, sinon du preset).
     sketch_denoise: Mapped[float | None] = mapped_column(Float, default=None)
+    # Composition verrouillée (ControlNet) : toute génération de la case suit l'image guide jusqu'au
+    # déverrouillage — {"source": "croquis"|"version"|"import", "image_id", "version", "path" (import),
+    # "width", "height", "type", "strength", "locked_at", "preview": {"job_id", "path", "width", "height",
+    # "type"}} ; None = composition libre.
+    composition_lock: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
     qc_score: Mapped[int | None] = mapped_column(Integer, default=None)
     state: Mapped[PanelState] = mapped_column(_enum(PanelState), default=PanelState.draft)
 

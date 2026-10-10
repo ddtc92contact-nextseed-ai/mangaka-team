@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from typing import Any
 
 from fastapi import Request
 from sqlalchemy.orm import Session
@@ -11,6 +12,7 @@ from sqlalchemy.orm import Session
 from ..agents import AgentService
 from ..config import Settings
 from ..pipeline.comfy_loras import LoraCatalog
+from ..pipeline.composition import ControlCatalog, unavailable_control
 from ..pipeline.jobs import JobRunner
 from ..pipeline.knowledge import KnowledgeBase
 from ..pipeline.qc import QCExecutor
@@ -34,6 +36,18 @@ class AppContext:
     agents: AgentService  # profils des agents (écran « L'équipe ») : presets effectifs par série
     knowledge: KnowledgeBase  # savoir-faire et bible injectés dans les agents
     lora_catalog: LoraCatalog = field(default_factory=LoraCatalog)  # LoRA vus par ComfyUI (cache court)
+    # Verrouillage de composition (ControlNet) disponible dans ComfyUI ? (cache court)
+    control_catalog: ControlCatalog = field(default_factory=ControlCatalog)
+
+    def control_status(self, *, refresh: bool = False) -> dict[str, Any]:
+        """Disponibilité du verrouillage de composition (nœuds, fichier du patch, prétraitements)."""
+        client = self.providers.comfyui
+        if client is None:
+            return unavailable_control(
+                self.providers.names.get("comfyui") or "?",
+                self.providers.errors.get("comfyui") or "ComfyUI non configuré",
+            )
+        return self.control_catalog.get(client, self.presets, refresh=refresh)
 
 
 def get_ctx(request: Request) -> AppContext:

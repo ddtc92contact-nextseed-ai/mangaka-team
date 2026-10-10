@@ -26,6 +26,11 @@ FrameKindName = Literal["border", "none", "fade"]
 # Débruitage du passage au propre (palier croquis) : 0 = croquis inchangé, 1 = image neuve.
 Denoise = Annotated[float, Field(ge=0.05, le=1)]
 ImageKindName = Literal["final", "croquis"]
+# Passage au propre : image → image depuis le croquis (débruitage) ou ControlNet (composition verrouillée).
+CleanModeName = Literal["img2img", "controlnet"]
+ControlTypeId = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=40)]
+# Force du patch ControlNet : 0 = contrôle ignoré, 1 = composition tenue (défaut), jusqu'à 2.
+ControlStrength = Annotated[float, Field(ge=0, le=2)]
 
 
 class _In(BaseModel):
@@ -48,6 +53,8 @@ class ProjectCreate(_In):
     # Absent : `sketch_enabled` de presets/defaults.yaml (activé).
     sketch_enabled: bool | None = None
     sketch_denoise: Denoise | None = None
+    clean_mode: CleanModeName = "img2img"
+    clean_control: ControlTypeId | None = None  # null : type par défaut du preset ControlNet
     # Agrandisseur de la finition d'impression (None : celui de defaults.yaml).
     upscaler: PresetId | None = None
 
@@ -65,6 +72,8 @@ class ProjectUpdate(_In):
     layout_style: PresetId | None = None
     sketch_enabled: bool | None = None
     sketch_denoise: Denoise | None = None  # null : `denoise` du preset « propre »
+    clean_mode: CleanModeName | None = None
+    clean_control: ControlTypeId | None = None  # null : type par défaut du preset ControlNet
     upscaler: PresetId | None = None  # null : revient à l'agrandisseur de defaults.yaml
 
 
@@ -82,6 +91,8 @@ class ProjectOut(BaseModel):
     layout_style: str
     sketch_enabled: bool = True
     sketch_denoise: float | None = None
+    clean_mode: CleanModeName = "img2img"
+    clean_control: str | None = None
     upscaler: str | None = None
     character_count: int
     chapter_count: int
@@ -261,6 +272,8 @@ class PanelOut(BaseModel):
     sketch_denoise: float | None = None
     # Version propre déjà tirée du croquis validé.
     sketch_cleaned: bool = False
+    # Composition verrouillée (ControlNet) : type de contrôle du verrou, None = composition libre.
+    composition_lock: str | None = None
     # QC de la version choisie (None : pas encore contrôlée).
     qc_verdict: QCVerdictName | None = None
     qc_score: int | None = None
@@ -533,6 +546,46 @@ class PanelUpdate(_In):
     sketch_denoise: Denoise | None = None
 
 
+class CompositionLockIn(_In):
+    """« Verrouiller la composition » depuis le croquis validé ou une version de la case."""
+
+    source: Literal["croquis", "version"]
+    image_id: int | None = None  # croquis : null = le croquis validé ; version : obligatoire
+    type: ControlTypeId | None = None  # null : type par défaut du preset ControlNet
+    strength: ControlStrength | None = None  # null : force par défaut du preset
+
+
+class CompositionLockUpdate(_In):
+    type: ControlTypeId | None = None
+    strength: ControlStrength | None = None
+
+
+class ControlPreviewOut(BaseModel):
+    status: Literal["none", "pending", "running", "ready", "failed", "cancelled"]
+    url: str | None = None  # dernière carte produite (peut être celle d'un type précédent pendant le calcul)
+    type: str | None = None  # type de la carte affichée
+    job_id: int | None = None
+    error: str | None = None
+    width: int | None = None
+    height: int | None = None
+
+
+class CompositionLockOut(BaseModel):
+    source: Literal["croquis", "version", "import"]
+    source_label: str  # « croquis v2 », « version 3 », « image importée »
+    image_id: int | None = None
+    version: int | None = None
+    source_url: str
+    type: str
+    type_name: str
+    strength: float
+    locked_at: str | None = None
+    preset: str | None = None  # preset ControlNet des prochaines générations
+    preset_name: str | None = None
+    problem: str | None = None  # le palier de la case ne propose pas de ControlNet…
+    preview: ControlPreviewOut
+
+
 class LibraryRef(BaseModel):
     """Élément de la bibliothèque cité par une case (personnage, objet ou décor)."""
 
@@ -568,6 +621,7 @@ class PanelDetailOut(BaseModel):
     sketch_denoise: float | None = None
     print_info: PrintInfoOut | None = None
     upscaler: str | None = None  # agrandisseur de la finition (nom), None si aucun configuré
+    composition_lock: CompositionLockOut | None = None  # None : composition libre
 
 
 class QueueItemOut(BaseModel):
@@ -616,8 +670,9 @@ class WorkflowPresetOut(BaseModel):
     tier_order: int | None = None
     estimated_s: float | None = None
     is_quality: bool = False  # palier de « Régénérer en Qualité »
-    role: Literal["generation", "croquis", "propre"] = "generation"
+    role: Literal["generation", "croquis", "propre", "controle"] = "generation"
     from_sketch: str | None = None  # workflow « propre depuis croquis » du même palier
+    with_control: str | None = None  # workflow ControlNet (composition verrouillée) du même palier
     is_sketch: bool = False  # workflow des croquis (defaults.workflow_sketch)
 
 

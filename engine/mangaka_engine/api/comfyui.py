@@ -52,7 +52,22 @@ def check_comfyui(session: Session = Depends(get_session), ctx: AppContext = Dep
             ctx.providers.errors.get("comfyui") or "ComfyUI non configuré",
         )
     url = ctx.settings.comfyui_url if client.name != "mock" else None
-    return run_check(client, ctx.presets, url=url, loras=lora_uses(session))
+    report = run_check(client, ctx.presets, url=url, loras=lora_uses(session))
+    # Le verrouillage de composition de l'atelier suit le dernier test (nœud ou fichier du patch absent).
+    if isinstance(report.get("control"), dict):
+        ctx.control_catalog.store({**report["control"], "provider": client.name, "simulated": False, "error": None})
+    else:
+        ctx.control_catalog.clear()
+    return report
+
+
+@router.get("/comfyui/control")
+def control_availability(refresh: bool = False, ctx: AppContext = Depends(get_ctx)) -> dict[str, Any]:
+    """Verrouillage de composition (ControlNet Union, patch de modèle) disponible dans ComfyUI ?
+
+    `available`, `message` en français sinon (nœud `QwenImageDiffsynthControlnet` ou fichier du patch
+    absent…), et l'état de chaque type de contrôle (prétraitement installé ou non). Gardé 30 s."""
+    return ctx.control_status(refresh=refresh)
 
 
 @router.get("/comfyui/loras")

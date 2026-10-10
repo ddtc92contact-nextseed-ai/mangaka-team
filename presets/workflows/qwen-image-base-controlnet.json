@@ -1,0 +1,221 @@
+{
+  "1": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "qwen_image_2.1_bf16.safetensors",
+      "weight_dtype": "default"
+    },
+    "_meta": {
+      "title": "Modèle de diffusion"
+    }
+  },
+  "2": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "qwen3vl_8b_bf16.safetensors",
+      "type": "qwen_image",
+      "device": "default"
+    },
+    "_meta": {
+      "title": "Encodeur de texte (Qwen3-VL 8B)"
+    }
+  },
+  "3": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "qwen_image_2.1_vae_bf16.safetensors"
+    },
+    "_meta": {
+      "title": "VAE"
+    }
+  },
+  "4": {
+    "class_type": "QwenImage21Cache",
+    "inputs": {
+      "device": "auto",
+      "dtype": "default",
+      "model": [
+        "44",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Cache Qwen Image 2.1"
+    }
+  },
+  "6": {
+    "class_type": "TextEncodeQwenImage21",
+    "inputs": {
+      "prompt": "",
+      "negative_prompt": "",
+      "resolution": 1024,
+      "clip": [
+        "2",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Prompts (positif / négatif)"
+    }
+  },
+  "8": {
+    "class_type": "EmptyLatentImage",
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 1
+    },
+    "_meta": {
+      "title": "Taille de l'image"
+    }
+  },
+  "9": {
+    "class_type": "KSampler",
+    "inputs": {
+      "seed": 0,
+      "steps": 50,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "4",
+        0
+      ],
+      "positive": [
+        "6",
+        0
+      ],
+      "negative": [
+        "6",
+        1
+      ],
+      "latent_image": [
+        "8",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "10": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "9",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Décodage VAE"
+    }
+  },
+  "11": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "filename_prefix": "mangaka/case",
+      "images": [
+        "10",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Sauvegarde"
+    }
+  },
+  "40": {
+    "class_type": "ModelPatchLoader",
+    "inputs": {
+      "name": "qwen_image_2.1_fun_controlnet_union_int8_convrot.safetensors"
+    },
+    "_meta": {
+      "title": "Patch ControlNet Union (models/model_patches)"
+    }
+  },
+  "41": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "mangaka/guide.png"
+    },
+    "_meta": {
+      "title": "Image guide (composition)"
+    }
+  },
+  "42": {
+    "class_type": "LineArtPreprocessor",
+    "inputs": {
+      "coarse": "disable",
+      "resolution": 1024,
+      "image": [
+        "41",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Prétraitement (remplacé selon le type)"
+    }
+  },
+  "43": {
+    "class_type": "ImageScale",
+    "inputs": {
+      "upscale_method": "lanczos",
+      "width": 1024,
+      "height": 1024,
+      "crop": "center",
+      "image": [
+        "42",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Carte de contrôle à la taille de la case"
+    }
+  },
+  "44": {
+    "class_type": "QwenImageDiffsynthControlnet",
+    "inputs": {
+      "strength": 1.0,
+      "model": [
+        "1",
+        0
+      ],
+      "model_patch": [
+        "40",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ],
+      "image": [
+        "43",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "ControlNet Union (patch appliqué au modèle)"
+    }
+  },
+  "45": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "filename_prefix": "mangaka/controle",
+      "images": [
+        "43",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Carte de contrôle (aperçu)"
+    }
+  }
+}

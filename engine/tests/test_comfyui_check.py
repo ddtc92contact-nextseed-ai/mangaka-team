@@ -40,8 +40,14 @@ OBJECT_INFO: dict[str, Any] = json.loads((COMFY_FIXTURES / "object_info.json").r
 SYSTEM_STATS: dict[str, Any] = json.loads((COMFY_FIXTURES / "system_stats.json").read_text())
 
 
-def _object_info() -> dict[str, Any]:
+def _recorded_object_info() -> dict[str, Any]:
+    """`/object_info` tel qu'enregistré sur la GX10 (ComfyUI pas encore mis à jour : pas de ControlNet)."""
     return copy.deepcopy(OBJECT_INFO)
+
+
+def _object_info() -> dict[str, Any]:
+    """Même ComfyUI, avec le patch ControlNet installé (voir `_with_control`)."""
+    return _with_control(_recorded_object_info())
 
 
 def _report(object_info: dict[str, Any], loras: list[LoraUse] | None = None) -> dict[str, Any]:
@@ -64,6 +70,39 @@ def _preset_value(preset_id: str, node: str, name: str) -> str:
 
 def _installed_lora() -> str:
     return _choices(OBJECT_INFO, "LoraLoaderModelOnly", "lora_name")[0]
+
+
+def _patch_file() -> str:
+    return _preset_value("qwen-image-turbo-controlnet", "40", "name")
+
+
+def _with_control(info: dict[str, Any]) -> dict[str, Any]:
+    """ComfyUI mis à jour : nœuds du patch ControlNet, fichier du patch et prétraitements installés."""
+    info["ModelPatchLoader"] = {"input": {"required": {"name": [[_patch_file()], {}]}}}
+    info["QwenImageDiffsynthControlnet"] = {
+        "input": {
+            "required": {
+                "model": ["MODEL"],
+                "model_patch": ["MODEL_PATCH"],
+                "vae": ["VAE"],
+                "image": ["IMAGE"],
+                "strength": ["FLOAT", {"default": 1.0}],
+            },
+            "optional": {"mask": ["MASK"]},
+        }
+    }
+    for cls in (
+        "LineArtPreprocessor",
+        "DepthAnythingV2Preprocessor",
+        "DWPreprocessor",
+        "ScribblePreprocessor",
+        "Canny",
+    ):
+        info[cls] = {"input": {"required": {"image": ["IMAGE"]}}}
+    return info
+
+
+CONTROL_PRESETS = {w.preset.id for w in REG.control_presets()}
 
 
 # --- vérification pure ----------------------------------------------------------------
@@ -93,15 +132,88 @@ def test_check_ok_with_recorded_object_info() -> None:
     }
     assert all(p["ok"] and p["problems"] == [] for p in report["presets"])
     assert report["loras"] == {"checked": 1, "problems": []}
+    assert report["control"]["available"] and report["control"]["message"] is None
     system = report["system"]
     assert system["comfyui_version"] == SYSTEM_STATS["system"]["comfyui_version"]
     [device] = system["devices"]
     assert device["type"] == "cuda" and "GB10" in device["name"] and device["vram_total"] > 0
 
 
+def test_recorded_comfyui_without_controlnet_reports_it_clearly() -> None:
+    """ComfyUI de la GX10 pas encore mis à jour : les presets ControlNet signalent le nœud absent, le test
+    reste bon pour tout le reste, et le verrouillage est déclaré indisponible avec un message clair."""
+    report = _report(_recorded_object_info(), [LoraUse(_installed_lora(), "série « Les Lames », style")])
+    assert report["ok"]  # presets ControlNet optionnels : les autres paliers marchent
+    problems = _problems(report)
+    assert {
+        f"{p}-controlnet"
+        for p in (
+            "qwen-image-turbo",
+            "qwen-image-edit-ref-turbo",
+            "qwen-image-base-rapide",
+            "qwen-image-edit-ref-rapide",
+            "qwen-image-base",
+            "qwen-image-edit-ref",
+        )
+    } == CONTROL_PRESETS
+    for preset in report["presets"]:
+        assert preset["optional"] == (preset["id"] in CONTROL_PRESETS)
+        if preset["id"] in CONTROL_PRESETS:
+            assert not preset["ok"]
+            assert problems[preset["id"]] == [
+                "nœud inconnu : ModelPatchLoader (nœud 40) — ComfyUI à mettre à jour (verrouillage de composition)",
+                "nœud inconnu : QwenImageDiffsynthControlnet (nœud 44) — ComfyUI à mettre à jour (verrouillage de"
+                " composition)",
+            ]
+        else:
+            assert preset["ok"], preset
+    control = report["control"]
+    assert not control["available"]
+    assert control["message"] == (
+        "Verrouillage de composition indisponible : nœud ModelPatchLoader absent de ce ComfyUI (mise à jour de"
+        " ComfyUI nécessaire) ; nœud QwenImageDiffsynthControlnet absent de ce ComfyUI (mise à jour de ComfyUI"
+        " nécessaire)."
+    )
+    assert {t["id"] for t in control["types"]} >= {"lineart", "depth", "pose", "scribble"}
+
+
+def test_missing_patch_file_or_apply_node_is_named() -> None:
+    info = _object_info()
+    info["ModelPatchLoader"]["input"]["required"]["name"][0].remove(_patch_file())
+    report = _report(info)
+    assert report["ok"] and not report["control"]["available"]
+    assert _problems(report)["qwen-image-turbo-controlnet"] == [
+        f"fichier du patch ControlNet introuvable dans ComfyUI : {_patch_file()} — à placer dans "
+        "ComfyUI/models/model_patches/ (nœud 40, ModelPatchLoader)"
+    ]
+    assert report["control"]["problems"] == [
+        f"fichier du patch {_patch_file()} absent de ComfyUI/models/model_patches/"
+    ]
+    assert _problems(report)["qwen-image-turbo"] == []
+
+    info = _object_info()
+    del info["QwenImageDiffsynthControlnet"]
+    control = _report(info)["control"]
+    assert not control["available"] and "QwenImageDiffsynthControlnet" in control["message"]
+
+
+def test_missing_preprocessor_only_hides_its_type() -> None:
+    info = _object_info()
+    del info["DWPreprocessor"]
+    report = _report(info)
+    control = report["control"]
+    assert control["available"]
+    types = {t["id"]: t for t in control["types"]}
+    assert not types["pose"]["available"] and "DWPreprocessor" in types["pose"]["problem"]
+    assert types["lineart"]["available"] and types["carte"]["available"]
+    assert _problems(report)["qwen-image-turbo-controlnet"] == []  # le prétraitement dépend du type choisi
+
+
 def test_every_preset_file_name_is_known_to_the_recorded_comfyui() -> None:
     """Les fichiers des presets sont bien ceux installés sur la GX10 (au moment de l'enregistrement)."""
     for wf in REG.workflows.values():
+        if wf.preset.id in CONTROL_PRESETS:  # patch ControlNet : installation en attente du feu vert
+            continue
         for node in wf.workflow.values():
             for name, value in node["inputs"].items():
                 if name.endswith("_name") and isinstance(value, str):
@@ -184,7 +296,7 @@ def test_missing_lora_from_series_and_characters() -> None:
     ]
     report = _report(_object_info(), uses)
     assert not report["ok"]
-    assert all(p["ok"] for p in report["presets"])  # les presets eux-mêmes sont bons
+    assert all(p["ok"] for p in report["presets"] if not p["optional"])  # les presets eux-mêmes sont bons
     assert report["loras"] == {
         "checked": 2,
         "problems": [
@@ -361,7 +473,7 @@ def test_check_endpoint_mock_and_http(make_client: Callable[[ComfyUIClient], Tes
     c.post(f"/projects/{series['id']}/characters", json={"name": "Aiko", "lora_name": "aiko-absent.safetensors"})
     report = c.get("/comfyui/check").json()
     assert report["online"] and report["url"] == "http://127.0.0.1:8188"
-    assert all(p["ok"] for p in report["presets"])
+    assert all(p["ok"] for p in report["presets"] if not p["optional"])
     assert report["loras"] == {
         "checked": 2,
         "problems": [
@@ -430,3 +542,18 @@ def test_trial_errors(make_client: Callable[[ComfyUIClient], TestClient]) -> Non
     c = make_client(_http(down))
     job = _wait_done(c, c.post("/comfyui/trial", json={"preset": "qwen-image-base"}).json()["id"])
     assert job["status"] == "failed" and job["error"] == "ComfyUI hors ligne (127.0.0.1:8188)"
+
+
+def test_control_availability_endpoint(make_client: Callable[[ComfyUIClient], TestClient]) -> None:
+    """`GET /comfyui/control` : simulé = disponible ; vrai ComfyUI sans le patch = indisponible, message clair."""
+    mock = make_client(MockComfyUIClient()).get("/comfyui/control").json()
+    assert mock["available"] and mock["simulated"] and mock["default_type"] == "lineart"
+    assert mock["default_strength"] == 1.0 and all(t["available"] for t in mock["types"])
+
+    c = make_client(_http(_fixture_server(_recorded_object_info())))
+    got = c.get("/comfyui/control").json()
+    assert not got["available"] and "QwenImageDiffsynthControlnet" in got["message"]
+    assert got["message"].startswith("Verrouillage de composition indisponible")
+
+    c = make_client(_http(_fixture_server(_object_info())))
+    assert c.get("/comfyui/control").json()["available"]

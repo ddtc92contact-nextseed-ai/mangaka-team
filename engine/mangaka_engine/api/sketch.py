@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from ..pipeline.composition import type_problem
 from ..pipeline.estimate import estimate_panels
 from ..pipeline.generation import GenerationError
 from ..pipeline.sketch import (
@@ -72,6 +73,22 @@ def _require_enabled(pages: list[Page]) -> None:
         raise FieldError("sketch_enabled", str(exc)) from None
 
 
+def _require_clean_mode(ctx: AppContext, pages: list[Page]) -> None:
+    """Passage au propre par ControlNet alors que ComfyUI ne l'a pas : message clair, rien en file."""
+    panel = next((p for page in pages for p in page.panels), None)
+    project = panel.page.chapter.project if panel is not None else None
+    if project is None or project.clean_mode != "controlnet":
+        return
+    status = ctx.control_status()
+    problem = type_problem(status, project.clean_control or str(status.get("default_type") or ""))
+    if problem is not None:
+        raise FieldError(
+            "clean_mode",
+            f"passage au propre par ControlNet impossible : {problem[:1].lower()}{problem[1:]} "
+            "Repasse la série en img2img (fiche série) ou mets ComfyUI à jour.",
+        )
+
+
 # --- une case -------------------------------------------------------------------------------
 @router.post("/panels/{panel_id}/sketch", response_model=list[JobOut], status_code=202)
 def sketch_panel(
@@ -133,6 +150,7 @@ def clean_panel(
     """« Passer au propre » : version finale au palier de la série depuis le croquis validé."""
     _require_comfyui(ctx)
     panel = get_panel_or_404(session, panel_id)
+    _require_clean_mode(ctx, [panel.page])
     denoise = body.denoise if body else None
     job = _run(
         panel, lambda: enqueue_clean(session, _presets(ctx, panel), panel, denoise=denoise, knowledge=ctx.knowledge)
@@ -148,6 +166,8 @@ def _batch(
 ) -> BatchGenerateOut:
     _require_comfyui(ctx)
     _require_enabled(pages)
+    if action == "clean":
+        _require_clean_mode(ctx, pages)
     total = sum(len(p.panels) for p in pages)
     panels = select_panels(session, pages)
     jobs: list[Job] = []

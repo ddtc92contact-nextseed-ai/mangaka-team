@@ -1,0 +1,107 @@
+# Qwen-Image 2.1 · Qualité (avec images de référence) — composition verrouillée (ControlNet Union).
+# Même graphe que « qwen-image-edit-ref » (mêmes ids : 1 modèle, 2 encodeur, 6 prompts, 8 latent, 9 échantillonneur,
+# 11 sortie) ; le patch ControlNet est inséré entre le modèle (après les LoRA) et le cache / l'échantillonneur.
+# Modèle : Qwen-Image-2.1-Fun-Controlnet-Union (Alibaba PAI), un seul fichier pour 8 conditions.
+# Nœuds ModelPatchLoader / QwenImageDiffsynthControlnet : ComfyUI récent (mise à jour en attente du
+# feu vert du manager) — tant qu'ils manquent, « Tester la connexion » le signale et l'atelier masque
+# le verrouillage ; les autres paliers ne changent pas. Voir presets/README.md (verrouillage de composition).
+id: qwen-image-edit-ref-controlnet
+name: "Qwen-Image 2.1 · Qualité — composition verrouillée (avec références)"
+description: >-
+  Palier Qualité (50 étapes) dont la composition (cadrage, poses) suit une image guide : croquis validé, version de la case ou image importée, guidé par jusqu'à 3 images de référence ; LoRA de la série conservés.
+workflow_file: qwen-image-edit-ref-controlnet.json
+output_node: "11"
+timeout_s: 1500   # au-delà, la génération est interrompue et le job passe en échec
+role: controle
+tier:
+  name: Qualité
+# Durée d'une case (s) tant qu'il y a moins de 3 générations terminées avec ce preset.
+estimated_s: 300
+mapping:
+  # TextEncodeQwenImage21 encode les deux prompts : sorties 0 (positif) et 1 (négatif).
+  positive_prompt: { node: "6", input: prompt }
+  negative_prompt: { node: "6", input: negative_prompt }
+  seed: { node: "9", input: seed }
+  steps: { node: "9", input: steps }
+  cfg: { node: "9", input: cfg }
+  width: { node: "8", input: width }
+  height: { node: "8", input: height }
+  filename_prefix: { node: "11", input: filename_prefix }
+reference_images:
+  - { node: "20", input: image }
+  - { node: "21", input: image }
+  - { node: "22", input: image }
+# LoRA (style de la série puis identité de chaque fiche) chaînés AVANT le patch ControlNet.
+lora_chain:
+  class_type: LoraLoaderModelOnly
+  model_from: { node: "1", output: 0 }
+  model_input: model
+  name_input: lora_name
+  strength_input: strength_model
+# Verrouillage de composition (ControlNet Union de Qwen-Image 2.1 : un PATCH DE MODÈLE, pas un
+# ControlNet classique). Nœuds ajoutés au graphe du palier, mêmes ids que lui pour le reste :
+#   40 ModelPatchLoader (fichier du patch, dossier ComfyUI/models/model_patches/)
+#   41 LoadImage (image guide : croquis validé, version de la case ou image importée)
+#   42 prétraitement, remplacé selon le type choisi (retiré pour « carte déjà prête »)
+#   43 ImageScale (carte à la taille de la case)
+#   44 QwenImageDiffsynthControlnet (modèle + patch + VAE + carte, force `strength`) → cache (nœud 4)
+#   45 SaveImage de la carte : aperçu dans l'atelier seulement (retiré du graphe de génération)
+# Les LoRA sont chaînés entre le modèle (nœud 1) et le patch (nœud 44).
+control:
+  patch: { node: "40", input: name }
+  apply: { node: "44", input: strength }
+  image: { node: "41", input: image }
+  preprocessor: "42"
+  resize: "43"
+  map_output: "45"
+  default_type: lineart
+  default_strength: 1.0   # 0 = contrôle ignoré, 1 = composition tenue, jusqu'à 2
+  # Prétraitements de comfyui_controlnet_aux (Canny : nœud natif). class_type absent = image utilisée telle quelle.
+  types:
+    lineart:
+      name: Trait
+      description: Contours et traits de l'image guide (le plus fidèle pour un croquis ou une case existante).
+      class_type: LineArtPreprocessor
+      inputs: { coarse: disable, resolution: 1024 }
+      order: 1
+    depth:
+      name: Profondeur
+      description: Volumes et plans (premier plan / fond) ; laisse plus de liberté au trait.
+      class_type: DepthAnythingV2Preprocessor
+      inputs: { ckpt_name: depth_anything_v2_vitl.pth, resolution: 1024 }
+      order: 2
+    pose:
+      name: Pose
+      description: Squelette des personnages (corps, mains, visage) ; idéal depuis une photo de pose.
+      class_type: DWPreprocessor
+      inputs:
+        detect_hand: enable
+        detect_body: enable
+        detect_face: enable
+        resolution: 1024
+        bbox_detector: yolox_l.onnx
+        pose_estimator: dw-ll_ucoco_384_bs5.torchscript.pt
+      order: 3
+    scribble:
+      name: Croquis à la main
+      description: Gribouillis ou crayonné de l'auteur, réduit à ses grandes lignes.
+      class_type: ScribblePreprocessor
+      inputs: { resolution: 1024 }
+      order: 4
+    canny:
+      name: Contours nets (Canny)
+      description: Bords francs détectés dans l'image ; utile pour une photo ou un décor.
+      class_type: Canny
+      inputs: { low_threshold: 0.4, high_threshold: 0.8 }
+      order: 5
+    carte:
+      name: Carte déjà prête
+      description: L'image importée est déjà une carte de contrôle (trait, profondeur ou pose) ; aucun prétraitement.
+      order: 6
+defaults:
+  negative_prompt: "texte, lettres, bulles, filigrane, signature, flou, mains déformées"
+  steps: 50
+  cfg: 1
+  width: 1024
+  height: 1024
+  filename_prefix: mangaka/case

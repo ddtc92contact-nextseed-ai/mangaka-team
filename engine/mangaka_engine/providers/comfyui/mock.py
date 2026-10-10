@@ -12,6 +12,11 @@ Inpainting (un `VAEEncode` part d'une `LoadImage` et un `LoadImageMask` est pré
 source, légèrement modifiée partout (comme le ferait l'aller-retour VAE) et remplie d'une couleur tirée
 de la seed dans la zone masquée — le moteur doit recoller seulement la zone pour garder le reste intact.
 
+Composition verrouillée (ControlNet, patch de modèle) : un nœud qui reçoit un `model_patch` et une
+`image` repart de l'image guide envoyée (même composition), légendée « CONTROLNET ». Aperçu de la carte
+de contrôle (workflow sans latent avec un prétraitement : classe `…Preprocessor` ou `Canny`) : contours
+de l'image guide, trait noir sur blanc.
+
 Agrandissement (finition d'impression) : un autre workflow sans latent vide (`Empty…`) qui charge une image
 envoyée renvoie cette image redimensionnée (Pillow, lanczos) à la taille demandée — celle du nœud de
 taille finale — sans GPU ni modèle.
@@ -26,7 +31,7 @@ import uuid
 from collections.abc import Callable, Sequence
 from typing import Any
 
-from PIL import Image, ImageDraw, ImageFont, ImageOps
+from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
 
 from .base import (
     ComfyStatus,
@@ -156,7 +161,9 @@ def render_mock_sketch(width: int, height: int, seed: int, label: str) -> bytes:
     return buf.getvalue()
 
 
-def render_mock_from_image(source: bytes, width: int, height: int, seed: int, denoise: float | None) -> bytes:
+def render_mock_from_image(
+    source: bytes, width: int, height: int, seed: int, denoise: float | None, *, caption: str | None = None
+) -> bytes:
     """Image → image : la source agrandie à la taille demandée, encrée (même composition), légendée."""
     with Image.open(io.BytesIO(source)) as src:
         base = ImageOps.grayscale(src.convert("RGB")).resize((width, height), Image.Resampling.LANCZOS)
@@ -166,7 +173,7 @@ def render_mock_from_image(source: bytes, width: int, height: int, seed: int, de
     draw = ImageDraw.Draw(img)
     side = min(width, height)
     size = max(10, side // 16)
-    text = f"PROPRE · seed {seed}" + (f" · denoise {denoise:g}" if denoise is not None else "")
+    text = caption or f"PROPRE · seed {seed}" + (f" · denoise {denoise:g}" if denoise is not None else "")
     draw.text(
         (width / 2, height - size * 1.6),
         text,
@@ -179,6 +186,21 @@ def render_mock_from_image(source: bytes, width: int, height: int, seed: int, de
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()
+
+
+def render_mock_control_map(source: bytes, width: int, height: int) -> bytes:
+    """Carte de contrôle simulée : contours de l'image guide, trait noir sur papier blanc."""
+    with Image.open(io.BytesIO(source)) as src:
+        base = ImageOps.grayscale(src.convert("RGB")).resize((width, height), Image.Resampling.LANCZOS)
+    edges = ImageOps.autocontrast(base.filter(ImageFilter.FIND_EDGES), cutoff=1)
+    out = ImageOps.invert(edges.point(lambda v: 255 if v > 40 else 0))
+    buf = io.BytesIO()
+    out.convert("RGB").save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def is_preprocessor(class_type: str) -> bool:
+    return class_type.endswith("Preprocessor") or class_type == "Canny"
 
 
 def _linked(workflow: dict[str, Any], value: Any) -> dict[str, Any] | None:
@@ -200,6 +222,26 @@ def source_image_name(workflow: dict[str, Any]) -> str | None:
             if current.get("class_type") == "LoadImage":
                 image = current.get("inputs", {}).get("image")
                 return image if isinstance(image, str) else None
+            current = _linked(workflow, current.get("inputs", {}).get("image"))
+    return None
+
+
+def control_image_name(workflow: dict[str, Any]) -> tuple[str, float | None] | None:
+    """(image guide, force) d'un workflow ControlNet : nœud à `model_patch`, en remontant son `image`."""
+    for node in workflow.values():
+        inputs = node.get("inputs", {}) if isinstance(node, dict) else {}
+        if "model_patch" not in inputs:
+            continue
+        strength = inputs.get("strength")
+        current = _linked(workflow, inputs.get("image"))
+        for _ in range(8):
+            if current is None:
+                break
+            if current.get("class_type") == "LoadImage":
+                image = current.get("inputs", {}).get("image")
+                if isinstance(image, str):
+                    return image, float(strength) if isinstance(strength, int | float) else None
+                break
             current = _linked(workflow, current.get("inputs", {}).get("image"))
     return None
 
@@ -300,9 +342,23 @@ class MockComfyUIClient:
         seed, label = _first_int(workflow, "seed") or 0, _label(workflow)
         inpaint = self._inpaint_inputs(workflow)
         sketch_source = source_image_name(workflow) if inpaint is None else None
-        source = source_upload(workflow, self.uploads) if inpaint is None and sketch_source is None else None
+        control = control_image_name(workflow) if inpaint is None and sketch_source is None else None
+        source = (
+            source_upload(workflow, self.uploads)
+            if inpaint is None and sketch_source is None and control is None
+            else None
+        )
+        preprocess = any(
+            isinstance(n, dict) and is_preprocessor(str(n.get("class_type") or "")) for n in workflow.values()
+        )
         if inpaint is not None:
             data = render_mock_inpaint(*inpaint, seed)
+        elif control is not None:
+            image, strength = control
+            caption = f"CONTROLNET · seed {seed}" + (f" · force {strength:g}" if strength is not None else "")
+            data = render_mock_from_image(self.uploads[image], *requested_size(workflow), seed, None, caption=caption)
+        elif source is not None and preprocess:
+            data = render_mock_control_map(source, *requested_size(workflow))
         elif source is not None:
             data = resize_image(source, *requested_size(workflow))
         elif sketch_source is not None:
