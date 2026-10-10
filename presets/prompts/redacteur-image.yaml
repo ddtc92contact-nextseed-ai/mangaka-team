@@ -1,0 +1,93 @@
+# Étape 3 — rédaction du prompt image d'une case par le LLM texte (agent Dessinateur), voir
+# engine/mangaka_engine/pipeline/prompt_writer.py et presets/README.md (« Rédacteur de prompt »).
+#
+# Qwen-Image 2.1 (encodeur Qwen3-VL) suit mieux UN paragraphe descriptif cohérent que des fragments
+# étiquetés : sujet → action → cadrage → décor → lumière → style, références citées par emplacement.
+# Le prompt rédigé est stocké sur la case (une fois par case) ; le cadrage des images de référence
+# (image_prompt.yaml#references) et les termes « pas de texte » du prompt négatif sont toujours
+# ajoutés au moment de l'envoi à ComfyUI, comme pour le prompt par fragments.
+#
+# Variables disponibles ($nom ; écrire $$ pour un « $ » littéral) :
+#   $language ($language_name : « français » ou « anglais ») $min_words $max_words
+#   $plan $angle $ambiance (direction artistique, sinon type de plan du scénario) $description
+#   $setting (lieu) $staging (mise en scène)
+#   $characters      (personnages de la case : « - Nom : traits visuels », un par ligne)
+#   $character_names (leurs noms exacts, à recopier)
+#   $absent_characters (personnages de la série absents de la case : à ne jamais nommer)
+#   $decor $objects  (fiches de la bibliothèque de la série vues dans la case)
+#   $references      (images de référence envoyées et leur rôle : « - image 1 : identité de Aiko »)
+#   $style           (mots-clés de style de la série, dans leur langue mesurée : à recopier tels quels)
+#   $bible $savoir_faire
+#   $context_json    (le même contexte, en JSON)
+# Gabarit de relance après une réponse invalide : $error (erreurs de validation).
+id: redacteur-image
+description: Prompt image de chaque case rédigé en un paragraphe (sujet, action, cadrage, décor, lumière, style).
+# « Prompt rédigé par l'IA » des nouvelles séries (chaque série a son réglage dans sa fiche) ;
+# false = assemblage par fragments (image_prompt.yaml#parts), inchangé.
+enabled: true
+# Langue du paragraphe : fr (défaut — les A/B mesurés favorisent le FR sur la plupart des packs) ou en.
+# Les mots-clés de style ($style) restent dans leur langue mesurée.
+language: fr
+min_words: 80             # longueur visée du paragraphe (mots)
+max_words: 160
+max_retries: 1            # nouvel essai après une réponse invalide : 2 tentatives au plus, puis repli par fragments
+temperature: 0.4
+
+system: |
+  Tu es le dessinateur d'un studio de manga et tu écris les prompts du modèle d'image Qwen-Image 2.1.
+  Ce modèle suit mieux un paragraphe descriptif cohérent qu'une liste de mots-clés : tu écris donc,
+  pour une case, UN seul paragraphe fluide, concret et visuel, en $language_name.
+  Règles :
+  - ordre : sujet (qui) → action (ce qu'il fait, sa pose, son expression) → cadrage (plan, angle,
+    place de chacun dans le cadre) → décor (lieu, moment, éléments visibles) → lumière et ambiance →
+    style ;
+  - nomme chaque personnage de la case par son nom exact, avec ses traits visuels (cheveux, tenue,
+    silhouette, signes distinctifs) ;
+  - cite chaque image de référence par son emplacement (« la personne de l'image 1… », « le lieu de
+    l'image 2… ») ;
+  - ne demande jamais de texte, de bulle, de lettre, de titre ni d'onomatopée dans l'image et ne
+    recopie aucune réplique : tout le lettrage est ajouté plus tard ;
+  - n'invente aucun personnage : seuls ceux de la case apparaissent, et jamais ceux qui en sont absents ;
+  - termine par les mots-clés de style fournis, recopiés tels quels, dans leur langue d'origine ;
+  - entre $min_words et $max_words mots ; pas de liste, pas de titre, pas de guillemets.
+  Tu réponds UNIQUEMENT par un objet JSON valide, sans texte autour ni bloc de code.
+
+user: |
+  Case à décrire :
+  - plan : $plan
+  - angle de caméra : $angle
+  - description : $description
+  - lieu : $setting
+  - mise en scène : $staging
+  - ambiance (lumière, atmosphère) : $ambiance
+
+  Personnages de la case (à nommer tous, avec leurs traits) :
+  $characters
+
+  Personnages absents de la case (à ne jamais nommer ni dessiner) : $absent_characters
+
+  Décor récurrent : $decor
+  Objets récurrents : $objects
+
+  Images de référence envoyées au modèle avec ce prompt :
+  $references
+
+  Repères de la bible de la série (à respecter) :
+  $bible
+
+  Savoir-faire de l'équipe (applique-le sans le citer) :
+  $savoir_faire
+
+  Mots-clés de style de la série (à recopier tels quels à la fin du paragraphe) : $style
+
+  Format de réponse :
+  {"prompt": "le paragraphe", "language": "$language", "notes": "une phrase facultative pour l'auteur, ou null"}
+
+  <contexte>
+  $context_json
+  </contexte>
+
+retry: |
+  Ta réponse précédente est invalide :
+  $error
+  Corrige ces erreurs et renvoie l'objet JSON complet, et uniquement lui.

@@ -294,9 +294,9 @@ def test_nothing_to_direct_and_unknown_page(c: TestClient) -> None:
     assert c.post(f"/chapters/{chapter_id}/direction/apply", json={}).status_code == 422
 
 
-def _three_panel_page(c: TestClient, layout_style: str) -> tuple[int, dict]:
+def _three_panel_page(c: TestClient, layout_style: str, **series: Any) -> tuple[int, dict]:
     """Une page de trois cases d'importance égale, sans indice de mise en scène."""
-    sid = _series(c, layout_style=layout_style)
+    sid = _series(c, layout_style=layout_style, **series)
     chapter_id = _scripted_chapter(c, sid, pages=1)
     panel = {
         "description": "Aiko court.",
@@ -363,7 +363,7 @@ def test_template_hint_and_page_choc_drive_the_layout(c: TestClient) -> None:
 
 
 def test_image_prompt_gets_plan_angle_and_ambiance(c: TestClient) -> None:
-    chapter_id, page = _three_panel_page(c, "sage")
+    chapter_id, page = _three_panel_page(c, "sage", ai_prompt=False)  # prompt par fragments
     d = _direct(c, chapter_id)["pages"][0]
     pid = d["panels"][0]["panel_id"]
     _panel_edit(

@@ -98,12 +98,14 @@ def _ok(resp: httpx.Response, status: int = 200) -> Any:
     return resp.json()
 
 
-def setup_chapter(c: TestClient) -> dict[str, Any]:
-    """Série (style + LoRA de style), Aiko (référence + LoRA), Kenji (sans), 2 pages / 3 cases."""
+def setup_chapter(c: TestClient, *, ai_prompt: bool = False) -> dict[str, Any]:
+    """Série (style + LoRA de style), Aiko (référence + LoRA), Kenji (sans), 2 pages / 3 cases.
+
+    Prompt par fragments par défaut (le rédacteur IA est couvert par test_prompt_writer.py)."""
     s = _ok(
         c.post(
             "/projects",
-            json={"title": "Les Lames", **SEINEN, "style_lora_name": "encre.safetensors"},
+            json={"title": "Les Lames", **SEINEN, "style_lora_name": "encre.safetensors", "ai_prompt": ai_prompt},
         ),
         201,
     )

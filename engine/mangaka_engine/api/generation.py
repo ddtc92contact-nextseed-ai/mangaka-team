@@ -22,6 +22,7 @@ from ..pipeline.generation import (
     STEP,
     GenerationError,
     LibraryEntry,
+    apply_prompt_request,
     enqueue_panel,
     entry_kind,
     panel_cast,
@@ -29,13 +30,17 @@ from ..pipeline.generation import (
     panel_target,
     panels_to_generate,
     preset_tier,
+    prompt_pending,
+    prompt_request,
     quality_preset_id,
     refresh_states,
     resolve_preset_id,
+    run_prompt_request,
     update_panel_prompt,
 )
 from ..pipeline.inpaint import MaskError, Region, decode_png
 from ..pipeline.names import CharacterMatcher
+from ..pipeline.prompt_writer import AGENT_ID as WRITER_AGENT
 from ..pipeline.qc_bench import STEP as BENCH_STEP
 from ..pipeline.reference_sheets import KIND_LABELS
 from ..pipeline.reference_sheets import STEP as REFERENCE_STEP
@@ -191,6 +196,10 @@ def panel_detail(session: Session, ctx: AppContext, panel: Panel) -> PanelDetail
         bbox=panel.bbox,
         final_prompt=panel.final_prompt,
         final_prompt_manual=panel.final_prompt_manual,
+        prompt_source=panel.prompt_source if panel.prompt_source in ("ia", "fragments") else None,  # type: ignore[arg-type]
+        ai_prompt=bool(page.chapter.project.ai_prompt),
+        prompt_pending=prompt_pending(presets, session, panel),
+        prompt_warning=panel.prompt_warning,
         generation_preset=panel.generation_preset,
         resolved_preset=resolved if resolved in presets.workflows else None,
         target=panel_target(presets, page, panel),
@@ -335,11 +344,12 @@ def update_panel(
         if changes["description"] is None:
             raise FieldError("description", "ne peut pas être vide")
         panel.description = changes["description"]
-        update_panel_prompt(_presets(ctx, panel), session, panel, ctx.knowledge)
+        # La case a changé : un prompt rédigé par l'IA le sera de nouveau à la prochaine génération.
+        update_panel_prompt(_presets(ctx, panel), session, panel, ctx.knowledge, reset=True)
     for key in ("setting", "staging"):
         if key in changes:
             setattr(panel, key, changes[key] or "")
-            update_panel_prompt(_presets(ctx, panel), session, panel, ctx.knowledge)
+            update_panel_prompt(_presets(ctx, panel), session, panel, ctx.knowledge, reset=True)
     if "generation_preset" in changes:
         preset = changes["generation_preset"]
         known = _presets(ctx, panel).workflows
@@ -359,7 +369,9 @@ def update_panel(
         text = (changes["final_prompt"] or "").strip()
         panel.final_prompt = text or None
         panel.final_prompt_manual = bool(text)
-        update_panel_prompt(_presets(ctx, panel), session, panel, ctx.knowledge)
+        if text:
+            panel.prompt_warning = None
+        update_panel_prompt(_presets(ctx, panel), session, panel, ctx.knowledge, reset=not text)
     session.commit()
     return panel_detail(session, ctx, panel)
 
@@ -368,10 +380,21 @@ def update_panel(
 def rebuild_prompt(
     panel_id: int, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
 ) -> PanelDetailOut:
-    """Abandonne l'édition manuelle et reconstruit le prompt final depuis la case et les fiches."""
+    """Abandonne l'édition manuelle et reconstruit le prompt final depuis la case et les fiches : redemandé
+    au LLM si la série a le « Prompt rédigé par l'IA » (au plus 2 tentatives, puis repli par fragments
+    avec un avertissement sur la case), sinon assemblé par fragments."""
     panel = get_panel_or_404(session, panel_id)
+    presets = _presets(ctx, panel)
     panel.final_prompt_manual = False
-    update_panel_prompt(_presets(ctx, panel), session, panel, ctx.knowledge)
+    request = prompt_request(presets, session, panel, ctx.knowledge, force=True)
+    if request is None:
+        update_panel_prompt(presets, session, panel, ctx.knowledge, reset=True)
+    else:
+        session.commit()  # aucune transaction ouverte pendant l'appel au LLM
+        llm, llm_error = ctx.agents.llm_for(WRITER_AGENT, request.project_id)
+        run, error = run_prompt_request(presets, llm, llm_error, request)
+        panel = get_panel_or_404(session, panel_id)
+        apply_prompt_request(presets, session, panel, request, run, error, ctx.knowledge)
     session.commit()
     return panel_detail(session, ctx, panel)
 

@@ -5,18 +5,21 @@ id: dessinateur
 name: Dessinateur
 icon: "🖌️"
 role: >-
-  Écrit le prompt de chaque case (description, plan, personnages, style) et la dessine avec
-  ComfyUI, sans jamais écrire de texte dans l'image.
+  Rédige le prompt de chaque case en un paragraphe (sujet, action, cadrage, décor, lumière, style)
+  avec le LLM texte, puis la dessine avec ComfyUI, sans jamais écrire de texte dans l'image.
 step: 3
 step_label: Génération
-providers: [comfyui]
+providers: [comfyui, llm]
+llm: { provider: provider, model: model }
 job_steps: [generation]
 knowledge_role: image_prompt   # savoir-faire livré : presets/knowledge.yaml › agents.image_prompt
 summary: [workflow]
 trial: image_prompt
 trial_description: >-
-  Construit le prompt d'une case factice (deux personnages, une réplique) et les paramètres envoyés
-  à ComfyUI, sans rien générer.
+  Construit le prompt d'une case factice (deux personnages, une réplique) — rédigé par le LLM et par
+  fragments, côte à côte — et les paramètres envoyés à ComfyUI, sans rien générer.
+secrets:
+  - { env: DEEPSEEK_API_KEY, label: Clé d'API DeepSeek }
 settings:
   - key: workflow
     label: Workflow des nouvelles séries
@@ -105,3 +108,110 @@ settings:
     group: Prompt
     type: boolean
     source: image_prompt.yaml#strip_quotes
+  # --- Rédacteur de prompt (prompts/redacteur-image.yaml) ---------------------------------------
+  - key: ai_prompt
+    label: Prompt rédigé par l'IA (nouvelles séries)
+    group: Rédacteur de prompt
+    type: boolean
+    source: prompts/redacteur-image.yaml#enabled
+    global_only: true
+    help: >-
+      Oui : le LLM écrit le prompt de chaque case en un paragraphe, une fois par case. Non : assemblage
+      par fragments (morceaux ci-dessus). Chaque série a son propre réglage dans sa fiche.
+  - key: provider
+    label: Fournisseur LLM
+    group: Rédacteur de prompt
+    type: choice
+    choices: [deepseek, ollama, claude, mock]
+    choice_labels: { deepseek: DeepSeek, ollama: Ollama (local), claude: Claude, mock: Factice (mode mock) }
+    source: env:LLM_PROVIDER
+    fallback: mock
+    help: Ollama et Claude sont prévus mais pas encore disponibles.
+  - key: model
+    label: Modèle
+    group: Rédacteur de prompt
+    type: text
+    source: providers.yaml#deepseek.model
+    env_override: DEEPSEEK_MODEL
+    help: Nom du modèle chez le fournisseur (ex. deepseek-chat).
+  - key: prompt_language
+    label: Langue du prompt
+    group: Rédacteur de prompt
+    type: choice
+    choices: [fr, en]
+    choice_labels: { fr: Français, en: Anglais }
+    source: prompts/redacteur-image.yaml#language
+    fallback: fr
+    help: >-
+      Français par défaut : les A/B mesurés le favorisent sur la plupart des packs. Les mots-clés de
+      style restent dans leur langue mesurée.
+  - key: min_words
+    label: Longueur visée — minimum (mots)
+    group: Rédacteur de prompt
+    type: integer
+    min: 10
+    max: 1000
+    source: prompts/redacteur-image.yaml#min_words
+  - key: max_words
+    label: Longueur visée — maximum (mots)
+    group: Rédacteur de prompt
+    type: integer
+    min: 10
+    max: 1000
+    source: prompts/redacteur-image.yaml#max_words
+  - key: writer_temperature
+    label: Température
+    group: Rédacteur de prompt
+    type: number
+    min: 0
+    max: 2
+    step: 0.05
+    source: prompts/redacteur-image.yaml#temperature
+    help: 0 = paragraphes très réguliers, 1 et plus = plus d'invention.
+  - key: writer_max_retries
+    label: Nouveaux essais après une réponse invalide
+    group: Rédacteur de prompt
+    type: integer
+    min: 0
+    max: 2
+    source: prompts/redacteur-image.yaml#max_retries
+    help: Ensuite, la case retombe sur le prompt par fragments, avec un avertissement.
+  - key: writer_system
+    label: Consignes de rédaction
+    group: Rédacteur de prompt
+    type: prompt
+    source: prompts/redacteur-image.yaml#system
+    variables: &writer_vars
+      - language
+      - language_name
+      - min_words
+      - max_words
+      - plan
+      - angle
+      - ambiance
+      - description
+      - setting
+      - staging
+      - characters
+      - character_names
+      - absent_characters
+      - decor
+      - objects
+      - references
+      - style
+      - bible
+      - savoir_faire
+      - context_json
+  - key: writer_user
+    label: Gabarit de la case
+    group: Rédacteur de prompt
+    type: prompt
+    source: prompts/redacteur-image.yaml#user
+    variables: *writer_vars
+    help: Gardez le bloc <contexte>$context_json</contexte> pour le mode mock.
+  - key: writer_retry
+    label: Consigne de relance
+    group: Rédacteur de prompt
+    type: prompt
+    source: prompts/redacteur-image.yaml#retry
+    variables: [error]

@@ -7,6 +7,11 @@ se passe dans un décor de la bibliothèque, à tour de rôle, et une case sur d
 Pour la direction artistique (`"task": "art_direction"`), il renvoie des choix variés mais
 déterministes : même chapitre, même audace, même relance → mêmes choix (`mock_art_direction`).
 
+Pour la rédaction du prompt image d'une case (`"task": "image_prompt"`), il rend un paragraphe qui
+nomme chaque personnage avec ses traits, cite les images de référence par leur emplacement et finit par
+les mots-clés de style (`mock_image_prompt`). `[mock:prompt-invalide:N]` dans la description de la case :
+les N premiers essais sont invalides ; `[mock:prompt-intrus:N]` : ils nomment un personnage absent.
+
 Pour tester les relances sans vrai LLM, les `invalid_attempts` premiers essais d'une conversation
 renvoient une réponse invalide (variable MOCK_LLM_INVALID_ATTEMPTS, ou `[mock:invalide:N]` dans le
 synopsis du chapitre ; `[mock:da-invalide:N]` pour la seule direction artistique ;
@@ -29,8 +34,11 @@ _CONTEXT = re.compile(r"<contexte>\s*(\{.*\})\s*</contexte>", re.DOTALL)
 _INVALID_MARK = re.compile(r"\[mock:invalide:(\d+)\]")
 _DA_INVALID_MARK = re.compile(r"\[mock:da-invalide:(\d+)\]")
 _ID_INVALID_MARK = re.compile(r"\[mock:id-invalide:(\d+)\]")
+_PROMPT_INVALID_MARK = re.compile(r"\[mock:prompt-invalide:(\d+)\]")
+_PROMPT_INTRUDER_MARK = re.compile(r"\[mock:prompt-intrus:(\d+)\]")
+_ANY_MARK = re.compile(r"\s*\[mock:[a-z-]+:\d+\]\s*")
 UNKNOWN_ID = 999_999  # id de décor cité par `[mock:id-invalide:N]` (absent de toute bibliothèque)
-TASKS = ("script", "art_direction")
+TASKS = ("script", "art_direction", "image_prompt")
 
 _SHOTS = ["plan large", "plan moyen", "gros plan", "plan américain", "contre-plongée", "plan rapproché", "plongée"]
 _PANELS_PER_PAGE = [5, 4, 6, 3, 5, 4]
@@ -280,6 +288,8 @@ class MockLLMProvider:
         if self._responder is not None:
             return LLMResult(text=self._responder(messages, json_mode), model="mock")
         ctx = _task_context(messages) if json_mode else None
+        if ctx is not None and ctx.get("task") == "image_prompt":
+            return LLMResult(text=self._image_prompt_answer(messages, ctx), model="mock")
         if ctx is not None and ctx.get("task") == "art_direction":
             return LLMResult(text=self._direction_answer(messages, ctx), model="mock")
         if ctx is not None:
@@ -304,6 +314,22 @@ class MockLLMProvider:
             return json.dumps(out, ensure_ascii=False)
         return json.dumps(mock_script(ctx), ensure_ascii=False)
 
+    def _image_prompt_answer(self, messages: list[ChatMessage], ctx: dict[str, Any]) -> str:
+        attempt = 1 + sum(1 for m in messages if m.role == "assistant")
+        description = str((ctx.get("panel") or {}).get("description") or "")
+        mark = _PROMPT_INVALID_MARK.search(description)
+        invalid = int(mark.group(1)) if mark else self.invalid_attempts
+        if attempt <= invalid:
+            if attempt % 2:
+                return "Voici le prompt : une belle case…"
+            return json.dumps({"prompt": "Une case.", "language": "klingon"})
+        out = mock_image_prompt(ctx)
+        intruder = _PROMPT_INTRUDER_MARK.search(description)
+        absent = list(ctx.get("absent_characters") or [])
+        if intruder and absent and attempt <= int(intruder.group(1)):
+            out["prompt"] = f"{absent[0]} observe la scène depuis le bord du cadre. {out['prompt']}"
+        return json.dumps(out, ensure_ascii=False)
+
     def _direction_answer(self, messages: list[ChatMessage], ctx: dict[str, Any]) -> str:
         attempt = 1 + sum(1 for m in messages if m.role == "assistant")
         mark = _DA_INVALID_MARK.search(str((ctx.get("chapter") or {}).get("synopsis") or ""))
@@ -313,3 +339,65 @@ class MockLLMProvider:
                 return "Voici mes choix de mise en scène : page 1 calme…"
             return json.dumps({"pages": [{"page": 1, "rythme": "tempête", "panels": [{"panel": 1, "plan": "drone"}]}]})
         return json.dumps(mock_art_direction(ctx), ensure_ascii=False)
+
+
+# --- rédaction du prompt image ---------------------------------------------------------------------
+_FILLERS = {
+    "fr": [
+        "La composition guide le regard vers l'action principale, avec un premier plan lisible et un fond détaillé.",
+        "Les silhouettes se détachent nettement du décor et les proportions restent fidèles aux fiches.",
+        "Les expressions sont marquées, les gestes amples et lisibles, sans aucun élément superflu.",
+        "Le décor garde sa profondeur, avec des plans successifs bien séparés.",
+    ],
+    "en": [
+        "The composition leads the eye to the main action, with a readable foreground and a detailed background.",
+        "Silhouettes stand out clearly from the setting and proportions stay true to the character sheets.",
+        "Expressions are strong, gestures broad and readable, with nothing superfluous.",
+        "The setting keeps its depth, with clearly separated layers.",
+    ],
+}
+
+
+def mock_image_prompt(ctx: dict[str, Any]) -> dict[str, Any]:
+    """Paragraphe déterministe : sujet → action → cadrage → décor → lumière → style, références citées."""
+    lang = "en" if ctx.get("language") == "en" else "fr"
+    panel = ctx.get("panel") or {}
+    refs = {r.get("name"): r.get("image") for r in ctx.get("references") or [] if r.get("kind") == "character"}
+    subjects = []
+    for c in ctx.get("characters") or []:
+        name, details = c.get("name", ""), c.get("details", "")
+        slot = refs.get(name)
+        who = (
+            (f"{name}, the person from image {slot}" if lang == "en" else f"{name}, la personne de l'image {slot}")
+            if slot
+            else name
+        )
+        subjects.append(f"{who} ({details})" if details else who)
+    sentences = []
+    if subjects:
+        sentences.append(("Featuring " if lang == "en" else "On voit ") + ", ".join(subjects) + ".")
+    description = _ANY_MARK.sub(" ", str(panel.get("description") or "")).strip()
+    if description:
+        sentences.append(description.rstrip(".") + ".")
+    framing = ", ".join(v for v in (panel.get("plan"), panel.get("angle")) if v)
+    if framing:
+        sentences.append(("Framing: " if lang == "en" else "Cadrage : ") + framing + ".")
+    if panel.get("staging"):
+        sentences.append(str(panel["staging"]).rstrip(".") + ".")
+    place = ", ".join(v for v in (panel.get("setting"), (ctx.get("decor") or {}).get("name")) if v)
+    if place:
+        sentences.append(("The scene takes place in " if lang == "en" else "La scène se passe : ") + place + ".")
+    if panel.get("ambiance"):
+        sentences.append(("Lighting: " if lang == "en" else "Lumière : ") + str(panel["ambiance"]).rstrip(".") + ".")
+    sentences.append(
+        "No text or speech bubbles in the image." if lang == "en" else "Aucun texte ni bulle dans l'image."
+    )
+    target = int(ctx.get("min_words") or 80)
+    fillers = _FILLERS[lang]
+    i = 0
+    while len(" ".join(sentences).split()) + len(str(ctx.get("style") or "").split()) < target:
+        sentences.insert(len(sentences) - 1, fillers[i % len(fillers)])
+        i += 1
+    if ctx.get("style"):
+        sentences.append(str(ctx["style"]).rstrip(".") + ".")
+    return {"prompt": " ".join(sentences), "language": lang, "notes": "Paragraphe du LLM factice (mode mock)."}
