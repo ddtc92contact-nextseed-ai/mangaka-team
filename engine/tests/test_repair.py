@@ -273,6 +273,8 @@ def test_repair_creates_a_linked_version_and_keeps_the_rest(make_client: Callabl
     assert info["available"] and info["preset"] == "qwen-image-inpaint-turbo"  # palier de la version (Turbo)
     assert info["character_id"] == data["aiko"]["id"]  # seul personnage de la case : concerné d'office
     assert "Aiko (cheveux noirs courts, kimono rouge)" in info["prompt"] and "Aiko sur un toit" in info["prompt"]
+    none = _ok(c.get(f"/panel-images/{v1['id']}/repair", params={"target": "hand", "auto_character": False}))
+    assert none["character_id"] is None and "Aiko (" not in none["prompt"]
     assert info["denoise"] == REG.workflow("qwen-image-inpaint-turbo").preset.defaults["denoise"]
 
     [job] = _ok(

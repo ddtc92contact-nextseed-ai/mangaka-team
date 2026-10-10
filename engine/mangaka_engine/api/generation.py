@@ -323,6 +323,7 @@ def get_repair_info(
     image_id: int,
     target: RepairTarget = "zone",
     character_id: int | None = None,
+    auto_character: bool = True,
     session: Session = Depends(get_session),
     ctx: AppContext = Depends(get_ctx),
 ) -> RepairInfoOut:
@@ -335,8 +336,8 @@ def get_repair_info(
     except (GenerationError, PresetError) as exc:
         return RepairInfoOut(available=False, problem=str(exc)[:1].upper() + str(exc)[1:], target=target)
     characters = [RepairCharacterOut(id=c.id, name=c.name) for c in rctx.characters]
-    # Sans choix explicite : le seul personnage de la case est celui concerné.
-    if character_id is None and len(rctx.characters) == 1:
+    # Sans choix explicite (`auto_character`) : le seul personnage de la case est celui concerné.
+    if character_id is None and auto_character and len(rctx.characters) == 1:
         character_id = rctx.characters[0].id
     try:
         character = concerned_character(rctx, character_id)
