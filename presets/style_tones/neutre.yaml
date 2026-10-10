@@ -4,4 +4,5 @@ name: Neutre
 description: "Ni appuyé ni sombre : le ton suit l'histoire."
 order: 20
 default: true
-prompt_keywords: [balanced natural lighting]
+lang: fr
+prompt_keywords: [ambiance neutre et calme, sans émotion marquée]

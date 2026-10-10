@@ -224,7 +224,7 @@ def test_trigger_words_saved_and_cleared(make_client: Callable[..., TestClient])
     # LoRA du catalogue (style_loras.yaml) : mots déclencheurs et poids conseillé.
     s = _ok(c.patch(f"/projects/{s['id']}", json={"style_lora_name": "encre-seinen_v2.safetensors"}))
     assert s["style_lora_trigger_words"] == ["ink seinen style"] and s["style_lora_in_catalog"] is True
-    assert s["style_prompt"].startswith("ink seinen style, shonen manga style")
+    assert s["style_prompt"].startswith("ink seinen style, shonen manga, dynamic energetic style")
     a = _ok(c.post(f"/projects/{s['id']}/characters", json={"name": "Aiko", "lora_trigger_words": "aiko_v1"}), 201)
     assert a["lora_trigger_words"] == "aiko_v1"
     a = _ok(c.patch(f"/characters/{a['id']}", json={"lora_trigger_words": ""}))
@@ -268,7 +268,7 @@ def test_picked_mock_lora_reaches_workflow_graph(make_client: Callable[..., Test
     [img] = _ok(c.get(f"/panels/{p1['id']}/images"))
     assert [(lo["name"], lo["weight"]) for lo in img["params"]["loras"]] == [(style, 0.6), (aiko_lora, 0.9)]
     assert style == "styles/aquarelle/lavis-doux.safetensors"  # catalogue : « soft wash painting »
-    assert "soft wash painting, seinen manga style" in img["params"]["prompt"] and "aiko_v1" in img["params"]["prompt"]
+    assert "soft wash painting, manga seinen" in img["params"]["prompt"] and "aiko_v1" in img["params"]["prompt"]
     [wf] = comfy.prompts.values()
     sent = [n["inputs"]["lora_name"] for n in wf.values() if n["class_type"] == "LoraLoaderModelOnly"]
     assert sent == [style, aiko_lora]

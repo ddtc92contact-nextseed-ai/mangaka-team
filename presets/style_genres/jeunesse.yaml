@@ -1,9 +1,10 @@
 # Genre « jeunesse » (kodomo) — champs : voir presets/README.md (« Packs de style »).
 id: jeunesse
 name: Jeunesse
-description: Enfantin (kodomo) — histoires simples, personnages ronds et attachants.
+description: Enfantin (kodomo) — histoires simples, personnages ronds et attachants. Pas de ton dark.
 order: 40
-prompt_keywords: [kodomo manga style for children, simple rounded character designs, cute friendly expressions, clear readable compositions]
+lang: fr
+prompt_keywords: [manga pour enfants, style simple et mignon, tout public]
 layout_style: sage
 reading_direction: rtl
 fonts: { dialogue: fredoka, shout: titan-one }

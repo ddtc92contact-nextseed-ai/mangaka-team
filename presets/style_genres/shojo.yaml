@@ -3,7 +3,8 @@ id: shojo
 name: Shōjo
 description: Romance et émotions — sentiments intérieurs, relations, regards.
 order: 30
-prompt_keywords: [shojo manga style, delicate linework, large expressive sparkling eyes, decorative flowers and sparkles]
+lang: fr
+prompt_keywords: [manga shojo, style romantique, grands yeux, traits fins et fleuris]
 layout_style: sage
 reading_direction: rtl
 fonts: { dialogue: fredoka, shout: lilita-one }

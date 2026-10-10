@@ -1,4 +1,5 @@
-# Réglages fins du style d'une série : listes bornées, chacune avec ses mots-clés (positifs uniquement).
+# Réglages fins du style d'une série : listes bornées, chacune avec ses mots-clés et leur langue (`lang`, mesurée).
+# Calibrage du 10/10/2026 : voir presets/README.md (« Calibrage »). Un niveau « moyen » nomme sa position.
 # Un réglage non choisi n'ajoute rien au prompt. Ordre des réglages = ordre dans le prompt.
 # Champs : voir presets/README.md (« Packs de style »).
 options:
@@ -6,21 +7,21 @@ options:
     name: Trait
     description: Épaisseur du trait d'encrage.
     choices:
-      fin: { name: Fin, prompt_keywords: [fine thin linework] }
-      moyen: { name: Moyen, prompt_keywords: [medium line weight] }
-      epais: { name: Épais, prompt_keywords: [thick bold linework] }
+      fin: { name: Fin, lang: en, prompt_keywords: [thin linework, delicate lines] }
+      moyen: { name: Moyen, lang: fr, prompt_keywords: [manga, épaisseur de trait moyenne (entre fin et épais), encrage modéré] }
+      epais: { name: Épais, lang: en, prompt_keywords: [thick bold linework, heavy inking] }
   trames:
     name: Trames
     description: Densité des trames (rendus noir et blanc seulement).
     monochrome_only: true
     choices:
-      legeres: { name: Légères, prompt_keywords: [light sparse screentones] }
-      moyennes: { name: Moyennes, prompt_keywords: [medium screentones] }
-      denses: { name: Denses, prompt_keywords: [dense heavy screentones] }
+      legeres: { name: Légères, lang: en, prompt_keywords: [light screentone, subtly grey] }
+      moyennes: { name: Moyennes, lang: fr, prompt_keywords: [manga, trames en points de densité moyenne (halftone), gris moyen] }
+      denses: { name: Denses, lang: en, prompt_keywords: [dense dark screentone] }
   detail:
     name: Détail des décors
     description: Niveau de détail des arrière-plans.
     choices:
-      simple: { name: Simple, prompt_keywords: [simple minimal backgrounds] }
-      moyen: { name: Moyen, prompt_keywords: [moderately detailed backgrounds] }
-      riche: { name: Riche, prompt_keywords: [richly detailed intricate backgrounds] }
+      simple: { name: Simple, lang: en, prompt_keywords: [simple background, minimal, plain] }
+      moyen: { name: Moyen, lang: fr, prompt_keywords: [décor moyennement détaillé] }
+      riche: { name: Riche, lang: fr, prompt_keywords: [décor très détaillé et riche] }

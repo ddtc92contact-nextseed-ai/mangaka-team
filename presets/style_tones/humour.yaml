@@ -1,9 +1,10 @@
 # Ton « humour » — champs : voir presets/README.md (« Packs de style »).
 id: humour
 name: Humour
-description: Comique — réactions exagérées, gags, légèreté.
+description: Comique — réactions exagérées, gags, légèreté. Dominante — tire le dessin vers le cartoon, quel que soit le genre.
 order: 40
-prompt_keywords: [comedic exaggerated expressions, playful lighthearted mood]
+lang: fr
+prompt_keywords: [scène humoristique, expression comique, style cartoon]
 llm_guidelines: >-
   Ton humoristique : un gag ou une chute toutes les deux ou trois pages, réactions exagérées,
   dialogues vifs ; la dernière case d'une page porte souvent la chute.

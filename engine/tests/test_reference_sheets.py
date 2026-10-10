@@ -177,8 +177,8 @@ def test_sheet_builds_prompt_size_and_lora_chain() -> None:
     assert "jeune femme, cheveux noirs courts, kimono rouge." in prompt
     assert "Détails : katana, cicatrice, aiko_v1." in prompt
     # Mots déclencheurs du catalogue (style_loras.yaml), puis genre, rendu et ton de la série.
-    assert "Style : ink seinen style, shonen manga style," in prompt
-    assert "black and white manga" in prompt and "bright cheerful atmosphere" in prompt
+    assert "Style : ink seinen style, shonen manga, dynamic energetic style," in prompt
+    assert "manga noir et blanc" in prompt and "ambiance lumineuse et joyeuse" in prompt
     assert "Modification demandée" not in prompt  # pas de consigne : morceau omis
 
     preset_id = sheet_preset_id(REG, sheet, series)
@@ -208,7 +208,10 @@ def test_sheet_without_lora_or_style_keeps_a_clean_prompt() -> None:
     legacy = _series(style_genre=None, style_rendering=None, style_tone=None)
     prompt = sheet_prompt(REG, sheet, entry, legacy)
     assert "Le labo en plan large" in prompt and "Détails" not in prompt
-    assert "Style : black and white manga, inked linework, screentone shading." in prompt
+    assert (
+        "Style : manga noir et blanc, ombres en points de trame réguliers (halftone), screentone, motifs de points gris, pas de hachures."
+        in prompt
+    )
     assert sheet_loras(_series(), entry) == []
     loaded = REG.workflow(sheet_preset_id(REG, sheet, _series()))
     built = build_workflow(loaded, sheet_params(loaded, sheet, prompt, REG, seed=1))

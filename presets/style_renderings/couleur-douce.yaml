@@ -4,4 +4,5 @@ name: Couleur douce
 description: Aquarelle aux tons pastel, dégradés légers.
 order: 40
 monochrome: false
-prompt_keywords: [soft watercolor coloring, pastel color palette, gentle color gradients]
+lang: en
+prompt_keywords: [soft color manga, watercolor pastel, gentle washes]

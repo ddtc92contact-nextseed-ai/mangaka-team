@@ -16,6 +16,7 @@ from mangaka_engine.pipeline import art_direction as da
 from mangaka_engine.pipeline import script as sc
 from mangaka_engine.pipeline.style import StyleError, check_style, series_style, style_brief
 from mangaka_engine.presets import PresetRegistry
+from mangaka_engine.presets.schemas import StyleOptionChoice, StylePack
 from mangaka_engine.providers.llm import MockLLMProvider
 from mangaka_engine.store.models import Chapter, Project
 from tests.conftest import PRESETS_DIR
@@ -77,6 +78,36 @@ def test_v1_packs_are_loaded_in_order_with_their_defaults() -> None:
         assert genre.llm_guidelines and genre.fonts.dialogue in REG.fonts.fonts  # type: ignore[union-attr]
 
 
+def test_v1_packs_carry_the_calibrated_keywords_and_their_language() -> None:
+    choices = [c for o in REG.style_options.options.values() for c in o.choices.values()]
+    packs: list[StylePack | StyleOptionChoice] = [
+        *REG.style_genres.values(),
+        *REG.style_renderings.values(),
+        *REG.style_tones.values(),
+        *choices,
+    ]
+    assert len(packs) == 7 + 4 + 4 + 9
+    for pack in packs:
+        assert pack.lang in ("fr", "en") and pack.prompt_keywords and all(pack.prompt_keywords), pack
+    # Calibrage du 10/10/2026 : trames = points nommés ; franco-belge = exclusion explicite de l'anime.
+    assert "halftone" in ", ".join(REG.style_renderings["nb-trames"].prompt_keywords)
+    assert "PAS de style anime japonais" in REG.style_genres["franco-belge"].prompt_keywords
+    assert (REG.style_genres["franco-belge"].lang, REG.style_renderings["nb-trames"].lang) == ("fr", "fr")
+    assert REG.style_options.options["trait"].choices["moyen"].lang == "fr"
+    assert "entre fin et épais" in ", ".join(REG.style_options.options["trait"].choices["moyen"].prompt_keywords)
+
+
+def test_lang_is_required_and_closed(tmp_path: Path) -> None:
+    root = _copy(tmp_path)
+    base = yaml.safe_load((root / "style_tones" / "neutre.yaml").read_text(encoding="utf-8"))
+    _write(root / "style_tones" / "sans-langue.yaml", {k: v for k, v in base.items() if k != "lang"} | {"id": "x1"})
+    _write(root / "style_tones" / "allemand.yaml", {**base, "id": "x2", "lang": "de", "default": False})
+    reg = PresetRegistry.load(root)
+    issues = {i.file: i.message for i in reg.issues}
+    assert "lang" in issues["style_tones/sans-langue.yaml"] and "lang" in issues["style_tones/allemand.yaml"]
+    assert not {"x1", "x2"} & set(reg.style_tones)
+
+
 def _copy(tmp_path: Path) -> Path:
     root = tmp_path / "presets"
     shutil.copytree(PRESETS_DIR, root)
@@ -132,16 +163,16 @@ def test_style_is_lora_then_genre_rendering_tone_and_fine_settings_in_a_fixed_or
 def test_style_combinations_lora_out_of_catalog_and_color() -> None:
     # Hors catalogue : appliqué sans mots déclencheurs.
     plain = series_style(REG, _series(style_lora_name="perso/inconnu.safetensors"))
-    assert plain.startswith("seinen manga style")
+    assert plain.startswith("manga seinen, style réaliste et mature")
     # Couleur : les trames (réservées au N&B) n'ajoutent rien, même si elles traînent en base.
     color = series_style(REG, _series(style_rendering="couleur", style_options={"trames": "denses"}))
-    assert "full color" in color and "screentone" not in color
+    assert "color manga" in color and "screentone" not in color
     # Un pack disparu des presets est ignoré ; le rendu revient au rendu par défaut.
     gone = series_style(REG, _series(style_genre="disparu", style_rendering="disparu"))
-    assert "black and white manga" in gone and "seinen" not in gone
+    assert "manga noir et blanc" in gone and "seinen" not in gone
     # Ancien texte libre : utilisé tant qu'aucun pack n'est choisi, ignoré ensuite.
     legacy = _series(legacy_style="Aquarelle pastel", style_genre=None, style_rendering=None, style_tone=None)
-    assert series_style(REG, legacy).startswith("Aquarelle pastel, black and white manga")
+    assert series_style(REG, legacy).startswith("Aquarelle pastel, manga noir et blanc")
     assert "Aquarelle" not in series_style(REG, _series(legacy_style="Aquarelle pastel"))
 
 
