@@ -676,6 +676,73 @@ class AssetOut(CharacterOut):
     kind: AssetKindName
 
 
+class ImageOrderIn(_In):
+    """Nouvel ordre des images de référence d'une fiche (toutes, une fois chacune) ; la 1re est la principale."""
+
+    image_ids: list[int] = Field(min_length=1, max_length=200)
+
+
+# --- « Créer des références » (fiches générées par ComfyUI) ---------------------
+LibraryKindName = Literal["character", "object", "decor"]
+Instruction = Annotated[str, StringConstraints(strip_whitespace=True, max_length=500)]
+
+
+class ReferenceSheetOut(BaseModel):
+    id: str
+    name: str
+    description: str
+    kinds: list[LibraryKindName]
+    width: int
+    height: int
+    workflow: str | None  # None : palier de la série (ou Qualité)
+
+
+class ReferenceGenerateIn(_In):
+    sheet: PresetId
+    count: VariantCount = 4
+    quality: bool = False  # palier Qualité au lieu de celui de la série
+    seed: Annotated[int, Field(ge=0, le=MAX_SEED)] | None = None
+
+
+class ReferenceRefineIn(_In):
+    instruction: Instruction = Field(min_length=1)
+    count: VariantCount = 4
+    quality: bool = False
+    sheet: PresetId | None = None  # par défaut : celui de la variante de départ
+
+
+class ReferenceVariantOut(BaseModel):
+    id: int
+    entry_kind: LibraryKindName
+    entry_id: int
+    url: str
+    sheet: str
+    sheet_name: str
+    preset: str | None
+    tier: str | None
+    seed: int | None
+    width: int
+    height: int
+    prompt: str
+    instruction: str
+    parent_id: int | None
+    kept: bool  # gardée parmi les images de référence de la fiche (et toujours présente)
+    kept_image_id: int | None
+    job_id: int | None
+    params: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+
+
+class ReferenceStudioOut(BaseModel):
+    """Historique des variantes d'une fiche (plus récentes d'abord) et générations en cours."""
+
+    variants: list[ReferenceVariantOut]
+    active_jobs: list[JobOut]
+    max_kept: int
+    kept_count: int
+    reference_slots: int  # emplacements d'images de référence d'une case (workflow « avec références »)
+
+
 # --- Banc d'essai du QC -----------------------------------------------------------
 AnnotationLabelName = Literal["good", "bad"]
 DefectName = Literal["face", "hands", "identity", "description", "text", "other"]

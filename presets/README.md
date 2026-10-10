@@ -24,6 +24,7 @@ Après modification d'un preset, redémarre le moteur (`npm run dev`).
 | `fonts.yaml` + `fonts/` | Polices de lettrage (OFL, licences dans `fonts/OFL*.txt`) et style de texte par type de bulle |
 | `lettering.yaml` | Formes et placement des bulles, queues, bordures de case, repères de coupe |
 | `agents/*.yaml` | Agents du pipeline (écran « L'équipe ») : nom, rôle, étape et réglages éditables depuis l'UI |
+| `reference_sheets/*.yaml` | Types de fiches de référence de « Créer des références » (portrait, turnaround, expressions, vue 3/4, plan large, autre angle) : gabarit de prompt, taille, workflow facultatif |
 
 | `knowledge.yaml` | Savoir-faire (RAG local) : découpage des documents, recherche hybride, seuil « petite collection », budget de la bible, collections lues par chaque agent |
 
@@ -525,6 +526,38 @@ référence de la GX10, puis validés contre le ComfyUI 0.37 de la machine. Pour
 4. Redémarre le moteur : `GET /presets` affiche les erreurs de mapping éventuelles ; puis « Tester la
    connexion » et « Générer une case d'essai » sur le tableau de bord.
 5. Régénère les JSON de référence des tests : `UPDATE_GOLDEN=1 npm run test:engine`, relis le diff.
+
+## Fiches de référence (`reference_sheets/*.yaml`)
+
+Sur chaque fiche de la bibliothèque (personnage, objet, décor), le panneau **« Créer des références »**
+génère des variantes d'un type de fiche dans la file ComfyUI (même progression, même annulation que
+les cases), à partir de la description visuelle, des mots-clés, du LoRA de style de la série et du
+LoRA de la fiche. **« Affiner »** repart d'une variante, envoyée comme image de référence (workflow
+« avec références » du même palier), avec une consigne (« cheveux plus courts »). **« Garder comme
+référence »** copie la variante parmi les images de référence de la fiche (8 au plus) ; la première
+image est la référence principale, servie en premier quand les emplacements d'une case manquent.
+
+Un type de fiche = un fichier ; en ajouter un ne demande aucun code (il est validé au démarrage, une
+erreur apparaît dans `GET /presets` et `GET /health`) :
+
+```yaml
+id: objet-eclate                 # unique, minuscules et tirets
+name: Vue éclatée                # libellé de la liste déroulante
+description: "Pièces séparées, alignées sur un axe."
+kinds: [object]                  # character | object | decor (plusieurs possibles)
+order: 30                        # ordre dans la liste
+width: 1024                      # multiples de 8, 256 à 2048
+height: 768
+workflow: null                   # null : palier de la série (Turbo par défaut) ou Qualité si demandé ;
+                                 # un id de workflows/ l'impose (le choix du palier est alors ignoré)
+prompt:                          # morceaux assemblés ; un morceau dont une variable est vide est omis
+  - "Vue éclatée de $name."
+  - "$description."
+  - "Détails : $keywords."       # mots-clés + mots déclencheurs du LoRA de la fiche
+  - "Modification demandée : $instruction."   # consigne d'« Affiner » (omis sinon)
+  - "Style : $style."            # style de la série + mots déclencheurs du LoRA de style
+negative_prompt: "personnage"    # ajouté au négatif du workflow (les termes « pas de texte » y sont toujours)
+```
 
 ## Prompt final des cases (`image_prompt.yaml`)
 

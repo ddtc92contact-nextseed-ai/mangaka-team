@@ -755,6 +755,64 @@ export interface LibraryRef {
   name: string;
 }
 
+/** Type de fiche de référence (presets/reference_sheets/) : portrait, turnaround, plan large… */
+export interface ReferenceSheet {
+  id: string;
+  name: string;
+  description: string;
+  kinds: LibraryKind[];
+  width: number;
+  height: number;
+  /** null : palier de la série (ou Qualité). */
+  workflow: string | null;
+}
+
+/** Image générée par « Créer des références », gardée ou non. */
+export interface ReferenceVariant {
+  id: number;
+  entry_kind: LibraryKind;
+  entry_id: number;
+  url: string;
+  sheet: string;
+  sheet_name: string;
+  preset: string | null;
+  tier: string | null;
+  seed: Seed | null;
+  width: number;
+  height: number;
+  prompt: string;
+  instruction: string;
+  /** Variante de départ d'un « Affiner ». */
+  parent_id: number | null;
+  kept: boolean;
+  kept_image_id: number | null;
+  job_id: number | null;
+  params: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface ReferenceStudio {
+  /** Plus récentes d'abord. */
+  variants: ReferenceVariant[];
+  active_jobs: Job[];
+  max_kept: number;
+  kept_count: number;
+  /** Emplacements d'images de référence d'une case de la série. */
+  reference_slots: number;
+}
+
+export interface ReferenceGenerateInput {
+  sheet: string;
+  count?: number;
+  quality?: boolean;
+}
+
+export interface ReferenceRefineInput {
+  instruction: string;
+  count?: number;
+  quality?: boolean;
+}
+
 /** Segment d'URL du moteur pour chaque sorte. */
 const LIBRARY_SEGMENT: Record<LibraryKind, string> = {
   character: "characters",
@@ -1411,6 +1469,20 @@ export const api = {
   },
   deleteLibraryImage: (kind: LibraryKind, id: number, imageId: number) =>
     request<void>(`/${LIBRARY_SEGMENT[kind]}/${id}/images/${imageId}`, { method: "DELETE" }),
+  reorderLibraryImages: (kind: LibraryKind, id: number, imageIds: number[]) =>
+    request<LibraryEntry>(`/${LIBRARY_SEGMENT[kind]}/${id}/images/order`, json("PUT", { image_ids: imageIds })),
+  referenceSheets: (kind?: LibraryKind) =>
+    request<ReferenceSheet[]>(`/presets/reference-sheets${kind ? `?kind=${kind}` : ""}`),
+  referenceStudio: (kind: LibraryKind, id: number) =>
+    request<ReferenceStudio>(`/${LIBRARY_SEGMENT[kind]}/${id}/reference-variants`),
+  generateReferences: (kind: LibraryKind, id: number, body: ReferenceGenerateInput) =>
+    request<Job[]>(`/${LIBRARY_SEGMENT[kind]}/${id}/reference-variants`, json("POST", body)),
+  refineReference: (variantId: number, body: ReferenceRefineInput) =>
+    request<Job[]>(`/reference-variants/${variantId}/refine`, json("POST", body)),
+  keepReference: (variantId: number) =>
+    request<LibraryEntry>(`/reference-variants/${variantId}/keep`, { method: "POST" }),
+  deleteReferenceVariant: (variantId: number) =>
+    request<void>(`/reference-variants/${variantId}`, { method: "DELETE" }),
   listCharacters: (projectId: number) => request<Character[]>(`/projects/${projectId}/characters`),
 
   listChapters: (projectId: number) => request<Chapter[]>(`/projects/${projectId}/chapters`),

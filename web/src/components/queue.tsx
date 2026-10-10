@@ -4,6 +4,7 @@ import Link from "next/link";
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { api, fullErrorMessage, type Queue, type QueueItem } from "@/lib/api";
 import { formatDuration, productionHref, workshopHref } from "@/lib/generation";
+import { entryHref } from "@/lib/library";
 import { Badge, useEngineStatus } from "./engine-status";
 import { ProgressBar } from "./ui";
 
@@ -131,12 +132,20 @@ function itemTitle(item: QueueItem): string {
   return variant ? `${item.label} · ${variant}` : item.label;
 }
 
+/** « Créer des références » : lien vers la fiche de la bibliothèque concernée. */
+function referenceHref(item: QueueItem): string | null {
+  const params = item.job.params ?? {};
+  const kind = params.entry_kind;
+  if (item.job.step !== "reference" || typeof params.entry_id !== "number") return null;
+  return kind === "character" || kind === "object" || kind === "decor" ? entryHref(kind, params.entry_id) : null;
+}
+
 function QueueRow({ item, compact, onNavigate }: { item: QueueItem; compact: boolean; onNavigate?: () => void }) {
   const { cancel } = useQueue();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const running = item.job.status === "running";
-  const href = item.chapter_id ? workshopHref(item.chapter_id, item.page_id, item.panel_id) : null;
+  const href = item.chapter_id ? workshopHref(item.chapter_id, item.page_id, item.panel_id) : referenceHref(item);
 
   async function onCancel() {
     setBusy(true);

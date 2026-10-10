@@ -8,6 +8,7 @@ import { api, errorMessage, type LibraryKind } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
 import { LIBRARY_KINDS, entryHref, libraryHref } from "@/lib/library";
 import { LibraryEntryForm, ReferenceImages } from "./library-entry-form";
+import { ReferenceStudio } from "./reference-studio";
 
 /** Fiche d'un personnage, d'un objet ou d'un décor : champs, images de référence, suppression. */
 export function LibraryEntryPage({ kind, id }: { kind: LibraryKind; id: number }) {
@@ -92,6 +93,10 @@ export function LibraryEntryPage({ kind, id }: { kind: LibraryKind; id: number }
           />
         </Card>
       </div>
+      <Card className="mt-6">
+        <h2 className="mb-1 font-semibold text-zinc-100">Créer des références</h2>
+        <ReferenceStudio kind={kind} entry={e} onEntryChange={entry.setData} />
+      </Card>
     </>
   );
 }

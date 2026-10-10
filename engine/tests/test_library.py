@@ -458,8 +458,11 @@ def test_database_from_before_the_library_keeps_working(make_settings: Callable[
         ("panels", "sketch_denoise"),
         ("projects", "sketch_enabled"),
         ("projects", "sketch_denoise"),
-    ]:  # colonnes du palier croquis (v12)
+    ]:  # colonnes du palier croquis (v13)
         con.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
+    con.execute("DROP TABLE reference_variants")  # v12
+    con.execute("ALTER TABLE character_images DROP COLUMN position")
+    con.execute("ALTER TABLE series_asset_images DROP COLUMN position")
     con.execute("ALTER TABLE panels DROP COLUMN decor_id")
     con.execute("ALTER TABLE panels DROP COLUMN object_ids")
     con.execute("DROP TABLE series_asset_images")

@@ -16,7 +16,9 @@
 - 10 : mots déclencheurs des LoRA (style de la série, identité des personnages).
 - 11 : bibliothèque de la série (objets et décors récurrents + images de référence ; décor et objets
   de chaque case). Les données existantes ne changent pas : les cases n'ont ni décor ni objet.
-- 12 : palier croquis (sorte des versions : `final` / `croquis`, croquis validé et débruitage du
+- 12 : « Créer des références » (variantes générées par fiche) et ordre des images de référence ; les
+  images existantes gardent leur ordre (celui de leur ajout).
+- 13 : palier croquis (sorte des versions : `final` / `croquis`, croquis validé et débruitage du
   passage au propre par case, réglages croquis de la série). Les versions existantes sont `final` ;
   le palier croquis est activé sur les séries existantes (il n'ajoute que des boutons).
 
@@ -47,6 +49,7 @@ from .models import (
     LLMRun,
     PanelImageAnnotation,
     QCBenchRun,
+    ReferenceVariant,
     SeriesAsset,
     SeriesAssetImage,
     SeriesBible,
@@ -54,7 +57,7 @@ from .models import (
 
 log = logging.getLogger("mangaka_engine")
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 
 class MigrationError(RuntimeError):
@@ -217,6 +220,16 @@ def _v10_to_v11(cur: sqlite3.Cursor) -> None:
 
 
 def _v11_to_v12(cur: sqlite3.Cursor) -> None:
+    for table in ("character_images", "series_asset_images"):
+        # series_asset_images vient d'être créée par la v11 depuis le modèle courant (déjà avec position).
+        if "position" not in {row[1] for row in cur.execute(f"PRAGMA table_info({table})")}:
+            cur.execute(f"ALTER TABLE {table} ADD COLUMN position INTEGER NOT NULL DEFAULT 0")
+        cur.execute(f"UPDATE {table} SET position = id")
+    for stmt in _ddl(ReferenceVariant.__table__):
+        cur.execute(stmt)
+
+
+def _v12_to_v13(cur: sqlite3.Cursor) -> None:
     cur.execute("ALTER TABLE panel_images ADD COLUMN kind VARCHAR(20) NOT NULL DEFAULT 'final'")
     cur.execute("ALTER TABLE panels ADD COLUMN sketch_image_id INTEGER")
     cur.execute("ALTER TABLE panels ADD COLUMN sketch_denoise FLOAT")
@@ -238,6 +251,7 @@ MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     9: (10, _v9_to_v10),
     10: (11, _v10_to_v11),
     11: (12, _v11_to_v12),
+    12: (13, _v12_to_v13),
 }
 
 
