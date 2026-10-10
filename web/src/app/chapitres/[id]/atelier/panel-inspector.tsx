@@ -25,6 +25,7 @@ import { MAX_VARIANTS, PANEL_STATE, formatDuration, isValidSeed } from "@/lib/ge
 import { dpiLabel, dpiTitle } from "@/lib/finishing";
 import { useJob } from "@/lib/jobs";
 import { LIBRARY_KINDS } from "@/lib/library";
+import { describeUsedReference } from "@/lib/used-references";
 import { useChapter } from "../chapter-context";
 import { CompositionBlock, LockBadge } from "./composition-block";
 import type { PanelView } from "./page-canvas";
@@ -638,11 +639,11 @@ function UsedReferences({ image }: { image: PanelImage }) {
       ) : (
         <ol className="mt-1 flex flex-wrap gap-1.5">
           {refs.map((r, i) => {
-            const kind = r.kind ?? "character";
+            const d = describeUsedReference(r, LIBRARY_KINDS);
             return (
-              <li key={`${r.image_id}-${i}`} className={`rounded px-2 py-0.5 ${LIBRARY_KINDS[kind].badge}`}>
-                {r.slot ?? i + 1}. {r.name ?? `${LIBRARY_KINDS[kind].singular} n° ${r.id ?? r.character_id ?? "?"}`}
-                <span className="opacity-70"> · {LIBRARY_KINDS[kind].singular}</span>
+              <li key={`${r.image_id}-${i}`} className={`rounded px-2 py-0.5 ${d.badge}`} data-kind={r.kind ?? "character"}>
+                {r.slot ?? i + 1}. {d.name}
+                <span className="opacity-70"> · {d.kindLabel}</span>
               </li>
             );
           })}

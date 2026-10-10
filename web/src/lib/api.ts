@@ -542,7 +542,7 @@ export interface RepairInput {
 export interface UsedReference {
   slot?: number;
   /** Absent sur les versions d'avant la bibliothèque (personnage). */
-  kind?: LibraryKind;
+  kind?: LibraryKind | "style";
   id?: number;
   name?: string;
   character_id?: number;

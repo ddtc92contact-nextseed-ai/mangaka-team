@@ -17,6 +17,7 @@
     "lint": "npm --workspace web run lint",
     "typecheck": "npm --workspace web run typecheck",
     "build": "npm --workspace web run build",
+    "test:web": "npm --workspace web run test",
     "test:engine": "node scripts/run-engine.mjs -m pytest",
     "lint:engine": "node scripts/run-engine.mjs -m ruff check .",
     "test:launcher": "node scripts/run-engine.mjs -m pytest ../scripts/tests"
