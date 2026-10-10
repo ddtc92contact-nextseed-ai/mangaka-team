@@ -44,6 +44,7 @@ lora_chain:
 #   41 LoadImage (image guide : croquis validé, version de la case ou image importée)
 #   42 prétraitement, remplacé selon le type choisi (retiré pour « carte déjà prête »)
 #   43 ImageScale (carte à la taille de la case)
+#   (46) post-traitements du type (« Trait » : ImageInvert), insérés entre 42 et 43 à la construction
 #   44 QwenImageDiffsynthControlnet (modèle + patch + VAE + carte, force `strength`) → cache (nœud 4)
 #   45 SaveImage de la carte : aperçu dans l'atelier seulement (retiré du graphe de génération)
 # Les LoRA sont chaînés entre le modèle (nœud 1) et le patch (nœud 44).
@@ -63,6 +64,10 @@ control:
       description: Contours et traits de l'image guide (le plus fidèle pour un croquis ou une case existante).
       class_type: LineArtPreprocessor
       inputs: { coarse: disable, resolution: 1024 }
+      # LineArtPreprocessor rend un trait BLANC sur fond NOIR ; le patch encode la carte avec le VAE et
+      # recopierait ce fond noir (case en négatif). Inversée : trait noir sur fond clair (aperçu compris).
+      post:
+        - { class_type: ImageInvert, name: Inversion }
       order: 1
     depth:
       name: Profondeur

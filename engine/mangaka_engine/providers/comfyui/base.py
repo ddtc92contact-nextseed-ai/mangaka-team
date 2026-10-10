@@ -154,6 +154,21 @@ def describe_prompt_error(data: Any, status_code: int) -> str:
     return message or f"HTTP {status_code}"
 
 
+def check_prompt_nodes(workflow: dict[str, Any]) -> None:
+    """Garde-fou avant `/prompt` : chaque clé de premier niveau doit être un nœud (`class_type` + `inputs`).
+
+    ComfyUI 0.39 répond HTTP 500 sans message sur une clé qui n'est pas un nœud ; on refuse ici, en clair."""
+    bad = [
+        str(key)
+        for key, node in workflow.items()
+        if not isinstance(node, dict)
+        or not isinstance(node.get("class_type"), str)
+        or not isinstance(node.get("inputs"), dict)
+    ]
+    if bad:
+        raise ComfyUIWorkflowError(f"workflow invalide : clés qui ne sont pas des nœuds : {', '.join(sorted(bad))}")
+
+
 def is_out_of_memory(exception_type: str, message: str) -> bool:
     text = f"{exception_type} {message}".lower()
     return "outofmemory" in text or "out of memory" in text or "allocation on device" in text

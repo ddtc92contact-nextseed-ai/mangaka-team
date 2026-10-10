@@ -153,15 +153,27 @@ class InpaintSettings(_Strict):
         return targets
 
 
+class ControlPostStep(_Strict):
+    """Post-traitement de la carte de contrôle, inséré entre le prétraitement et la mise à la taille
+    (ex. `ImageInvert` : trait blanc sur fond noir → trait noir sur fond clair)."""
+
+    class_type: str = Field(min_length=1, description="Nœud ComfyUI (une image en entrée, une image en sortie)")
+    name: str = ""
+    image_input: str = "image"
+    inputs: dict[str, Any] = Field(default_factory=dict, description="Entrées constantes du nœud")
+
+
 class ControlType(_Strict):
     """Un type de contrôle (trait, profondeur, pose…) : le prétraitement qui tire la carte de contrôle de
-    l'image guide. `class_type` absent = l'image guide est déjà une carte (croquis à la main, scribble)."""
+    l'image guide. `class_type` absent = l'image guide est déjà une carte (croquis à la main, scribble).
+    `post` : nœuds appliqués ensuite à la carte, dans l'ordre (aperçu de l'atelier compris)."""
 
     name: str = Field(min_length=1, description="Libellé affiché (« Trait »)")
     description: str = ""
     class_type: str | None = Field(default=None, description="Nœud de prétraitement (comfyui_controlnet_aux)")
     image_input: str = "image"
     inputs: dict[str, Any] = Field(default_factory=dict, description="Entrées constantes du prétraitement")
+    post: list[ControlPostStep] = Field(default_factory=list, description="Post-traitements de la carte")
     order: int = 0
 
 

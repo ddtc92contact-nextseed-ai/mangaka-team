@@ -1,0 +1,1570 @@
+{
+  "canny": {
+    "generation": {
+      "1": {
+        "_meta": {
+          "title": "Modèle de diffusion"
+        },
+        "class_type": "UNETLoader",
+        "inputs": {
+          "unet_name": "qwen_image_2.1_bf16.safetensors",
+          "weight_dtype": "default"
+        }
+      },
+      "10": {
+        "_meta": {
+          "title": "Décodage VAE"
+        },
+        "class_type": "VAEDecode",
+        "inputs": {
+          "samples": [
+            "9",
+            0
+          ],
+          "vae": [
+            "3",
+            0
+          ]
+        }
+      },
+      "11": {
+        "_meta": {
+          "title": "Sauvegarde"
+        },
+        "class_type": "SaveImage",
+        "inputs": {
+          "filename_prefix": "mangaka/serie-1/chapitre-1/page-1/case-1",
+          "images": [
+            "10",
+            0
+          ]
+        }
+      },
+      "2": {
+        "_meta": {
+          "title": "Encodeur de texte (Qwen3-VL 8B)"
+        },
+        "class_type": "CLIPLoader",
+        "inputs": {
+          "clip_name": "qwen3vl_8b_bf16.safetensors",
+          "device": "default",
+          "type": "qwen_image"
+        }
+      },
+      "20": {
+        "_meta": {
+          "title": "Référence 1"
+        },
+        "class_type": "LoadImage",
+        "inputs": {
+          "image": "mangaka/perso1_img1.png"
+        }
+      },
+      "21": {
+        "_meta": {
+          "title": "Référence 2"
+        },
+        "class_type": "LoadImage",
+        "inputs": {
+          "image": "mangaka/perso2_img4.png"
+        }
+      },
+      "3": {
+        "_meta": {
+          "title": "VAE"
+        },
+        "class_type": "VAELoader",
+        "inputs": {
+          "vae_name": "qwen_image_2.1_vae_bf16.safetensors"
+        }
+      },
+      "4": {
+        "_meta": {
+          "title": "Cache Qwen Image 2.1"
+        },
+        "class_type": "QwenImage21Cache",
+        "inputs": {
+          "device": "auto",
+          "dtype": "default",
+          "model": [
+            "44",
+            0
+          ]
+        }
+      },
+      "40": {
+        "_meta": {
+          "title": "Patch ControlNet Union (models/model_patches)"
+        },
+        "class_type": "ModelPatchLoader",
+        "inputs": {
+          "name": "qwen_image_2.1_fun_controlnet_union_int8_convrot.safetensors"
+        }
+      },
+      "41": {
+        "_meta": {
+          "title": "Image guide (composition)"
+        },
+        "class_type": "LoadImage",
+        "inputs": {
+          "image": "mangaka/guide_case1_v2.png"
+        }
+      },
+      "42": {
+        "_meta": {
+          "title": "Prétraitement : Contours nets (Canny)"
+        },
+        "class_type": "Canny",
+        "inputs": {
+          "high_threshold": 0.8,
+          "image": [
+            "41",
+            0
+          ],
+          "low_threshold": 0.4
+        }
+      },
+      "43": {
+        "_meta": {
+          "title": "Carte de contrôle à la taille de la case"
+        },
+        "class_type": "ImageScale",
+        "inputs": {
+          "crop": "center",
+          "height": 1216,
+          "image": [
+            "42",
+            0
+          ],
+          "upscale_method": "lanczos",
+          "width": 832
+        }
+      },
+      "44": {
+        "_meta": {
+          "title": "ControlNet Union (patch appliqué au modèle)"
+        },
+        "class_type": "QwenImageDiffsynthControlnet",
+        "inputs": {
+          "image": [
+            "43",
+            0
+          ],
+          "model": [
+            "47",
+            0
+          ],
+          "model_patch": [
+            "40",
+            0
+          ],
+          "strength": 0.85,
+          "vae": [
+            "3",
+            0
+          ]
+        }
+      },
+      "46": {
+        "_meta": {
+          "title": "LoRA style"
+        },
+        "class_type": "LoraLoaderModelOnly",
+        "inputs": {
+          "lora_name": "encre-seinen.safetensors",
+          "model": [
+            "1",
+            0
+          ],
+          "strength_model": 0.7
+        }
+      },
+      "47": {
+        "_meta": {
+          "title": "LoRA Aiko"
+        },
+        "class_type": "LoraLoaderModelOnly",
+        "inputs": {
+          "lora_name": "aiko-v3.safetensors",
+          "model": [
+            "46",
+            0
+          ],
+          "strength_model": 0.9
+        }
+      },
+      "6": {
+        "_meta": {
+          "title": "Prompts (positif / négatif) + références"
+        },
+        "class_type": "TextEncodeQwenImage21",
+        "inputs": {
+          "clip": [
+            "2",
+            0
+          ],
+          "images.image_1": [
+            "20",
+            0
+          ],
+          "images.image_2": [
+            "21",
+            0
+          ],
+          "negative_prompt": "texte, bulles",
+          "prompt": "plan moyen, Aiko sur un toit au crépuscule, encre et trames",
+          "resolution": 1024,
+          "vae": [
+            "3",
+            0
+          ]
+        }
+      },
+      "8": {
+        "_meta": {
+          "title": "Taille de l'image"
+        },
+        "class_type": "EmptyLatentImage",
+        "inputs": {
+          "batch_size": 1,
+          "height": 1216,
+          "width": 832
+        }
+      },
+      "9": {
+        "_meta": {
+          "title": "KSampler"
+        },
+        "class_type": "KSampler",
+        "inputs": {
+          "cfg": 1,
+          "denoise": 1,
+          "latent_image": [
+            "8",
+            0
+          ],
+          "model": [
+            "4",
+            0
+          ],
+          "negative": [
+            "6",
+            1
+          ],
+          "positive": [
+            "6",
+            0
+          ],
+          "sampler_name": "euler",
+          "scheduler": "simple",
+          "seed": 424242,
+          "steps": 50
+        }
+      }
+    },
+    "map": {
+      "41": {
+        "_meta": {
+          "title": "Image guide (composition)"
+        },
+        "class_type": "LoadImage",
+        "inputs": {
+          "image": "mangaka/guide_case1_v2.png"
+        }
+      },
+      "42": {
+        "_meta": {
+          "title": "Prétraitement : Contours nets (Canny)"
+        },
+        "class_type": "Canny",
+        "inputs": {
+          "high_threshold": 0.8,
+          "image": [
+            "41",
+            0
+          ],
+          "low_threshold": 0.4
+        }
+      },
+      "43": {
+        "_meta": {
+          "title": "Carte de contrôle à la taille de la case"
+        },
+        "class_type": "ImageScale",
+        "inputs": {
+          "crop": "center",
+          "height": 1216,
+          "image": [
+            "42",
+            0
+          ],
+          "upscale_method": "lanczos",
+          "width": 832
+        }
+      },
+      "45": {
+        "_meta": {
+          "title": "Carte de contrôle (aperçu)"
+        },
+        "class_type": "SaveImage",
+        "inputs": {
+          "filename_prefix": "mangaka/controle",
+          "images": [
+            "43",
+            0
+          ]
+        }
+      }
+    }
+  },
+  "carte": {
+    "generation": {
+      "1": {
+        "_meta": {
+          "title": "Modèle de diffusion"
+        },
+        "class_type": "UNETLoader",
+        "inputs": {
+          "unet_name": "qwen_image_2.1_bf16.safetensors",
+          "weight_dtype": "default"
+        }
+      },
+      "10": {
+        "_meta": {
+          "title": "Décodage VAE"
+        },
+        "class_type": "VAEDecode",
+        "inputs": {
+          "samples": [
+            "9",
+            0
+          ],
+          "vae": [
+            "3",
+            0
+          ]
+        }
+      },
+      "11": {
+        "_meta": {
+          "title": "Sauvegarde"
+        },
+        "class_type": "SaveImage",
+        "inputs": {
+          "filename_prefix": "mangaka/serie-1/chapitre-1/page-1/case-1",
+          "images": [
+            "10",
+            0
+          ]
+        }
+      },
+      "2": {
+        "_meta": {
+          "title": "Encodeur de texte (Qwen3-VL 8B)"
+        },
+        "class_type": "CLIPLoader",
+        "inputs": {
+          "clip_name": "qwen3vl_8b_bf16.safetensors",
+          "device": "default",
+          "type": "qwen_image"
+        }
+      },
+      "20": {
+        "_meta": {
+          "title": "Référence 1"
+        },
+        "class_type": "LoadImage",
+        "inputs": {
+          "image": "mangaka/perso1_img1.png"
+        }
+      },
+      "21": {
+        "_meta": {
+          "title": "Référence 2"
+        },
+        "class_type": "LoadImage",
+        "inputs": {
+          "image": "mangaka/perso2_img4.png"
+        }
+      },
+      "3": {
+        "_meta": {
+          "title": "VAE"
+        },
+        "class_type": "VAELoader",
+        "inputs": {
+          "vae_name": "qwen_image_2.1_vae_bf16.safetensors"
+        }
+      },
+      "4": {
+        "_meta": {
+          "title": "Cache Qwen Image 2.1"
+        },
+        "class_type": "QwenImage21Cache",
+        "inputs": {
+          "device": "auto",
+          "dtype": "default",
+          "model": [
+            "44",
+            0
+          ]
+        }
+      },
+      "40": {
+        "_meta": {
+          "title": "Patch ControlNet Union (models/model_patches)"
+        },
+        "class_type": "ModelPatchLoader",
+        "inputs": {
+          "name": "qwen_image_2.1_fun_controlnet_union_int8_convrot.safetensors"
+        }
+      },
+      "41": {
+        "_meta": {
+          "title": "Image guide (composition)"
+        },
+        "class_type": "LoadImage",
+        "inputs": {
+          "image": "mangaka/guide_case1_v2.png"
+        }
+      },
+      "43": {
+        "_meta": {
+          "title": "Carte de contrôle à la taille de la case"
+        },
+        "class_type": "ImageScale",
+        "inputs": {
+          "crop": "center",
+          "height": 1216,
+          "image": [
+            "41",
+            0
+          ],
+          "upscale_method": "lanczos",
+          "width": 832
+        }
+      },
+      "44": {
+        "_meta": {
+          "title": "ControlNet Union (patch appliqué au modèle)"
+        },
+        "class_type": "QwenImageDiffsynthControlnet",
+        "inputs": {
+          "image": [
+            "43",
+            0
+          ],
+          "model": [
+            "47",
+            0
+          ],
+          "model_patch": [
+            "40",
+            0
+          ],
+          "strength": 0.85,
+          "vae": [
+            "3",
+            0
+          ]
+        }
+      },
+      "46": {
+        "_meta": {
+          "title": "LoRA style"
+        },
+        "class_type": "LoraLoaderModelOnly",
+        "inputs": {
+          "lora_name": "encre-seinen.safetensors",
+          "model": [
+            "1",
+            0
+          ],
+          "strength_model": 0.7
+        }
+      },
+      "47": {
+        "_meta": {
+          "title": "LoRA Aiko"
+        },
+        "class_type": "LoraLoaderModelOnly",
+        "inputs": {
+          "lora_name": "aiko-v3.safetensors",
+          "model": [
+            "46",
+            0
+          ],
+          "strength_model": 0.9
+        }
+      },
+      "6": {
+        "_meta": {
+          "title": "Prompts (positif / négatif) + références"
+        },
+        "class_type": "TextEncodeQwenImage21",
+        "inputs": {
+          "clip": [
+            "2",
+            0
+          ],
+          "images.image_1": [
+            "20",
+            0
+          ],
+          "images.image_2": [
+            "21",
+            0
+          ],
+          "negative_prompt": "texte, bulles",
+          "prompt": "plan moyen, Aiko sur un toit au crépuscule, encre et trames",
+          "resolution": 1024,
+          "vae": [
+            "3",
+            0
+          ]
+        }
+      },
+      "8": {
+        "_meta": {
+          "title": "Taille de l'image"
+        },
+        "class_type": "EmptyLatentImage",
+        "inputs": {
+          "batch_size": 1,
+          "height": 1216,
+          "width": 832
+        }
+      },
+      "9": {
+        "_meta": {
+          "title": "KSampler"
+        },
+        "class_type": "KSampler",
+        "inputs": {
+          "cfg": 1,
+          "denoise": 1,
+          "latent_image": [
+            "8",
+            0
+          ],
+          "model": [
+            "4",
+            0
+          ],
+          "negative": [
+            "6",
+            1
+          ],
+          "positive": [
+            "6",
+            0
+          ],
+          "sampler_name": "euler",
+          "scheduler": "simple",
+          "seed": 424242,
+          "steps": 50
+        }
+      }
+    },
+    "map": {
+      "41": {
+        "_meta": {
+          "title": "Image guide (composition)"
+        },
+        "class_type": "LoadImage",
+        "inputs": {
+          "image": "mangaka/guide_case1_v2.png"
+        }
+      },
+      "43": {
+        "_meta": {
+          "title": "Carte de contrôle à la taille de la case"
+        },
+        "class_type": "ImageScale",
+        "inputs": {
+          "crop": "center",
+          "height": 1216,
+          "image": [
+            "41",
+            0
+          ],
+          "upscale_method": "lanczos",
+          "width": 832
+        }
+      },
+      "45": {
+        "_meta": {
+          "title": "Carte de contrôle (aperçu)"
+        },
+        "class_type": "SaveImage",
+        "inputs": {
+          "filename_prefix": "mangaka/controle",
+          "images": [
+            "43",
+            0
+          ]
+        }
+      }
+    }
+  },
+  "depth": {
+    "generation": {
+      "1": {
+        "_meta": {
+          "title": "Modèle de diffusion"
+        },
+        "class_type": "UNETLoader",
+        "inputs": {
+          "unet_name": "qwen_image_2.1_bf16.safetensors",
+          "weight_dtype": "default"
+        }
+      },
+      "10": {
+        "_meta": {
+          "title": "Décodage VAE"
+        },
+        "class_type": "VAEDecode",
+        "inputs": {
+          "samples": [
+            "9",
+            0
+          ],
+          "vae": [
+            "3",
+            0
+          ]
+        }
+      },
+      "11": {
+        "_meta": {
+          "title": "Sauvegarde"
+        },
+        "class_type": "SaveImage",
+        "inputs": {
+          "filename_prefix": "mangaka/serie-1/chapitre-1/page-1/case-1",
+          "images": [
+            "10",
+            0
+          ]
+        }
+      },
+      "2": {
+        "_meta": {
+          "title": "Encodeur de texte (Qwen3-VL 8B)"
+        },
+        "class_type": "CLIPLoader",
+        "inputs": {
+          "clip_name": "qwen3vl_8b_bf16.safetensors",
+          "device": "default",
+          "type": "qwen_image"
+        }
+      },
+      "20": {
+        "_meta": {
+          "title": "Référence 1"
+        },
+        "class_type": "LoadImage",
+        "inputs": {
+          "image": "mangaka/perso1_img1.png"
+        }
+      },
+      "21": {
+        "_meta": {
+          "title": "Référence 2"
+        },
+        "class_type": "LoadImage",
+        "inputs": {
+          "image": "mangaka/perso2_img4.png"
+        }
+      },
+      "3": {
+        "_meta": {
+          "title": "VAE"
+        },
+        "class_type": "VAELoader",
+        "inputs": {
+          "vae_name": "qwen_image_2.1_vae_bf16.safetensors"
+        }
+      },
+      "4": {
+        "_meta": {
+          "title": "Cache Qwen Image 2.1"
+        },
+        "class_type": "QwenImage21Cache",
+        "inputs": {
+          "device": "auto",
+          "dtype": "default",
+          "model": [
+            "44",
+            0
+          ]
+        }
+      },
+      "40": {
+        "_meta": {
+          "title": "Patch ControlNet Union (models/model_patches)"
+        },
+        "class_type": "ModelPatchLoader",
+        "inputs": {
+          "name": "qwen_image_2.1_fun_controlnet_union_int8_convrot.safetensors"
+        }
+      },
+      "41": {
+        "_meta": {
+          "title": "Image guide (composition)"
+        },
+        "class_type": "LoadImage",
+        "inputs": {
+          "image": "mangaka/guide_case1_v2.png"
+        }
+      },
+      "42": {
+        "_meta": {
+          "title": "Prétraitement : Profondeur"
+        },
+        "class_type": "DepthAnythingV2Preprocessor",
+        "inputs": {
+          "ckpt_name": "depth_anything_v2_vitl.pth",
+          "image": [
+            "41",
+            0
+          ],
+          "resolution": 1024
+        }
+      },
+      "43": {
+        "_meta": {
+          "title": "Carte de contrôle à la taille de la case"
+        },
+        "class_type": "ImageScale",
+        "inputs": {
+          "crop": "center",
+          "height": 1216,
+          "image": [
+            "42",
+            0
+          ],
+          "upscale_method": "lanczos",
+          "width": 832
+        }
+      },
+      "44": {
+        "_meta": {
+          "title": "ControlNet Union (patch appliqué au modèle)"
+        },
+        "class_type": "QwenImageDiffsynthControlnet",
+        "inputs": {
+          "image": [
+            "43",
+            0
+          ],
+          "model": [
+            "47",
+            0
+          ],
+          "model_patch": [
+            "40",
+            0
+          ],
+          "strength": 0.85,
+          "vae": [
+            "3",
+            0
+          ]
+        }
+      },
+      "46": {
+        "_meta": {
+          "title": "LoRA style"
+        },
+        "class_type": "LoraLoaderModelOnly",
+        "inputs": {
+          "lora_name": "encre-seinen.safetensors",
+          "model": [
+            "1",
+            0
+          ],
+          "strength_model": 0.7
+        }
+      },
+      "47": {
+        "_meta": {
+          "title": "LoRA Aiko"
+        },
+        "class_type": "LoraLoaderModelOnly",
+        "inputs": {
+          "lora_name": "aiko-v3.safetensors",
+          "model": [
+            "46",
+            0
+          ],
+          "strength_model": 0.9
+        }
+      },
+      "6": {
+        "_meta": {
+          "title": "Prompts (positif / négatif) + références"
+        },
+        "class_type": "TextEncodeQwenImage21",
+        "inputs": {
+          "clip": [
+            "2",
+            0
+          ],
+          "images.image_1": [
+            "20",
+            0
+          ],
+          "images.image_2": [
+            "21",
+            0
+          ],
+          "negative_prompt": "texte, bulles",
+          "prompt": "plan moyen, Aiko sur un toit au crépuscule, encre et trames",
+          "resolution": 1024,
+          "vae": [
+            "3",
+            0
+          ]
+        }
+      },
+      "8": {
+        "_meta": {
+          "title": "Taille de l'image"
+        },
+        "class_type": "EmptyLatentImage",
+        "inputs": {
+          "batch_size": 1,
+          "height": 1216,
+          "width": 832
+        }
+      },
+      "9": {
+        "_meta": {
+          "title": "KSampler"
+        },
+        "class_type": "KSampler",
+        "inputs": {
+          "cfg": 1,
+          "denoise": 1,
+          "latent_image": [
+            "8",
+            0
+          ],
+          "model": [
+            "4",
+            0
+          ],
+          "negative": [
+            "6",
+            1
+          ],
+          "positive": [
+            "6",
+            0
+          ],
+          "sampler_name": "euler",
+          "scheduler": "simple",
+          "seed": 424242,
+          "steps": 50
+        }
+      }
+    },
+    "map": {
+      "41": {
+        "_meta": {
+          "title": "Image guide (composition)"
+        },
+        "class_type": "LoadImage",
+        "inputs": {
+          "image": "mangaka/guide_case1_v2.png"
+        }
+      },
+      "42": {
+        "_meta": {
+          "title": "Prétraitement : Profondeur"
+        },
+        "class_type": "DepthAnythingV2Preprocessor",
+        "inputs": {
+          "ckpt_name": "depth_anything_v2_vitl.pth",
+          "image": [
+            "41",
+            0
+          ],
+          "resolution": 1024
+        }
+      },
+      "43": {
+        "_meta": {
+          "title": "Carte de contrôle à la taille de la case"
+        },
+        "class_type": "ImageScale",
+        "inputs": {
+          "crop": "center",
+          "height": 1216,
+          "image": [
+            "42",
+            0
+          ],
+          "upscale_method": "lanczos",
+          "width": 832
+        }
+      },
+      "45": {
+        "_meta": {
+          "title": "Carte de contrôle (aperçu)"
+        },
+        "class_type": "SaveImage",
+        "inputs": {
+          "filename_prefix": "mangaka/controle",
+          "images": [
+            "43",
+            0
+          ]
+        }
+      }
+    }
+  },
+  "pose": {
+    "generation": {
+      "1": {
+        "_meta": {
+          "title": "Modèle de diffusion"
+        },
+        "class_type": "UNETLoader",
+        "inputs": {
+          "unet_name": "qwen_image_2.1_bf16.safetensors",
+          "weight_dtype": "default"
+        }
+      },
+      "10": {
+        "_meta": {
+          "title": "Décodage VAE"
+        },
+        "class_type": "VAEDecode",
+        "inputs": {
+          "samples": [
+            "9",
+            0
+          ],
+          "vae": [
+            "3",
+            0
+          ]
+        }
+      },
+      "11": {
+        "_meta": {
+          "title": "Sauvegarde"
+        },
+        "class_type": "SaveImage",
+        "inputs": {
+          "filename_prefix": "mangaka/serie-1/chapitre-1/page-1/case-1",
+          "images": [
+            "10",
+            0
+          ]
+        }
+      },
+      "2": {
+        "_meta": {
+          "title": "Encodeur de texte (Qwen3-VL 8B)"
+        },
+        "class_type": "CLIPLoader",
+        "inputs": {
+          "clip_name": "qwen3vl_8b_bf16.safetensors",
+          "device": "default",
+          "type": "qwen_image"
+        }
+      },
+      "20": {
+        "_meta": {
+          "title": "Référence 1"
+        },
+        "class_type": "LoadImage",
+        "inputs": {
+          "image": "mangaka/perso1_img1.png"
+        }
+      },
+      "21": {
+        "_meta": {
+          "title": "Référence 2"
+        },
+        "class_type": "LoadImage",
+        "inputs": {
+          "image": "mangaka/perso2_img4.png"
+        }
+      },
+      "3": {
+        "_meta": {
+          "title": "VAE"
+        },
+        "class_type": "VAELoader",
+        "inputs": {
+          "vae_name": "qwen_image_2.1_vae_bf16.safetensors"
+        }
+      },
+      "4": {
+        "_meta": {
+          "title": "Cache Qwen Image 2.1"
+        },
+        "class_type": "QwenImage21Cache",
+        "inputs": {
+          "device": "auto",
+          "dtype": "default",
+          "model": [
+            "44",
+            0
+          ]
+        }
+      },
+      "40": {
+        "_meta": {
+          "title": "Patch ControlNet Union (models/model_patches)"
+        },
+        "class_type": "ModelPatchLoader",
+        "inputs": {
+          "name": "qwen_image_2.1_fun_controlnet_union_int8_convrot.safetensors"
+        }
+      },
+      "41": {
+        "_meta": {
+          "title": "Image guide (composition)"
+        },
+        "class_type": "LoadImage",
+        "inputs": {
+          "image": "mangaka/guide_case1_v2.png"
+        }
+      },
+      "42": {
+        "_meta": {
+          "title": "Prétraitement : Pose"
+        },
+        "class_type": "DWPreprocessor",
+        "inputs": {
+          "bbox_detector": "yolox_l.onnx",
+          "detect_body": "enable",
+          "detect_face": "enable",
+          "detect_hand": "enable",
+          "image": [
+            "41",
+            0
+          ],
+          "pose_estimator": "dw-ll_ucoco_384_bs5.torchscript.pt",
+          "resolution": 1024
+        }
+      },
+      "43": {
+        "_meta": {
+          "title": "Carte de contrôle à la taille de la case"
+        },
+        "class_type": "ImageScale",
+        "inputs": {
+          "crop": "center",
+          "height": 1216,
+          "image": [
+            "42",
+            0
+          ],
+          "upscale_method": "lanczos",
+          "width": 832
+        }
+      },
+      "44": {
+        "_meta": {
+          "title": "ControlNet Union (patch appliqué au modèle)"
+        },
+        "class_type": "QwenImageDiffsynthControlnet",
+        "inputs": {
+          "image": [
+            "43",
+            0
+          ],
+          "model": [
+            "47",
+            0
+          ],
+          "model_patch": [
+            "40",
+            0
+          ],
+          "strength": 0.85,
+          "vae": [
+            "3",
+            0
+          ]
+        }
+      },
+      "46": {
+        "_meta": {
+          "title": "LoRA style"
+        },
+        "class_type": "LoraLoaderModelOnly",
+        "inputs": {
+          "lora_name": "encre-seinen.safetensors",
+          "model": [
+            "1",
+            0
+          ],
+          "strength_model": 0.7
+        }
+      },
+      "47": {
+        "_meta": {
+          "title": "LoRA Aiko"
+        },
+        "class_type": "LoraLoaderModelOnly",
+        "inputs": {
+          "lora_name": "aiko-v3.safetensors",
+          "model": [
+            "46",
+            0
+          ],
+          "strength_model": 0.9
+        }
+      },
+      "6": {
+        "_meta": {
+          "title": "Prompts (positif / négatif) + références"
+        },
+        "class_type": "TextEncodeQwenImage21",
+        "inputs": {
+          "clip": [
+            "2",
+            0
+          ],
+          "images.image_1": [
+            "20",
+            0
+          ],
+          "images.image_2": [
+            "21",
+            0
+          ],
+          "negative_prompt": "texte, bulles",
+          "prompt": "plan moyen, Aiko sur un toit au crépuscule, encre et trames",
+          "resolution": 1024,
+          "vae": [
+            "3",
+            0
+          ]
+        }
+      },
+      "8": {
+        "_meta": {
+          "title": "Taille de l'image"
+        },
+        "class_type": "EmptyLatentImage",
+        "inputs": {
+          "batch_size": 1,
+          "height": 1216,
+          "width": 832
+        }
+      },
+      "9": {
+        "_meta": {
+          "title": "KSampler"
+        },
+        "class_type": "KSampler",
+        "inputs": {
+          "cfg": 1,
+          "denoise": 1,
+          "latent_image": [
+            "8",
+            0
+          ],
+          "model": [
+            "4",
+            0
+          ],
+          "negative": [
+            "6",
+            1
+          ],
+          "positive": [
+            "6",
+            0
+          ],
+          "sampler_name": "euler",
+          "scheduler": "simple",
+          "seed": 424242,
+          "steps": 50
+        }
+      }
+    },
+    "map": {
+      "41": {
+        "_meta": {
+          "title": "Image guide (composition)"
+        },
+        "class_type": "LoadImage",
+        "inputs": {
+          "image": "mangaka/guide_case1_v2.png"
+        }
+      },
+      "42": {
+        "_meta": {
+          "title": "Prétraitement : Pose"
+        },
+        "class_type": "DWPreprocessor",
+        "inputs": {
+          "bbox_detector": "yolox_l.onnx",
+          "detect_body": "enable",
+          "detect_face": "enable",
+          "detect_hand": "enable",
+          "image": [
+            "41",
+            0
+          ],
+          "pose_estimator": "dw-ll_ucoco_384_bs5.torchscript.pt",
+          "resolution": 1024
+        }
+      },
+      "43": {
+        "_meta": {
+          "title": "Carte de contrôle à la taille de la case"
+        },
+        "class_type": "ImageScale",
+        "inputs": {
+          "crop": "center",
+          "height": 1216,
+          "image": [
+            "42",
+            0
+          ],
+          "upscale_method": "lanczos",
+          "width": 832
+        }
+      },
+      "45": {
+        "_meta": {
+          "title": "Carte de contrôle (aperçu)"
+        },
+        "class_type": "SaveImage",
+        "inputs": {
+          "filename_prefix": "mangaka/controle",
+          "images": [
+            "43",
+            0
+          ]
+        }
+      }
+    }
+  },
+  "scribble": {
+    "generation": {
+      "1": {
+        "_meta": {
+          "title": "Modèle de diffusion"
+        },
+        "class_type": "UNETLoader",
+        "inputs": {
+          "unet_name": "qwen_image_2.1_bf16.safetensors",
+          "weight_dtype": "default"
+        }
+      },
+      "10": {
+        "_meta": {
+          "title": "Décodage VAE"
+        },
+        "class_type": "VAEDecode",
+        "inputs": {
+          "samples": [
+            "9",
+            0
+          ],
+          "vae": [
+            "3",
+            0
+          ]
+        }
+      },
+      "11": {
+        "_meta": {
+          "title": "Sauvegarde"
+        },
+        "class_type": "SaveImage",
+        "inputs": {
+          "filename_prefix": "mangaka/serie-1/chapitre-1/page-1/case-1",
+          "images": [
+            "10",
+            0
+          ]
+        }
+      },
+      "2": {
+        "_meta": {
+          "title": "Encodeur de texte (Qwen3-VL 8B)"
+        },
+        "class_type": "CLIPLoader",
+        "inputs": {
+          "clip_name": "qwen3vl_8b_bf16.safetensors",
+          "device": "default",
+          "type": "qwen_image"
+        }
+      },
+      "20": {
+        "_meta": {
+          "title": "Référence 1"
+        },
+        "class_type": "LoadImage",
+        "inputs": {
+          "image": "mangaka/perso1_img1.png"
+        }
+      },
+      "21": {
+        "_meta": {
+          "title": "Référence 2"
+        },
+        "class_type": "LoadImage",
+        "inputs": {
+          "image": "mangaka/perso2_img4.png"
+        }
+      },
+      "3": {
+        "_meta": {
+          "title": "VAE"
+        },
+        "class_type": "VAELoader",
+        "inputs": {
+          "vae_name": "qwen_image_2.1_vae_bf16.safetensors"
+        }
+      },
+      "4": {
+        "_meta": {
+          "title": "Cache Qwen Image 2.1"
+        },
+        "class_type": "QwenImage21Cache",
+        "inputs": {
+          "device": "auto",
+          "dtype": "default",
+          "model": [
+            "44",
+            0
+          ]
+        }
+      },
+      "40": {
+        "_meta": {
+          "title": "Patch ControlNet Union (models/model_patches)"
+        },
+        "class_type": "ModelPatchLoader",
+        "inputs": {
+          "name": "qwen_image_2.1_fun_controlnet_union_int8_convrot.safetensors"
+        }
+      },
+      "41": {
+        "_meta": {
+          "title": "Image guide (composition)"
+        },
+        "class_type": "LoadImage",
+        "inputs": {
+          "image": "mangaka/guide_case1_v2.png"
+        }
+      },
+      "42": {
+        "_meta": {
+          "title": "Prétraitement : Croquis à la main"
+        },
+        "class_type": "ScribblePreprocessor",
+        "inputs": {
+          "image": [
+            "41",
+            0
+          ],
+          "resolution": 1024
+        }
+      },
+      "43": {
+        "_meta": {
+          "title": "Carte de contrôle à la taille de la case"
+        },
+        "class_type": "ImageScale",
+        "inputs": {
+          "crop": "center",
+          "height": 1216,
+          "image": [
+            "42",
+            0
+          ],
+          "upscale_method": "lanczos",
+          "width": 832
+        }
+      },
+      "44": {
+        "_meta": {
+          "title": "ControlNet Union (patch appliqué au modèle)"
+        },
+        "class_type": "QwenImageDiffsynthControlnet",
+        "inputs": {
+          "image": [
+            "43",
+            0
+          ],
+          "model": [
+            "47",
+            0
+          ],
+          "model_patch": [
+            "40",
+            0
+          ],
+          "strength": 0.85,
+          "vae": [
+            "3",
+            0
+          ]
+        }
+      },
+      "46": {
+        "_meta": {
+          "title": "LoRA style"
+        },
+        "class_type": "LoraLoaderModelOnly",
+        "inputs": {
+          "lora_name": "encre-seinen.safetensors",
+          "model": [
+            "1",
+            0
+          ],
+          "strength_model": 0.7
+        }
+      },
+      "47": {
+        "_meta": {
+          "title": "LoRA Aiko"
+        },
+        "class_type": "LoraLoaderModelOnly",
+        "inputs": {
+          "lora_name": "aiko-v3.safetensors",
+          "model": [
+            "46",
+            0
+          ],
+          "strength_model": 0.9
+        }
+      },
+      "6": {
+        "_meta": {
+          "title": "Prompts (positif / négatif) + références"
+        },
+        "class_type": "TextEncodeQwenImage21",
+        "inputs": {
+          "clip": [
+            "2",
+            0
+          ],
+          "images.image_1": [
+            "20",
+            0
+          ],
+          "images.image_2": [
+            "21",
+            0
+          ],
+          "negative_prompt": "texte, bulles",
+          "prompt": "plan moyen, Aiko sur un toit au crépuscule, encre et trames",
+          "resolution": 1024,
+          "vae": [
+            "3",
+            0
+          ]
+        }
+      },
+      "8": {
+        "_meta": {
+          "title": "Taille de l'image"
+        },
+        "class_type": "EmptyLatentImage",
+        "inputs": {
+          "batch_size": 1,
+          "height": 1216,
+          "width": 832
+        }
+      },
+      "9": {
+        "_meta": {
+          "title": "KSampler"
+        },
+        "class_type": "KSampler",
+        "inputs": {
+          "cfg": 1,
+          "denoise": 1,
+          "latent_image": [
+            "8",
+            0
+          ],
+          "model": [
+            "4",
+            0
+          ],
+          "negative": [
+            "6",
+            1
+          ],
+          "positive": [
+            "6",
+            0
+          ],
+          "sampler_name": "euler",
+          "scheduler": "simple",
+          "seed": 424242,
+          "steps": 50
+        }
+      }
+    },
+    "map": {
+      "41": {
+        "_meta": {
+          "title": "Image guide (composition)"
+        },
+        "class_type": "LoadImage",
+        "inputs": {
+          "image": "mangaka/guide_case1_v2.png"
+        }
+      },
+      "42": {
+        "_meta": {
+          "title": "Prétraitement : Croquis à la main"
+        },
+        "class_type": "ScribblePreprocessor",
+        "inputs": {
+          "image": [
+            "41",
+            0
+          ],
+          "resolution": 1024
+        }
+      },
+      "43": {
+        "_meta": {
+          "title": "Carte de contrôle à la taille de la case"
+        },
+        "class_type": "ImageScale",
+        "inputs": {
+          "crop": "center",
+          "height": 1216,
+          "image": [
+            "42",
+            0
+          ],
+          "upscale_method": "lanczos",
+          "width": 832
+        }
+      },
+      "45": {
+        "_meta": {
+          "title": "Carte de contrôle (aperçu)"
+        },
+        "class_type": "SaveImage",
+        "inputs": {
+          "filename_prefix": "mangaka/controle",
+          "images": [
+            "43",
+            0
+          ]
+        }
+      }
+    }
+  }
+}

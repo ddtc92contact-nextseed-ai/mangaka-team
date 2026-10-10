@@ -13,7 +13,13 @@ from pathlib import Path
 
 import pytest
 
-from mangaka_engine.presets import ControlInput, LoraSpec, PresetRegistry, build_workflow
+from mangaka_engine.presets import (
+    ControlInput,
+    LoraSpec,
+    PresetRegistry,
+    build_control_map_workflow,
+    build_workflow,
+)
 from tests.conftest import PRESETS_DIR
 
 REG = PresetRegistry.load(PRESETS_DIR)
@@ -81,6 +87,29 @@ def test_workflow_matches_golden(preset_id: str) -> None:
     if os.environ.get("UPDATE_GOLDEN"):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
+    assert json.loads(path.read_text(encoding="utf-8")) == built
+
+
+CONTROL_PRESETS = [p for p in PRESETS if p.endswith("-controlnet")]
+# Types sans post-traitement de la carte : graphe figé (le golden a été produit avant l'inversion de « Trait »).
+PLAIN_CONTROL_TYPES = ["depth", "pose", "scribble", "canny", "carte"]
+
+
+@pytest.mark.parametrize("preset_id", CONTROL_PRESETS)
+def test_control_types_match_golden(preset_id: str) -> None:
+    """Workflow de génération et aperçu de carte de chaque type autre que « Trait », comparés au golden."""
+    loaded = REG.workflow(preset_id)
+    refs = REFERENCES if loaded.preset.reference_images else []
+    built = {}
+    for type_id in PLAIN_CONTROL_TYPES:
+        control = ControlInput(image=CONTROL.image, type=type_id, strength=CONTROL.strength)
+        built[type_id] = {
+            "generation": build_workflow(loaded, PARAMS, reference_images=refs, loras=LORAS, control=control).workflow,
+            "map": build_control_map_workflow(loaded, CONTROL.image, type_id, 832, 1216).workflow,
+        }
+    path = GOLDEN / f"{preset_id}.types.json"
+    if os.environ.get("UPDATE_GOLDEN"):
+        path.write_text(json.dumps(built, indent=2, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
     assert json.loads(path.read_text(encoding="utf-8")) == built
 
 

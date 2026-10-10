@@ -373,6 +373,23 @@ def test_mock_comfyui_returns_image_of_requested_size() -> None:
     assert img.size == (320, 200) and img.format == "PNG"
 
 
+@pytest.mark.parametrize("bad", [{"extra": 1}, {"7": {"inputs": {}}}, {"7": {"class_type": "X"}}])
+def test_prompt_keys_must_all_be_nodes(bad: dict[str, Any]) -> None:
+    """Garde-fou : ComfyUI 0.39 répond HTTP 500 sans message sur une clé de premier niveau qui n'est pas
+    un nœud ; refusé avant l'envoi, par le vrai client comme par le mock."""
+    workflow = {"1": {"class_type": "X", "inputs": {}}, **bad}
+    sent: list[httpx.Request] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        sent.append(req)
+        return httpx.Response(500, text="")
+
+    for client in (MockComfyUIClient(), http_client(handler)):
+        with pytest.raises(ComfyUIWorkflowError, match="clés qui ne sont pas des nœuds : " + next(iter(bad))):
+            client.queue_prompt(workflow)
+    assert sent == []
+
+
 def test_mock_comfyui_offline() -> None:
     client = MockComfyUIClient(online=False)
     assert not client.health().online

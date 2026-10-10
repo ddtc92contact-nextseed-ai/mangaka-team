@@ -136,15 +136,23 @@ def control_core_problems(loaded: LoadedWorkflow, object_info: dict[str, Any]) -
 
 
 def control_type_problems(control: ControlSettings, object_info: dict[str, Any]) -> dict[str, str | None]:
-    """Type de contrôle → problème (None : utilisable) : son prétraitement est-il connu de ComfyUI ?"""
-    return {
-        key: (
-            f"prétraitement {t.class_type} absent de ce ComfyUI (comfyui_controlnet_aux à installer ou à mettre à jour)"
-            if t.class_type is not None and t.class_type not in object_info
-            else None
-        )
-        for key, t in control.types.items()
-    }
+    """Type de contrôle → problème (None : utilisable) : son prétraitement et ses post-traitements de la
+    carte (`post`, ex. `ImageInvert`) sont-ils connus de ComfyUI ?"""
+    out: dict[str, str | None] = {}
+    for key, t in control.types.items():
+        problems = []
+        if t.class_type is not None and t.class_type not in object_info:
+            problems.append(
+                f"prétraitement {t.class_type} absent de ce ComfyUI (comfyui_controlnet_aux à installer ou à mettre"
+                " à jour)"
+            )
+        missing = [s.class_type for s in t.post if s.class_type not in object_info]
+        problems += [
+            f"nœud {cls} (post-traitement de la carte) absent de ce ComfyUI (mise à jour de ComfyUI nécessaire)"
+            for cls in dict.fromkeys(missing)
+        ]
+        out[key] = " ; ".join(problems) or None
+    return out
 
 
 def control_types(presets: PresetRegistry) -> dict[str, tuple[ControlSettings, str]]:

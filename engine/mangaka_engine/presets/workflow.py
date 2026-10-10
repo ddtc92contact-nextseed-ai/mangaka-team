@@ -46,7 +46,7 @@ class BuiltWorkflow:
     loras: list[LoraSpec] = field(default_factory=list)
     removed_nodes: list[str] = field(default_factory=list)
     source_image: str | None = None  # image de composition (nom côté ComfyUI)
-    # Contrôle appliqué : {type, name, strength, preprocessor, patch, image} (preset ControlNet).
+    # Contrôle appliqué : {type, name, strength, preprocessor, patch, image[, post]} (preset ControlNet).
     control: dict[str, Any] | None = None
 
 
@@ -197,19 +197,32 @@ def apply_control(
                 workflow[settings.resize]["inputs"][key] = size[key]
     image_link = [settings.image.node, 0]
     pre = settings.preprocessor
+    users = _consumers(workflow, [pre, 0])
     if ctype.class_type is None:
         # Pas de prétraitement : l'image guide est déjà une carte (croquis à la main, scribble).
-        for node_id, key in _consumers(workflow, [pre, 0]):
-            workflow[node_id]["inputs"][key] = image_link
         workflow.pop(pre, None)
+        source = image_link
     else:
         workflow[pre] = {
             "class_type": ctype.class_type,
             "inputs": {**copy.deepcopy(ctype.inputs), ctype.image_input: image_link},
             "_meta": {"title": f"Prétraitement : {ctype.name}"},
         }
+        source = [pre, 0]
+    # Post-traitements de la carte (ex. inversion) : chaînés après le prétraitement, avant la mise à la taille.
+    for step in ctype.post:
+        node_id = str(_next_id(workflow))
+        workflow[node_id] = {
+            "class_type": step.class_type,
+            "inputs": {**copy.deepcopy(step.inputs), step.image_input: source},
+            "_meta": {"title": f"Carte ({ctype.name}) : {step.name or step.class_type}"},
+        }
+        source = [node_id, 0]
+    if source != [pre, 0]:
+        for node_id, key in users:
+            workflow[node_id]["inputs"][key] = source
     patch = workflow[settings.patch.node]["inputs"].get(settings.patch.input)
-    return {
+    applied = {
         "type": control.type,
         "name": ctype.name,
         "strength": control.strength,
@@ -217,6 +230,9 @@ def apply_control(
         "patch": patch,
         "image": control.image,
     }
+    if ctype.post:
+        applied["post"] = [step.class_type for step in ctype.post]
+    return applied
 
 
 def build_control_map_workflow(

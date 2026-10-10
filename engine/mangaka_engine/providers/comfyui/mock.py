@@ -42,6 +42,7 @@ from .base import (
     ImageRef,
     ProgressFn,
     StopFn,
+    check_prompt_nodes,
 )
 
 DEFAULT_SIZE = (512, 512)
@@ -188,12 +189,15 @@ def render_mock_from_image(
     return buf.getvalue()
 
 
-def render_mock_control_map(source: bytes, width: int, height: int) -> bytes:
-    """Carte de contrôle simulée : contours de l'image guide, trait noir sur papier blanc."""
+def render_mock_control_map(source: bytes, width: int, height: int, *, inverted: bool = False) -> bytes:
+    """Carte de contrôle simulée : contours de l'image guide, trait blanc sur fond noir comme les
+    prétraitements réels ; `inverted` (nœud `ImageInvert` dans le graphe) : trait noir sur papier blanc."""
     with Image.open(io.BytesIO(source)) as src:
         base = ImageOps.grayscale(src.convert("RGB")).resize((width, height), Image.Resampling.LANCZOS)
     edges = ImageOps.autocontrast(base.filter(ImageFilter.FIND_EDGES), cutoff=1)
-    out = ImageOps.invert(edges.point(lambda v: 255 if v > 40 else 0))
+    out = edges.point(lambda v: 255 if v > 40 else 0)
+    if inverted:
+        out = ImageOps.invert(out)
     buf = io.BytesIO()
     out.convert("RGB").save(buf, format="PNG")
     return buf.getvalue()
@@ -324,6 +328,7 @@ class MockComfyUIClient:
 
     def queue_prompt(self, workflow: dict[str, Any]) -> str:
         self._check_online()
+        check_prompt_nodes(workflow)
         node_errors: dict[str, Any] = {}
         for node_id, node in workflow.items():
             if isinstance(node, dict) and node.get("class_type") in ("LoadImage", "LoadImageMask"):
@@ -358,7 +363,8 @@ class MockComfyUIClient:
             caption = f"CONTROLNET · seed {seed}" + (f" · force {strength:g}" if strength is not None else "")
             data = render_mock_from_image(self.uploads[image], *requested_size(workflow), seed, None, caption=caption)
         elif source is not None and preprocess:
-            data = render_mock_control_map(source, *requested_size(workflow))
+            inverts = sum(1 for n in workflow.values() if isinstance(n, dict) and n.get("class_type") == "ImageInvert")
+            data = render_mock_control_map(source, *requested_size(workflow), inverted=inverts % 2 == 1)
         elif source is not None:
             data = resize_image(source, *requested_size(workflow))
         elif sketch_source is not None:

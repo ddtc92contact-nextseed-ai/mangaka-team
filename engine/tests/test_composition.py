@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from PIL import Image
+from PIL import Image, ImageStat
 
 from mangaka_engine.pipeline.composition import unavailable_control
 from mangaka_engine.pipeline.generation import composition_params
@@ -121,6 +121,10 @@ def test_control_types_and_errors() -> None:
         else:
             assert wf["42"]["class_type"] == ctype.class_type
             assert wf["42"]["inputs"] == {**ctype.inputs, ctype.image_input: ["41", 0]}
+        if not ctype.post:
+            assert "ImageInvert" not in {n["class_type"] for n in wf.values()}, type_id
+    # Seul « Trait » inverse sa carte ; « Carte déjà prête » n'est jamais retouchée.
+    assert [t for t, c in settings.types.items() if c.post] == ["lineart"]
     with pytest.raises(PresetError, match="attend une image guide"):
         build_workflow(loaded, PARAMS)
     with pytest.raises(PresetError, match="type de contrôle inconnu"):
@@ -144,6 +148,39 @@ def test_control_map_workflow_keeps_only_the_preprocessing() -> None:
     }
     assert built.output_node == "45" and wf["45"]["inputs"]["filename_prefix"] == "x/controle"
     assert (wf["43"]["inputs"]["width"], wf["43"]["inputs"]["height"]) == (640, 960)
+
+
+@pytest.mark.parametrize("preset_id", CONTROLNET)
+def test_lineart_map_is_inverted_before_resize(preset_id: str) -> None:
+    """« Trait » : LineArtPreprocessor (trait blanc sur fond noir) → ImageInvert → ImageScale → patch."""
+    loaded = REG.workflow(preset_id)
+    settings = loaded.preset.control
+    assert settings is not None and settings.default_type == "lineart"
+    refs = ["mangaka/ref1.png"] if loaded.preset.reference_images else []
+    built = build_workflow(
+        loaded, PARAMS, reference_images=refs, loras=LORAS, control=ControlInput(GUIDE, "lineart", 1.0)
+    )
+    wf = built.workflow
+    [inv] = [k for k, n in wf.items() if n["class_type"] == "ImageInvert"]
+    assert wf[inv]["inputs"] == {"image": [settings.preprocessor, 0]}
+    assert wf[settings.preprocessor]["class_type"] == "LineArtPreprocessor"
+    assert settings.resize is not None and wf[settings.resize]["inputs"]["image"] == [inv, 0]
+    assert wf[settings.apply.node]["inputs"]["image"] == [settings.resize, 0]
+    assert not any(v == [settings.preprocessor, 0] for k, n in wf.items() if k != inv for v in n["inputs"].values())
+    assert built.control is not None and built.control["post"] == ["ImageInvert"]
+    assert all(isinstance(n, dict) and "class_type" in n and "inputs" in n for n in wf.values())
+
+    # Aperçu de la carte : la carte réellement envoyée au modèle, donc inversée.
+    preview = build_control_map_workflow(loaded, GUIDE, "lineart", 640, 960)
+    assert {k: n["class_type"] for k, n in preview.workflow.items()} == {
+        "41": "LoadImage",
+        "42": "LineArtPreprocessor",
+        inv: "ImageInvert",
+        "43": "ImageScale",
+        "45": "SaveImage",
+    }
+    assert preview.workflow["43"]["inputs"]["image"] == [inv, 0]
+    assert preview.workflow["45"]["inputs"]["images"] == ["43", 0]
 
 
 def test_composition_params_replays_the_control() -> None:
@@ -204,7 +241,16 @@ def test_lock_from_sketch_then_regenerate(make_client: Callable[..., TestClient]
     preview = c.get(lock["preview"]["url"])
     assert preview.status_code == 200
     map_wf = next(wf for wf in comfy.prompts.values() if "9" not in wf)
-    assert {n["class_type"] for n in map_wf.values()} == {"LoadImage", "LineArtPreprocessor", "ImageScale", "SaveImage"}
+    assert {n["class_type"] for n in map_wf.values()} == {
+        "LoadImage",
+        "LineArtPreprocessor",
+        "ImageInvert",
+        "ImageScale",
+        "SaveImage",
+    }
+    # Carte inversée : trait noir sur fond clair (le patch encode la carte avec le VAE).
+    with Image.open(io.BytesIO(preview.content)) as img:
+        assert ImageStat.Stat(img.convert("L")).mean[0] > 128
     # Badge « composition verrouillée » dans la liste des pages.
     pages = _ok(c.get(f"/chapters/{data['chapter']['id']}/pages"))
     flags = {p["id"]: p["composition_lock"] for pg in pages for p in pg["panels"]}
