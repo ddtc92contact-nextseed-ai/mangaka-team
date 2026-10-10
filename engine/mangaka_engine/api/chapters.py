@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
+from ..pipeline.finishing import panel_print_info
 from ..pipeline.knowledge import record_chapter_summary
 from ..pipeline.layout import LayoutError
 from ..pipeline.library import SeriesLibrary
@@ -22,7 +23,8 @@ from ..pipeline.pages import (
     slant_page_cut,
 )
 from ..pipeline.script import normalize_shot_type, script_job
-from ..presets import PresetError
+from ..presets import PresetError, PresetRegistry
+from ..store.files import FileStore
 from ..store.models import (
     Bubble,
     BubbleKind,
@@ -95,7 +97,13 @@ def _one_out(session: Session, chapter: Chapter) -> ChapterOut:
     return chapter_out(chapter, _page_counts(session, [chapter.id]).get(chapter.id, (0, 0)))
 
 
-def page_out(page: Page, regen_threshold: float | None = None) -> PageOut:
+def page_out(
+    page: Page,
+    regen_threshold: float | None = None,
+    presets: PresetRegistry | None = None,
+    files: FileStore | None = None,
+) -> PageOut:
+    """`presets` + `files` : ajoute le dpi d'impression de chaque case (finition d'impression)."""
     chosen = {p.id: next((i for i in p.images if i.selected), None) for p in page.panels}
     layout_panels = {lp.get("panel_id"): lp for lp in (page.layout or {}).get("panels", [])}
     return PageOut(
@@ -148,6 +156,9 @@ def page_out(page: Page, regen_threshold: float | None = None) -> PageOut:
                 detections=c.detections if c else None,
                 regeneration_advised=regen_threshold is not None
                 and regeneration_advised(p, layout_panels.get(p.id), regen_threshold),
+                print_info=panel_print_info(presets, files, p, chosen[p.id])
+                if presets is not None and files is not None
+                else None,
             )
             for p in page.panels
         ],
@@ -331,7 +342,12 @@ def list_pages(
 
 
 def _page_out(ctx: AppContext, page: Page) -> PageOut:
-    return page_out(page, ctx.presets.layout.regeneration.ratio_threshold)
+    return page_out(
+        page,
+        ctx.presets.layout.regeneration.ratio_threshold,
+        ctx.agents.presets_for(page.chapter.project_id),
+        ctx.files,
+    )
 
 
 @router.put("/chapters/{chapter_id}/pages", response_model=list[PageOut])

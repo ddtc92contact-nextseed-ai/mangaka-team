@@ -1,0 +1,16 @@
+# Finition d'impression — alternative : 4x-UltraSharp (plus de micro-détail, peut durcir les trames).
+# Fichier attendu : ComfyUI/models/upscale_models/4x-UltraSharp.pth (déjà sur la GX10).
+id: ultrasharp-4x
+name: 4x-UltraSharp
+description: >-
+  Alternative : détails plus nets que l'anime 6B, à préférer pour les cases très texturées.
+workflow_file: ultrasharp-4x.json
+output_node: "5"
+model_scale: 4
+timeout_s: 300
+estimated_s: 8
+mapping:
+  image: { node: "1", input: image }
+  width: { node: "4", input: width }
+  height: { node: "4", input: height }
+  filename_prefix: { node: "5", input: filename_prefix }

@@ -479,6 +479,8 @@ def test_database_v11_keeps_reference_order(make_settings: Callable[..., Setting
         files = [("files", (f"{i}.png", png_bytes(), "image/png")) for i in range(3)]
         _ok(client.post(f"/characters/{entry['id']}/images", files=files), 201)
     con = sqlite3.connect(settings.database_path)
+    con.execute("ALTER TABLE panel_images DROP COLUMN finish")  # v13 : finition d'impression
+    con.execute("ALTER TABLE projects DROP COLUMN upscaler")
     con.execute("DROP TABLE reference_variants")
     con.execute("ALTER TABLE character_images DROP COLUMN position")
     con.execute("ALTER TABLE series_asset_images DROP COLUMN position")

@@ -18,6 +18,7 @@
   de chaque case). Les données existantes ne changent pas : les cases n'ont ni décor ni objet.
 - 12 : « Créer des références » (variantes générées par fiche) et ordre des images de référence ; les
   images existantes gardent leur ordre (celui de leur ajout).
+- 13 : finition d'impression (image agrandie dérivée d'une version, agrandisseur choisi par série).
 
 Une base neuve est créée directement à la dernière version. Chaque migration tourne dans une
 transaction unique, clés étrangères désactivées (recette « 12 étapes » de SQLite pour reconstruire
@@ -54,7 +55,7 @@ from .models import (
 
 log = logging.getLogger("mangaka_engine")
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 
 class MigrationError(RuntimeError):
@@ -226,6 +227,11 @@ def _v11_to_v12(cur: sqlite3.Cursor) -> None:
         cur.execute(stmt)
 
 
+def _v12_to_v13(cur: sqlite3.Cursor) -> None:
+    cur.execute("ALTER TABLE panel_images ADD COLUMN finish JSON")
+    cur.execute("ALTER TABLE projects ADD COLUMN upscaler VARCHAR(100)")
+
+
 MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     # version de départ → (version d'arrivée, fonction)
     0: (2, _v0_to_v2),
@@ -240,6 +246,7 @@ MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     9: (10, _v9_to_v10),
     10: (11, _v10_to_v11),
     11: (12, _v11_to_v12),
+    12: (13, _v12_to_v13),
 }
 
 

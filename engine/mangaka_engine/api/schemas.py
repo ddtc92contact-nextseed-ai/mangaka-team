@@ -42,6 +42,8 @@ class ProjectCreate(_In):
     style_lora_trigger_words: LoraTriggers = ""
     # Absent : style par défaut des presets (« dynamique »).
     layout_style: PresetId | None = None
+    # Agrandisseur de la finition d'impression (None : celui de defaults.yaml).
+    upscaler: PresetId | None = None
 
 
 class ProjectUpdate(_In):
@@ -55,6 +57,7 @@ class ProjectUpdate(_In):
     style_lora_weight: LoraWeight | None = None
     style_lora_trigger_words: LoraTriggers | None = None
     layout_style: PresetId | None = None
+    upscaler: PresetId | None = None  # null : revient à l'agrandisseur de defaults.yaml
 
 
 class ProjectOut(BaseModel):
@@ -69,6 +72,7 @@ class ProjectOut(BaseModel):
     style_lora_weight: float
     style_lora_trigger_words: str
     layout_style: str
+    upscaler: str | None = None
     character_count: int
     chapter_count: int
     # Pages déjà mises en page : changer le sens de lecture les recalcule (confirmation dans l'UI).
@@ -191,6 +195,31 @@ class PanelFrameIn(_In):
     inset: bool | None = None
 
 
+class PrintInfoOut(BaseModel):
+    """Dpi effectif de la version retenue à l'impression (finition d'impression)."""
+
+    image_id: int
+    status: Literal["ok", "finished", "low"]  # au dpi cible · finalisée · sous le seuil
+    target_dpi: int  # dpi du format de page
+    min_dpi: int  # seuil : finishing_tolerance × dpi cible
+    box_width: int  # boîte imprimée (px au dpi cible, fond perdu compris)
+    box_height: int
+    width_mm: float
+    height_mm: float
+    source_width: int
+    source_height: int
+    dpi: int  # dpi effectif de la version retenue
+    factor: float  # agrandissement nécessaire pour atteindre le dpi cible
+    target_width: int  # taille finale de la finition
+    target_height: int
+    needed: bool
+    finished: bool
+    finished_dpi: int | None = None
+    finished_width: int | None = None
+    finished_height: int | None = None
+    finished_upscaler: str | None = None
+
+
 class PanelOut(BaseModel):
     id: int
     index: int
@@ -222,6 +251,8 @@ class PanelOut(BaseModel):
     detections: dict[str, Any] | None = None  # boîtes de la version choisie
     # Le ratio de la case s'écarte trop de celui de l'image retenue (seuil : presets/layout.yaml).
     regeneration_advised: bool = False
+    # Dpi de la version retenue à l'impression (None : pas de version retenue ou pas de mise en page).
+    print_info: PrintInfoOut | None = None
 
 
 class PageOut(BaseModel):
@@ -443,7 +474,33 @@ class PanelImageOut(BaseModel):
     detections: dict[str, Any] | None = None
     # Jugement humain « bonne / mauvaise » (banc d'essai du QC), indépendant du verdict QC.
     annotation: AnnotationOut | None = None
+    # Finition d'impression de la version (image agrandie dérivée) : taille, agrandisseur, dpi…
+    finish: dict[str, Any] | None = None
     created_at: datetime
+
+
+class UpscalerOut(BaseModel):
+    id: str
+    name: str
+    description: str
+    model_scale: float | None
+    high_fidelity: bool
+    is_default: bool
+    estimated_s: float | None
+    timeout_s: float
+
+
+class FinishBatchOut(BaseModel):
+    jobs: list[JobOut]
+    panel_ids: list[int]
+    skipped: int  # cases déjà au dpi cible, déjà finalisées, sans version ou déjà en file
+
+
+class PageFinishingOut(BaseModel):
+    page_id: int
+    upscaler: str | None  # nom de l'agrandisseur de la série
+    panels: dict[int, PrintInfoOut | None]
+    active_jobs: list[JobOut]
 
 
 class PanelUpdate(_In):
@@ -484,6 +541,8 @@ class PanelDetailOut(BaseModel):
     target: dict[str, int] | None
     images: list[PanelImageOut]
     active_jobs: list[JobOut]
+    print_info: PrintInfoOut | None = None
+    upscaler: str | None = None  # agrandisseur de la finition (nom), None si aucun configuré
 
 
 class QueueItemOut(BaseModel):

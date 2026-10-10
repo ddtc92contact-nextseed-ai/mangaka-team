@@ -28,6 +28,7 @@ def project_out(project: Project, character_count: int, chapter_count: int, laid
         style_lora_weight=project.style_lora_weight,
         style_lora_trigger_words=project.style_lora_trigger_words or "",
         layout_style=project.layout_style,
+        upscaler=project.upscaler,
         character_count=character_count,
         chapter_count=chapter_count,
         laid_out_page_count=laid_out,
@@ -59,7 +60,11 @@ def _counts(session: Session, project_id: int) -> tuple[int, int, int]:
 
 
 def _check_presets(
-    ctx: AppContext, page_format: str | None, workflow: str | None, layout_style: str | None = None
+    ctx: AppContext,
+    page_format: str | None,
+    workflow: str | None,
+    layout_style: str | None = None,
+    upscaler: str | None = None,
 ) -> None:
     if page_format is not None and page_format not in ctx.presets.page_formats:
         raise FieldError("page_format", f"format de page inconnu : « {page_format} »")
@@ -67,6 +72,8 @@ def _check_presets(
         raise FieldError("workflow_preset", f"workflow inconnu : « {workflow} »")
     if layout_style is not None and layout_style not in ctx.presets.layout_styles:
         raise FieldError("layout_style", f"style de mise en page inconnu : « {layout_style} »")
+    if upscaler is not None and upscaler not in ctx.presets.upscalers:
+        raise FieldError("upscaler", f"agrandisseur inconnu : « {upscaler} »")
 
 
 @router.get("", response_model=list[ProjectOut])
@@ -92,7 +99,7 @@ def create_project(
     layout_style = body.layout_style or ctx.presets.default_layout_style
     if layout_style is None:
         raise FieldError("layout_style", "aucun style de mise en page disponible (presets/layout_styles/)")
-    _check_presets(ctx, page_format, workflow, layout_style)
+    _check_presets(ctx, page_format, workflow, layout_style, body.upscaler)
     project = Project(
         title=body.title,
         style=body.style,
@@ -104,6 +111,7 @@ def create_project(
         style_lora_weight=body.style_lora_weight,
         style_lora_trigger_words=body.style_lora_trigger_words,
         layout_style=layout_style,
+        upscaler=body.upscaler,
     )
     session.add(project)
     session.commit()
@@ -137,7 +145,13 @@ def update_project(
     ):
         if key in changes and changes[key] is None:
             raise FieldError(key, "ne peut pas être vide")
-    _check_presets(ctx, changes.get("page_format"), changes.get("workflow_preset"), changes.get("layout_style"))
+    _check_presets(
+        ctx,
+        changes.get("page_format"),
+        changes.get("workflow_preset"),
+        changes.get("layout_style"),
+        changes.get("upscaler"),
+    )
     direction = changes.pop("reading_direction", None)
     if "status" in changes:
         changes["status"] = SeriesStatus(changes["status"])

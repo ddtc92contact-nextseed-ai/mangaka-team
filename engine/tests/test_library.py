@@ -452,6 +452,8 @@ def test_database_from_before_the_library_keeps_working(make_settings: Callable[
             )
         )
     con = sqlite3.connect(settings.database_path)
+    con.execute("ALTER TABLE panel_images DROP COLUMN finish")  # v13
+    con.execute("ALTER TABLE projects DROP COLUMN upscaler")
     con.execute("DROP TABLE reference_variants")  # v12
     con.execute("ALTER TABLE character_images DROP COLUMN position")
     con.execute("ALTER TABLE series_asset_images DROP COLUMN position")

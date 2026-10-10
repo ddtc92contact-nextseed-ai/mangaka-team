@@ -1,4 +1,4 @@
-from .loader import LoadedWorkflow, PresetError, PresetIssue, PresetRegistry
+from .loader import LoadedUpscaler, LoadedWorkflow, PresetError, PresetIssue, PresetRegistry
 from .schemas import (
     ImagePromptSettings,
     KnowledgeAgent,
@@ -12,9 +12,10 @@ from .schemas import (
     ReferenceSlot,
     SplitNode,
     TreeNode,
+    UpscalerPreset,
     WorkflowPreset,
 )
-from .workflow import BuiltWorkflow, LoraSpec, build_workflow
+from .workflow import BuiltWorkflow, LoraSpec, build_upscale_workflow, build_workflow
 
 __all__ = [
     "BuiltWorkflow",
@@ -30,11 +31,14 @@ __all__ = [
     "ReferenceSlot",
     "SplitNode",
     "TreeNode",
+    "LoadedUpscaler",
     "LoadedWorkflow",
     "PageFormat",
     "PresetError",
     "PresetIssue",
     "PresetRegistry",
+    "UpscalerPreset",
     "WorkflowPreset",
+    "build_upscale_workflow",
     "build_workflow",
 ]

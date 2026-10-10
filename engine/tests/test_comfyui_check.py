@@ -78,6 +78,11 @@ def test_check_ok_with_recorded_object_info() -> None:
         "qwen-image-edit-ref-rapide",
         "qwen-image-turbo",
         "qwen-image-edit-ref-turbo",
+        # agrandisseurs de la finition d'impression (presets/upscalers/)
+        "realesrgan-x4plus-anime-6b",
+        "ultrasharp-4x",
+        "remacri-4x",
+        "seedvr2-7b",
         "qwen-image-inpaint",
         "qwen-image-inpaint-rapide",
         "qwen-image-inpaint-turbo",
@@ -147,10 +152,23 @@ def test_unknown_node_class() -> None:
     info = _object_info()
     del info["QwenImage21Cache"]
     report = _report(info)
-    for problems in _problems(report).values():
-        assert problems == ["nœud inconnu : QwenImage21Cache (nœud 4)"]
+    for preset_id, problems in _problems(report).items():
+        expected = ["nœud inconnu : QwenImage21Cache (nœud 4)"] if preset_id in REG.workflows else []
+        assert problems == expected
     del info["LoraLoaderModelOnly"]
     assert "nœud inconnu : LoraLoaderModelOnly (chargeur de LoRA)" in _problems(_report(info))["qwen-image-base"]
+
+
+def test_missing_upscale_model_names_the_file_and_the_folder() -> None:
+    info = _object_info()
+    model = REG.upscaler("realesrgan-x4plus-anime-6b").workflow["2"]["inputs"]["model_name"]
+    info["UpscaleModelLoader"]["input"]["required"]["model_name"][0].remove(model)
+    problems = _problems(_report(info))
+    assert problems["realesrgan-x4plus-anime-6b"] == [
+        f"modèle introuvable dans ComfyUI : {model} — à placer dans ComfyUI/models/upscale_models/"
+        " (nœud 2, UpscaleModelLoader)"
+    ]
+    assert problems["ultrasharp-4x"] == [] and problems["qwen-image-turbo"] == []
 
 
 def test_missing_lora_from_series_and_characters() -> None:

@@ -7,6 +7,10 @@ progression par étapes ; vérifie que les images des `LoadImage` / `LoadImageMa
 Inpainting (un `VAEEncode` part d'une `LoadImage` et un `LoadImageMask` est présent) : renvoie l'image
 source, légèrement modifiée partout (comme le ferait l'aller-retour VAE) et remplie d'une couleur tirée
 de la seed dans la zone masquée — le moteur doit recoller seulement la zone pour garder le reste intact.
+
+Agrandissement (finition d'impression) : un autre workflow sans latent vide (`Empty…`) qui charge une image
+envoyée renvoie cette image redimensionnée (Pillow, lanczos) à la taille demandée — celle du nœud de
+taille finale — sans GPU ni modèle.
 """
 
 from __future__ import annotations
@@ -70,6 +74,27 @@ def _label(workflow: dict[str, Any]) -> str:
             last = prefix.rstrip("/").rsplit("/", 1)[-1]
             return last.replace("-", " ").replace("_", " ").strip()
     return ""
+
+
+def source_upload(workflow: dict[str, Any], uploads: dict[str, bytes]) -> bytes | None:
+    """Image envoyée d'un workflow image → image (agrandissement) ; None pour une génération."""
+    nodes = [n for n in workflow.values() if isinstance(n, dict)]
+    if any(str(n.get("class_type") or "").startswith("Empty") for n in nodes):
+        return None
+    for node in nodes:
+        if node.get("class_type") == "LoadImage":
+            image = node.get("inputs", {}).get("image")
+            if image in uploads:
+                return uploads[image]
+    return None
+
+
+def resize_image(data: bytes, width: int, height: int) -> bytes:
+    with Image.open(io.BytesIO(data)) as src:
+        out = src.convert("RGB").resize((width, height), Image.Resampling.LANCZOS)
+    buf = io.BytesIO()
+    out.save(buf, format="PNG")
+    return buf.getvalue()
 
 
 def _font(size: int) -> ImageFont.ImageFont | ImageFont.FreeTypeFont:
@@ -192,8 +217,12 @@ class MockComfyUIClient:
         filename = f"mock_{prompt_id}.png"
         seed = _first_int(workflow, "seed") or 0
         inpaint = self._inpaint_inputs(workflow)
+        source = source_upload(workflow, self.uploads) if inpaint is None else None
         if inpaint is not None:
             self._images[filename] = render_mock_inpaint(*inpaint, seed)
+        elif source is not None:
+            width, height = requested_size(workflow)
+            self._images[filename] = resize_image(source, width, height)
         else:
             width, height = requested_size(workflow)
             self._images[filename] = render_mock_image(width, height, seed, _label(workflow))

@@ -62,7 +62,13 @@ def _version(path: Path) -> int:
     return v
 
 
+def _drop_v13_finishing(con: sqlite3.Connection) -> None:
+    con.execute("ALTER TABLE panel_images DROP COLUMN finish")
+    con.execute("ALTER TABLE projects DROP COLUMN upscaler")
+
+
 def _drop_v12_references(con: sqlite3.Connection) -> None:
+    _drop_v13_finishing(con)
     con.execute("DROP TABLE reference_variants")
     con.execute("ALTER TABLE character_images DROP COLUMN position")
     con.execute("ALTER TABLE series_asset_images DROP COLUMN position")
@@ -362,6 +368,28 @@ def test_v8_database_gets_frame_and_sfx_columns(make_settings: Callable[..., Set
         res = c.put(f"/panels/{panel['id']}/frame", json={"frame": "none"})
         assert res.status_code == 200, res.text
         assert res.json()["layout"]["panels"][0]["frame"] == "none"
+    assert _version(settings.database_path) == SCHEMA_VERSION
+    fresh = settings.database_path.parent / "fresh.db"
+    create_db_engine(fresh).dispose()
+    assert _columns(settings.database_path) == _columns(fresh)
+
+
+def test_v12_database_gets_finishing_columns(make_settings: Callable[..., Settings]) -> None:
+    """v12 → v13 : finition d'impression (dérivé agrandi d'une version, agrandisseur de la série)."""
+    settings = make_settings()
+    with TestClient(create_app(settings)) as c:
+        project = c.post("/projects", json={"title": "Série v12"}).json()
+    con = sqlite3.connect(settings.database_path)
+    _drop_v13_finishing(con)
+    con.execute("PRAGMA user_version = 12")
+    con.commit()
+    con.close()
+
+    with TestClient(create_app(settings)) as c:
+        assert c.get(f"/projects/{project['id']}").json()["upscaler"] is None
+        res = c.patch(f"/projects/{project['id']}", json={"upscaler": "ultrasharp-4x"})
+        assert res.status_code == 200, res.text
+        assert res.json()["upscaler"] == "ultrasharp-4x"
     assert _version(settings.database_path) == SCHEMA_VERSION
     fresh = settings.database_path.parent / "fresh.db"
     create_db_engine(fresh).dispose()

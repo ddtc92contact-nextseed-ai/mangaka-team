@@ -1213,5 +1213,399 @@
   "python_module": "nodes",
   "category": "mask",
   "output_node": false
+ },
+ "UpscaleModelLoader": {
+  "input": {
+   "required": {
+    "model_name": [
+     [
+      "4x-UltraSharp.pth",
+      "4x_foolhardy_Remacri.pth",
+      "RealESRGAN_x4plus.pth",
+      "RealESRGAN_x4plus_anime_6B.pth"
+     ]
+    ]
+   }
+  },
+  "input_order": {
+   "required": [
+    "model_name"
+   ]
+  },
+  "output": [
+   "UPSCALE_MODEL"
+  ],
+  "output_is_list": [
+   false
+  ],
+  "output_name": [
+   "UPSCALE_MODEL"
+  ],
+  "name": "UpscaleModelLoader",
+  "display_name": "UpscaleModelLoader",
+  "description": "",
+  "python_module": "comfy_extras",
+  "category": "loaders",
+  "output_node": false
+ },
+ "ImageUpscaleWithModel": {
+  "input": {
+   "required": {
+    "upscale_model": [
+     "UPSCALE_MODEL",
+     {}
+    ],
+    "image": [
+     "IMAGE",
+     {}
+    ]
+   }
+  },
+  "input_order": {
+   "required": [
+    "upscale_model",
+    "image"
+   ]
+  },
+  "output": [
+   "IMAGE"
+  ],
+  "output_is_list": [
+   false
+  ],
+  "output_name": [
+   "IMAGE"
+  ],
+  "name": "ImageUpscaleWithModel",
+  "display_name": "ImageUpscaleWithModel",
+  "description": "",
+  "python_module": "comfy_extras",
+  "category": "image/upscaling",
+  "output_node": false
+ },
+ "ImageScale": {
+  "input": {
+   "required": {
+    "image": [
+     "IMAGE",
+     {}
+    ],
+    "upscale_method": [
+     [
+      "nearest-exact",
+      "bilinear",
+      "area",
+      "bicubic",
+      "lanczos"
+     ]
+    ],
+    "width": [
+     "INT",
+     {
+      "default": 512,
+      "min": 0,
+      "max": 16384,
+      "step": 1
+     }
+    ],
+    "height": [
+     "INT",
+     {
+      "default": 512,
+      "min": 0,
+      "max": 16384,
+      "step": 1
+     }
+    ],
+    "crop": [
+     [
+      "disabled",
+      "center"
+     ]
+    ]
+   }
+  },
+  "input_order": {
+   "required": [
+    "image",
+    "upscale_method",
+    "width",
+    "height",
+    "crop"
+   ]
+  },
+  "output": [
+   "IMAGE"
+  ],
+  "output_is_list": [
+   false
+  ],
+  "output_name": [
+   "IMAGE"
+  ],
+  "name": "ImageScale",
+  "display_name": "ImageScale",
+  "description": "",
+  "python_module": "comfy_extras",
+  "category": "image/upscaling",
+  "output_node": false
+ },
+ "SeedVR2Preprocess": {
+  "input": {
+   "required": {
+    "resized_images": [
+     "IMAGE",
+     {}
+    ]
+   }
+  },
+  "input_order": {
+   "required": [
+    "resized_images"
+   ]
+  },
+  "output": [
+   "IMAGE"
+  ],
+  "output_is_list": [
+   false
+  ],
+  "output_name": [
+   "images"
+  ],
+  "name": "SeedVR2Preprocess",
+  "display_name": "SeedVR2Preprocess",
+  "description": "",
+  "python_module": "comfy_extras",
+  "category": "image/upscaling",
+  "output_node": false
+ },
+ "SeedVR2Conditioning": {
+  "input": {
+   "required": {
+    "model": [
+     "MODEL",
+     {}
+    ],
+    "vae_conditioning": [
+     "LATENT",
+     {}
+    ]
+   }
+  },
+  "input_order": {
+   "required": [
+    "model",
+    "vae_conditioning"
+   ]
+  },
+  "output": [
+   "CONDITIONING",
+   "CONDITIONING"
+  ],
+  "output_is_list": [
+   false,
+   false
+  ],
+  "output_name": [
+   "positive",
+   "negative"
+  ],
+  "name": "SeedVR2Conditioning",
+  "display_name": "SeedVR2Conditioning",
+  "description": "",
+  "python_module": "comfy_extras",
+  "category": "conditioning",
+  "output_node": false
+ },
+ "SeedVR2PostProcessing": {
+  "input": {
+   "required": {
+    "images": [
+     "IMAGE",
+     {}
+    ],
+    "original_resized_images": [
+     "IMAGE",
+     {}
+    ],
+    "color_correction_method": [
+     "COMBO",
+     {
+      "options": [
+       "lab",
+       "wavelet",
+       "adain",
+       "none"
+      ],
+      "default": "lab"
+     }
+    ]
+   }
+  },
+  "input_order": {
+   "required": [
+    "images",
+    "original_resized_images",
+    "color_correction_method"
+   ]
+  },
+  "output": [
+   "IMAGE"
+  ],
+  "output_is_list": [
+   false
+  ],
+  "output_name": [
+   "images"
+  ],
+  "name": "SeedVR2PostProcessing",
+  "display_name": "SeedVR2PostProcessing",
+  "description": "",
+  "python_module": "comfy_extras",
+  "category": "image/upscaling",
+  "output_node": false
+ },
+ "VAEEncodeTiled": {
+  "input": {
+   "required": {
+    "pixels": [
+     "IMAGE",
+     {}
+    ],
+    "vae": [
+     "VAE",
+     {}
+    ],
+    "tile_size": [
+     "INT",
+     {
+      "default": 512,
+      "min": 0,
+      "max": 4096
+     }
+    ],
+    "overlap": [
+     "INT",
+     {
+      "default": 64,
+      "min": 0,
+      "max": 4096
+     }
+    ],
+    "temporal_size": [
+     "INT",
+     {
+      "default": 64,
+      "min": 0,
+      "max": 4096
+     }
+    ],
+    "temporal_overlap": [
+     "INT",
+     {
+      "default": 8,
+      "min": 0,
+      "max": 4096
+     }
+    ]
+   }
+  },
+  "input_order": {
+   "required": [
+    "pixels",
+    "vae",
+    "tile_size",
+    "overlap",
+    "temporal_size",
+    "temporal_overlap"
+   ]
+  },
+  "output": [
+   "LATENT"
+  ],
+  "output_is_list": [
+   false
+  ],
+  "output_name": [
+   "LATENT"
+  ],
+  "name": "VAEEncodeTiled",
+  "display_name": "VAEEncodeTiled",
+  "description": "",
+  "python_module": "comfy_extras",
+  "category": "_for_testing",
+  "output_node": false
+ },
+ "VAEDecodeTiled": {
+  "input": {
+   "required": {
+    "samples": [
+     "LATENT",
+     {}
+    ],
+    "vae": [
+     "VAE",
+     {}
+    ],
+    "tile_size": [
+     "INT",
+     {
+      "default": 512,
+      "min": 0,
+      "max": 4096
+     }
+    ],
+    "overlap": [
+     "INT",
+     {
+      "default": 64,
+      "min": 0,
+      "max": 4096
+     }
+    ],
+    "temporal_size": [
+     "INT",
+     {
+      "default": 64,
+      "min": 0,
+      "max": 4096
+     }
+    ],
+    "temporal_overlap": [
+     "INT",
+     {
+      "default": 8,
+      "min": 0,
+      "max": 4096
+     }
+    ]
+   }
+  },
+  "input_order": {
+   "required": [
+    "samples",
+    "vae",
+    "tile_size",
+    "overlap",
+    "temporal_size",
+    "temporal_overlap"
+   ]
+  },
+  "output": [
+   "IMAGE"
+  ],
+  "output_is_list": [
+   false
+  ],
+  "output_name": [
+   "IMAGE"
+  ],
+  "name": "VAEDecodeTiled",
+  "display_name": "VAEDecodeTiled",
+  "description": "",
+  "python_module": "comfy_extras",
+  "category": "_for_testing",
+  "output_node": false
  }
 }

@@ -11,6 +11,8 @@ Après modification d'un preset, redémarre le moteur (`npm run dev`).
 
 | Fichier | Rôle |
 | --- | --- |
+| `defaults.yaml` | Format de page, workflow (palier **Turbo**) et style de mise en page (`layout_style`) appliqués aux nouvelles séries ; workflow « avec références » de repli pour un preset qui ne déclare pas `with_references` (`workflow_with_references`) ; palier de « Régénérer en Qualité » (`workflow_quality`) ; agrandisseur de la finition d'impression (`upscaler`) et tolérance de dpi (`finishing_tolerance`) |
+
 | `defaults.yaml` | Format de page, workflow (palier **Turbo**) et style de mise en page (`layout_style`) appliqués aux nouvelles séries ; workflow « avec références » de repli pour un preset qui ne déclare pas `with_references` (`workflow_with_references`) ; palier de « Régénérer en Qualité » (`workflow_quality`) ; preset de réparation ciblée de repli (`workflow_inpaint`) |
 | `providers.yaml` | Paramètres des fournisseurs (URL, modèle LLM, timeouts). **Aucune clé d'API ici** : elles vont dans `.env` |
 | `page_formats/*.yaml` | Formats de page (dimensions en mm, DPI, marges, gouttières) : A4 (défaut) et B4 JIS à 300 DPI |
@@ -20,6 +22,9 @@ Après modification d'un preset, redémarre le moteur (`npm run dev`).
 | `prompts/*.yaml` | Prompts des étapes LLM (`script` : découpage d'un chapitre) |
 | `image_prompt.yaml` | Construction du prompt final des cases (étape 3) et termes « pas de texte » du prompt négatif |
 | `qc.yaml` | Contrôle qualité des cases (étape 4) : poids, seuils de verdict, règles des détecteurs, seuil CCIP, zone de doute de la vision, nouveaux essais automatiques |
+| `workflows/*.yaml` + `*.json` | Workflows ComfyUI : le JSON API exporté + le mapping des paramètres |
+| `upscalers/*.yaml` + `*.json` | Finition d'impression : agrandissement de la version retenue d'une case jusqu'au dpi du format, avant l'assemblage |
+
 | `workflows/*.yaml` + `*.json` | Workflows ComfyUI : le JSON API exporté + le mapping des paramètres (dont les presets de réparation ciblée, bloc `inpaint`) |
 | `fonts.yaml` + `fonts/` | Polices de lettrage (OFL, licences dans `fonts/OFL*.txt`) et style de texte par type de bulle |
 | `lettering.yaml` | Formes et placement des bulles, queues, bordures de case, repères de coupe |
@@ -463,6 +468,80 @@ référence de la GX10, puis validés contre le ComfyUI 0.37 de la machine. Pour
 4. Redémarre le moteur : `GET /presets` affiche les erreurs de mapping éventuelles ; puis « Tester la
    connexion » et « Générer une case d'essai » sur le tableau de bord.
 5. Régénère les JSON de référence des tests : `UPDATE_GOLDEN=1 npm run test:engine`, relis le diff.
+
+## Finition d'impression (`upscalers/*.yaml`)
+
+Les cases sont générées à ≈ 1 Mpx (`layout.yaml`) alors que la zone utile A4 300 dpi fait 2161 × 3154 px :
+imprimée, une case pleine page sort à ≈ 115 dpi, une bande sur deux à ≈ 164 dpi. La **finition** agrandit la
+version **retenue** avec un modèle (quelques secondes, composition gardée) au lieu de la régénérer en Qualité
+(≈ 280 s, composition qui peut changer).
+
+### Facteur calculé par case
+
+- **Boîte imprimée** : la boîte de la case en px du format (dpi du format de page), **fond perdu compris**
+  (+ `bleed_mm` sur chaque bord posé au bord de la page, comme à l'export « fond perdu »).
+- **Dpi effectif** = dpi du format ÷ max(largeur boîte ÷ largeur image, hauteur boîte ÷ hauteur image) (l'image
+  est posée « au remplissage », recadrée au centre).
+- Sous `finishing_tolerance` × dpi cible (`defaults.yaml`, 0,9 → 270 dpi pour 300 dpi), la case est à finaliser ;
+  le **facteur** est celui qui amène l'image au dpi cible (jamais un ×3 fixe) et la **taille finale exacte** est
+  `ceil(image × facteur)` : un côté tombe juste sur la boîte, l'autre la couvre.
+
+### Quand
+
+- **« Finaliser la page »** (atelier) : met en file la finition des cases dont la version retenue est sous le
+  seuil ; **« Finaliser cette case »** (panneau de la case) ; **« Finaliser le chapitre pour l'impression »**
+  (Lettrage › Export). API : `POST /pages/{id}/finish`, `POST /panels/{id}/finish`, `POST /chapters/{id}/finish`,
+  `GET /pages/{id}/finishing`, `GET /presets/upscalers`.
+- Les finitions passent dans **la même file** que les générations (job `finishing`) : une seule tâche ComfyUI à
+  la fois.
+- Le résultat est un **dérivé de la version** (`PanelImage.finish`), pas une nouvelle version de composition. Il
+  est réutilisé tant que la version reste retenue ; retenir une autre version de la case efface la finition des
+  autres versions **de cette case seulement** (fichier compris).
+- **Assemblage** (rendu PNG / SVG, export ZIP) : image finalisée si elle existe, sinon la version retenue (comme
+  avant). L'aperçu écran reste sur l'image légère. L'export signale les cases encore sous le seuil.
+- **Indicateur** : chaque case de l'atelier affiche son dpi (« 115 dpi → 300 dpi après finition ») avec un badge
+  d'alerte sous le seuil, vert au dpi cible ou une fois finalisée.
+
+### Presets livrés
+
+| Preset | Modèle (`ComfyUI/models/…`) | Usage |
+| --- | --- | --- |
+| `realesrgan-x4plus-anime-6b` (**défaut**) | `upscale_models/RealESRGAN_x4plus_anime_6B.pth` | Meilleur pour le trait encré et les aplats |
+| `ultrasharp-4x` | `upscale_models/4x-UltraSharp.pth` | Plus de micro-détail (peut durcir les trames) |
+| `remacri-4x` | `upscale_models/4x_foolhardy_Remacri.pth` | Rendu doux : lavis, couleur directe |
+| `seedvr2-7b` (haute fidélité) | `diffusion_models/seedvr2_7b_int8_convrot.safetensors` + `vae/seedvr2_ema_vae_fp16.safetensors` | Restauration par diffusion (nœuds SeedVR2 natifs de ComfyUI), bien plus lente : jamais par défaut |
+
+Tous sont déjà sur la GX10 : rien à télécharger. L'agrandisseur par défaut est `upscaler` dans `defaults.yaml` ;
+chaque série peut choisir le sien (fiche série › « Agrandisseur (finition d'impression) », champ `upscaler` de
+`PATCH /projects/{id}`, `null` = celui de `defaults.yaml`).
+
+```yaml
+id: realesrgan-x4plus-anime-6b
+name: Real-ESRGAN x4plus anime 6B
+workflow_file: realesrgan-x4plus-anime-6b.json
+output_node: "5"                       # SaveImage
+model_scale: 4                         # facteur natif du modèle (informatif)
+high_fidelity: false                   # true : option lente, signalée dans la fiche série
+timeout_s: 300
+estimated_s: 6                         # durée estimée dans la file tant qu'il n'y a pas de mesures
+mapping:                               # obligatoires : image, width, height
+  image: { node: "1", input: image }   # LoadImage : la version retenue, envoyée par le moteur (/upload/image)
+  width: { node: "4", input: width }   # taille finale exacte, calculée par case
+  height: { node: "4", input: height }
+  filename_prefix: { node: "5", input: filename_prefix }
+```
+
+Graphe ESRGAN : `1 LoadImage` → `3 ImageUpscaleWithModel` (modèle `2 UpscaleModelLoader`, ×4) → `4 ImageScale`
+(lanczos, taille finale exacte, sans recadrage) → `5 SaveImage`. Graphe SeedVR2 (repris du workflow « Upscale
+planche - SeedVR2 7B » de la GX10) : `1 LoadImage` → `3 ImageScale` (taille finale) → `4 SeedVR2Preprocess` →
+`5 VAEEncodeTiled` → `7 SeedVR2Conditioning` + `9 KSampler` (1 étape) → `10 VAEDecodeTiled` →
+`11 SeedVR2PostProcessing` (recalé sur `3`) → `12 SaveImage`.
+
+Comme pour les workflows, les noms de modèles vivent **uniquement** dans les JSON : le moteur n'en connaît aucun.
+« Tester la connexion » vérifie aussi les agrandisseurs (nœuds inconnus, « modèle introuvable dans ComfyUI : … — à
+placer dans ComfyUI/models/upscale_models/ »). En mode mock, le ComfyUI factice agrandit l'image envoyée avec
+Pillow (aucune GPU).
+
 
 ## Réparation ciblée (inpainting)
 

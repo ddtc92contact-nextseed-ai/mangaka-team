@@ -129,6 +129,8 @@ class Project(TimestampMixin, Base):
     style_lora_trigger_words: Mapped[str] = mapped_column(Text, default="")
     # Grammaire de mise en page de la série (presets/layout_styles/) : sage, dynamique, nerveuse…
     layout_style: Mapped[str] = mapped_column(String(100), default="dynamique")
+    # Agrandisseur de la finition d'impression (presets/upscalers/) ; None = celui de defaults.yaml.
+    upscaler: Mapped[str | None] = mapped_column(String(100), default=None)
 
     characters: Mapped[list[Character]] = relationship(
         back_populates="project", cascade="all, delete-orphan", order_by="Character.name"
@@ -369,6 +371,11 @@ class PanelImage(Base):
     qc_details: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     # Boîtes détectées (visages, mains, texte) en px de l'image : réutilisées par le lettrage.
     detections: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
+    # Finition d'impression : dérivé agrandi de cette version (pas une nouvelle version de composition) —
+    # {"path", "width", "height", "upscaler", "upscaler_name", "factor", "source_width", "source_height",
+    # "target_dpi", "dpi", "job_id", "duration_ms", "created_at"}. Utilisé par l'assemblage tant que la
+    # version reste retenue ; effacé (fichier compris) quand une autre version de la case est retenue.
+    finish: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
     selected: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
@@ -449,7 +456,7 @@ class Job(Base):
     project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     chapter_id: Mapped[int | None] = mapped_column(ForeignKey("chapters.id", ondelete="CASCADE"), index=True)
     panel_id: Mapped[int | None] = mapped_column(ForeignKey("panels.id", ondelete="CASCADE"), index=True)
-    step: Mapped[str] = mapped_column(String(30))  # script | layout | generation | qc | qc_bench | lettering
+    step: Mapped[str] = mapped_column(String(30))  # script | layout | generation | qc | qc_bench | finishing | …
     status: Mapped[JobStatus] = mapped_column(_enum(JobStatus), default=JobStatus.pending)
     progress: Mapped[int] = mapped_column(Integer, default=0)  # 0–100
     message: Mapped[str] = mapped_column(Text, default="")

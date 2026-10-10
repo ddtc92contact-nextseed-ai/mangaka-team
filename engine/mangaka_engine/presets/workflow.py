@@ -12,7 +12,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from .loader import LoadedWorkflow, PresetError
+from .loader import LoadedUpscaler, LoadedWorkflow, PresetError
 from .schemas import LoraChain
 
 MAX_SEED = 2**63 - 1
@@ -128,6 +128,28 @@ def build_workflow(
         loras=list(loras),
         removed_nodes=removed,
     )
+
+
+def build_upscale_workflow(
+    loaded: LoadedUpscaler,
+    image: str,
+    width: int,
+    height: int,
+    *,
+    filename_prefix: str | None = None,
+) -> BuiltWorkflow:
+    """Workflow d'agrandissement : image source (nom côté ComfyUI) → taille finale exacte `width` × `height`."""
+    preset = loaded.preset
+    if width <= 0 or height <= 0:
+        raise PresetError(f"taille finale invalide : {width}×{height}")
+    resolved: dict[str, Any] = {**preset.defaults, "image": image, "width": int(width), "height": int(height)}
+    if filename_prefix is not None and "filename_prefix" in preset.mapping:
+        resolved["filename_prefix"] = filename_prefix
+    workflow = copy.deepcopy(loaded.workflow)
+    for name, value in resolved.items():
+        target = preset.mapping[name]
+        workflow[target.node]["inputs"][target.input] = value
+    return BuiltWorkflow(workflow=workflow, params=resolved, output_node=preset.output_node)
 
 
 def remove_nodes(workflow: dict[str, Any], nodes: Sequence[str]) -> None:

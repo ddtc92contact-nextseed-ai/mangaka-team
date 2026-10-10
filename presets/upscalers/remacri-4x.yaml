@@ -1,0 +1,16 @@
+# Finition d'impression — alternative : 4x foolhardy Remacri (rendu doux, bon sur les dégradés).
+# Fichier attendu : ComfyUI/models/upscale_models/4x_foolhardy_Remacri.pth (déjà sur la GX10).
+id: remacri-4x
+name: 4x foolhardy Remacri
+description: >-
+  Alternative : rendu plus doux, adapté aux cases en lavis ou en couleur directe.
+workflow_file: remacri-4x.json
+output_node: "5"
+model_scale: 4
+timeout_s: 300
+estimated_s: 8
+mapping:
+  image: { node: "1", input: image }
+  width: { node: "4", input: width }
+  height: { node: "4", input: height }
+  filename_prefix: { node: "5", input: filename_prefix }
