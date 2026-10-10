@@ -1112,6 +1112,8 @@ export interface ReferenceGenerateInput {
   sheet: string;
   count?: number;
   quality?: boolean;
+  /** Image de départ : une image de référence de la fiche ; absente = à partir de la description seule. */
+  start_image_id?: number | null;
 }
 
 export interface ReferenceRefineInput {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type FormEvent } from "react";
+import { useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import {
   api,
   engineUrl,
@@ -8,6 +8,7 @@ import {
   type Job,
   type LibraryEntry,
   type LibraryKind,
+  type ReferenceImage,
   type ReferenceSheet,
   type ReferenceVariant,
 } from "@/lib/api";
@@ -53,6 +54,10 @@ export function ReferenceStudio({
   const [sheetId, setSheetId] = useState("");
   const [count, setCount] = useState(4);
   const [quality, setQuality] = useState(false);
+  // Image de départ facultative : une image de référence de la fiche (null : à partir de zéro).
+  const [startId, setStartId] = useState<number | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -74,6 +79,7 @@ export function ReferenceStudio({
   const maxKept = studio.data?.max_kept ?? 8;
   const keptIds = new Set(entry.reference_images.map((i) => i.id));
   const full = entry.reference_images.length >= maxKept;
+  const startImage = entry.reference_images.find((i) => i.id === startId) ?? null;
 
   function enqueued(newJobs: Job[], message: string) {
     setLaunched((l) => [...l, ...newJobs]);
@@ -87,12 +93,38 @@ export function ReferenceStudio({
     setError(null);
     setNotice(null);
     try {
-      const newJobs = await api.generateReferences(kind, entry.id, { sheet: sheet.id, count, quality });
-      enqueued(newJobs, `${plural(newJobs.length, "variante")} « ${sheet.name} » en file : elles apparaissent ci-dessous une à une.`);
+      const newJobs = await api.generateReferences(kind, entry.id, {
+        sheet: sheet.id,
+        count,
+        quality,
+        start_image_id: startImage?.id ?? null,
+      });
+      const from = startImage ? " à partir de l’image de départ" : "";
+      enqueued(newJobs, `${plural(newJobs.length, "variante")} « ${sheet.name} »${from} en file : elles apparaissent ci-dessous une à une.`);
     } catch (err) {
       setError(fullErrorMessage(err));
     } finally {
       setBusy(false);
+    }
+  }
+
+  /** Nouvelle image de départ (photo d'un croquis…) : rangée avec les images de référence de la fiche, puis choisie. */
+  async function uploadStart(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setUploading(true);
+    setError(null);
+    try {
+      const before = new Set(entry.reference_images.map((i) => i.id));
+      const updated = await api.uploadLibraryImages(kind, entry.id, [file]);
+      onEntryChange(updated);
+      const added = updated.reference_images.find((i) => !before.has(i.id));
+      if (added) setStartId(added.id);
+    } catch (err) {
+      setError(fullErrorMessage(err));
+    } finally {
+      setUploading(false);
     }
   }
 
@@ -146,8 +178,9 @@ export function ReferenceStudio({
   return (
     <div className="space-y-5">
       <p className="text-sm text-zinc-500">
-        À partir de la description visuelle, des mots-clés, du LoRA de style de la série, de sa référence de style
-        (planche de style, si elle en a une) et du LoRA de la fiche. Les
+        À partir de la description visuelle, des mots-clés, du style de la série (packs et LoRA de style) et du LoRA
+        de la fiche ; une image de départ est facultative. La référence de style de la série (planche de style) ne
+        sert qu&apos;au trait : elle n&apos;est jointe qu&apos;après une image de départ ou la variante à affiner. Les
         variantes non gardées restent dans l&apos;historique : tu peux les garder plus tard ou les supprimer.
       </p>
       {!sheetList.length ? (
@@ -155,7 +188,8 @@ export function ReferenceStudio({
           Aucun type de fiche pour un {info.singular} : ajoute un fichier dans presets/reference_sheets/.
         </Alert>
       ) : (
-        <form onSubmit={generate} className="grid gap-4 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
+        <form onSubmit={generate} className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
           <Field label="Type de fiche" htmlFor="reference-sheet" hint={sheet ? sheetHint(sheet) : undefined}>
             <Select id="reference-sheet" value={sheet?.id ?? ""} onChange={(e) => setSheetId(e.target.value)}>
               {sheetList.map((s) => (
@@ -180,9 +214,20 @@ export function ReferenceStudio({
               <option value="quality">Qualité (plus lent)</option>
             </Select>
           </Field>
-          <Button type="submit" disabled={busy || !sheet} className="sm:mb-[1.375rem]">
+          <Button type="submit" disabled={busy || uploading || !sheet} className="sm:mb-[1.375rem]">
             {busy ? "Mise en file…" : `Générer ${plural(count, "variante")}`}
           </Button>
+          </div>
+          <StartImageField
+            images={entry.reference_images}
+            selected={startImage}
+            onSelect={setStartId}
+            onUpload={() => fileInput.current?.click()}
+            uploading={uploading}
+            full={full}
+            maxKept={maxKept}
+          />
+          <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={uploadStart} data-testid="start-image-upload" />
         </form>
       )}
       {error && <Alert>{error}</Alert>}
@@ -217,7 +262,67 @@ export function ReferenceStudio({
 }
 
 function sheetHint(sheet: ReferenceSheet): string {
-  return `${sheet.description ? `${sheet.description} ` : ""}${sheet.width}×${sheet.height} px.`;
+  return `${sheet.description ? `${sheet.description} ` : ""}${sheet.width}×${sheet.height} px. Le sujet vient de la description ou de l’image de départ.`;
+}
+
+/** « Image de départ (facultatif) » : une image de référence de la fiche, ou une nouvelle envoyée ici. */
+function StartImageField({
+  images,
+  selected,
+  onSelect,
+  onUpload,
+  uploading,
+  full,
+  maxKept,
+}: {
+  images: ReferenceImage[];
+  selected: ReferenceImage | null;
+  onSelect: (id: number | null) => void;
+  onUpload: () => void;
+  uploading: boolean;
+  full: boolean;
+  maxKept: number;
+}) {
+  return (
+    <Field
+      label="Image de départ (facultatif)"
+      htmlFor="reference-start"
+      hint={
+        selected
+          ? "La fiche garde le sujet, la silhouette et la pose de cette image, redessinés comme la fiche le demande."
+          : "Sans image de départ, la fiche est créée à partir de la description seule."
+      }
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        {selected && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={engineUrl(selected.url)} alt="Image de départ choisie" className="h-10 w-10 shrink-0 rounded border border-zinc-700 object-cover" />
+        )}
+        <Select
+          id="reference-start"
+          className="min-w-0 flex-1"
+          value={selected?.id ?? ""}
+          onChange={(e) => onSelect(e.target.value ? Number(e.target.value) : null)}
+        >
+          <option value="">Aucune — à partir de la description</option>
+          {images.map((img, i) => (
+            <option key={img.id} value={img.id}>
+              Image {i + 1} · {img.original_name}
+            </option>
+          ))}
+        </Select>
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={uploading || full}
+          title={full ? `${maxKept} images de référence au plus : supprimes-en une` : "Photo ou scan d’un croquis, par exemple"}
+          onClick={onUpload}
+        >
+          {uploading ? "Envoi…" : "Envoyer une image…"}
+        </Button>
+      </div>
+    </Field>
+  );
 }
 
 /** Variante en file ou en cours de génération : progression en direct, annulable. */
@@ -255,7 +360,8 @@ function PendingVariant({
       </div>
       <div className="flex items-center justify-between gap-2 px-2 py-1.5 text-xs text-zinc-400">
         <span className="truncate">
-          {refine ? "Affinage" : String(params.sheet_name ?? "Variante")} · {String(params.variant ?? "")}/{String(params.count ?? "")}
+          {refine ? "Affinage" : String(params.sheet_name ?? "Variante")}
+          {params.start_image_id !== null && params.start_image_id !== undefined ? " · image de départ" : ""} · {String(params.variant ?? "")}/{String(params.count ?? "")}
         </span>
         <button
           type="button"
@@ -270,10 +376,47 @@ function PendingVariant({
   );
 }
 
+/** Images envoyées au workflow pour une variante, dans l'ordre (`params.reference_images`). */
+function sentImages(v: ReferenceVariant): { kind: string; variant_id?: number }[] {
+  const refs = v.params?.reference_images;
+  return Array.isArray(refs) ? refs.filter((r): r is { kind: string } => typeof r === "object" && r !== null && typeof (r as { kind?: unknown }).kind === "string") : [];
+}
+
 /** La référence de style de la série (planche de style) faisait partie des images envoyées. */
 function usedStyleReference(v: ReferenceVariant): boolean {
-  const refs = v.params?.reference_images;
-  return Array.isArray(refs) && refs.some((r) => typeof r === "object" && r !== null && (r as { kind?: unknown }).kind === "style");
+  return sentImages(v).some((r) => r.kind === "style");
+}
+
+const SENT_ROLES: Record<string, string> = {
+  start: "Image de départ — sujet",
+  variant: "Variante à affiner — sujet",
+  style: "Référence de style — trait seulement",
+};
+
+/** Images envoyées avec leur rôle ; aucune = fiche créée à partir de la description seule. */
+function SentImages({ variant }: { variant: ReferenceVariant }) {
+  const refs = sentImages(variant);
+  return (
+    <div data-testid="variant-inputs">
+      <span className="text-zinc-500">Images envoyées : </span>
+      {refs.length === 0 ? (
+        <span>aucune (à partir de la description)</span>
+      ) : (
+        <ol className="mt-1 flex flex-wrap gap-1">
+          {refs.map((r, i) => (
+            <li
+              key={`${r.kind}-${i}`}
+              data-kind={r.kind}
+              className={`rounded px-1.5 py-px ${r.kind === "style" ? "bg-sky-500/15 text-sky-200" : "bg-zinc-800 text-zinc-200"}`}
+            >
+              {i + 1}. {SENT_ROLES[r.kind] ?? r.kind}
+              {r.kind === "variant" && r.variant_id ? ` (n° ${r.variant_id})` : ""}
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
 }
 
 function VariantCard({
@@ -345,7 +488,10 @@ function VariantCard({
         {v.instruction && <p className="text-zinc-300">« {v.instruction} »</p>}
         <details>
           <summary className="cursor-pointer text-zinc-500 hover:text-zinc-300">Prompt · seed {String(v.seed ?? "—")}</summary>
-          <p className="mt-1 whitespace-pre-wrap text-zinc-400">{v.prompt}</p>
+          <div className="mt-1 space-y-1.5">
+            <SentImages variant={v} />
+            <p className="whitespace-pre-wrap text-zinc-400">{v.prompt}</p>
+          </div>
         </details>
         <div className="mt-auto flex flex-wrap gap-1.5">
           <Button
