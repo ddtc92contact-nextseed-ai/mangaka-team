@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from ..pipeline.reference_sheets import MAX_KEPT, delete_entry_variants, next_position
 from ..store.files import InvalidImageError, StoredImage
 from ..store.models import Character, CharacterImage, SeriesAsset, SeriesAssetImage
 from .deps import AppContext, get_ctx, get_session
@@ -84,6 +85,14 @@ async def read_uploads(files: list[UploadFile], ctx: AppContext) -> list[tuple[s
     return payloads
 
 
+def check_room(entry: Character | SeriesAsset, adding: int) -> None:
+    """Plafond d'images de référence par fiche (le même que « Garder comme référence »)."""
+    room = MAX_KEPT - len(entry.reference_images)
+    if adding > room:
+        detail = f"encore {room} possible(s)" if room > 0 else "supprimes-en une d'abord"
+        raise FieldError("files", f"{MAX_KEPT} images de référence au plus par fiche ({detail})")
+
+
 def store_uploads(
     session: Session,
     ctx: AppContext,
@@ -156,6 +165,7 @@ def delete_character(
 ) -> Response:
     character = get_character_or_404(session, character_id)
     paths = [img.path for img in character.reference_images]
+    paths += delete_entry_variants(session, "character", character.id)
     session.delete(character)
     session.commit()
     for path in paths:
@@ -172,6 +182,7 @@ async def upload_reference_images(
 ) -> CharacterOut:
     character = get_character_or_404(session, character_id)
     payloads = await read_uploads(files, ctx)
+    check_room(character, len(payloads))
 
     def add(name: str, path: str, stored: StoredImage) -> None:
         character.reference_images.append(
@@ -181,6 +192,7 @@ async def upload_reference_images(
                 content_type=stored.content_type,
                 width=stored.width,
                 height=stored.height,
+                position=next_position(character),
             )
         )
 

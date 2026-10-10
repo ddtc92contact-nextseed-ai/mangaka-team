@@ -1,0 +1,17 @@
+# Type de fiche de référence : voir presets/README.md (« Fiches de référence »).
+id: decor-plan-large
+name: Plan large
+description: "Le lieu en plan d'ensemble, vide de personnages, tel qu'on le découvre."
+kinds: [decor]
+order: 10
+width: 1536
+height: 864
+workflow: null
+prompt:
+  - "Fiche de référence de décor : $name en plan large d'ensemble, à hauteur d'œil, tout le lieu visible."
+  - "$description."
+  - "Détails : $keywords."
+  - "Modification demandée : $instruction."
+  - "Style : $style."
+  - "Aucun personnage, perspective claire, aucun texte ni enseigne lisible."
+negative_prompt: "personnages, foule, gros plan"
