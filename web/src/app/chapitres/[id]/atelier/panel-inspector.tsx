@@ -26,6 +26,7 @@ import { useJob } from "@/lib/jobs";
 import { LIBRARY_KINDS } from "@/lib/library";
 import type { PanelView } from "./page-canvas";
 import { PanelQC } from "./panel-qc";
+import { RepairDialog, type RepairPreset } from "./repair-dialog";
 import { VersionsStrip } from "./versions";
 
 /** Panneau latéral d'une case : contenu, prompt final, réglages de génération, progression, versions. */
@@ -62,6 +63,8 @@ export function PanelInspector({
   const [notice, setNotice] = useState<string | null>(null);
   // La dernière action a mis une génération en file : lien « Voir la production ».
   const [generated, setGenerated] = useState(false);
+  // Fenêtre « Réparer une zone » ouverte sur une version (détection présélectionnée éventuelle).
+  const [repair, setRepair] = useState<{ image: PanelImage; preset?: RepairPreset } | null>(null);
 
   const running = view?.running ?? null;
   const live = useJob(running?.job ?? null);
@@ -168,6 +171,18 @@ export function PanelInspector({
       onChanged();
       setNotice("Version validée à la main (décision tracée dans le QC).");
     });
+
+  const repairQueued = (source: PanelImage) => {
+    setRepair(null);
+    setError(null);
+    refresh();
+    onChanged();
+    detail.reload();
+    setGenerated(true);
+    setNotice(
+      `Réparation de la version ${source.version} mise en file : elle deviendra une nouvelle version (le reste de l'image ne bouge pas), à retenir ou non.`,
+    );
+  };
 
   function annotated(imageId: number, annotation: Annotation | null) {
     detail.setData((cur) =>
@@ -441,16 +456,32 @@ export function PanelInspector({
             busy={busy}
             onRun={(vision) => runQC(vision, qcImage ?? undefined)}
             onOverride={overrideQC}
+            onRepair={(image, preset) => setRepair({ image, preset })}
           />
 
           <div className="space-y-2">
             <h3 className="text-sm font-medium text-zinc-300">
               Versions <span className="text-zinc-500">({d.images.length})</span>
             </h3>
-            <VersionsStrip images={d.images} onSelect={selectImage} onDelete={deleteImage} onAnnotated={annotated} />
+            <VersionsStrip
+              images={d.images}
+              onSelect={selectImage}
+              onDelete={deleteImage}
+              onAnnotated={annotated}
+              onRepair={(image) => setRepair({ image })}
+            />
           </div>
         </div>
       ) : null}
+      {repair && (
+        <RepairDialog
+          key={`${repair.image.id}-${repair.preset?.kind ?? ""}-${repair.preset?.index ?? ""}`}
+          image={repair.image}
+          preset={repair.preset}
+          onClose={() => setRepair(null)}
+          onQueued={() => repairQueued(repair.image)}
+        />
+      )}
     </section>
   );
 }

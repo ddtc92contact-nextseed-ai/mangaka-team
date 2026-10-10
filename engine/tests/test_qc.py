@@ -385,6 +385,28 @@ def test_reject_triggers_one_auto_retry_then_review(make_client: Callable[..., T
     assert _panel(c, p1["id"])["state"] == "flagged"
 
 
+def test_repair_goes_through_qc_without_auto_retry(make_client: Callable[..., TestClient]) -> None:
+    """Une réparation passe par le QC comme les autres versions, mais un rejet ne relance rien : relancer
+    régénérerait toute la case. L'auteur choisit de la garder ou non."""
+    det = ScriptedDetectors(faces=1, text=1)  # rejet à chaque contrôle
+    c = make_client(providers(detectors=det, identity=ScriptedIdentity(0.95), vision=RecordingVision()))
+    data = setup_chapter(c)
+    p1 = data["panels"][0]
+    _ok(c.post(f"/panels/{p1['id']}/generate", json={"seed": 7}), 202)
+    _wait(c)
+    v1 = _images(c, p1["id"])[0]
+    face = v1["detections"]["faces"][0]
+    _ok(c.post(f"/panel-images/{v1['id']}/repair", json={"regions": [face], "target": "face"}), 202)
+    _wait(c)
+    images = _images(c, p1["id"])
+    repaired = images[-1]
+    assert repaired["params"]["repair"]["source_image_id"] == v1["id"]
+    assert repaired["qc"]["source"] == "auto" and repaired["qc"]["computed_verdict"] == "reject"
+    assert repaired["qc_verdict"] == "review" and "auto_retry" not in repaired["qc"]
+    assert any("réparation à revoir" in r for r in repaired["qc_reasons"])
+    assert len(images) == 3 and not repaired["selected"]  # v1, son nouvel essai, la réparation
+
+
 def test_auto_qc_disabled_in_preset(make_client: Callable[..., TestClient], presets_copy: Path) -> None:
     edit_qc(presets_copy, auto_after_generation=False)
     c = make_client(mangaka_presets_dir=presets_copy)

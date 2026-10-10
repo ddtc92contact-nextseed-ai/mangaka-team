@@ -8,6 +8,7 @@ import { Alert, Button, Select } from "@/components/ui";
 import { engineUrl, fullErrorMessage, type Annotation, type PanelImage } from "@/lib/api";
 import { formatDuration, imageDurationS } from "@/lib/generation";
 import { QC_VERDICT } from "@/lib/qc";
+import { REPAIR_TARGETS, isSketch } from "./repair-dialog";
 
 function caption(img: PanelImage): string {
   return `v${img.version}${img.tier ? ` · ${img.tier}` : ""} · seed ${img.seed ?? "—"} · ${formatDuration(imageDurationS(img))}`;
@@ -30,11 +31,14 @@ export function VersionsStrip({
   onSelect,
   onDelete,
   onAnnotated,
+  onRepair,
 }: {
   images: PanelImage[];
   onSelect: (img: PanelImage) => Promise<void>;
   onDelete: (img: PanelImage) => Promise<void>;
   onAnnotated: (imageId: number, annotation: Annotation | null) => void;
+  /** Ouvre « Réparer une zone » sur une version (la fenêtre des versions se ferme). */
+  onRepair?: (img: PanelImage) => void;
 }) {
   const [viewId, setViewId] = useState<number | null>(null);
   const [compareId, setCompareId] = useState<number | null>(null);
@@ -137,6 +141,11 @@ export function VersionsStrip({
                     </span>
                   )}{" "}
                   {formatDuration(imageDurationS(img))}
+                  {img.params.repair && (
+                    <span className="rounded bg-violet-500/15 px-1 py-px text-[9px] font-semibold text-violet-300" title={`Réparation de la v${img.params.repair.source_version}`}>
+                      ✎ v{img.params.repair.source_version}
+                    </span>
+                  )}
                 </span>
                 <span className="block truncate text-zinc-500" title={`seed ${img.seed ?? "—"}`}>
                   seed {img.seed ?? "—"}
@@ -178,6 +187,19 @@ export function VersionsStrip({
               {compared && (
                 <Button variant="ghost" onClick={() => setCompareId(null)}>
                   ← Vue simple
+                </Button>
+              )}
+              {!compared && onRepair && !isSketch(viewed) && (
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    close();
+                    onRepair(viewed);
+                  }}
+                  disabled={busy}
+                  data-testid="repair-version"
+                >
+                  Réparer une zone…
                 </Button>
               )}
               {!compared && (
@@ -277,6 +299,16 @@ function VersionLarge({ img }: { img: PanelImage }) {
     ["Workflow", img.preset ?? "—"],
     ["Taille", img.width && img.height ? `${img.width} × ${img.height} px` : "—"],
     ["Créée le", new Date(img.created_at).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })],
+    ...(p.repair
+      ? ([
+          [
+            "Réparation",
+            `de la v${p.repair.source_version} · ${REPAIR_TARGETS[p.repair.target] ?? p.repair.target}${
+              p.repair.character_name ? ` (${p.repair.character_name})` : ""
+            } · marge ${p.repair.grow_px} px, bords ${p.repair.feather_px} px, denoise ${p.repair.denoise.toLocaleString("fr-FR")}`,
+          ],
+        ] as [string, string][])
+      : []),
     ["QC", img.qc_verdict ? `${QC_VERDICT[img.qc_verdict]}${img.qc_score !== null ? ` · ${img.qc_score}/100` : ""}` : "pas encore contrôlée"],
   ];
   return (

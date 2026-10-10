@@ -32,9 +32,11 @@ from ..pipeline.generation import (
     resolve_preset_id,
     update_panel_prompt,
 )
+from ..pipeline.inpaint import MaskError, Region, decode_png
 from ..pipeline.qc_bench import STEP as BENCH_STEP
 from ..pipeline.reference_sheets import KIND_LABELS
 from ..pipeline.reference_sheets import STEP as REFERENCE_STEP
+from ..pipeline.repair import concerned_character, default_repair_prompt, enqueue_repair, repair_context
 from ..presets import PresetError, PresetRegistry
 from ..store.models import Chapter, Job, JobStatus, Page, Panel, PanelImage, PanelImageAnnotation, Project
 from .chapters import get_chapter_or_404, get_page_or_404
@@ -55,6 +57,10 @@ from .schemas import (
     PresetEstimateOut,
     QueueItemOut,
     QueueOut,
+    RepairCharacterOut,
+    RepairIn,
+    RepairInfoOut,
+    RepairTarget,
     WorkflowPresetOut,
 )
 
@@ -212,8 +218,13 @@ def update_panel(
     changes = body.model_dump(exclude_unset=True)
     if "generation_preset" in changes:
         preset = changes["generation_preset"]
-        if preset is not None and preset not in _presets(ctx, panel).workflows:
+        known = _presets(ctx, panel).workflows
+        if preset is not None and preset not in known:
             raise FieldError("generation_preset", f"workflow inconnu : « {preset} »")
+        if preset is not None and known[preset].preset.inpaint is not None:
+            raise FieldError(
+                "generation_preset", f"« {preset} » est un preset de réparation : il ne génère pas de case"
+            )
         panel.generation_preset = preset
     if "final_prompt" in changes:
         text = (changes["final_prompt"] or "").strip()
@@ -317,6 +328,86 @@ def generate_chapter(
     return _generate_pages(session, ctx, pages, body or BatchGenerateIn())
 
 
+# --- réparation ciblée -----------------------------------------------------------------
+@router.get("/panel-images/{image_id}/repair", response_model=RepairInfoOut)
+def get_repair_info(
+    image_id: int,
+    target: RepairTarget = "zone",
+    character_id: int | None = None,
+    auto_character: bool = True,
+    session: Session = Depends(get_session),
+    ctx: AppContext = Depends(get_ctx),
+) -> RepairInfoOut:
+    """Préremplit « Réparer » : preset de réparation du palier, marge, adoucissement, denoise et prompt
+    (description de la case + personnage concerné : mots-clés, mots déclencheurs de son LoRA)."""
+    img = _get_image_or_404(session, image_id)
+    presets = _presets(ctx, img.panel)
+    try:
+        rctx = repair_context(session, presets, img)
+    except (GenerationError, PresetError) as exc:
+        return RepairInfoOut(available=False, problem=str(exc)[:1].upper() + str(exc)[1:], target=target)
+    characters = [RepairCharacterOut(id=c.id, name=c.name) for c in rctx.characters]
+    # Sans choix explicite (`auto_character`) : le seul personnage de la case est celui concerné.
+    if character_id is None and auto_character and len(rctx.characters) == 1:
+        character_id = rctx.characters[0].id
+    try:
+        character = concerned_character(rctx, character_id)
+    except GenerationError as exc:
+        raise FieldError("character_id", str(exc)) from None
+    preset = rctx.loaded.preset
+    return RepairInfoOut(
+        available=True,
+        preset=preset.id,
+        preset_name=preset.name,
+        tier=preset.tier.name if preset.tier else None,
+        grow_px=rctx.settings.grow_px,
+        feather_px=rctx.settings.feather_px,
+        denoise=float(preset.defaults.get("denoise", 0.45)),
+        target=target,
+        character_id=character.id if character is not None else None,
+        characters=characters,
+        prompt=default_repair_prompt(presets, rctx, img, target, character),
+    )
+
+
+@router.post("/panel-images/{image_id}/repair", response_model=list[JobOut], status_code=202)
+def repair_panel_image(
+    image_id: int, body: RepairIn, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
+) -> list[JobOut]:
+    """« Réparer » : repeint seulement la zone choisie de cette version (inpainting), via la file
+    ComfyUI. Le résultat est une nouvelle version liée à sa source (`params.repair`), contrôlée par le QC ;
+    la version choisie ne change pas."""
+    _require_comfyui(ctx)
+    img = _get_image_or_404(session, image_id)
+    try:
+        painted = decode_png(body.mask_png) if body.mask_png else None
+    except MaskError as exc:
+        raise FieldError("mask_png", str(exc)) from None
+    try:
+        job = enqueue_repair(
+            session,
+            _presets(ctx, img.panel),
+            ctx.files,
+            img,
+            regions=[Region(r.x1, r.y1, r.x2, r.y2) for r in body.regions],
+            painted=painted,
+            target=body.target,
+            character_id=body.character_id,
+            prompt=body.prompt,
+            grow_px=body.grow_px,
+            feather_px=body.feather_px,
+            denoise=body.denoise,
+            seed=body.seed,
+        )
+    except PresetError as exc:
+        raise FieldError("preset", str(exc)) from None
+    except GenerationError as exc:
+        raise FieldError("repair", str(exc)[:1].upper() + str(exc)[1:]) from None
+    session.commit()
+    ctx.generation.notify()
+    return [job_out(job)]
+
+
 # --- versions ---------------------------------------------------------------------------
 @router.get("/panels/{panel_id}/images", response_model=list[PanelImageOut])
 def list_panel_images(
@@ -369,6 +460,7 @@ def delete_panel_image(
     img = _get_image_or_404(session, image_id)
     panel_id, path = img.panel_id, img.path
     finished = (img.finish or {}).get("path")
+    mask = ((img.params or {}).get("repair") or {}).get("mask_path")
     session.delete(img)
     session.flush()
     refresh_states(session, [panel_id])
@@ -376,6 +468,8 @@ def delete_panel_image(
     ctx.files.delete(path)
     if isinstance(finished, str):
         ctx.files.delete(finished)
+    if isinstance(mask, str) and mask:
+        ctx.files.delete(mask)
     return Response(status_code=204)
 
 
@@ -602,4 +696,5 @@ def list_workflow_presets(ctx: AppContext = Depends(get_ctx)) -> list[WorkflowPr
             is_quality=bool(defaults and defaults.workflow_quality == w.preset.id),
         )
         for w in presets.workflows.values()
+        if w.preset.inpaint is None  # presets de réparation : jamais proposés pour générer une case
     ]

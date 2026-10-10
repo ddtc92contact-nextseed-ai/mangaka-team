@@ -741,7 +741,11 @@ class QCExecutor:
             reasons = list(result.reasons)
             retry: dict[str, Any] | None = None
             if auto and verdict == QCVerdict.reject:
-                if attempt < cfg.max_auto_retries:
+                if (img.params or {}).get("repair"):
+                    # Une réparation ne se relance pas toute seule : l'auteur choisit de la garder ou non.
+                    verdict = QCVerdict.review
+                    reasons.append("Rejet : réparation à revoir (pas de nouvel essai automatique pour une réparation)")
+                elif attempt < cfg.max_auto_retries:
                     retry = self._retry(session, panel, img, attempt + 1, cfg, presets)
                     if retry.get("job_id"):
                         reasons.append(

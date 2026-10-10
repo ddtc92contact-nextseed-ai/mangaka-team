@@ -63,6 +63,8 @@ def check_workflow(loaded: LoadedWorkflow | LoadedUpscaler, object_info: dict[st
     preset = loaded.preset
     runtime = {(t.node, t.input) for t in preset.mapping.values()}
     runtime |= {(s.node, s.input) for s in preset.reference_images}
+    if preset.inpaint is not None:  # image source et masque : envoyés par le moteur
+        runtime |= {(t.node, t.input) for t in (preset.inpaint.source_image, preset.inpaint.mask_image)}
     problems: list[str] = []
     unknown: set[str] = set()
     for node_id in sorted(loaded.workflow, key=_node_order):

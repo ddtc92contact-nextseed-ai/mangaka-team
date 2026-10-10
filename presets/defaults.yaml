@@ -14,3 +14,5 @@ layout_style: dynamique
 upscaler: realesrgan-x4plus-anime-6b
 # Pas d'agrandissement si la case atteint déjà cette part du dpi cible du format (0,9 × 300 = 270 dpi).
 finishing_tolerance: 0.9
+# Réparation ciblée (atelier) pour un workflow qui ne déclare pas `inpaint_with` (preset avec bloc `inpaint`).
+workflow_inpaint: qwen-image-inpaint-turbo

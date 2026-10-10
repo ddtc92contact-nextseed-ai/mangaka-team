@@ -389,6 +389,58 @@ class GenerateIn(_In):
     prompt_override: FinalPrompt | None = None
 
 
+RepairTarget = Literal["face", "hand", "zone"]
+
+
+class RepairRegionIn(_In):
+    """Rectangle à repeindre, en px de l'image de la version (détection du QC ou rectangle tracé)."""
+
+    x1: Annotated[float, Field(ge=0, le=100_000)]
+    y1: Annotated[float, Field(ge=0, le=100_000)]
+    x2: Annotated[float, Field(ge=0, le=100_000)]
+    y2: Annotated[float, Field(ge=0, le=100_000)]
+    # Une boîte de `PanelImage.detections` peut être renvoyée telle quelle (score et étiquette ignorés).
+    score: float | None = None
+    label: Annotated[str, StringConstraints(max_length=40)] | None = None
+
+
+class RepairIn(_In):
+    """Réparation ciblée d'une version : zone (rectangles et/ou masque peint), prompt et réglages."""
+
+    regions: Annotated[list[RepairRegionIn], Field(max_length=50)] = Field(default_factory=list)
+    # Masque peint : PNG en base64 (data URL acceptée), blanc ou opaque = à repeindre ; redimensionné.
+    mask_png: Annotated[str, StringConstraints(max_length=20_000_000)] | None = None
+    target: RepairTarget = "zone"
+    character_id: int | None = None
+    prompt: FinalPrompt | None = None
+    grow_px: Annotated[int, Field(ge=0, le=256)] | None = None
+    feather_px: Annotated[int, Field(ge=0, le=128)] | None = None
+    denoise: Annotated[float, Field(ge=0.05, le=1)] | None = None
+    seed: Annotated[int, Field(ge=0, le=MAX_SEED)] | None = None
+
+
+class RepairCharacterOut(BaseModel):
+    id: int
+    name: str
+
+
+class RepairInfoOut(BaseModel):
+    """Préremplissage de la fenêtre « Réparer » : preset, réglages par défaut, prompt, personnages."""
+
+    available: bool
+    problem: str | None = None  # pourquoi la réparation est impossible (croquis, preset manquant…)
+    preset: str | None = None
+    preset_name: str | None = None
+    tier: str | None = None
+    grow_px: int = 0
+    feather_px: int = 0
+    denoise: float = 0.45
+    target: RepairTarget = "zone"
+    character_id: int | None = None
+    characters: list[RepairCharacterOut] = Field(default_factory=list)
+    prompt: str = ""
+
+
 class BatchGenerateIn(_In):
     force: bool = False
     count: VariantCount = 1
