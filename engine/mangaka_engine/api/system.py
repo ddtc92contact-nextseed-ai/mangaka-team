@@ -95,6 +95,7 @@ def health(ctx: AppContext = Depends(get_ctx)) -> dict[str, Any]:
         "presets": {
             "page_formats": len(ctx.presets.page_formats),
             "workflows": len(ctx.presets.workflows),
+            "upscalers": len(ctx.presets.upscalers),
             "layout_templates": len(ctx.presets.layout_templates),
             "layout_styles": len(ctx.presets.layout_styles),
             "prompts": len(ctx.presets.prompts),
@@ -152,6 +153,18 @@ def list_presets(ctx: AppContext = Depends(get_ctx)) -> dict[str, Any]:
                 "denoise": w.preset.defaults.get("denoise"),
             }
             for w in reg.workflows.values()
+        ],
+        "upscalers": [
+            {
+                "id": u.preset.id,
+                "name": u.preset.name,
+                "description": u.preset.description,
+                "model_scale": u.preset.model_scale,
+                "high_fidelity": u.preset.high_fidelity,
+                "is_default": u.preset.id == reg.default_upscaler,
+                "estimated_s": u.preset.estimated_s,
+            }
+            for u in reg.upscalers.values()
         ],
         "fonts": [
             {

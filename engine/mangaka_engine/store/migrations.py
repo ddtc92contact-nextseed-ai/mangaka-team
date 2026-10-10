@@ -18,7 +18,8 @@
   de chaque case). Les données existantes ne changent pas : les cases n'ont ni décor ni objet.
 - 12 : « Créer des références » (variantes générées par fiche) et ordre des images de référence ; les
   images existantes gardent leur ordre (celui de leur ajout).
-- 13 : palier croquis (sorte des versions : `final` / `croquis`, croquis validé et débruitage du
+- 13 : finition d'impression (image agrandie dérivée d'une version, agrandisseur choisi par série).
+- 14 : palier croquis (sorte des versions : `final` / `croquis`, croquis validé et débruitage du
   passage au propre par case, réglages croquis de la série). Les versions existantes sont `final` ;
   le palier croquis est activé sur les séries existantes (il n'ajoute que des boutons).
 
@@ -57,7 +58,7 @@ from .models import (
 
 log = logging.getLogger("mangaka_engine")
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 
 
 class MigrationError(RuntimeError):
@@ -230,6 +231,11 @@ def _v11_to_v12(cur: sqlite3.Cursor) -> None:
 
 
 def _v12_to_v13(cur: sqlite3.Cursor) -> None:
+    cur.execute("ALTER TABLE panel_images ADD COLUMN finish JSON")
+    cur.execute("ALTER TABLE projects ADD COLUMN upscaler VARCHAR(100)")
+
+
+def _v13_to_v14(cur: sqlite3.Cursor) -> None:
     cur.execute("ALTER TABLE panel_images ADD COLUMN kind VARCHAR(20) NOT NULL DEFAULT 'final'")
     cur.execute("ALTER TABLE panels ADD COLUMN sketch_image_id INTEGER")
     cur.execute("ALTER TABLE panels ADD COLUMN sketch_denoise FLOAT")
@@ -252,6 +258,7 @@ MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     10: (11, _v10_to_v11),
     11: (12, _v11_to_v12),
     12: (13, _v12_to_v13),
+    13: (14, _v13_to_v14),
 }
 
 

@@ -12,6 +12,8 @@ from sqlalchemy.orm import Session, selectinload
 
 from ..pipeline.comfy_trial import STEP as TRIAL_STEP
 from ..pipeline.estimate import Estimate, estimate_panels, remaining_panels
+from ..pipeline.finishing import STEP as FINISH_STEP
+from ..pipeline.finishing import FinishingError, drop_finishes, panel_print_info, resolve_upscaler
 from ..pipeline.generation import (
     ACTIVE,
     QC_STEP,
@@ -109,6 +111,7 @@ def panel_image_out(img: PanelImage, presets: PresetRegistry | None = None) -> P
         qc=dict(img.qc_details or {}),
         detections=img.detections,
         annotation=annotation_out(img.annotation),
+        finish=img.finish,
         created_at=img.created_at,
     )
 
@@ -139,11 +142,11 @@ def _get_image_or_404(session: Session, image_id: int) -> PanelImage:
 
 
 def _active_jobs(session: Session, panel_id: int) -> list[Job]:
-    """Générations et contrôles qualité en cours ou en attente pour la case."""
+    """Générations, contrôles qualité et finitions en cours ou en attente pour la case."""
     return list(
         session.scalars(
             select(Job)
-            .where(Job.panel_id == panel_id, Job.step.in_([STEP, QC_STEP]), Job.status.in_(ACTIVE))
+            .where(Job.panel_id == panel_id, Job.step.in_([STEP, QC_STEP, FINISH_STEP]), Job.status.in_(ACTIVE))
             .order_by(Job.id)
         )
     )
@@ -154,6 +157,10 @@ def panel_detail(session: Session, ctx: AppContext, panel: Panel) -> PanelDetail
     cast = panel_cast(session, panel)
     presets = _presets(ctx, panel)
     resolved = resolve_preset_id(presets, panel, cast.entries)
+    try:
+        upscaler: str | None = resolve_upscaler(presets, page.chapter.project).preset.name
+    except FinishingError:
+        upscaler = None
     return PanelDetailOut(
         id=panel.id,
         page_id=page.id,
@@ -179,6 +186,8 @@ def panel_detail(session: Session, ctx: AppContext, panel: Panel) -> PanelDetail
         active_jobs=[job_out(j) for j in _active_jobs(session, panel.id)],
         sketch_image_id=sketch.id if (sketch := validated_sketch(panel)) else None,
         sketch_denoise=panel.sketch_denoise,
+        print_info=panel_print_info(presets, ctx.files, panel),  # type: ignore[arg-type]
+        upscaler=upscaler,
     )
 
 
@@ -450,13 +459,17 @@ def get_panel_image_file(
 def select_panel_image(
     image_id: int, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
 ) -> list[PanelImageOut]:
-    """Choisit cette version pour la case (une seule version choisie par case ; jamais un croquis)."""
+    """Choisit cette version pour la case (une seule version choisie par case ; jamais un croquis).
+
+    La finition d'impression des autres versions de la case est effacée (celle des autres cases ne
+    bouge pas) : elle ne vaut que pour la version retenue."""
     img = _get_image_or_404(session, image_id)
     if img.kind == ImageKind.croquis:
         raise FieldError("image_id", "un croquis ne peut pas être choisi : valide-le puis « Passer au propre »")
     panel = img.panel
     for other in panel.images:
         other.selected = other.id == img.id
+    drop_finishes(ctx.files, panel, keep_image_id=img.id)
     session.flush()
     refresh_states(session, [panel.id])  # l'état de la case suit le verdict QC de la version choisie
     session.commit()
@@ -472,12 +485,15 @@ def delete_panel_image(
     panel_id, path = img.panel_id, img.path
     if img.panel.sketch_image_id == img.id:
         img.panel.sketch_image_id = None  # croquis validé supprimé : la case est à trier de nouveau
+    finished = (img.finish or {}).get("path")
     mask = ((img.params or {}).get("repair") or {}).get("mask_path")
     session.delete(img)
     session.flush()
     refresh_states(session, [panel_id])
     session.commit()
     ctx.files.delete(path)
+    if isinstance(finished, str):
+        ctx.files.delete(finished)
     if isinstance(mask, str) and mask:
         ctx.files.delete(mask)
     return Response(status_code=204)
@@ -534,7 +550,9 @@ def _median_durations(session: Session) -> tuple[dict[str, float], float | None,
     """Médianes des durées réussies : par preset et toutes générations confondues, puis des contrôles QC."""
     rows = session.execute(
         select(Job.step, Job.params, Job.duration_ms)
-        .where(Job.step.in_([STEP, QC_STEP]), Job.status == JobStatus.succeeded, Job.duration_ms.is_not(None))
+        .where(
+            Job.step.in_([STEP, QC_STEP, FINISH_STEP]), Job.status == JobStatus.succeeded, Job.duration_ms.is_not(None)
+        )
         .order_by(Job.id.desc())
         .limit(500)
     ).all()
@@ -547,6 +565,11 @@ def _median_durations(session: Session) -> tuple[dict[str, float], float | None,
             n = len((params or {}).get("image_ids") or []) or 1
             if len(qc) < MEDIAN_SAMPLE:
                 qc.append(seconds / n)
+            continue
+        if step == FINISH_STEP:  # durées des finitions, par agrandisseur (clé « finishing:<id> »)
+            key = f"finishing:{(params or {}).get('upscaler')}"
+            if len(by_preset.setdefault(key, [])) < MEDIAN_SAMPLE:
+                by_preset[key].append(seconds)
             continue
         preset = (params or {}).get("preset")
         if isinstance(preset, str) and len(by_preset.setdefault(preset, [])) < MEDIAN_SAMPLE:
@@ -577,7 +600,10 @@ def get_queue(session: Session = Depends(get_session), ctx: AppContext = Depends
     jobs = list(
         session.scalars(
             select(Job)
-            .where(Job.step.in_([STEP, QC_STEP, BENCH_STEP, TRIAL_STEP, REFERENCE_STEP]), Job.status.in_(ACTIVE))
+            .where(
+                Job.step.in_([STEP, QC_STEP, BENCH_STEP, TRIAL_STEP, REFERENCE_STEP, FINISH_STEP]),
+                Job.status.in_(ACTIVE),
+            )
             .order_by((Job.status == JobStatus.running).desc(), Job.id)
         )
     )
@@ -588,7 +614,13 @@ def get_queue(session: Session = Depends(get_session), ctx: AppContext = Depends
         params = job.params or {}
         preset = params.get("preset")
         is_qc = job.step in (QC_STEP, BENCH_STEP)
-        if job.step == BENCH_STEP:
+        if job.step == FINISH_STEP:
+            upscaler_id = params.get("upscaler")
+            estimate = medians.get(f"finishing:{upscaler_id}")
+            if estimate is None and isinstance(upscaler_id, str):
+                loaded = ctx.agents.presets_for(job.project_id).upscalers.get(upscaler_id)
+                estimate = loaded.preset.estimated_s if loaded is not None else None
+        elif job.step == BENCH_STEP:
             n_cases = int(params.get("sample_count") or 1)
             estimate = qc_median * n_cases if qc_median is not None else None
         elif is_qc:
@@ -612,7 +644,9 @@ def get_queue(session: Session = Depends(get_session), ctx: AppContext = Depends
         else:
             label = f"Job {job.id}"
         series = chapter.project if chapter else (session.get(Project, job.project_id) if job.project_id else None)
-        if job.step == REFERENCE_STEP:
+        if job.step == FINISH_STEP:
+            label = f"Finition d'impression · {label} ({params.get('upscaler_name') or params.get('upscaler')})"
+        elif job.step == REFERENCE_STEP:
             kind = KIND_LABELS.get(str(params.get("entry_kind")), "fiche")
             action = "Affiner" if params.get("parent_id") is not None else "Références"
             label = f"{action} · {params.get('entry_name') or kind} ({kind}) · {params.get('sheet_name') or ''}"

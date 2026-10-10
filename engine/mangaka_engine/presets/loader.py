@@ -16,6 +16,7 @@ Arborescence attendue :
       layout_styles/*.yaml     # grammaires de mise en page par série (biais, gouttières, gabarits favoris)
       prompts/*.yaml           # prompts des étapes LLM
       workflows/*.yaml         # workflows ComfyUI (+ leur JSON API)
+      upscalers/*.yaml         # agrandisseurs de la finition d'impression (+ leur JSON API)
       agents/*.yaml            # agents du pipeline (écran « L'équipe ») : rôle et réglages éditables
       reference_sheets/*.yaml  # fiches de référence générées (portrait, turnaround, plan large…)
 
@@ -49,6 +50,7 @@ from .schemas import (
     ProvidersPreset,
     QCSettings,
     ReferenceSheet,
+    UpscalerPreset,
     WorkflowPreset,
 )
 
@@ -69,6 +71,14 @@ class LoadedWorkflow:
 
 
 @dataclass
+class LoadedUpscaler:
+    preset: UpscalerPreset
+    workflow: dict[str, Any]
+    source: Path
+    preset_path: Path | None = None
+
+
+@dataclass
 class PresetIssue:
     file: str
     message: str
@@ -79,6 +89,7 @@ class PresetRegistry:
     root: Path
     page_formats: dict[str, PageFormat] = field(default_factory=dict)
     workflows: dict[str, LoadedWorkflow] = field(default_factory=dict)
+    upscalers: dict[str, LoadedUpscaler] = field(default_factory=dict)
     layout_templates: dict[str, LayoutTemplate] = field(default_factory=dict)
     layout_styles: dict[str, LayoutStyle] = field(default_factory=dict)
     prompts: dict[str, PromptPreset] = field(default_factory=dict)
@@ -106,6 +117,19 @@ class PresetRegistry:
             return self.workflows[preset_id]
         except KeyError:
             raise PresetError(f"workflow inconnu : « {preset_id} »") from None
+
+    def upscaler(self, preset_id: str) -> LoadedUpscaler:
+        try:
+            return self.upscalers[preset_id]
+        except KeyError:
+            raise PresetError(f"agrandisseur inconnu : « {preset_id} »") from None
+
+    @property
+    def default_upscaler(self) -> str | None:
+        """Agrandisseur de la finition d'impression : celui de defaults.yaml (None si absent ou inconnu)."""
+        if self.defaults and self.defaults.upscaler in self.upscalers:
+            return self.defaults.upscaler
+        return None
 
     def layout_template(self, preset_id: str) -> LayoutTemplate:
         try:
@@ -197,6 +221,11 @@ class PresetRegistry:
                 ),
             )
         )
+
+        for path in sorted((root / "upscalers").glob("*.y*ml")):
+            up = reg._load_upscaler(path)
+            if up is not None:
+                reg._register(reg.upscalers, up.preset.id, up, path)
 
         for path in sorted((root / "layouts").glob("*.y*ml")):
             lib = reg._parse(path, LayoutTemplateFile)
@@ -303,6 +332,11 @@ class PresetRegistry:
                     reg.defaults = defaults.model_copy(update={"layout_style": None})
                 else:
                     reg.defaults = defaults
+                if reg.defaults is not None and reg.defaults.upscaler and reg.defaults.upscaler not in reg.upscalers:
+                    reg.issues.append(
+                        PresetIssue(reg._rel(defaults_path), f"agrandisseur inconnu : {reg.defaults.upscaler}")
+                    )
+                    reg.defaults = reg.defaults.model_copy(update={"upscaler": None})
                 inpaint_id = reg.defaults.workflow_inpaint if reg.defaults else None
                 if inpaint_id and not reg._is_inpaint(inpaint_id):
                     reg.issues.append(
@@ -411,10 +445,16 @@ class PresetRegistry:
             self.issues.append(PresetIssue(self._rel(path), format_validation_error(exc)))
             return None
 
-    def _load_workflow(self, path: Path) -> LoadedWorkflow | None:
-        preset = self._parse(path, WorkflowPreset)
-        if preset is None:
+    def _load_upscaler(self, path: Path) -> LoadedUpscaler | None:
+        preset = self._parse(path, UpscalerPreset)
+        workflow = self._load_json(path, preset) if preset is not None else None
+        if preset is None or workflow is None:
             return None
+        source = (path.parent / preset.workflow_file).resolve()
+        return LoadedUpscaler(preset=preset, workflow=workflow, source=source, preset_path=path)
+
+    def _load_json(self, path: Path, preset: WorkflowPreset | UpscalerPreset) -> dict[str, Any] | None:
+        """JSON API d'un preset, vérifié contre son mapping (erreur notée dans `issues`)."""
         json_path = (path.parent / preset.workflow_file).resolve()
         try:
             workflow = json.loads(json_path.read_text(encoding="utf-8"))
@@ -428,10 +468,18 @@ class PresetRegistry:
         if errors:
             self.issues.append(PresetIssue(self._rel(path), " ; ".join(errors)))
             return None
-        return LoadedWorkflow(preset=preset, workflow=workflow, source=json_path, preset_path=path)
+        return workflow
+
+    def _load_workflow(self, path: Path) -> LoadedWorkflow | None:
+        preset = self._parse(path, WorkflowPreset)
+        workflow = self._load_json(path, preset) if preset is not None else None
+        if preset is None or workflow is None:
+            return None
+        source = (path.parent / preset.workflow_file).resolve()
+        return LoadedWorkflow(preset=preset, workflow=workflow, source=source, preset_path=path)
 
 
-def check_workflow_mapping(preset: WorkflowPreset, workflow: Any) -> list[str]:
+def check_workflow_mapping(preset: WorkflowPreset | UpscalerPreset, workflow: Any) -> list[str]:
     """Vérifie que chaque paramètre mappé pointe vers un nœud/une entrée existants."""
     if not isinstance(workflow, dict) or not workflow:
         return ["le JSON du workflow doit être un objet au format API ComfyUI"]

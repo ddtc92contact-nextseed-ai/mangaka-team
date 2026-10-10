@@ -239,6 +239,58 @@ class WorkflowPreset(_Strict):
         return self
 
 
+REQUIRED_UPSCALER_PARAMS = ("image", "width", "height")
+
+
+class UpscalerPreset(_Strict):
+    """Agrandissement d'une case avant l'assemblage (finition d'impression), `presets/upscalers/`.
+
+    Le JSON API charge l'image de la version retenue (`image` : un `LoadImage`), l'agrandit avec un
+    modèle et la ramène à la taille finale exacte (`width` / `height`), calculée par case.
+    """
+
+    id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
+    name: str
+    description: str = ""
+    workflow_file: str = Field(description="Chemin du JSON API ComfyUI, relatif au fichier preset")
+    output_node: str = Field(description="Nœud SaveImage dont on récupère l'image agrandie")
+    mapping: dict[str, NodeInput]
+    defaults: dict[str, Any] = Field(default_factory=dict)
+    # Facteur natif du modèle (×4 pour un ESRGAN 4x) : informatif, la taille finale reste exacte.
+    model_scale: float | None = Field(default=None, gt=0)
+    # Option « haute fidélité » (lente) : jamais choisie par défaut sans le dire.
+    high_fidelity: bool = False
+    timeout_s: float = Field(default=600, gt=0, le=24 * 3600, description="Durée max d'un agrandissement")
+    estimated_s: float | None = Field(default=None, gt=0)
+
+    # Même interface que WorkflowPreset pour les vérifications communes (mapping, test de connexion).
+    @property
+    def reference_images(self) -> list[ReferenceSlot]:
+        return []
+
+    @property
+    def lora_chain(self) -> LoraChain | None:
+        return None
+
+    @property
+    def inpaint(self) -> InpaintSettings | None:
+        return None
+
+    @property
+    def source_image(self) -> NodeInput | None:
+        return None
+
+    @model_validator(mode="after")
+    def _check_mapping(self) -> UpscalerPreset:
+        missing = [p for p in REQUIRED_UPSCALER_PARAMS if p not in self.mapping]
+        if missing:
+            raise ValueError(f"paramètres obligatoires absents du mapping : {', '.join(missing)}")
+        unknown = [k for k in self.defaults if k not in self.mapping]
+        if unknown:
+            raise ValueError(f"valeurs par défaut sans mapping : {', '.join(unknown)}")
+        return self
+
+
 class DeepSeekPreset(_Strict):
     base_url: str
     model: str
@@ -273,6 +325,10 @@ class Defaults(_Strict):
     # Palier croquis : activé pour les nouvelles séries, et workflow des croquis (rôle `croquis`).
     sketch_enabled: bool = True
     workflow_sketch: str | None = None
+    # Finition d'impression : agrandisseur par défaut (presets/upscalers/), surchargeable par série.
+    upscaler: str | None = None
+    # Pas d'agrandissement si la case atteint déjà cette part du dpi cible (0,9 × 300 = 270 dpi).
+    finishing_tolerance: float = Field(default=0.9, gt=0, le=1)
     # Preset de réparation ciblée pour un workflow qui ne déclare pas `inpaint_with`.
     workflow_inpaint: str | None = None
 

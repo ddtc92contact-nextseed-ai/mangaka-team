@@ -137,7 +137,17 @@ export function VersionsStrip({
               )}
               <span className="block px-1.5 py-1 text-[10px] leading-tight text-zinc-400">
                 <span className="flex items-center gap-1">
-                  v{img.version} <TierBadge tier={img.tier} /> {formatDuration(imageDurationS(img))}
+                  v{img.version} <TierBadge tier={img.tier} />
+                  {img.finish && (
+                    <span
+                      className="rounded bg-emerald-500/15 px-1 py-px text-[9px] font-semibold uppercase tracking-wide text-emerald-300"
+                      title={`Finalisée pour l'impression : ${img.finish.width} × ${img.finish.height} px, ${img.finish.dpi} dpi (${img.finish.upscaler_name})`}
+                      data-testid="version-finished"
+                    >
+                      Finalisée
+                    </span>
+                  )}{" "}
+                  {formatDuration(imageDurationS(img))}
                   {img.params.repair && (
                     <span className="rounded bg-violet-500/15 px-1 py-px text-[9px] font-semibold text-violet-300" title={`Réparation de la v${img.params.repair.source_version}`}>
                       ✎ v{img.params.repair.source_version}

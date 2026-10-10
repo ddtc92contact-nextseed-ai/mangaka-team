@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { AnnotationBar } from "@/components/annotation";
+import { DpiBadge } from "@/components/print-dpi";
 import { ProductionLink } from "@/components/production-link";
 import { useQueue } from "@/components/queue";
 import { Alert, Button, Field, Input, Loading, ProgressBar, Select, Textarea } from "@/components/ui";
@@ -11,13 +12,17 @@ import {
   fullErrorMessage,
   type Annotation,
   type GenerateInput,
+  type Job,
   type PanelImage,
+  type PrintInfo,
+  type QueueItem,
   type QCStatus,
   type VisionMode,
   type WorkflowPreset,
 } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
 import { MAX_VARIANTS, PANEL_STATE, formatDuration, isValidSeed } from "@/lib/generation";
+import { dpiLabel, dpiTitle } from "@/lib/finishing";
 import { useJob } from "@/lib/jobs";
 import { LIBRARY_KINDS } from "@/lib/library";
 import { useChapter } from "../chapter-context";
@@ -66,6 +71,8 @@ export function PanelInspector({
 
   const running = view?.running ?? null;
   const live = useJob(running?.job ?? null);
+  const finishing = view?.finishing ?? null;
+  const liveFinish = useJob(finishing?.job ?? null);
   const pending = view?.pending ?? [];
 
   const d = detail.data && detail.data.id === panelId ? detail.data : null;
@@ -143,6 +150,15 @@ export function PanelInspector({
     onChanged();
   }
   const cancelJob = (jobId: number) => run(() => cancel(jobId));
+
+  const finishPanel = () =>
+    run(async () => {
+      await api.finishPanel(panelId);
+      refresh();
+      onChanged();
+      detail.reload();
+      setNotice("Finition d'impression mise en file : la version retenue est agrandie jusqu'au dpi du format (composition gardée).");
+    });
 
   const runQC = (vision: VisionMode, image?: PanelImage) =>
     run(async () => {
@@ -425,6 +441,18 @@ export function PanelInspector({
             </Button>
           </div>
 
+          <PrintSection
+            info={d.print_info ?? null}
+            upscaler={d.upscaler ?? null}
+            finishing={finishing}
+            progress={liveFinish?.progress ?? finishing?.job.progress ?? 0}
+            message={liveFinish?.message ?? finishing?.job.message ?? ""}
+            failure={view?.finishFailure ?? null}
+            busy={busy}
+            onFinish={finishPanel}
+            onCancel={(id) => cancelJob(id)}
+          />
+
           {qcImage && <AnnotationBar image={qcImage} onChange={annotated} keyboard onPrev={onPrev} onNext={onNext} />}
 
           <PanelQC
@@ -482,6 +510,93 @@ export function PanelInspector({
         />
       )}
     </section>
+  );
+}
+
+/** Finition d'impression : dpi effectif de la version retenue, « Finaliser cette case », progression. */
+function PrintSection({
+  info,
+  upscaler,
+  finishing,
+  progress,
+  message,
+  failure,
+  busy,
+  onFinish,
+  onCancel,
+}: {
+  info: PrintInfo | null;
+  upscaler: string | null;
+  finishing: QueueItem | null;
+  progress: number;
+  message: string;
+  failure: Job | null;
+  busy: boolean;
+  onFinish: () => void;
+  onCancel: (jobId: number) => void;
+}) {
+  return (
+    <div className="space-y-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3" data-testid="print-section">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-sm font-medium text-zinc-300">Impression</h3>
+        {info && <DpiBadge info={info} />}
+      </div>
+      {!info ? (
+        <p className="text-xs text-zinc-500">Choisis d&apos;abord une version : le dpi se calcule sur la version retenue.</p>
+      ) : (
+        <>
+          <p className="text-sm text-zinc-200" title={dpiTitle(info)} data-testid="print-dpi">
+            {dpiLabel(info)}
+          </p>
+          <p className="text-[11px] text-zinc-500">
+            Case imprimée : {info.width_mm.toLocaleString("fr-FR")} × {info.height_mm.toLocaleString("fr-FR")} mm (fond perdu
+            compris) · cible {info.target_dpi} dpi, seuil {info.min_dpi} dpi
+            {info.status === "low" && ` · agrandissement ×${info.factor.toLocaleString("fr-FR", { maximumFractionDigits: 2 })} → ${info.target_width} × ${info.target_height} px`}
+            {info.status === "finished" && info.finished_upscaler && ` · ${info.finished_upscaler}`}
+          </p>
+        </>
+      )}
+      {finishing ? (
+        <div className="space-y-1.5" aria-live="polite">
+          <div className="flex items-center justify-between gap-2 text-xs">
+            <span className="text-zinc-200">
+              {finishing.job.status === "running"
+                ? `${message || "Finition…"} · ${progress} %`
+                : `Finition en file (position ${finishing.position})`}
+            </span>
+            <Button variant="ghost" className="!px-2 !py-0.5 text-xs" onClick={() => onCancel(finishing.job.id)} disabled={busy}>
+              Annuler
+            </Button>
+          </div>
+          {finishing.job.status === "running" && (
+            <ProgressBar key={finishing.job.id} value={progress} label="Progression de la finition" />
+          )}
+        </div>
+      ) : (
+        info?.status === "low" && (
+          <div className="space-y-2">
+            {failure && (
+              <Alert>
+                <strong className="font-semibold">Dernière finition en échec.</strong> {failure.error ?? "Erreur inconnue."}
+              </Alert>
+            )}
+            <Button
+              variant="secondary"
+              onClick={onFinish}
+              disabled={busy || !upscaler}
+              title={
+                upscaler
+                  ? `Agrandit la version retenue avec ${upscaler} (quelques secondes, composition gardée)`
+                  : "Aucun agrandisseur configuré (upscaler de presets/defaults.yaml)"
+              }
+              data-testid="finish-panel"
+            >
+              Finaliser cette case
+            </Button>
+          </div>
+        )
+      )}
+    </div>
   );
 }
 

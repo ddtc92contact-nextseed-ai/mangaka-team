@@ -47,6 +47,7 @@ export function ProjectForm({
     layout_style: initial?.layout_style,
     sketch_enabled: initial?.sketch_enabled,
     sketch_denoise: initial?.sketch_denoise ?? null,
+    upscaler: initial?.upscaler ?? null,
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
@@ -70,6 +71,9 @@ export function ProjectForm({
   // Débruitage livré : celui du preset « propre depuis croquis » du palier choisi.
   const cleanPreset = presets.data?.workflows.find((w) => w.id === currentWorkflow?.from_sketch);
   const presetDenoise = cleanPreset?.denoise ?? null;
+  const upscalers = presets.data?.upscalers ?? [];
+  const defaultUpscaler = upscalers.find((u) => u.is_default);
+  const upscalerInfo = upscalers.find((u) => u.id === form.upscaler) ?? defaultUpscaler;
 
   const set = <K extends keyof ProjectInput>(key: K, value: ProjectInput[K]) => {
     setForm((f) => ({ ...f, [key]: value }));
@@ -289,6 +293,34 @@ export function ProjectForm({
           />
         </Field>
       </fieldset>
+      <Field
+        label="Agrandisseur (finition d'impression)"
+        htmlFor="upscaler"
+        error={errors.upscaler}
+        hint={
+          upscalerInfo?.description ||
+          "Agrandit la version retenue de chaque case jusqu'au dpi du format avant l'assemblage (« Finaliser la page »)."
+        }
+      >
+        <Select
+          id="upscaler"
+          value={form.upscaler ?? ""}
+          onChange={(e) => set("upscaler", e.target.value || null)}
+          aria-invalid={Boolean(errors.upscaler)}
+          disabled={!presets.data}
+        >
+          <option value="">Par défaut{defaultUpscaler ? ` — ${defaultUpscaler.name}` : ""}</option>
+          {upscalers.map((u) => (
+            <option key={u.id} value={u.id}>
+              {u.name}
+              {u.high_fidelity ? " (lent)" : ""}
+            </option>
+          ))}
+          {form.upscaler && presets.data && !upscalers.some((u) => u.id === form.upscaler) && (
+            <option value={form.upscaler}>{form.upscaler} (preset introuvable)</option>
+          )}
+        </Select>
+      </Field>
       <div className="flex justify-end">
         <Button type="submit" disabled={saving}>
           {saving ? "Enregistrement…" : submitLabel}

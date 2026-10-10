@@ -30,6 +30,8 @@ export interface Project {
   sketch_enabled: boolean;
   /** Débruitage du passage au propre (null : celui du preset). */
   sketch_denoise: number | null;
+  /** Agrandisseur de la finition d'impression (presets/upscalers/) ; null = celui de defaults.yaml. */
+  upscaler: string | null;
   character_count: number;
   chapter_count: number;
   /** Pages déjà mises en page : changer le sens de lecture les met en miroir. */
@@ -52,6 +54,7 @@ export type ProjectInput = Pick<
   | "layout_style"
   | "sketch_enabled"
   | "sketch_denoise"
+  | "upscaler"
 >;
 
 export interface Chapter {
@@ -133,6 +136,59 @@ export interface PanelData {
   sketch_denoise?: number | null;
   /** Une version propre a déjà été tirée du croquis validé. */
   sketch_cleaned?: boolean;
+  /** Dpi de la version retenue à l'impression (null : pas de version retenue ou pas de mise en page). */
+  print_info?: PrintInfo | null;
+}
+
+/** Finition d'impression : dpi effectif de la version retenue une fois imprimée. */
+export interface PrintInfo {
+  image_id: number;
+  /** ok : déjà au dpi cible · finished : finalisée au dpi cible · low : sous le seuil. */
+  status: "ok" | "finished" | "low";
+  target_dpi: number;
+  min_dpi: number;
+  box_width: number;
+  box_height: number;
+  width_mm: number;
+  height_mm: number;
+  source_width: number;
+  source_height: number;
+  dpi: number;
+  factor: number;
+  target_width: number;
+  target_height: number;
+  needed: boolean;
+  finished: boolean;
+  finished_dpi: number | null;
+  finished_width: number | null;
+  finished_height: number | null;
+  finished_upscaler: string | null;
+}
+
+/** Agrandisseur de la finition d'impression (presets/upscalers/). */
+export interface Upscaler {
+  id: string;
+  name: string;
+  description: string;
+  model_scale: number | null;
+  high_fidelity: boolean;
+  is_default: boolean;
+  estimated_s: number | null;
+  timeout_s: number;
+}
+
+/** Image agrandie dérivée d'une version (finition d'impression). */
+export interface PanelImageFinish {
+  path: string;
+  width: number;
+  height: number;
+  upscaler: string;
+  upscaler_name: string;
+  factor: number;
+  dpi: number;
+  target_dpi: number;
+  created_at: string;
+  [key: string]: unknown;
 }
 
 export interface PanelSfx {
@@ -391,6 +447,8 @@ export interface PanelImage {
   detections: Detections | null;
   /** Jugement humain bonne / mauvaise (banc d'essai du QC), indépendant du verdict QC. */
   annotation: Annotation | null;
+  /** Finition d'impression de la version (image agrandie), null : aucune. */
+  finish?: PanelImageFinish | null;
   created_at: string;
 }
 
@@ -619,6 +677,9 @@ export interface PanelDetail {
   /** Croquis validé au tri (null : aucun). */
   sketch_image_id?: number | null;
   sketch_denoise?: number | null;
+  print_info?: PrintInfo | null;
+  /** Nom de l'agrandisseur de la série (finition d'impression), null : aucun configuré. */
+  upscaler?: string | null;
 }
 
 export interface GenerateInput {
@@ -918,6 +979,9 @@ export interface Presets {
     layout_style?: string | null;
     sketch_enabled?: boolean;
     workflow_sketch?: string | null;
+    /** Agrandisseur de la finition d'impression et part du dpi cible qui suffit (0,9). */
+    upscaler?: string | null;
+    finishing_tolerance?: number;
   } | null;
   page_formats: {
     id: string;
@@ -947,6 +1011,8 @@ export interface Presets {
     /** Débruitage livré (workflows « propre »). */
     denoise?: number | null;
   }[];
+  /** Agrandisseurs de la finition d'impression (presets/upscalers/). */
+  upscalers?: Omit<Upscaler, "timeout_s">[];
   fonts: { id: string; name: string; bold: boolean; italic: boolean }[];
   layout_templates: LayoutTemplate[];
   layout_styles: LayoutStyle[];
@@ -1617,6 +1683,10 @@ export const api = {
   cleanChapter: (id: number) => request<BatchGenerateResult>(`/chapters/${id}/clean`, { method: "POST" }),
   pageSketchEstimate: (id: number) => request<SketchEstimate>(`/pages/${id}/sketch-estimate`),
   chapterSketchEstimate: (id: number) => request<SketchEstimate>(`/chapters/${id}/sketch-estimate`),
+  upscalers: () => request<Upscaler[]>("/presets/upscalers"),
+  finishPanel: (id: number) => request<Job>(`/panels/${id}/finish`, { method: "POST" }),
+  finishPage: (id: number) => request<BatchGenerateResult>(`/pages/${id}/finish`, { method: "POST" }),
+  finishChapter: (id: number) => request<BatchGenerateResult>(`/chapters/${id}/finish`, { method: "POST" }),
   selectPanelImage: (id: number) => request<PanelImage[]>(`/panel-images/${id}/select`, { method: "POST" }),
   deletePanelImage: (id: number) => request<void>(`/panel-images/${id}`, { method: "DELETE" }),
   /** `character` : « auto » (le seul personnage de la case), « none » (aucun) ou l'id d'un personnage. */

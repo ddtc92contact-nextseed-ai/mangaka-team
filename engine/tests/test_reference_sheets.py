@@ -485,8 +485,10 @@ def test_database_v11_keeps_reference_order(make_settings: Callable[..., Setting
         ("panels", "sketch_denoise"),
         ("projects", "sketch_enabled"),
         ("projects", "sketch_denoise"),
-    ]:  # colonnes du palier croquis (v13)
+    ]:  # colonnes du palier croquis (v14)
         con.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
+    con.execute("ALTER TABLE panel_images DROP COLUMN finish")  # v13 : finition d'impression
+    con.execute("ALTER TABLE projects DROP COLUMN upscaler")
     con.execute("DROP TABLE reference_variants")
     con.execute("ALTER TABLE character_images DROP COLUMN position")
     con.execute("ALTER TABLE series_asset_images DROP COLUMN position")

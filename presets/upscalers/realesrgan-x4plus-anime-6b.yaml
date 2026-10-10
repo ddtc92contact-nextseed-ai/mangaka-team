@@ -1,0 +1,18 @@
+# Finition d'impression — agrandisseur par défaut (defaults.yaml › upscaler).
+# Real-ESRGAN x4plus anime 6B : le meilleur pour le trait encré et les aplats (manga, BD).
+# Fichier attendu : ComfyUI/models/upscale_models/RealESRGAN_x4plus_anime_6B.pth (déjà sur la GX10).
+id: realesrgan-x4plus-anime-6b
+name: Real-ESRGAN x4plus anime 6B
+description: >-
+  Défaut : agrandissement ×4 par modèle, puis taille finale exacte (lanczos). Garde la composition et
+  le trait ; quelques secondes par case.
+workflow_file: realesrgan-x4plus-anime-6b.json
+output_node: "5"
+model_scale: 4
+timeout_s: 300
+estimated_s: 6
+mapping:
+  image: { node: "1", input: image }              # LoadImage : version retenue, envoyée par le moteur
+  width: { node: "4", input: width }              # ImageScale : taille finale exacte, calculée par case
+  height: { node: "4", input: height }
+  filename_prefix: { node: "5", input: filename_prefix }
