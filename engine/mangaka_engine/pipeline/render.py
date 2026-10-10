@@ -36,8 +36,9 @@ from sqlalchemy.orm import Session, selectinload
 from ..presets import PresetError, PresetRegistry
 from ..store.db import Database
 from ..store.files import FileStore
-from ..store.models import Bubble, BubbleKind, Chapter, Job, Page, Panel, PanelImage
+from ..store.models import Bubble, BubbleKind, Chapter, ImageKind, Job, Page, Panel, PanelImage
 from .assembly import Canvas, PageArt, PanelArt, canvas_geometry, cover_transform, png_bytes, render_png, render_svg
+from .finishing import finished_art, panel_print_info
 from .fonts import FontBook
 from .jobs import JobReporter
 from .lettering import Box, BubbleSpec, Letterer, LetteringError, LetteringWarning, PanelSpec, SfxSpec
@@ -121,7 +122,8 @@ class PageInputs:
 
 
 def selected_image(panel: Panel) -> PanelImage | None:
-    return next((i for i in panel.images if i.selected), None)
+    """Version assemblée : la version choisie, jamais un croquis (palier croquis)."""
+    return next((i for i in panel.images if i.selected and i.kind == ImageKind.final), None)
 
 
 def _image_size(img: PanelImage, files: FileStore) -> tuple[int, int] | None:
@@ -235,8 +237,13 @@ def page_inputs(presets: PresetRegistry, files: FileStore, page: Page, fonts: Fo
             faces: list[Box] = []
         else:
             assert img is not None
+            # Aperçu écran : l'image légère ; visages en px de la version (même cadrage que sa finition).
             urls[panel.id] = f"/panel-images/{img.id}/file"
             faces = faces_on_page(face_boxes(img, size), size, box)
+            # Finition d'impression : l'assemblage prend l'image agrandie quand elle existe.
+            finished = finished_art(img, files)
+            if finished is not None:
+                path, size = finished
         faces_by_panel[panel.id] = faces
         panels.append(
             PanelArt(
@@ -438,6 +445,26 @@ def load_chapter_pages(session: Session, chapter_id: int) -> list[Page]:
     )
 
 
+def low_dpi_warnings(presets: PresetRegistry, files: FileStore, page: Page) -> list[dict[str, Any]]:
+    """Cases de la page sous le seuil de dpi à l'impression (ni assez grandes, ni finalisées)."""
+    out = []
+    for panel in page.panels:
+        info = panel_print_info(presets, files, panel)
+        if info is not None and info["status"] == "low":
+            out.append(
+                {
+                    "code": "low_dpi",
+                    "message": (
+                        f"Case {panel.index + 1} : {info['finished_dpi'] or info['dpi']} dpi à l'impression "
+                        f"(cible {info['target_dpi']}) — « Finaliser la page » pour l'agrandir."
+                    ),
+                    "panel_id": panel.id,
+                    "page_number": page.number,
+                }
+            )
+    return out
+
+
 def export_job(
     db: Database,
     presets: PresetRegistry,
@@ -473,6 +500,7 @@ def export_job(
                     except PresetError as exc:
                         raise LetteringError(str(exc)) from None
                     rendered = render_art(presets, fonts, art, bleed=bleed, crop_marks=crop_marks)
+                    warnings += low_dpi_warnings(presets, files, page)
                     stem = page_file_stem(page.number)
                     zf.writestr(f"{stem}.png", rendered.png)
                     zf.writestr(f"{stem}.svg", rendered.svg)

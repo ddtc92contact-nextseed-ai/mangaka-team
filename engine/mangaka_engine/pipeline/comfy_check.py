@@ -18,7 +18,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from ..presets import LoadedWorkflow, PresetRegistry
+from ..presets import LoadedUpscaler, LoadedWorkflow, PresetRegistry
 from ..providers.comfyui import ComfyUIClient, ComfyUIError, missing_value_message
 
 
@@ -58,11 +58,15 @@ def _node_order(node_id: str) -> tuple[int, str]:
     return (int(node_id), node_id) if node_id.isdigit() else (10**9, node_id)
 
 
-def check_workflow(loaded: LoadedWorkflow, object_info: dict[str, Any]) -> list[str]:
+def check_workflow(loaded: LoadedWorkflow | LoadedUpscaler, object_info: dict[str, Any]) -> list[str]:
     """Problèmes lisibles d'un workflow face aux nœuds et fichiers du ComfyUI interrogé."""
     preset = loaded.preset
     runtime = {(t.node, t.input) for t in preset.mapping.values()}
     runtime |= {(s.node, s.input) for s in preset.reference_images}
+    if preset.source_image is not None:  # croquis validé, envoyé à chaque passage au propre
+        runtime.add((preset.source_image.node, preset.source_image.input))
+    if preset.inpaint is not None:  # image source et masque : envoyés par le moteur
+        runtime |= {(t.node, t.input) for t in (preset.inpaint.source_image, preset.inpaint.mask_image)}
     problems: list[str] = []
     unknown: set[str] = set()
     for node_id in sorted(loaded.workflow, key=_node_order):
@@ -139,7 +143,7 @@ def build_report(
 ) -> dict[str, Any]:
     workflows = [
         {"id": w.preset.id, "name": w.preset.name, "problems": check_workflow(w, object_info)}
-        for w in presets.workflows.values()
+        for w in [*presets.workflows.values(), *presets.upscalers.values()]
     ]
     for w in workflows:
         w["ok"] = not w["problems"]

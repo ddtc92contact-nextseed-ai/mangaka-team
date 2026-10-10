@@ -37,8 +37,26 @@ from ..providers.qc import Detections, QCProviderError
 from ..providers.vision import VisionError, VisionProvider, VisionResponseError
 from ..store.db import Database
 from ..store.files import FileStore
-from ..store.models import Character, Job, JobStatus, Page, Panel, PanelImage, PanelState, QCVerdict, utcnow
-from .generation import ACTIVE, GenerationError, enqueue_panel, panel_characters, refresh_states
+from ..store.models import (
+    Character,
+    ImageKind,
+    Job,
+    JobStatus,
+    Page,
+    Panel,
+    PanelImage,
+    PanelState,
+    QCVerdict,
+    utcnow,
+)
+from .generation import (
+    ACTIVE,
+    GenerationError,
+    composition_params,
+    enqueue_panel,
+    panel_characters,
+    refresh_states,
+)
 from .generation import QC_STEP as STEP
 from .generation import STEP as GENERATION_STEP
 from .jobs import JobReporter
@@ -369,7 +387,8 @@ def make_qc_job(
 def target_image(panel: Panel) -> PanelImage | None:
     """Version contrôlée par défaut : la version choisie, sinon la plus récente."""
     chosen = next((i for i in panel.images if i.selected), None)
-    return chosen or (panel.images[-1] if panel.images else None)
+    finals = [i for i in panel.images if i.kind == ImageKind.final]  # jamais un croquis
+    return chosen or (finals[-1] if finals else None)
 
 
 class AutoQC:
@@ -741,7 +760,11 @@ class QCExecutor:
             reasons = list(result.reasons)
             retry: dict[str, Any] | None = None
             if auto and verdict == QCVerdict.reject:
-                if attempt < cfg.max_auto_retries:
+                if (img.params or {}).get("repair"):
+                    # Une réparation ne se relance pas toute seule : l'auteur choisit de la garder ou non.
+                    verdict = QCVerdict.review
+                    reasons.append("Rejet : réparation à revoir (pas de nouvel essai automatique pour une réparation)")
+                elif attempt < cfg.max_auto_retries:
                     retry = self._retry(session, panel, img, attempt + 1, cfg, presets)
                     if retry.get("job_id"):
                         reasons.append(
@@ -809,7 +832,7 @@ class QCExecutor:
                 panel,
                 count=1,
                 preset=(img.params or {}).get("preset"),
-                extra_params={"qc_attempt": attempt, "retry_of": img.id},
+                extra_params={"qc_attempt": attempt, "retry_of": img.id, **composition_params(img)},
             )
         except (GenerationError, PresetError) as exc:
             return {"attempt": attempt, "error": str(exc)}

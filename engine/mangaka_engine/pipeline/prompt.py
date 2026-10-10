@@ -1,6 +1,7 @@
 """Étape 3 — prompt final d'une case (fonctions pures, sans base ni réseau).
 
 description + type de plan (+ plan, angle et ambiance de la direction artistique) + fiches des personnages (description visuelle, mots-clés)
++ fiches du décor et des objets de la bibliothèque de la série (même forme que les personnages)
 + style de la série (+ notes de la bible sur les personnages et passages du savoir-faire) → prompt positif ; le prompt négatif contient toujours les termes qui
 interdisent au modèle de dessiner du texte (bulles et lettrage sont vectoriels).
 Le gabarit vit dans `presets/image_prompt.yaml`.
@@ -18,9 +19,14 @@ from ..presets import ImagePromptSettings
 
 @dataclass(frozen=True)
 class PromptCharacter:
+    """Une fiche de la bibliothèque (personnage, décor ou objet) : nom, description, mots-clés."""
+
     name: str
     visual_description: str = ""
     prompt_keywords: Sequence[str] = field(default_factory=tuple)
+
+
+PromptEntry = PromptCharacter
 
 
 # Répliques entre guillemets français, anglais ou droits.
@@ -63,6 +69,8 @@ def build_prompt(
     angle: str | None = None,
     ambiance: str | None = None,
     characters: Sequence[PromptCharacter] = (),
+    decor: PromptEntry | None = None,
+    objects: Sequence[PromptEntry] = (),
     style: str = "",
     savoir_faire: str = "",
     bible: str = "",
@@ -71,7 +79,8 @@ def build_prompt(
     """Assemble le prompt positif d'une case à partir des morceaux du preset.
 
     `plan`, `angle`, `ambiance` : direction artistique appliquée à la case ; `$plan` vaut le type de
-    plan du scénario quand la direction artistique n'en donne pas.
+    plan du scénario quand la direction artistique n'en donne pas. `decor`, `objects` : fiches de la
+    bibliothèque (`$decor`, `$objects`), décrites comme les personnages.
     """
     settings = settings or ImagePromptSettings()
     desc, savoir_faire, bible = description or "", savoir_faire or "", bible or ""
@@ -90,6 +99,10 @@ def build_prompt(
         "description": _clean(desc),
         "characters": settings.character_separator.join(
             d for d in (describe_character(c, settings) for c in characters) if d
+        ),
+        "decor": describe_character(decor, settings) if decor is not None else "",
+        "objects": settings.character_separator.join(
+            d for d in (describe_character(o, settings) for o in objects) if d
         ),
         "style": _clean(style),
         "savoir_faire": _clean(savoir_faire),

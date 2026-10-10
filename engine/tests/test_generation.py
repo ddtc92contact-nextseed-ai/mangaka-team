@@ -630,7 +630,10 @@ def test_workflow_presets_endpoint(make_client: Callable[..., TestClient]) -> No
     assert presets["qwen-image-edit-ref-turbo"]["tier_choice"] is None
     assert presets["qwen-image-base"]["with_references"] == "qwen-image-edit-ref"
     assert presets["qwen-image-base-rapide"]["with_references"] == "qwen-image-edit-ref-rapide"
-    assert all(p["has_trial"] for p in presets.values())
+    # Une case d'essai pour chaque palier et le croquis ; « propre » demande un croquis source.
+    assert all(p["has_trial"] for p in presets.values() if p["role"] != "propre")
+    assert presets["qwen-image-croquis"]["is_sketch"] and presets["qwen-image-croquis"]["role"] == "croquis"
+    assert presets["qwen-image-turbo"]["from_sketch"] == "qwen-image-turbo-from-sketch"
 
 
 # --- paliers : Turbo par défaut, « Régénérer en Qualité », taille des cases avec références ------

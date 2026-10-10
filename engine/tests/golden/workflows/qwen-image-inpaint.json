@@ -1,0 +1,216 @@
+{
+  "1": {
+    "_meta": {
+      "title": "Modèle de diffusion"
+    },
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "qwen_image_2.1_bf16.safetensors",
+      "weight_dtype": "default"
+    }
+  },
+  "10": {
+    "_meta": {
+      "title": "Décodage VAE"
+    },
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "9",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ]
+    }
+  },
+  "11": {
+    "_meta": {
+      "title": "Sauvegarde"
+    },
+    "class_type": "SaveImage",
+    "inputs": {
+      "filename_prefix": "mangaka/serie-1/chapitre-1/page-1/case-1",
+      "images": [
+        "10",
+        0
+      ]
+    }
+  },
+  "2": {
+    "_meta": {
+      "title": "Encodeur de texte (Qwen3-VL 8B)"
+    },
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "qwen3vl_8b_bf16.safetensors",
+      "device": "default",
+      "type": "qwen_image"
+    }
+  },
+  "20": {
+    "_meta": {
+      "title": "Référence 1"
+    },
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "mangaka/perso1_img1.png"
+    }
+  },
+  "3": {
+    "_meta": {
+      "title": "VAE"
+    },
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "qwen_image_2.1_vae_bf16.safetensors"
+    }
+  },
+  "30": {
+    "_meta": {
+      "title": "Image source (version à réparer)"
+    },
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "mangaka/source_img12.png"
+    }
+  },
+  "31": {
+    "_meta": {
+      "title": "Masque (blanc = zone à repeindre)"
+    },
+    "class_type": "LoadImageMask",
+    "inputs": {
+      "channel": "red",
+      "image": "mangaka/masque_job34.png"
+    }
+  },
+  "32": {
+    "_meta": {
+      "title": "Encodage VAE de la source"
+    },
+    "class_type": "VAEEncode",
+    "inputs": {
+      "pixels": [
+        "30",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ]
+    }
+  },
+  "33": {
+    "_meta": {
+      "title": "Bruit limité au masque"
+    },
+    "class_type": "SetLatentNoiseMask",
+    "inputs": {
+      "mask": [
+        "31",
+        0
+      ],
+      "samples": [
+        "32",
+        0
+      ]
+    }
+  },
+  "34": {
+    "_meta": {
+      "title": "LoRA style"
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "lora_name": "encre-seinen.safetensors",
+      "model": [
+        "1",
+        0
+      ],
+      "strength_model": 0.7
+    }
+  },
+  "35": {
+    "_meta": {
+      "title": "LoRA Aiko"
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "lora_name": "aiko-v3.safetensors",
+      "model": [
+        "34",
+        0
+      ],
+      "strength_model": 0.9
+    }
+  },
+  "4": {
+    "_meta": {
+      "title": "Cache Qwen Image 2.1"
+    },
+    "class_type": "QwenImage21Cache",
+    "inputs": {
+      "device": "auto",
+      "dtype": "default",
+      "model": [
+        "35",
+        0
+      ]
+    }
+  },
+  "6": {
+    "_meta": {
+      "title": "Prompts (positif / négatif) + références"
+    },
+    "class_type": "TextEncodeQwenImage21",
+    "inputs": {
+      "clip": [
+        "2",
+        0
+      ],
+      "images.image_1": [
+        "20",
+        0
+      ],
+      "negative_prompt": "texte, bulles",
+      "prompt": "Main bien dessinée, cinq doigts. Personnage : Aiko (cheveux noirs).",
+      "resolution": 1024,
+      "vae": [
+        "3",
+        0
+      ]
+    }
+  },
+  "9": {
+    "_meta": {
+      "title": "KSampler (débruitage partiel)"
+    },
+    "class_type": "KSampler",
+    "inputs": {
+      "cfg": 1,
+      "denoise": 0.4,
+      "latent_image": [
+        "33",
+        0
+      ],
+      "model": [
+        "4",
+        0
+      ],
+      "negative": [
+        "6",
+        1
+      ],
+      "positive": [
+        "6",
+        0
+      ],
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "seed": 424242,
+      "steps": 50
+    }
+  }
+}

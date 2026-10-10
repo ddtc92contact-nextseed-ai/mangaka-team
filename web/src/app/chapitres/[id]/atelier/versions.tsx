@@ -8,6 +8,7 @@ import { Alert, Button, Select } from "@/components/ui";
 import { engineUrl, fullErrorMessage, type Annotation, type PanelImage } from "@/lib/api";
 import { formatDuration, imageDurationS } from "@/lib/generation";
 import { QC_VERDICT } from "@/lib/qc";
+import { REPAIR_TARGETS, isSketch } from "./repair-dialog";
 
 function caption(img: PanelImage): string {
   return `v${img.version}${img.tier ? ` · ${img.tier}` : ""} · seed ${img.seed ?? "—"} · ${formatDuration(imageDurationS(img))}`;
@@ -16,7 +17,14 @@ function caption(img: PanelImage): string {
 /** Pastille du palier qui a produit la version (Turbo, Rapide, Qualité). */
 function TierBadge({ tier }: { tier: string | null }) {
   if (!tier) return null;
-  const tone = tier === "Qualité" ? "bg-amber-500/15 text-amber-300" : tier === "Turbo" ? "bg-sky-500/15 text-sky-300" : "bg-zinc-800 text-zinc-300";
+  const tone =
+    tier === "Qualité"
+      ? "bg-amber-500/15 text-amber-300"
+      : tier === "Turbo"
+        ? "bg-sky-500/15 text-sky-300"
+        : tier === "Croquis"
+          ? "bg-zinc-200 text-zinc-800"
+          : "bg-zinc-800 text-zinc-300";
   return (
     <span className={`rounded px-1 py-px text-[9px] font-semibold uppercase tracking-wide ${tone}`} data-testid="version-tier">
       {tier}
@@ -30,11 +38,14 @@ export function VersionsStrip({
   onSelect,
   onDelete,
   onAnnotated,
+  onRepair,
 }: {
   images: PanelImage[];
   onSelect: (img: PanelImage) => Promise<void>;
   onDelete: (img: PanelImage) => Promise<void>;
   onAnnotated: (imageId: number, annotation: Annotation | null) => void;
+  /** Ouvre « Réparer une zone » sur une version (la fenêtre des versions se ferme). */
+  onRepair?: (img: PanelImage) => void;
 }) {
   const [viewId, setViewId] = useState<number | null>(null);
   const [compareId, setCompareId] = useState<number | null>(null);
@@ -126,7 +137,22 @@ export function VersionsStrip({
               )}
               <span className="block px-1.5 py-1 text-[10px] leading-tight text-zinc-400">
                 <span className="flex items-center gap-1">
-                  v{img.version} <TierBadge tier={img.tier} /> {formatDuration(imageDurationS(img))}
+                  v{img.version} <TierBadge tier={img.tier} />
+                  {img.finish && (
+                    <span
+                      className="rounded bg-emerald-500/15 px-1 py-px text-[9px] font-semibold uppercase tracking-wide text-emerald-300"
+                      title={`Finalisée pour l'impression : ${img.finish.width} × ${img.finish.height} px, ${img.finish.dpi} dpi (${img.finish.upscaler_name})`}
+                      data-testid="version-finished"
+                    >
+                      Finalisée
+                    </span>
+                  )}{" "}
+                  {formatDuration(imageDurationS(img))}
+                  {img.params.repair && (
+                    <span className="rounded bg-violet-500/15 px-1 py-px text-[9px] font-semibold text-violet-300" title={`Réparation de la v${img.params.repair.source_version}`}>
+                      ✎ v{img.params.repair.source_version}
+                    </span>
+                  )}
                 </span>
                 <span className="block truncate text-zinc-500" title={`seed ${img.seed ?? "—"}`}>
                   seed {img.seed ?? "—"}
@@ -170,9 +196,27 @@ export function VersionsStrip({
                   ← Vue simple
                 </Button>
               )}
+              {!compared && onRepair && !isSketch(viewed) && (
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    close();
+                    onRepair(viewed);
+                  }}
+                  disabled={busy}
+                  data-testid="repair-version"
+                >
+                  Réparer une zone…
+                </Button>
+              )}
               {!compared && (
-                <Button onClick={() => run(() => onSelect(viewed))} disabled={busy || viewed.selected} data-testid="choose-version">
-                  {viewed.selected ? "Version choisie" : "Choisir cette version"}
+                <Button
+                  onClick={() => run(() => onSelect(viewed))}
+                  disabled={busy || viewed.selected || viewed.kind === "croquis"}
+                  title={viewed.kind === "croquis" ? "Un croquis n'est jamais assemblé : valide-le puis « Passer au propre »" : undefined}
+                  data-testid="choose-version"
+                >
+                  {viewed.kind === "croquis" ? "Croquis (non assemblé)" : viewed.selected ? "Version choisie" : "Choisir cette version"}
                 </Button>
               )}
             </>
@@ -232,14 +276,16 @@ export function VersionsStrip({
                       {img.selected && <span className="ml-2 text-xs text-rose-300">choisie</span>}
                     </span>
                   )}
-                  <Button
-                    variant={img.selected ? "ghost" : "secondary"}
-                    className="!px-2.5 !py-1 text-xs"
-                    disabled={busy || img.selected}
-                    onClick={() => run(() => onSelect(img))}
-                  >
-                    {img.selected ? "Choisie" : "Choisir celle-ci"}
-                  </Button>
+                  {img.kind !== "croquis" && (
+                    <Button
+                      variant={img.selected ? "ghost" : "secondary"}
+                      className="!px-2.5 !py-1 text-xs"
+                      disabled={busy || img.selected}
+                      onClick={() => run(() => onSelect(img))}
+                    >
+                      {img.selected ? "Choisie" : "Choisir celle-ci"}
+                    </Button>
+                  )}
                 </div>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
@@ -265,8 +311,28 @@ function VersionLarge({ img }: { img: PanelImage }) {
     ["Durée", formatDuration(imageDurationS(img))],
     ["Palier", img.tier ?? "—"],
     ["Workflow", img.preset ?? "—"],
+    ...(typeof img.params.composition === "object" && img.params.composition
+      ? ([
+          [
+            "Composition",
+            `croquis v${(img.params.composition as { version?: number }).version ?? "?"} · débruitage ${
+              (img.params.composition as { denoise?: number }).denoise ?? "—"
+            }`,
+          ],
+        ] as [string, string][])
+      : []),
     ["Taille", img.width && img.height ? `${img.width} × ${img.height} px` : "—"],
     ["Créée le", new Date(img.created_at).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })],
+    ...(p.repair
+      ? ([
+          [
+            "Réparation",
+            `de la v${p.repair.source_version} · ${REPAIR_TARGETS[p.repair.target] ?? p.repair.target}${
+              p.repair.character_name ? ` (${p.repair.character_name})` : ""
+            } · marge ${p.repair.grow_px} px, bords ${p.repair.feather_px} px, denoise ${p.repair.denoise.toLocaleString("fr-FR")}`,
+          ],
+        ] as [string, string][])
+      : []),
     ["QC", img.qc_verdict ? `${QC_VERDICT[img.qc_verdict]}${img.qc_score !== null ? ` · ${img.qc_score}/100` : ""}` : "pas encore contrôlée"],
   ];
   return (

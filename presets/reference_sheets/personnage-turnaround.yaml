@@ -1,0 +1,17 @@
+# Type de fiche de référence : voir presets/README.md (« Fiches de référence »).
+id: personnage-turnaround
+name: Plein pied face / profil / dos (turnaround)
+description: "Le même personnage en pied, vu de face, de profil et de dos, côte à côte."
+kinds: [character]
+order: 20
+width: 1536
+height: 864
+workflow: null
+prompt:
+  - "Planche de model sheet (turnaround) de $name : trois vues du même personnage en pied, côte à côte — de face, de profil, de dos — même taille, même tenue, pose neutre bras le long du corps."
+  - "$description."
+  - "Détails : $keywords."
+  - "Modification demandée : $instruction."
+  - "Style : $style."
+  - "Fond blanc uni, éclairage neutre, aucun texte ni légende."
+negative_prompt: "personnages différents, vues coupées, décor"

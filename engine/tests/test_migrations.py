@@ -62,7 +62,37 @@ def _version(path: Path) -> int:
     return v
 
 
+def _drop_v14_sketch(con: sqlite3.Connection) -> None:
+    con.execute("ALTER TABLE panel_images DROP COLUMN kind")
+    con.execute("ALTER TABLE panels DROP COLUMN sketch_image_id")
+    con.execute("ALTER TABLE panels DROP COLUMN sketch_denoise")
+    con.execute("ALTER TABLE projects DROP COLUMN sketch_enabled")
+    con.execute("ALTER TABLE projects DROP COLUMN sketch_denoise")
+
+
+def _drop_v13_finishing(con: sqlite3.Connection) -> None:
+    _drop_v14_sketch(con)
+    con.execute("ALTER TABLE panel_images DROP COLUMN finish")
+    con.execute("ALTER TABLE projects DROP COLUMN upscaler")
+
+
+def _drop_v12_references(con: sqlite3.Connection) -> None:
+    _drop_v13_finishing(con)
+    con.execute("DROP TABLE reference_variants")
+    con.execute("ALTER TABLE character_images DROP COLUMN position")
+    con.execute("ALTER TABLE series_asset_images DROP COLUMN position")
+
+
+def _drop_v11_library(con: sqlite3.Connection) -> None:
+    _drop_v12_references(con)
+    con.execute("ALTER TABLE panels DROP COLUMN decor_id")
+    con.execute("ALTER TABLE panels DROP COLUMN object_ids")
+    con.execute("DROP TABLE series_asset_images")
+    con.execute("DROP TABLE series_assets")
+
+
 def _drop_v10_columns(con: sqlite3.Connection) -> None:
+    _drop_v11_library(con)
     con.execute("ALTER TABLE projects DROP COLUMN style_lora_trigger_words")
     con.execute("ALTER TABLE characters DROP COLUMN lora_trigger_words")
 
@@ -347,6 +377,48 @@ def test_v8_database_gets_frame_and_sfx_columns(make_settings: Callable[..., Set
         res = c.put(f"/panels/{panel['id']}/frame", json={"frame": "none"})
         assert res.status_code == 200, res.text
         assert res.json()["layout"]["panels"][0]["frame"] == "none"
+    assert _version(settings.database_path) == SCHEMA_VERSION
+    fresh = settings.database_path.parent / "fresh.db"
+    create_db_engine(fresh).dispose()
+    assert _columns(settings.database_path) == _columns(fresh)
+
+
+def test_v12_database_gets_finishing_columns(make_settings: Callable[..., Settings]) -> None:
+    """v12 → v13 : finition d'impression (dérivé agrandi d'une version, agrandisseur de la série)."""
+    settings = make_settings()
+    with TestClient(create_app(settings)) as c:
+        project = c.post("/projects", json={"title": "Série v12"}).json()
+    con = sqlite3.connect(settings.database_path)
+    _drop_v13_finishing(con)
+    con.execute("PRAGMA user_version = 12")
+    con.commit()
+    con.close()
+
+    with TestClient(create_app(settings)) as c:
+        assert c.get(f"/projects/{project['id']}").json()["upscaler"] is None
+        res = c.patch(f"/projects/{project['id']}", json={"upscaler": "ultrasharp-4x"})
+        assert res.status_code == 200, res.text
+        assert res.json()["upscaler"] == "ultrasharp-4x"
+    assert _version(settings.database_path) == SCHEMA_VERSION
+    fresh = settings.database_path.parent / "fresh.db"
+    create_db_engine(fresh).dispose()
+    assert _columns(settings.database_path) == _columns(fresh)
+
+
+def test_v13_database_gets_sketch_columns(make_settings: Callable[..., Settings]) -> None:
+    """v13 → v14 : palier croquis. Les versions existantes sont « final », le croquis est activé."""
+    settings = make_settings()
+    with TestClient(create_app(settings)) as c:
+        project = c.post("/projects", json={"title": "Série v13"}).json()
+    con = sqlite3.connect(settings.database_path)
+    _drop_v14_sketch(con)
+    con.execute("PRAGMA user_version = 13")
+    con.commit()
+    con.close()
+
+    with TestClient(create_app(settings)) as c:
+        got = c.get(f"/projects/{project['id']}").json()
+        assert got["sketch_enabled"] is True and got["sketch_denoise"] is None
     assert _version(settings.database_path) == SCHEMA_VERSION
     fresh = settings.database_path.parent / "fresh.db"
     create_db_engine(fresh).dispose()

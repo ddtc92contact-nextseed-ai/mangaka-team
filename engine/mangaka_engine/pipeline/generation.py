@@ -2,11 +2,19 @@
 
 - `enqueue_panel` : prépare le prompt final, choisit le workflow et crée `count` jobs
   `generation` (variantes) en attente ;
+- `pick_references` : emplacements d'images de référence du workflow (3 au plus), remplis par
+  ordre de priorité — personnages de la case, puis son décor, puis ses objets (voir la fonction) ;
+  les emplacements retenus sont notés sur le job (`params.references`) et sur la version produite ;
 - `GenerationExecutor` : exécuté par la file sérielle (`pipeline/queue.py`) pour un job :
   envoi des images de référence, construction du workflow (références + LoRA via le preset),
   file ComfyUI, progression, récupération de l'image → nouvelle `PanelImage` (version n+1) ;
 - `refresh_states` : états des cases et des pages (queued → generating → review, puis selon le
   verdict QC de la version choisie : approved / flagged ; `qc` pendant un contrôle).
+
+Palier croquis (voir `pipeline/sketch.py`) : un job dont le preset a le rôle `croquis` produit une
+version `kind = croquis` (petite image, jamais choisie, sans QC automatique) ; un preset `propre`
+reçoit l'image de composition (le croquis validé, `params.source_image_id`) et la version produite
+garde sa source dans `params.composition`.
 
 Aucun nom de modèle, de LoRA ni de nœud ici : tout vient des presets et des fiches.
 """
@@ -14,14 +22,16 @@ Aucun nom de modèle, de LoRA ni de nœud ici : tout vient des presets et des fi
 from __future__ import annotations
 
 import contextlib
+import io
 import logging
 import threading
 import time
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Any
 
+from PIL import Image, UnidentifiedImageError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
@@ -41,6 +51,7 @@ from ..store.models import (
     ChapterStatus,
     Character,
     CharacterImage,
+    ImageKind,
     Job,
     JobStatus,
     Page,
@@ -49,11 +60,15 @@ from ..store.models import (
     PanelImage,
     PanelState,
     QCVerdict,
+    SeriesAsset,
+    SeriesAssetImage,
 )
 from .art_direction import applied_panel_direction
+from .inpaint import png_bytes, recompose, soften_mask
 from .jobs import JobReporter
 from .knowledge import KnowledgeBase
 from .layout import target_size
+from .library import panel_assets
 from .prompt import PromptCharacter, build_negative_prompt, build_prompt
 
 log = logging.getLogger("mangaka_engine")
@@ -84,6 +99,38 @@ def panel_characters(session: Session, panel: Panel) -> list[Character]:
     return [found[i] for i in dict.fromkeys(ids) if i in found]
 
 
+# Une fiche de la bibliothèque citée par une case : personnage, décor ou objet.
+LibraryEntry = Character | SeriesAsset
+
+
+@dataclass
+class PanelCast:
+    """Ce que la case cite dans la bibliothèque de la série."""
+
+    characters: list[Character] = field(default_factory=list)
+    decor: SeriesAsset | None = None
+    objects: list[SeriesAsset] = field(default_factory=list)
+
+    @property
+    def entries(self) -> list[LibraryEntry]:
+        """Fiches dans l'ordre de priorité des images de référence : personnages, décor, objets."""
+        return [*self.characters, *([self.decor] if self.decor is not None else []), *self.objects]
+
+
+def panel_cast(session: Session, panel: Panel) -> PanelCast:
+    decor, objects = panel_assets(session, panel, panel.page.chapter.project_id)
+    return PanelCast(characters=panel_characters(session, panel), decor=decor, objects=objects)
+
+
+def entry_kind(entry: LibraryEntry) -> str:
+    return "character" if isinstance(entry, Character) else entry.kind.value
+
+
+def _prompt_entry(entry: LibraryEntry) -> PromptCharacter:
+    triggers = split_trigger_words(entry.lora_trigger_words) if entry.lora_name else ()
+    return PromptCharacter(entry.name, entry.visual_description, (*(entry.prompt_keywords or []), *triggers))
+
+
 def panel_knowledge(
     session: Session, knowledge: KnowledgeBase | None, panel: Panel, characters: Sequence[Character]
 ) -> tuple[str, str]:
@@ -91,6 +138,8 @@ def panel_knowledge(
     if knowledge is None:
         return "", ""
     query = " ".join(p for p in (panel.shot_type or "", panel.description, *(c.name for c in characters)) if p)
+    decor, objects = panel_assets(session, panel, panel.page.chapter.project_id)
+    query = " ".join([query, *(a.name for a in ([decor] if decor else []) + objects)])
     try:
         return knowledge.for_panel(session, panel.page.chapter.project_id, query, [c.id for c in characters])
     except Exception:  # noqa: BLE001 — le prompt se construit sans notes plutôt que d'échouer
@@ -116,6 +165,8 @@ def build_panel_prompt(
     panel: Panel,
     characters: Sequence[Character],
     notes: tuple[str, str] = ("", ""),
+    decor: SeriesAsset | None = None,
+    objects: Sequence[SeriesAsset] = (),
 ) -> str:
     series = panel.page.chapter.project
     savoir_faire, bible = notes
@@ -126,14 +177,9 @@ def build_panel_prompt(
         plan=da.get("plan"),
         angle=da.get("angle"),
         ambiance=da.get("ambiance"),
-        characters=[
-            PromptCharacter(
-                c.name,
-                c.visual_description,
-                (*(c.prompt_keywords or []), *(split_trigger_words(c.lora_trigger_words) if c.lora_name else ())),
-            )
-            for c in characters
-        ],
+        characters=[_prompt_entry(c) for c in characters],
+        decor=_prompt_entry(decor) if decor is not None else None,
+        objects=[_prompt_entry(o) for o in objects],
         style=style_with_triggers(series.style, series.style_lora_trigger_words if series.style_lora_name else ""),
         savoir_faire=savoir_faire,
         bible=bible,
@@ -142,12 +188,13 @@ def build_panel_prompt(
 
 
 def resolve_preset_id(
-    presets: PresetRegistry, panel: Panel, characters: Sequence[Character], requested: str | None = None
+    presets: PresetRegistry, panel: Panel, characters: Sequence[LibraryEntry], requested: str | None = None
 ) -> str:
     """Demande > preset de la case > workflow « avec références » si besoin > workflow de la série.
 
     Le workflow « avec références » est celui du palier de la série (`with_references` de son
     preset) ; `defaults.workflow_with_references` ne sert qu'aux presets qui n'en déclarent pas.
+    `characters` : fiches de la case (personnages, et aussi décor et objets : `PanelCast.entries`).
     """
     if requested:
         return requested
@@ -169,7 +216,7 @@ def resolve_preset_id(
     return series_id
 
 
-def quality_preset_id(presets: PresetRegistry, characters: Sequence[Character]) -> str:
+def quality_preset_id(presets: PresetRegistry, characters: Sequence[LibraryEntry]) -> str:
     """Preset de « Régénérer en Qualité » : `defaults.workflow_quality`, ou son pendant « avec
     références » (`with_references`) si un personnage de la case a une planche de référence."""
     defaults = presets.defaults
@@ -202,8 +249,41 @@ def panel_target(presets: PresetRegistry, page: Page, panel: Panel) -> dict[str,
     return None
 
 
-def pick_references(characters: Sequence[Character], slots: int) -> list[tuple[Character, CharacterImage]]:
-    """Remplit les emplacements à tour de rôle : 1re image de chaque personnage, puis 2e…"""
+def sketch_size(target: dict[str, int], long_side: int, multiple: int) -> dict[str, int]:
+    """Taille d'un croquis : même ratio que la case, grand côté ≈ `long_side`, côtés multiples de `multiple`."""
+    w, h = target["width"], target["height"]
+    scale = long_side / max(w, h)
+
+    def snap(v: int) -> int:
+        return max(multiple, round(v * scale / multiple) * multiple)
+
+    return {"width": snap(w), "height": snap(h)}
+
+
+def composition_params(img: PanelImage) -> dict[str, Any]:
+    """Paramètres de job qui rejouent la source de composition d'une version (croquis validé) :
+    un nouvel essai automatique du QC repart du même croquis, avec une nouvelle graine."""
+    comp = (img.params or {}).get("composition")
+    if not isinstance(comp, dict) or comp.get("image_id") is None:
+        return {}
+    return {
+        "source_image_id": comp["image_id"],
+        "denoise": comp.get("denoise"),
+        "sketch_prompt": (img.params or {}).get("prompt"),
+    }
+
+
+def pick_references(
+    characters: Sequence[LibraryEntry], slots: int
+) -> list[tuple[LibraryEntry, CharacterImage | SeriesAssetImage]]:
+    """Remplit les emplacements par tours, dans l'ordre de priorité des fiches.
+
+    Ordre de priorité (`PanelCast.entries`) : personnages de la case (dans l'ordre de la case), puis
+    son décor, puis ses objets. 1er tour : la 1re image de chaque fiche, dans cet ordre ; 2e tour :
+    la 2e image… jusqu'à remplir les emplacements (3 au plus dans les presets livrés). Ainsi chaque
+    personnage passe avant le décor, qui passe avant les objets, et une fiche n'a une 2e image que si
+    toutes les autres ont déjà leur 1re.
+    """
     out: list[tuple[Character, CharacterImage]] = []
     depth = 0
     while len(out) < slots and any(depth < len(c.reference_images) for c in characters):
@@ -214,8 +294,8 @@ def pick_references(characters: Sequence[Character], slots: int) -> list[tuple[C
     return out
 
 
-def collect_loras(panel: Panel, characters: Sequence[Character]) -> list[LoraSpec]:
-    """LoRA de style de la série puis LoRA d'identité de chaque personnage, dans l'ordre."""
+def collect_loras(panel: Panel, characters: Sequence[LibraryEntry]) -> list[LoraSpec]:
+    """LoRA de style de la série puis LoRA de chaque fiche (personnages, décor, objets), dans l'ordre."""
     series = panel.page.chapter.project
     loras: list[LoraSpec] = []
     if series.style_lora_name:
@@ -238,9 +318,9 @@ def update_panel_prompt(
 ) -> str:
     """Reconstruit le prompt final, sauf s'il a été édité à la main."""
     if not panel.final_prompt_manual or not (panel.final_prompt or "").strip():
-        characters = panel_characters(session, panel)
-        notes = panel_knowledge(session, knowledge, panel, characters)
-        panel.final_prompt = build_panel_prompt(presets, panel, characters, notes)
+        cast = panel_cast(session, panel)
+        notes = panel_knowledge(session, knowledge, panel, cast.characters)
+        panel.final_prompt = build_panel_prompt(presets, panel, cast.characters, notes, cast.decor, cast.objects)
         panel.final_prompt_manual = False
     return panel.final_prompt or ""
 
@@ -263,9 +343,9 @@ def enqueue_panel(
     page = panel.page
     if panel_target(presets, page, panel) is None:
         raise GenerationError(f"la page {page.number} n'est pas mise en page : lance « Recalculer » d'abord")
-    characters = panel_characters(session, panel)
-    preset_id = resolve_preset_id(presets, panel, characters, preset)
-    presets.workflow(preset_id)  # PresetError si inconnu
+    preset_id = resolve_preset_id(presets, panel, panel_cast(session, panel).entries, preset)
+    if presets.workflow(preset_id).preset.inpaint is not None:  # PresetError si inconnu
+        raise GenerationError(f"le workflow {preset_id} sert à réparer une version, pas à générer une case")
     if prompt_override is not None and prompt_override.strip():
         panel.final_prompt = prompt_override.strip()
         panel.final_prompt_manual = True
@@ -339,7 +419,13 @@ def refresh_states(session: Session, panel_ids: Iterable[int]) -> None:
                 )
             )
         }
-        n_images = session.scalar(select(func.count()).where(PanelImage.panel_id == panel.id)) or 0
+        # Les croquis ne comptent pas : une case qui n'a que des croquis reste « à générer ».
+        n_images = (
+            session.scalar(
+                select(func.count()).where(PanelImage.panel_id == panel.id, PanelImage.kind == ImageKind.final)
+            )
+            or 0
+        )
         chosen = session.scalar(select(PanelImage).where(PanelImage.panel_id == panel.id, PanelImage.selected))
         panel.qc_score = chosen.qc_score if chosen is not None else None
         if (STEP, JobStatus.running) in active:
@@ -356,7 +442,13 @@ def refresh_states(session: Session, panel_ids: Iterable[int]) -> None:
     for page in pages.values():
         states = [p.state for p in page.panels]
         ids = [p.id for p in page.panels]
-        with_images = set(session.scalars(select(PanelImage.panel_id).where(PanelImage.panel_id.in_(ids)).distinct()))
+        with_images = set(
+            session.scalars(
+                select(PanelImage.panel_id)
+                .where(PanelImage.panel_id.in_(ids), PanelImage.kind == ImageKind.final)
+                .distinct()
+            )
+        )
         if any(s in (PanelState.queued, PanelState.generating) for s in states):
             page.state = PageState.generating
         elif ids and len(with_images) == len(ids):
@@ -384,11 +476,19 @@ def recover_states(db: Database) -> None:
 class _Plan:
     loaded: LoadedWorkflow
     params: dict[str, Any]
-    references: list[tuple[int, int, str, bytes]]  # (personnage, image, nom de fichier, contenu)
+    references: list[dict[str, Any]]  # emplacements retenus : {kind, id, name, image_id, filename}, dans l'ordre
+    reference_data: list[bytes]
     loras: list[LoraSpec]
     folder: str
     prompt: str
     panel_id: int
+    # Réparation ciblée : version source, masque adouci (PNG) et réglages (`params.repair` du job).
+    repair: dict[str, Any] | None = None
+    source_data: bytes = b""
+    mask_data: bytes = b""
+    # Image de composition (preset `propre`) : {image_id, version, method, denoise, filename} + son contenu.
+    sketch: dict[str, Any] | None = None
+    sketch_data: bytes | None = None
 
 
 def _capitalize(text: str) -> str:
@@ -459,47 +559,143 @@ class GenerationExecutor:
                 raise GenerationError("case introuvable (supprimée entre-temps ?)")
             page = panel.page
             chapter: Chapter = page.chapter
-            characters = panel_characters(session, panel)
+            cast = panel_cast(session, panel)
+            entries = cast.entries
             presets = self.presets_for(chapter.project_id)
-            preset_id = str(job.params.get("preset") or resolve_preset_id(presets, panel, characters))
+            preset_id = str(job.params.get("preset") or resolve_preset_id(presets, panel, entries))
             loaded = presets.workflow(preset_id)
-            prompt = update_panel_prompt(presets, session, panel, self.knowledge)
-            size = panel_target(presets, page, panel)
+            repair = job.params.get("repair") if isinstance(job.params.get("repair"), dict) else None
+            source_data = mask_data = b""
+            size: dict[str, int] | None
+            if repair is not None:
+                if loaded.preset.inpaint is None:
+                    raise GenerationError(f"le workflow {preset_id} n'est pas un preset de réparation")
+                source, source_data, mask_data, size = self._repair_inputs(session, panel.id, repair)
+                prompt = str(repair.get("prompt") or "")
+                concerned = [c for c in cast.characters if c.id == repair.get("character_id")]
+                if concerned:
+                    # Le personnage concerné d'abord (références et LoRA d'identité), puis le style de la série.
+                    entries = concerned
+            else:
+                if loaded.preset.inpaint is not None:
+                    raise GenerationError(f"le workflow {preset_id} sert à réparer une version, pas à générer une case")
+                # Passage au propre : même prompt que le croquis validé (sinon le prompt final de la case).
+                prompt = str(job.params.get("sketch_prompt") or "").strip() or update_panel_prompt(
+                    presets, session, panel, self.knowledge
+                )
+                size = panel_target(presets, page, panel)
             if size is None:
                 raise GenerationError(f"la page {page.number} n'est pas mise en page")
-            references: list[tuple[int, int, str, bytes]] = []
-            for character, image in pick_references(characters, len(loaded.preset.reference_images)):
+            if repair is None and loaded.preset.role == "croquis" and loaded.preset.long_side:
+                size = sketch_size(size, loaded.preset.long_side, presets.layout.generation.multiple)
+            sketch, sketch_data = self._sketch_source(session, job, panel, loaded)
+            references: list[dict[str, Any]] = []
+            reference_data: list[bytes] = []
+            for entry, image in pick_references(entries, len(loaded.preset.reference_images)):
                 path = self.files.absolute(image.path)
                 if not path.is_file():
-                    raise GenerationError(f"image de référence de {character.name} absente de data/ ({image.path})")
+                    raise GenerationError(f"image de référence de {entry.name} absente de data/ ({image.path})")
                 ext = PurePosixPath(image.path).suffix or ".png"
+                kind = entry_kind(entry)
+                prefix = {"character": "perso", "decor": "decor", "object": "objet"}[kind]
                 references.append(
-                    (character.id, image.id, f"perso{character.id}_img{image.id}{ext}", path.read_bytes())
+                    {
+                        "slot": len(references) + 1,
+                        "kind": kind,
+                        "id": entry.id,
+                        "name": entry.name,
+                        "image_id": image.id,
+                        "filename": f"{prefix}{entry.id}_img{image.id}{ext}",
+                    }
                 )
+                reference_data.append(path.read_bytes())
+            # « Références utilisées » : notées sur le job dès la préparation (visibles dans l'atelier).
+            job.params = {**(job.params or {}), "references": references}
             params: dict[str, Any] = {
                 "positive_prompt": prompt,
                 "negative_prompt": build_negative_prompt(
                     str(loaded.preset.defaults.get("negative_prompt", "")), presets.image_prompt
                 ),
                 "seed": job.params.get("seed"),
-                **size,
             }
+            if repair is not None:
+                params["denoise"] = float(repair.get("denoise") or loaded.preset.defaults.get("denoise") or 0.45)
+            else:
+                params.update(size)
+            if sketch is not None and "denoise" in loaded.preset.mapping:
+                params["denoise"] = sketch["denoise"]
             if "filename_prefix" in loaded.preset.mapping:
                 params["filename_prefix"] = (
                     f"mangaka/serie-{chapter.project_id}/chapitre-{chapter.number}/page-{page.number}"
-                    f"/case-{panel.index + 1}"
+                    f"/{'croquis-' if loaded.preset.role == 'croquis' else ''}case-{panel.index + 1}"
                 )
             plan = _Plan(
                 loaded=loaded,
                 params=params,
                 references=references,
-                loras=collect_loras(panel, characters),
+                reference_data=reference_data,
+                loras=collect_loras(panel, entries),
                 folder=f"projects/{chapter.project_id}/chapters/{chapter.id}/panels/{panel.id}",
                 prompt=prompt,
                 panel_id=panel.id,
+                repair={**repair, "image_width": size["width"], "image_height": size["height"]} if repair else None,
+                source_data=source_data,
+                mask_data=mask_data,
+                sketch=sketch,
+                sketch_data=sketch_data,
             )
             session.commit()  # prompt final éventuellement reconstruit
             return plan
+
+    def _sketch_source(
+        self, session: Session, job: Job, panel: Panel, loaded: LoadedWorkflow
+    ) -> tuple[dict[str, Any] | None, bytes | None]:
+        """Image de composition d'un preset `propre` : le croquis désigné par le job (`source_image_id`)."""
+        if loaded.preset.source_image is None:
+            return None, None
+        source_id = job.params.get("source_image_id")
+        sketch = session.get(PanelImage, int(source_id)) if source_id is not None else None
+        if sketch is None or sketch.panel_id != panel.id:
+            raise GenerationError(
+                "croquis source introuvable (supprimé entre-temps ?) : valide un croquis puis relance"
+            )
+        path = self.files.absolute(sketch.path)
+        if not path.is_file():
+            raise GenerationError(f"fichier du croquis absent de data/ ({sketch.path})")
+        denoise = job.params.get("denoise")
+        if denoise is None:
+            denoise = loaded.preset.defaults.get("denoise")
+        source = {
+            "source": sketch.kind.value,
+            "image_id": sketch.id,
+            "version": sketch.version,
+            "seed": sketch.seed,
+            "method": "img2img",
+            "denoise": denoise,
+            "filename": f"croquis_case{panel.id}_v{sketch.version}{PurePosixPath(sketch.path).suffix or '.png'}",
+        }
+        return source, path.read_bytes()
+
+    def _repair_inputs(
+        self, session: Session, panel_id: int, repair: dict[str, Any]
+    ) -> tuple[PanelImage, bytes, bytes, dict[str, int]]:
+        """Version source (octets), masque agrandi et adouci (PNG) et taille de l'image source."""
+        source = session.get(PanelImage, repair.get("source_image_id"))
+        if source is None or source.panel_id != panel_id:
+            raise GenerationError("version source introuvable (supprimée entre-temps ?)")
+        source_path = self.files.absolute(source.path)
+        mask_path = self.files.absolute(str(repair.get("mask_path") or ""))
+        if not source_path.is_file():
+            raise GenerationError(f"image de la version {source.version} absente de data/ ({source.path})")
+        if not mask_path.is_file():
+            raise GenerationError("masque de la réparation absent de data/")
+        source_data = source_path.read_bytes()
+        with Image.open(io.BytesIO(source_data)) as img:
+            width, height = img.size
+        with Image.open(mask_path) as raw:
+            mask = raw.convert("L").resize((width, height), Image.Resampling.NEAREST)
+        soft = soften_mask(mask, int(repair.get("grow_px") or 0), int(repair.get("feather_px") or 0))
+        return source, source_data, png_bytes(soft), {"width": width, "height": height}
 
     def __call__(self, job_id: int, report: JobReporter, cancel: threading.Event) -> str:
         if self.comfyui is None:
@@ -512,10 +708,29 @@ class GenerationExecutor:
         preset = plan.loaded.preset
 
         uploaded: list[str] = []
-        for i, (_, _, filename, data) in enumerate(plan.references, start=1):
+        for i, (ref, data) in enumerate(zip(plan.references, plan.reference_data, strict=True), start=1):
             report(4, f"Envoi de l'image de référence {i}/{len(plan.references)} à ComfyUI…")
-            uploaded.append(comfy.upload_image(data, filename, subfolder=UPLOAD_SUBFOLDER))
-        built = build_workflow(plan.loaded, plan.params, reference_images=uploaded, loras=plan.loras)
+            uploaded.append(comfy.upload_image(data, ref["filename"], subfolder=UPLOAD_SUBFOLDER))
+        sketch_name: str | None = None
+        if plan.sketch is not None and plan.sketch_data is not None:
+            report(6, f"Envoi du croquis validé (version {plan.sketch['version']}) à ComfyUI…")
+            sketch_name = comfy.upload_image(plan.sketch_data, plan.sketch["filename"], subfolder=UPLOAD_SUBFOLDER)
+        inpaint_images: tuple[str, str] | None = None
+        if plan.repair is not None:
+            report(6, "Envoi de la version source et du masque à ComfyUI…")
+            source_id = plan.repair.get("source_image_id")
+            inpaint_images = (
+                comfy.upload_image(plan.source_data, f"source_img{source_id}.png", subfolder=UPLOAD_SUBFOLDER),
+                comfy.upload_image(plan.mask_data, f"masque_job{job_id}.png", subfolder=UPLOAD_SUBFOLDER),
+            )
+        built = build_workflow(
+            plan.loaded,
+            plan.params,
+            reference_images=uploaded,
+            loras=plan.loras,
+            inpaint_images=inpaint_images,
+            source_image=sketch_name,
+        )
         if cancel.is_set():
             raise ComfyUIInterruptedError("génération annulée")
 
@@ -552,6 +767,18 @@ class GenerationExecutor:
 
         report(92, "Récupération de l'image…")
         data = comfy.fetch_image(refs[0])
+        if plan.repair is not None:
+            # Seule la zone masquée (adoucie) est reprise : le reste est l'original, au pixel près.
+            report(95, "Recollage de la zone réparée sur l'original…")
+            try:
+                with (
+                    Image.open(io.BytesIO(plan.source_data)) as source,
+                    Image.open(io.BytesIO(data)) as generated,
+                    Image.open(io.BytesIO(plan.mask_data)) as soft,
+                ):
+                    data = png_bytes(recompose(source, generated, soft))
+            except (UnidentifiedImageError, OSError) as exc:
+                raise GenerationError(f"image renvoyée par ComfyUI illisible : {exc}") from None
         stored = self.files.save_image(data, plan.folder)
         duration_ms = int((time.monotonic() - t0) * 1000)
 
@@ -566,26 +793,44 @@ class GenerationExecutor:
             has_selected = session.scalar(
                 select(PanelImage.id).where(PanelImage.panel_id == panel.id, PanelImage.selected)
             )
+            kind = ImageKind.croquis if preset.role == "croquis" else ImageKind.final
+            composition = (
+                {
+                    **{k: v for k, v in plan.sketch.items() if k != "filename"},
+                    "denoise": built.params.get("denoise", plan.sketch["denoise"]),
+                    "comfyui_name": sketch_name,
+                }
+                if plan.sketch is not None
+                else None
+            )
             image = PanelImage(
                 panel_id=panel.id,
                 version=version,
+                kind=kind,
                 path=stored.path,
                 seed=built.params["seed"],
-                selected=has_selected is None,  # la première version est choisie d'office
+                # La première version est choisie d'office ; un croquis ne l'est jamais (jamais assemblé).
+                selected=has_selected is None and kind == ImageKind.final,
                 params={
+                    "kind": kind.value,
+                    **({"composition": composition, "sketch_image_id": composition["image_id"]} if composition else {}),
                     "preset": preset.id,
                     "preset_name": preset.name,
                     "tier": preset.tier.name if preset.tier else None,
                     "prompt": built.params["positive_prompt"],
                     "negative_prompt": built.params["negative_prompt"],
                     "seed": built.params["seed"],
-                    "width": built.params["width"],
-                    "height": built.params["height"],
+                    "width": built.params.get("width", stored.width),
+                    "height": built.params.get("height", stored.height),
                     "workflow_params": built.params,
                     "loras": [lo.as_dict() for lo in built.loras],
                     "reference_images": [
-                        {"character_id": cid, "image_id": iid, "comfyui_name": name}
-                        for (cid, iid, _, _), name in zip(plan.references, uploaded, strict=True)
+                        {
+                            **{k: v for k, v in ref.items() if k != "filename"},
+                            **({"character_id": ref["id"]} if ref["kind"] == "character" else {}),
+                            "comfyui_name": name,
+                        }
+                        for ref, name in zip(plan.references, uploaded, strict=True)
                     ],
                     "removed_nodes": built.removed_nodes,
                     "image_width": stored.width,
@@ -595,15 +840,39 @@ class GenerationExecutor:
                     "job_id": job_id,
                     "comfyui_prompt_id": prompt_id,
                     "comfyui": comfy.name,
+                    **({"repair": _repair_params(plan.repair)} if plan.repair is not None else {}),
                 },
             )
             session.add(image)
             session.flush()
             job = session.get(Job, job_id)
-            if self.on_generated is not None and job is not None:
+            # Pas de QC automatique sur un croquis : c'est l'œil de l'auteur qui trie.
+            if self.on_generated is not None and job is not None and kind == ImageKind.final:
                 try:
                     self.on_generated(session, job, image)
                 except Exception:  # noqa: BLE001 — la version est gardée même si le QC ne peut être mis en file
                     log.exception("job %s : mise en file du contrôle qualité impossible", job_id)
             session.commit()
-        return f"Version {version} — {stored.width}×{stored.height}, seed {built.params['seed']}"
+        if plan.repair is not None:
+            return f"Version {version} — réparation de la v{plan.repair.get('source_version')}, seed {built.params['seed']}"
+        label = "Croquis" if kind == ImageKind.croquis else "Version"
+        return f"{label} {version} — {stored.width}×{stored.height}, seed {built.params['seed']}"
+
+
+def _repair_params(repair: dict[str, Any]) -> dict[str, Any]:
+    """Lien d'une version réparée vers sa source et réglages de la réparation (sans le prompt, déjà noté)."""
+    keys = (
+        "source_image_id",
+        "source_version",
+        "target",
+        "character_id",
+        "character_name",
+        "regions",
+        "painted",
+        "mask_path",
+        "mask_bbox",
+        "grow_px",
+        "feather_px",
+        "denoise",
+    )
+    return {k: repair.get(k) for k in keys}

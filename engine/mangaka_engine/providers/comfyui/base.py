@@ -69,6 +69,7 @@ _FILE_INPUT_FOLDERS = {
     "vae_name": "vae",
     "lora_name": "loras",
     "ckpt_name": "checkpoints",
+    "model_name": "upscale_models",  # UpscaleModelLoader (finition d'impression)
 }
 
 # Types d'erreurs de validation de `/prompt` (champ `type`) → libellé français.

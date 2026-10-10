@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, object_session, selectinload
 
+from ..pipeline.finishing import panel_print_info
 from ..pipeline.knowledge import record_chapter_summary
 from ..pipeline.layout import LayoutError
+from ..pipeline.library import SeriesLibrary
 from ..pipeline.pages import (
     FRAME_KEYS,
     apply_frame_change,
@@ -21,13 +24,16 @@ from ..pipeline.pages import (
     slant_page_cut,
 )
 from ..pipeline.script import normalize_shot_type, script_job
-from ..presets import PresetError
+from ..pipeline.sketch import cleaned_from, latest_sketch, validated_sketch
+from ..presets import PresetError, PresetRegistry
+from ..store.files import FileStore
 from ..store.models import (
     Bubble,
     BubbleKind,
     Chapter,
     ChapterStatus,
     Character,
+    ImageKind,
     Job,
     JobStatus,
     Page,
@@ -94,6 +100,20 @@ def _one_out(session: Session, chapter: Chapter) -> ChapterOut:
     return chapter_out(chapter, _page_counts(session, [chapter.id]).get(chapter.id, (0, 0)))
 
 
+def _sketch_fields(panel: Panel) -> dict[str, Any]:
+    """Palier croquis : croquis montré (validé, sinon le plus récent), validation, propre déjà tiré."""
+    validated = validated_sketch(panel)
+    shown = validated or latest_sketch(panel)
+    return {
+        "sketch_count": sum(1 for i in panel.images if i.kind == ImageKind.croquis),
+        "sketch_image_id": shown.id if shown else None,
+        "sketch_image_url": f"/panel-images/{shown.id}/file" if shown else None,
+        "sketch_validated": validated is not None,
+        "sketch_denoise": panel.sketch_denoise,
+        "sketch_cleaned": validated is not None and cleaned_from(panel, validated) is not None,
+    }
+
+
 def last_generation_jobs(session: Session | None, panel_ids: list[int]) -> dict[int, Job]:
     """Dernier job de génération de chaque case (le plus récent, quel que soit le nombre de jobs du chapitre)."""
     if session is None or not panel_ids:
@@ -107,7 +127,16 @@ def last_generation_jobs(session: Session | None, panel_ids: list[int]) -> dict[
     return {j.panel_id: j for j in session.scalars(select(Job).where(Job.id.in_(latest))) if j.panel_id is not None}
 
 
-def page_out(page: Page, regen_threshold: float | None = None, last_jobs: dict[int, Job] | None = None) -> PageOut:
+def page_out(
+    page: Page,
+    regen_threshold: float | None = None,
+    presets: PresetRegistry | None = None,
+    files: FileStore | None = None,
+    last_jobs: dict[int, Job] | None = None,
+) -> PageOut:
+    """`presets` + `files` : ajoute le dpi d'impression de chaque case (finition d'impression).
+
+    `last_jobs` : dernier job de génération de chaque case (lu ici si absent)."""
     if last_jobs is None:
         last_jobs = last_generation_jobs(object_session(page), [p.id for p in page.panels])
     chosen = {p.id: next((i for i in p.images if i.selected), None) for p in page.panels}
@@ -130,6 +159,8 @@ def page_out(page: Page, regen_threshold: float | None = None, last_jobs: dict[i
                 index=p.index,
                 description=p.description,
                 characters=list(p.character_names or []),
+                decor=p.decor_id,
+                objets=list(p.object_ids or []),
                 shot_type=p.shot_type,
                 importance=p.importance,
                 intensity=p.intensity,  # type: ignore[arg-type]
@@ -150,7 +181,8 @@ def page_out(page: Page, regen_threshold: float | None = None, last_jobs: dict[i
                 final_prompt=p.final_prompt,
                 final_prompt_manual=p.final_prompt_manual,
                 generation_preset=p.generation_preset,
-                image_count=len(p.images),
+                image_count=sum(1 for i in p.images if i.kind == ImageKind.final),
+                **_sketch_fields(p),
                 selected_image_id=next((i.id for i in p.images if i.selected), None),
                 selected_image_url=next((f"/panel-images/{i.id}/file" for i in p.images if i.selected), None),
                 qc_verdict=c.qc_verdict.value if (c := chosen[p.id]) and c.qc_verdict else None,
@@ -160,6 +192,9 @@ def page_out(page: Page, regen_threshold: float | None = None, last_jobs: dict[i
                 detections=c.detections if c else None,
                 regeneration_advised=regen_threshold is not None
                 and regeneration_advised(p, layout_panels.get(p.id), regen_threshold),
+                print_info=panel_print_info(presets, files, p, chosen[p.id])
+                if presets is not None and files is not None
+                else None,
                 last_job_id=j.id if (j := last_jobs.get(p.id)) else None,
                 last_job_status=j.status.value if j else None,
                 last_job_error=j.error if j else None,
@@ -346,7 +381,13 @@ def list_pages(
 
 
 def _page_out(ctx: AppContext, page: Page, last_jobs: dict[int, Job] | None = None) -> PageOut:
-    return page_out(page, ctx.presets.layout.regeneration.ratio_threshold, last_jobs)
+    return page_out(
+        page,
+        ctx.presets.layout.regeneration.ratio_threshold,
+        ctx.agents.presets_for(page.chapter.project_id),
+        ctx.files,
+        last_jobs,
+    )
 
 
 def pages_out(session: Session, ctx: AppContext, pages: list[Page]) -> list[PageOut]:
@@ -376,6 +417,9 @@ def replace_pages(
         c.name.casefold(): c.id
         for c in session.scalars(select(Character).where(Character.project_id == chapter.project_id))
     }
+    library = SeriesLibrary.load(session, chapter.project_id)
+    decor_ids = {e["id"] for e in library.decors}
+    object_ids = {e["id"] for e in library.objets}
 
     seen_pages: set[int] = set()
     seen_panels: set[int] = set()
@@ -389,6 +433,14 @@ def replace_pages(
                 if cin.id not in panels_by_id or cin.id in seen_panels:
                     raise FieldError(f"pages.{pi}.panels.{ci}.id", "case inconnue dans ce chapitre")
                 seen_panels.add(cin.id)
+            if cin.decor is not None and cin.decor not in decor_ids:
+                raise FieldError(f"pages.{pi}.panels.{ci}.decor", "décor inconnu dans cette série")
+            unknown = [i for i in cin.objets or [] if i not in object_ids]
+            if unknown:
+                raise FieldError(
+                    f"pages.{pi}.panels.{ci}.objets",
+                    f"objet(s) inconnu(s) dans cette série : {', '.join(map(str, unknown))}",
+                )
 
     # Numéros temporaires négatifs : évite les conflits d'unicité pendant le réordonnancement.
     for p in pages:
@@ -419,6 +471,11 @@ def replace_pages(
             panel.shot_type = normalize_shot_type(cin.shot_type) or None
             panel.importance = cin.importance
             panel.intensity = cin.intensity
+            # Bibliothèque : un champ absent garde le décor / les objets de la case.
+            if "decor" in cin.model_fields_set:
+                panel.decor_id = cin.decor
+            if cin.objets is not None:
+                panel.object_ids = list(dict.fromkeys(cin.objets))
             # Les bulles sont recréées ; un cadre ou une queue ajustés à la main au lettrage suivent leur `id`.
             previous = {b.id: b for b in panel.bubbles} if panel.id is not None else {}
             bubbles = [

@@ -1,7 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { api, EngineError, engineUrl, errorMessage, type Character, type CharacterInput } from "@/lib/api";
+import {
+  api,
+  EngineError,
+  engineUrl,
+  errorMessage,
+  type LibraryEntry,
+  type LibraryEntryInput,
+  type LibraryKind,
+} from "@/lib/api";
+import { LIBRARY_KINDS } from "@/lib/library";
 import { ImageDropzone } from "./image-dropzone";
 import { LoraPicker } from "./lora-picker";
 import { Alert, Button, Field, Input, Textarea } from "./ui";
@@ -14,19 +23,22 @@ function parseKeywords(raw: string): string[] {
 }
 
 /**
- * Création (projectId) ou édition (initial) d'un personnage.
+ * Création (projectId) ou édition (initial) d'une fiche de la bibliothèque : personnage, objet ou décor.
  * En création, les images déposées sont envoyées juste après l'enregistrement.
  */
-export function CharacterForm({
+export function LibraryEntryForm({
+  kind,
   projectId,
   initial,
   onSaved,
 }: {
+  kind: LibraryKind;
   projectId: number;
-  initial?: Character;
-  /** `uploadError` : le personnage est enregistré mais les images déposées ont été refusées. */
-  onSaved: (character: Character, uploadError?: string) => void;
+  initial?: LibraryEntry;
+  /** `uploadError` : la fiche est enregistrée mais les images déposées ont été refusées. */
+  onSaved: (entry: LibraryEntry, uploadError?: string) => void;
 }) {
+  const info = LIBRARY_KINDS[kind];
   const [name, setName] = useState(initial?.name ?? "");
   const [description, setDescription] = useState(initial?.visual_description ?? "");
   const [keywords, setKeywords] = useState((initial?.prompt_keywords ?? []).join(", "));
@@ -49,7 +61,7 @@ export function CharacterForm({
       setSaving(false);
       return;
     }
-    const body: CharacterInput = {
+    const body: LibraryEntryInput = {
       name,
       visual_description: description,
       prompt_keywords: parseKeywords(keywords),
@@ -58,14 +70,16 @@ export function CharacterForm({
       lora_trigger_words: loraTriggers.trim(),
     };
     try {
-      let saved = initial ? await api.updateCharacter(initial.id, body) : await api.createCharacter(projectId, body);
+      let saved = initial
+        ? await api.updateLibraryEntry(kind, initial.id, body)
+        : await api.createLibraryEntry(kind, projectId, body);
       let uploadError: string | undefined;
       if (pending.length) {
         try {
-          saved = await api.uploadReferenceImages(saved.id, pending);
+          saved = await api.uploadLibraryImages(kind, saved.id, pending);
           setPending([]);
         } catch (err) {
-          // Le personnage existe : on y va quand même, en transmettant l'erreur à afficher sur sa fiche.
+          // La fiche existe : on y va quand même, en transmettant l'erreur à afficher sur sa page.
           uploadError = describe(err);
         }
       }
@@ -86,7 +100,7 @@ export function CharacterForm({
           id="name"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="Aiko"
+          placeholder={info.namePlaceholder}
           aria-invalid={Boolean(errors.name)}
           maxLength={120}
           required
@@ -96,13 +110,13 @@ export function CharacterForm({
         label="Description visuelle"
         htmlFor="visual_description"
         error={errors.visual_description}
-        hint="Ce qui doit rester identique d'une case à l'autre : visage, coiffure, tenue, signes distinctifs."
+        hint={info.descriptionHint}
       >
         <Textarea
           id="visual_description"
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          placeholder="Jeune femme, cheveux noirs courts, cicatrice sur la joue gauche, kimono rouge"
+          placeholder={info.descriptionPlaceholder}
         />
       </Field>
       <Field
@@ -115,13 +129,13 @@ export function CharacterForm({
           id="prompt_keywords"
           value={keywords}
           onChange={(e) => setKeywords(e.target.value)}
-          placeholder="aiko, kimono rouge, katana"
+          placeholder={info.keywordsPlaceholder}
         />
       </Field>
       <LoraPicker
         id="lora_name"
-        label="LoRA d'identité (optionnel)"
-        placeholder="aiko_v1.safetensors"
+        label={info.loraLabel}
+        placeholder={info.loraPlaceholder}
         value={loraName}
         onChange={setLoraName}
         savedValue={initial?.lora_name}
@@ -143,7 +157,7 @@ export function CharacterForm({
       )}
       <div className="flex justify-end">
         <Button type="submit" disabled={saving}>
-          {saving ? "Enregistrement…" : initial ? "Enregistrer" : "Créer le personnage"}
+          {saving ? "Enregistrement…" : initial ? "Enregistrer" : info.createLabel}
         </Button>
       </div>
     </form>
@@ -179,14 +193,22 @@ function PendingImages({ files, onRemove }: { files: File[]; onRemove: (index: n
   );
 }
 
-/** Galerie des images de référence d'un personnage existant (ajout immédiat, suppression). */
+/** Plafond d'images de référence par fiche (le même côté moteur : MAX_KEPT). */
+export const MAX_REFERENCE_IMAGES = 8;
+
+/**
+ * Galerie des images de référence d'une fiche existante (ajout immédiat, ordre, suppression).
+ * La première est la référence principale : c'est elle qui sert quand les emplacements d'une case manquent.
+ */
 export function ReferenceImages({
-  character,
+  kind,
+  entry,
   onChange,
   initialError,
 }: {
-  character: Character;
-  onChange: (character: Character) => void;
+  kind: LibraryKind;
+  entry: LibraryEntry;
+  onChange: (entry: LibraryEntry) => void;
   initialError?: string | null;
 }) {
   const [busy, setBusy] = useState(false);
@@ -196,7 +218,7 @@ export function ReferenceImages({
     setBusy(true);
     setError(null);
     try {
-      onChange(await api.uploadReferenceImages(character.id, files));
+      onChange(await api.uploadLibraryImages(kind, entry.id, files));
     } catch (err) {
       setError(describe(err));
     } finally {
@@ -204,11 +226,23 @@ export function ReferenceImages({
     }
   }
 
+  async function move(index: number, to: number) {
+    const ids = entry.reference_images.map((i) => i.id);
+    const [moved] = ids.splice(index, 1);
+    ids.splice(to, 0, moved);
+    setError(null);
+    try {
+      onChange(await api.reorderLibraryImages(kind, entry.id, ids));
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
   async function remove(imageId: number) {
     setError(null);
     try {
-      await api.deleteReferenceImage(character.id, imageId);
-      onChange({ ...character, reference_images: character.reference_images.filter((i) => i.id !== imageId) });
+      await api.deleteLibraryImage(kind, entry.id, imageId);
+      onChange({ ...entry, reference_images: entry.reference_images.filter((i) => i.id !== imageId) });
     } catch (err) {
       setError(errorMessage(err));
     }
@@ -217,17 +251,60 @@ export function ReferenceImages({
   return (
     <div className="space-y-4">
       {error && <Alert>{error}</Alert>}
-      <ImageDropzone onFiles={upload} disabled={busy} label={busy ? "Envoi en cours…" : undefined} />
-      {character.reference_images.length > 0 ? (
-        <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3">
-          {character.reference_images.map((img) => (
-            <li key={img.id} className="overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950">
+      <p className="text-xs text-zinc-500" data-testid="reference-count">
+        {entry.reference_images.length} / {MAX_REFERENCE_IMAGES} images · la première est la référence principale.
+      </p>
+      <ImageDropzone
+        onFiles={upload}
+        disabled={busy || entry.reference_images.length >= MAX_REFERENCE_IMAGES}
+        label={
+          busy
+            ? "Envoi en cours…"
+            : entry.reference_images.length >= MAX_REFERENCE_IMAGES
+              ? `${MAX_REFERENCE_IMAGES} images au plus : supprimes-en une pour en ajouter`
+              : undefined
+        }
+      />
+      {entry.reference_images.length > 0 ? (
+        <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3" aria-label="Images de référence">
+          {entry.reference_images.map((img, index) => (
+            <li
+              key={img.id}
+              className={`relative overflow-hidden rounded-lg border bg-zinc-950 ${index === 0 ? "border-rose-500/60" : "border-zinc-800"}`}
+            >
+              {index === 0 && (
+                <span className="absolute top-1 left-1 rounded bg-rose-500 px-1.5 py-px text-[10px] font-semibold text-white">
+                  Principale
+                </span>
+              )}
               <a href={engineUrl(img.url)} target="_blank" rel="noreferrer">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={engineUrl(img.url)} alt={img.original_name} className="aspect-square w-full object-cover" />
               </a>
-              <div className="flex items-center justify-between gap-2 px-2 py-1.5 text-xs text-zinc-400">
-                <span className="shrink-0" title={img.original_name}>
+              <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 px-2 py-1.5 text-xs text-zinc-400">
+                <span className="flex shrink-0 items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => move(index, index - 1)}
+                    disabled={index === 0}
+                    className="rounded px-1 hover:bg-zinc-800 hover:text-zinc-100 disabled:opacity-30"
+                    aria-label={`Avancer ${img.original_name}`}
+                    title={index === 1 ? "En faire la référence principale" : "Avancer"}
+                  >
+                    ←
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => move(index, index + 1)}
+                    disabled={index === entry.reference_images.length - 1}
+                    className="rounded px-1 hover:bg-zinc-800 hover:text-zinc-100 disabled:opacity-30"
+                    aria-label={`Reculer ${img.original_name}`}
+                    title="Reculer"
+                  >
+                    →
+                  </button>
+                </span>
+                <span className="whitespace-nowrap tabular-nums" title={img.original_name}>
                   {img.width}×{img.height}
                 </span>
                 <button

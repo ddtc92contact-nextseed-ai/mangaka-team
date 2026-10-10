@@ -12,7 +12,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from .loader import LoadedWorkflow, PresetError
+from .loader import LoadedUpscaler, LoadedWorkflow, PresetError
 from .schemas import LoraChain
 
 MAX_SEED = 2**63 - 1
@@ -36,6 +36,7 @@ class BuiltWorkflow:
     reference_images: list[str] = field(default_factory=list)  # noms côté ComfyUI, dans l'ordre des emplacements
     loras: list[LoraSpec] = field(default_factory=list)
     removed_nodes: list[str] = field(default_factory=list)
+    source_image: str | None = None  # image de composition (nom côté ComfyUI)
 
 
 def is_link(value: Any) -> bool:
@@ -56,6 +57,8 @@ def build_workflow(
     *,
     reference_images: Sequence[str] = (),
     loras: Sequence[LoraSpec] = (),
+    source_image: str | None = None,
+    inpaint_images: tuple[str, str] | None = None,
 ) -> BuiltWorkflow:
     """Applique `defaults` puis `params` sur une copie du JSON API.
 
@@ -63,7 +66,11 @@ def build_workflow(
     - `seed` absente ou None → tirée au hasard puis renvoyée (pour être enregistrée) ;
     - `reference_images` remplissent les emplacements dans l'ordre, les emplacements vides
       sont retirés ;
-    - `loras` sont chaînés au point d'insertion `lora_chain`, dans l'ordre.
+    - `loras` sont chaînés au point d'insertion `lora_chain`, dans l'ordre ;
+    - `source_image` (nom côté ComfyUI de l'image de composition, ex. le croquis validé) est écrite
+      dans le nœud `source_image` du preset : obligatoire pour un workflow qui en déclare un.
+    - preset de réparation (bloc `inpaint`) : `inpaint_images` = (image source, masque), noms côté
+      ComfyUI ; pas de taille à fournir (celle de l'image source).
     """
     preset = loaded.preset
     unknown = sorted(set(params) - set(preset.mapping))
@@ -77,7 +84,12 @@ def build_workflow(
         raise PresetError("positive_prompt est obligatoire")
     resolved.setdefault("negative_prompt", "")
 
-    missing = [p for p in ("width", "height") if p not in resolved]
+    inpaint = preset.inpaint
+    if inpaint is not None and inpaint_images is None:
+        raise PresetError(f"le workflow de réparation {preset.id} demande une image source et un masque")
+    if inpaint is None and inpaint_images is not None:
+        raise PresetError(f"le workflow {preset.id} n'est pas un preset de réparation (bloc inpaint absent)")
+    missing = [p for p in ("width", "height") if p not in resolved] if inpaint is None else []
     if missing:
         raise PresetError(f"paramètres manquants : {', '.join(missing)}")
 
@@ -87,6 +99,10 @@ def build_workflow(
             f"le workflow {preset.id} accepte au plus {len(slots)} image(s) de référence "
             f"({len(reference_images)} fournie(s))"
         )
+    if preset.source_image is not None and not source_image:
+        raise PresetError(f"le workflow {preset.id} attend une image de composition (croquis validé)")
+    if source_image and preset.source_image is None:
+        raise PresetError(f"le workflow {preset.id} n'accepte pas d'image de composition (source_image)")
     if loras and preset.lora_chain is None:
         raise PresetError(f"le workflow {preset.id} ne déclare pas de point d'insertion LoRA (lora_chain)")
 
@@ -94,6 +110,13 @@ def build_workflow(
     for name, value in resolved.items():
         target = preset.mapping[name]
         workflow[target.node]["inputs"][target.input] = value
+    if inpaint is not None and inpaint_images is not None:
+        source, mask = inpaint_images
+        workflow[inpaint.source_image.node]["inputs"][inpaint.source_image.input] = source
+        workflow[inpaint.mask_image.node]["inputs"][inpaint.mask_image.input] = mask
+
+    if preset.source_image is not None:
+        workflow[preset.source_image.node]["inputs"][preset.source_image.input] = source_image
 
     removed: list[str] = []
     for i, slot in enumerate(slots):
@@ -115,7 +138,30 @@ def build_workflow(
         reference_images=list(reference_images),
         loras=list(loras),
         removed_nodes=removed,
+        source_image=source_image,
     )
+
+
+def build_upscale_workflow(
+    loaded: LoadedUpscaler,
+    image: str,
+    width: int,
+    height: int,
+    *,
+    filename_prefix: str | None = None,
+) -> BuiltWorkflow:
+    """Workflow d'agrandissement : image source (nom côté ComfyUI) → taille finale exacte `width` × `height`."""
+    preset = loaded.preset
+    if width <= 0 or height <= 0:
+        raise PresetError(f"taille finale invalide : {width}×{height}")
+    resolved: dict[str, Any] = {**preset.defaults, "image": image, "width": int(width), "height": int(height)}
+    if filename_prefix is not None and "filename_prefix" in preset.mapping:
+        resolved["filename_prefix"] = filename_prefix
+    workflow = copy.deepcopy(loaded.workflow)
+    for name, value in resolved.items():
+        target = preset.mapping[name]
+        workflow[target.node]["inputs"][target.input] = value
+    return BuiltWorkflow(workflow=workflow, params=resolved, output_node=preset.output_node)
 
 
 def remove_nodes(workflow: dict[str, Any], nodes: Sequence[str]) -> None:

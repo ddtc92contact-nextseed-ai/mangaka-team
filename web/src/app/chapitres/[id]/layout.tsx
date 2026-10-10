@@ -31,6 +31,7 @@ export default function ChapterLayout({ children }: { children: ReactNode }) {
     { href: `/chapitres/${id}/scenario`, label: "Scénario" },
     { href: `/chapitres/${id}/direction`, label: "Direction artistique" },
     { href: `/chapitres/${id}/mise-en-page`, label: "Mise en page" },
+    ...(series.data.sketch_enabled ? [{ href: `/chapitres/${id}/croquis`, label: "Croquis" }] : []),
     { href: `/chapitres/${id}/atelier`, label: "Atelier" },
     { href: `/chapitres/${id}/lettrage`, label: "Lettrage" },
     { href: `/chapitres/${id}/production`, label: "Production" },

@@ -14,6 +14,14 @@
   format, pour qu'elles ne deviennent pas « obsolètes ».
 - 9 : mise en page dynamique v2 (options de cadre imposées par case, paramètres des onomatopées).
 - 10 : mots déclencheurs des LoRA (style de la série, identité des personnages).
+- 11 : bibliothèque de la série (objets et décors récurrents + images de référence ; décor et objets
+  de chaque case). Les données existantes ne changent pas : les cases n'ont ni décor ni objet.
+- 12 : « Créer des références » (variantes générées par fiche) et ordre des images de référence ; les
+  images existantes gardent leur ordre (celui de leur ajout).
+- 13 : finition d'impression (image agrandie dérivée d'une version, agrandisseur choisi par série).
+- 14 : palier croquis (sorte des versions : `final` / `croquis`, croquis validé et débruitage du
+  passage au propre par case, réglages croquis de la série). Les versions existantes sont `final` ;
+  le palier croquis est activé sur les séries existantes (il n'ajoute que des boutons).
 
 Une base neuve est créée directement à la dernière version. Chaque migration tourne dans une
 transaction unique, clés étrangères désactivées (recette « 12 étapes » de SQLite pour reconstruire
@@ -42,12 +50,15 @@ from .models import (
     LLMRun,
     PanelImageAnnotation,
     QCBenchRun,
+    ReferenceVariant,
+    SeriesAsset,
+    SeriesAssetImage,
     SeriesBible,
 )
 
 log = logging.getLogger("mangaka_engine")
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 14
 
 
 class MigrationError(RuntimeError):
@@ -201,6 +212,37 @@ def _v9_to_v10(cur: sqlite3.Cursor) -> None:
     cur.execute("ALTER TABLE characters ADD COLUMN lora_trigger_words TEXT NOT NULL DEFAULT ''")
 
 
+def _v10_to_v11(cur: sqlite3.Cursor) -> None:
+    for table in (SeriesAsset.__table__, SeriesAssetImage.__table__):
+        for stmt in _ddl(table):
+            cur.execute(stmt)
+    cur.execute("ALTER TABLE panels ADD COLUMN decor_id INTEGER")
+    cur.execute("ALTER TABLE panels ADD COLUMN object_ids JSON NOT NULL DEFAULT '[]'")
+
+
+def _v11_to_v12(cur: sqlite3.Cursor) -> None:
+    for table in ("character_images", "series_asset_images"):
+        # series_asset_images vient d'être créée par la v11 depuis le modèle courant (déjà avec position).
+        if "position" not in {row[1] for row in cur.execute(f"PRAGMA table_info({table})")}:
+            cur.execute(f"ALTER TABLE {table} ADD COLUMN position INTEGER NOT NULL DEFAULT 0")
+        cur.execute(f"UPDATE {table} SET position = id")
+    for stmt in _ddl(ReferenceVariant.__table__):
+        cur.execute(stmt)
+
+
+def _v12_to_v13(cur: sqlite3.Cursor) -> None:
+    cur.execute("ALTER TABLE panel_images ADD COLUMN finish JSON")
+    cur.execute("ALTER TABLE projects ADD COLUMN upscaler VARCHAR(100)")
+
+
+def _v13_to_v14(cur: sqlite3.Cursor) -> None:
+    cur.execute("ALTER TABLE panel_images ADD COLUMN kind VARCHAR(20) NOT NULL DEFAULT 'final'")
+    cur.execute("ALTER TABLE panels ADD COLUMN sketch_image_id INTEGER")
+    cur.execute("ALTER TABLE panels ADD COLUMN sketch_denoise FLOAT")
+    cur.execute("ALTER TABLE projects ADD COLUMN sketch_enabled BOOLEAN NOT NULL DEFAULT 1")
+    cur.execute("ALTER TABLE projects ADD COLUMN sketch_denoise FLOAT")
+
+
 MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     # version de départ → (version d'arrivée, fonction)
     0: (2, _v0_to_v2),
@@ -213,6 +255,10 @@ MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     7: (8, _v7_to_v8),
     8: (9, _v8_to_v9),
     9: (10, _v9_to_v10),
+    10: (11, _v10_to_v11),
+    11: (12, _v11_to_v12),
+    12: (13, _v12_to_v13),
+    13: (14, _v13_to_v14),
 }
 
 

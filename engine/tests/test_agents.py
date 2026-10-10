@@ -214,7 +214,7 @@ def test_knowledge_is_stored_even_without_a_knowledge_base(c: TestClient) -> Non
         ("controleur-qualite", {"reject_below": 90}, "reject_below", "reject_below doit être inférieur ou égal"),
         ("metteur-en-page", {"templates": "- id: [cassé"}, "templates", "YAML invalide"),
         ("metteur-en-page", {"templates": "- id: x\n  name: X\n"}, "templates", "champ obligatoire"),
-        ("dessinateur", {"parts": ["$shot.", "Avec $decor."]}, "parts", "ligne 2 : variable inconnue : $decor"),
+        ("dessinateur", {"parts": ["$shot.", "Avec $meteo."]}, "parts", "ligne 2 : variable inconnue : $meteo"),
         ("scenariste", {"inconnu": 1}, "inconnu", "réglage inconnu"),
     ],
 )
@@ -267,7 +267,9 @@ def test_dessinateur_settings_reach_the_panel_prompt(c: TestClient) -> None:
     assert r.status_code == 200, r.text
     presets = _ctx(c).agents.presets_for(sid)
     assert presets.image_prompt.parts == ["$description.", "Style maison."]
-    assert all(w.preset.defaults["steps"] == 31 for w in presets.workflows.values())
+    # Tous les workflows… sauf le croquis, qui garde ses quelques étapes (c'est tout son intérêt).
+    assert all(w.preset.defaults["steps"] == 31 for w in presets.workflows.values() if w.preset.role != "croquis")
+    assert presets.workflow("qwen-image-croquis").preset.defaults["steps"] == 6
 
 
 def test_provider_without_key_is_misconfigured(make_settings: Callable[..., Settings]) -> None:

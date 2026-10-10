@@ -1,8 +1,10 @@
 "use client";
 
 import { useImperativeHandle, useRef, type KeyboardEvent, type Ref } from "react";
-import { engineUrl, type LayoutPanel, type PageData, type PanelData, type QueueItem } from "@/lib/api";
+import { engineUrl, type Job, type LayoutPanel, type PageData, type PanelData, type QueueItem } from "@/lib/api";
+import { DpiBadge } from "@/components/print-dpi";
 import { DetectionOverlay, QCBadge } from "@/components/qc";
+import { dpiLabel } from "@/lib/finishing";
 import { generationStep, PANEL_STATE } from "@/lib/generation";
 import { needsReview } from "@/lib/qc";
 import { cssClipPath, panelPolygon, svgPoints } from "@/lib/layout";
@@ -21,20 +23,31 @@ export interface PanelView {
   failure: PanelFailure | null;
   /** Contrôle qualité en cours ou en attente pour cette case. */
   qc: QueueItem | null;
+  /** Finition d'impression en cours ou en attente pour cette case. */
+  finishing: QueueItem | null;
+  /** Dernière finition en échec (null : la dernière a réussi, ou aucune). */
+  finishFailure: Job | null;
 }
 
-/** État vivant de chaque case : job en cours / en file (d'après la file), dernier échec (porté par la case). */
-export function buildPanelViews(pages: PageData[], items: QueueItem[]): Map<number, PanelView> {
+/** État vivant de chaque case : job en cours / en file (d'après la file), dernier échec de génération (porté par la case), dernière finition (d'après les jobs). */
+export function buildPanelViews(pages: PageData[], items: QueueItem[], finishJobs: Job[] = []): Map<number, PanelView> {
+  const latestFinish = new Map<number, Job>();
+  for (const j of finishJobs) {
+    if (j.panel_id != null && !latestFinish.has(j.panel_id)) latestFinish.set(j.panel_id, j);
+  }
   const map = new Map<number, PanelView>();
   for (const p of pages) {
     for (const panel of p.panels) {
-      const mine = items.filter((i) => i.panel_id === panel.id && i.job.step !== "qc");
+      const mine = items.filter((i) => i.panel_id === panel.id && i.job.step === "generation");
+      const lastFinish = latestFinish.get(panel.id);
       map.set(panel.id, {
         panel,
         running: mine.find((i) => i.job.status === "running") ?? null,
         pending: mine.filter((i) => i.job.status === "pending"),
         failure: panel.last_job_status === "failed" ? { job_id: panel.last_job_id, error: panel.last_job_error } : null,
         qc: items.find((i) => i.panel_id === panel.id && i.job.step === "qc") ?? null,
+        finishing: items.find((i) => i.panel_id === panel.id && i.job.step === "finishing") ?? null,
+        finishFailure: lastFinish?.status === "failed" ? lastFinish : null,
       });
     }
   }
@@ -145,6 +158,9 @@ export function PageCanvas({
                   ? "Contrôle qualité…"
                   : "QC en file"
                 : PANEL_STATE[panel.state] ?? panel.state;
+        // Sans version choisie, le croquis (palier croquis) montre déjà la composition de la case.
+        const isSketch = !panel.selected_image_url && Boolean(panel.sketch_image_url);
+        const imageUrl = panel.selected_image_url ?? panel.sketch_image_url ?? null;
         // Case en biais : le bouton est découpé au polygone, son contour est dessiné en SVG.
         const poly = lp.slanted ? panelPolygon(lp) : null;
         const qcLabel = panel.qc_verdict
@@ -161,7 +177,7 @@ export function PageCanvas({
             onClick={() => onOpen(panel.id)}
             onKeyDown={(e) => onKeyDown(e, lp)}
             aria-pressed={selected}
-            aria-label={`Case ${panel.index + 1} — ${stateLabel}${qcLabel}${panel.shot_type ? ` — ${panel.shot_type}` : ""}`}
+            aria-label={`Case ${panel.index + 1} — ${stateLabel}${isSketch ? ` — croquis${panel.sketch_validated ? " validé" : ""}` : ""}${qcLabel}${panel.print_info ? ` — ${dpiLabel(panel.print_info)}` : ""}${panel.shot_type ? ` — ${panel.shot_type}` : ""}`}
             data-testid="workshop-panel"
             data-state={running ? "generating" : queued ? "queued" : failure ? "failed" : panel.state}
             data-qc={panel.qc_verdict ?? "none"}
@@ -183,23 +199,31 @@ export function PageCanvas({
               clipPath: poly ? cssClipPath(poly, lp) : undefined,
             }}
           >
-            {panel.selected_image_url ? (
+            {imageUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
-                src={engineUrl(panel.selected_image_url)}
+                src={engineUrl(imageUrl)}
                 alt=""
                 className={`h-full w-full object-cover ${running || queued ? "opacity-60" : ""} ${queued ? "grayscale" : ""}`}
                 draggable={false}
+                data-sketch={isSketch ? "true" : undefined}
               />
             ) : null}
             {panel.selected_image_url && showBoxes && panel.detections ? (
               <DetectionOverlay detections={panel.detections} fit="cover" />
             ) : null}
             {panel.selected_image_url ? (
-              <span className="absolute right-1 top-1">
+              <span className="absolute right-1 top-1 flex flex-col items-end gap-1">
                 <QCBadge verdict={panel.qc_verdict} score={panel.qc_score} override={panel.qc_override} />
+                {view?.finishing ? (
+                  <span className="rounded bg-sky-900/90 px-1.5 py-0.5 text-[10px] font-semibold text-sky-100" data-testid="finishing-badge">
+                    {view.finishing.job.status === "running" ? `Finition ${view.finishing.job.progress} %` : "Finition en file"}
+                  </span>
+                ) : panel.print_info ? (
+                  <DpiBadge info={panel.print_info} />
+                ) : null}
               </span>
-            ) : (
+            ) : isSketch ? null : (
               <span
                 className={`flex h-full w-full flex-col items-center justify-center gap-1 p-1 text-center [background-image:repeating-linear-gradient(45deg,transparent_0_10px,rgba(0,0,0,0.035)_10px_20px)] ${
                   failure ? "bg-red-100 text-red-800" : queued ? "bg-zinc-300 text-zinc-500" : "bg-zinc-200 text-zinc-600"
@@ -211,9 +235,14 @@ export function PageCanvas({
                 <span className="text-[11px] font-medium leading-tight">{stateLabel}</span>
               </span>
             )}
-            {panel.selected_image_url && (
+            {imageUrl && (
               <span className="absolute left-1 top-1 rounded bg-zinc-950/80 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-100">
                 {panel.index + 1}
+                {isSketch && (
+                  <span className="ml-1 font-normal text-zinc-300" data-testid="panel-sketch-badge">
+                    · croquis{panel.sketch_validated ? " ✓" : ""}
+                  </span>
+                )}
                 {(running || queued || failure || checking || panel.state === "review") && (
                   <span className="ml-1 font-normal text-zinc-300">· {stateLabel}</span>
                 )}

@@ -16,7 +16,9 @@ Arborescence attendue :
       layout_styles/*.yaml     # grammaires de mise en page par série (biais, gouttières, gabarits favoris)
       prompts/*.yaml           # prompts des étapes LLM
       workflows/*.yaml         # workflows ComfyUI (+ leur JSON API)
+      upscalers/*.yaml         # agrandisseurs de la finition d'impression (+ leur JSON API)
       agents/*.yaml            # agents du pipeline (écran « L'équipe ») : rôle et réglages éditables
+      reference_sheets/*.yaml  # fiches de référence générées (portrait, turnaround, plan large…)
 
 Un preset invalide n'empêche pas le moteur de démarrer : il est écarté et
 l'erreur est exposée via `GET /presets` et `GET /health`.
@@ -47,8 +49,13 @@ from .schemas import (
     PromptPreset,
     ProvidersPreset,
     QCSettings,
+    ReferenceSheet,
+    UpscalerPreset,
     WorkflowPreset,
 )
+
+# Ordre des rôles de workflow dans les listes : paliers de série, croquis, propre depuis croquis.
+ROLE_ORDER = {"generation": 0, "croquis": 1, "propre": 2}
 
 
 class PresetError(Exception):
@@ -64,6 +71,14 @@ class LoadedWorkflow:
 
 
 @dataclass
+class LoadedUpscaler:
+    preset: UpscalerPreset
+    workflow: dict[str, Any]
+    source: Path
+    preset_path: Path | None = None
+
+
+@dataclass
 class PresetIssue:
     file: str
     message: str
@@ -74,6 +89,7 @@ class PresetRegistry:
     root: Path
     page_formats: dict[str, PageFormat] = field(default_factory=dict)
     workflows: dict[str, LoadedWorkflow] = field(default_factory=dict)
+    upscalers: dict[str, LoadedUpscaler] = field(default_factory=dict)
     layout_templates: dict[str, LayoutTemplate] = field(default_factory=dict)
     layout_styles: dict[str, LayoutStyle] = field(default_factory=dict)
     prompts: dict[str, PromptPreset] = field(default_factory=dict)
@@ -86,6 +102,7 @@ class PresetRegistry:
     knowledge: KnowledgeSettings = field(default_factory=KnowledgeSettings)
     defaults: Defaults | None = None
     agents: dict[str, AgentPreset] = field(default_factory=dict)
+    reference_sheets: dict[str, ReferenceSheet] = field(default_factory=dict)
     issues: list[PresetIssue] = field(default_factory=list)
 
     # --- accès -----------------------------------------------------------
@@ -100,6 +117,19 @@ class PresetRegistry:
             return self.workflows[preset_id]
         except KeyError:
             raise PresetError(f"workflow inconnu : « {preset_id} »") from None
+
+    def upscaler(self, preset_id: str) -> LoadedUpscaler:
+        try:
+            return self.upscalers[preset_id]
+        except KeyError:
+            raise PresetError(f"agrandisseur inconnu : « {preset_id} »") from None
+
+    @property
+    def default_upscaler(self) -> str | None:
+        """Agrandisseur de la finition d'impression : celui de defaults.yaml (None si absent ou inconnu)."""
+        if self.defaults and self.defaults.upscaler in self.upscalers:
+            return self.defaults.upscaler
+        return None
 
     def layout_template(self, preset_id: str) -> LayoutTemplate:
         try:
@@ -119,6 +149,12 @@ class PresetRegistry:
         if self.defaults and self.defaults.layout_style in self.layout_styles:
             return self.defaults.layout_style
         return next(iter(self.layout_styles), None)
+
+    def reference_sheet(self, sheet_id: str) -> ReferenceSheet:
+        try:
+            return self.reference_sheets[sheet_id]
+        except KeyError:
+            raise PresetError(f"type de fiche de référence inconnu : « {sheet_id} »") from None
 
     def prompt(self, preset_id: str) -> PromptPreset:
         try:
@@ -172,11 +208,24 @@ class PresetRegistry:
                 reg._register(reg.workflows, wf.preset.id, wf, path)
 
         reg._check_reference_pairs()
-        # Ordre des listes déroulantes : texte → image d'abord, puis avec références ; par nom ensuite
-        # (« … · Qualité » avant « … · Rapide »).
+        reg._check_sketch_pairs()
+        # Ordre des listes déroulantes : paliers de série, puis croquis, puis « propre depuis croquis » ;
+        # texte → image d'abord, puis avec références ; par nom ensuite (« … · Qualité » avant « … · Rapide »).
         reg.workflows = dict(
-            sorted(reg.workflows.items(), key=lambda kv: (bool(kv[1].preset.reference_images), kv[1].preset.name))
+            sorted(
+                reg.workflows.items(),
+                key=lambda kv: (
+                    ROLE_ORDER[kv[1].preset.role],
+                    bool(kv[1].preset.reference_images),
+                    kv[1].preset.name,
+                ),
+            )
         )
+
+        for path in sorted((root / "upscalers").glob("*.y*ml")):
+            up = reg._load_upscaler(path)
+            if up is not None:
+                reg._register(reg.upscalers, up.preset.id, up, path)
 
         for path in sorted((root / "layouts").glob("*.y*ml")):
             lib = reg._parse(path, LayoutTemplateFile)
@@ -265,6 +314,17 @@ class PresetRegistry:
                         PresetIssue(reg._rel(defaults_path), f"workflow inconnu : {defaults.workflow_quality}")
                     )
                     reg.defaults = defaults.model_copy(update={"workflow_quality": None})
+                elif defaults.workflow_sketch and (
+                    defaults.workflow_sketch not in reg.workflows
+                    or reg.workflows[defaults.workflow_sketch].preset.role != "croquis"
+                ):
+                    reg.issues.append(
+                        PresetIssue(
+                            reg._rel(defaults_path),
+                            f"workflow_sketch : workflow inconnu ou sans rôle croquis : {defaults.workflow_sketch}",
+                        )
+                    )
+                    reg.defaults = defaults.model_copy(update={"workflow_sketch": None})
                 elif defaults.layout_style and defaults.layout_style not in reg.layout_styles:
                     reg.issues.append(
                         PresetIssue(reg._rel(defaults_path), f"style de mise en page inconnu : {defaults.layout_style}")
@@ -272,6 +332,20 @@ class PresetRegistry:
                     reg.defaults = defaults.model_copy(update={"layout_style": None})
                 else:
                     reg.defaults = defaults
+                if reg.defaults is not None and reg.defaults.upscaler and reg.defaults.upscaler not in reg.upscalers:
+                    reg.issues.append(
+                        PresetIssue(reg._rel(defaults_path), f"agrandisseur inconnu : {reg.defaults.upscaler}")
+                    )
+                    reg.defaults = reg.defaults.model_copy(update={"upscaler": None})
+                inpaint_id = reg.defaults.workflow_inpaint if reg.defaults else None
+                if inpaint_id and not reg._is_inpaint(inpaint_id):
+                    reg.issues.append(
+                        PresetIssue(
+                            reg._rel(defaults_path),
+                            f"workflow_inpaint : workflow inconnu ou sans bloc inpaint : {inpaint_id}",
+                        )
+                    )
+                    reg.defaults = reg.defaults.model_copy(update={"workflow_inpaint": None})
         else:
             reg.issues.append(PresetIssue(reg._rel(defaults_path), "fichier absent"))
 
@@ -279,6 +353,16 @@ class PresetRegistry:
             agent = reg._parse(path, AgentPreset)
             if agent is not None:
                 reg._register(reg.agents, agent.id, agent, path)
+
+        for path in sorted((root / "reference_sheets").glob("*.y*ml")):
+            sheet = reg._parse(path, ReferenceSheet)
+            if sheet is None:
+                continue
+            if sheet.workflow is not None and sheet.workflow not in reg.workflows:
+                reg.issues.append(PresetIssue(reg._rel(path), f"workflow inconnu : {sheet.workflow}"))
+                continue
+            reg._register(reg.reference_sheets, sheet.id, sheet, path)
+        reg.reference_sheets = dict(sorted(reg.reference_sheets.items(), key=lambda kv: (kv[1].order, kv[1].name)))
         return reg
 
     def _check_reference_pairs(self) -> None:
@@ -299,6 +383,38 @@ class PresetRegistry:
             else:
                 continue
             self.issues.append(PresetIssue(self._rel(wf.preset_path or wf.source), problem))
+        for wf in self.workflows.values():
+            target = wf.preset.inpaint_with
+            if target is not None and not self._is_inpaint(target):
+                self.issues.append(
+                    PresetIssue(
+                        self._rel(wf.preset_path or wf.source),
+                        f"inpaint_with : workflow inconnu ou sans bloc inpaint : {target}",
+                    )
+                )
+
+    def _is_inpaint(self, preset_id: str) -> bool:
+        wf = self.workflows.get(preset_id)
+        return wf is not None and wf.preset.is_inpaint
+
+    def _check_sketch_pairs(self) -> None:
+        """`from_sketch` doit désigner un workflow « propre » chargé ; le `with_references` d'un workflow
+        croquis ou propre doit garder le même rôle. Le workflow reste chargé ; « Passer au propre » échoue
+        avec un message clair (jamais de repli sur un autre palier)."""
+        for wf in self.workflows.values():
+            problems: list[str] = []
+            target = wf.preset.from_sketch
+            if target is not None:
+                other = self.workflows.get(target)
+                if other is None:
+                    problems.append(f"from_sketch : workflow inconnu ou invalide : {target}")
+                elif other.preset.role != "propre":
+                    problems.append(f"from_sketch : le workflow {target} n'a pas le rôle « propre »")
+            refs = self.workflows.get(wf.preset.with_references or "")
+            if refs is not None and wf.preset.role != "generation" and refs.preset.role != wf.preset.role:
+                problems.append(f"with_references : le workflow {refs.preset.id} n'a pas le rôle « {wf.preset.role} »")
+            for problem in problems:
+                self.issues.append(PresetIssue(self._rel(wf.preset_path or wf.source), problem))
 
     def _rel(self, path: Path) -> str:
         try:
@@ -329,10 +445,16 @@ class PresetRegistry:
             self.issues.append(PresetIssue(self._rel(path), format_validation_error(exc)))
             return None
 
-    def _load_workflow(self, path: Path) -> LoadedWorkflow | None:
-        preset = self._parse(path, WorkflowPreset)
-        if preset is None:
+    def _load_upscaler(self, path: Path) -> LoadedUpscaler | None:
+        preset = self._parse(path, UpscalerPreset)
+        workflow = self._load_json(path, preset) if preset is not None else None
+        if preset is None or workflow is None:
             return None
+        source = (path.parent / preset.workflow_file).resolve()
+        return LoadedUpscaler(preset=preset, workflow=workflow, source=source, preset_path=path)
+
+    def _load_json(self, path: Path, preset: WorkflowPreset | UpscalerPreset) -> dict[str, Any] | None:
+        """JSON API d'un preset, vérifié contre son mapping (erreur notée dans `issues`)."""
         json_path = (path.parent / preset.workflow_file).resolve()
         try:
             workflow = json.loads(json_path.read_text(encoding="utf-8"))
@@ -346,10 +468,18 @@ class PresetRegistry:
         if errors:
             self.issues.append(PresetIssue(self._rel(path), " ; ".join(errors)))
             return None
-        return LoadedWorkflow(preset=preset, workflow=workflow, source=json_path, preset_path=path)
+        return workflow
+
+    def _load_workflow(self, path: Path) -> LoadedWorkflow | None:
+        preset = self._parse(path, WorkflowPreset)
+        workflow = self._load_json(path, preset) if preset is not None else None
+        if preset is None or workflow is None:
+            return None
+        source = (path.parent / preset.workflow_file).resolve()
+        return LoadedWorkflow(preset=preset, workflow=workflow, source=source, preset_path=path)
 
 
-def check_workflow_mapping(preset: WorkflowPreset, workflow: Any) -> list[str]:
+def check_workflow_mapping(preset: WorkflowPreset | UpscalerPreset, workflow: Any) -> list[str]:
     """Vérifie que chaque paramètre mappé pointe vers un nœud/une entrée existants."""
     if not isinstance(workflow, dict) or not workflow:
         return ["le JSON du workflow doit être un objet au format API ComfyUI"]
@@ -374,6 +504,22 @@ def check_workflow_mapping(preset: WorkflowPreset, workflow: Any) -> list[str]:
                 errors.append(f"référence {i} : nœud {extra} absent du workflow")
             elif extra in mapped:
                 errors.append(f"référence {i} : le nœud {extra} est mappé, il ne peut pas être retiré")
+    source = preset.source_image
+    if source is not None:
+        node = workflow.get(source.node)
+        if not isinstance(node, dict):
+            errors.append(f"source_image : nœud {source.node} absent du workflow")
+        elif source.input not in node.get("inputs", {}):
+            errors.append(f"source_image : entrée « {source.input} » absente du nœud {source.node}")
+    if preset.inpaint is not None:
+        for label, target in (("source_image", preset.inpaint.source_image), ("mask_image", preset.inpaint.mask_image)):
+            node = workflow.get(target.node)
+            if not isinstance(node, dict):
+                errors.append(f"inpaint.{label} : nœud {target.node} absent du workflow")
+            elif target.input not in node.get("inputs", {}):
+                errors.append(f"inpaint.{label} : entrée « {target.input} » absente du nœud {target.node}")
+            if any(target.node in (slot.node, *slot.remove) for slot in preset.reference_images):
+                errors.append(f"inpaint.{label} : le nœud {target.node} est un emplacement de référence")
     chain = preset.lora_chain
     if chain is not None:
         for label, src in (("model_from", chain.model_from), ("clip_from", chain.clip_from)):

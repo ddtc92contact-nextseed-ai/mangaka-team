@@ -17,9 +17,11 @@ from .agents import AgentService
 from .api import (
     agents,
     art_direction,
+    assets,
     chapters,
     characters,
     comfyui,
+    finishing,
     generation,
     jobs,
     knowledge,
@@ -27,6 +29,8 @@ from .api import (
     projects,
     qc,
     qc_bench,
+    reference_sheets,
+    sketch,
     system,
 )
 from .api.deps import AppContext
@@ -34,6 +38,8 @@ from .api.errors import install_error_handlers
 from .config import Settings, get_settings
 from .pipeline.comfy_trial import STEP as TRIAL_STEP
 from .pipeline.comfy_trial import TrialExecutor
+from .pipeline.finishing import STEP as FINISHING_STEP
+from .pipeline.finishing import FinishingExecutor
 from .pipeline.generation import STEP as GENERATION_STEP
 from .pipeline.generation import GenerationExecutor, describe_error, recover_states
 from .pipeline.jobs import JobRunner
@@ -44,6 +50,8 @@ from .pipeline.qc import describe_error as describe_qc_error
 from .pipeline.qc_bench import STEP as QC_BENCH_STEP
 from .pipeline.qc_bench import QCBenchExecutor
 from .pipeline.queue import QueueStep, SerialJobQueue
+from .pipeline.reference_sheets import STEP as REFERENCE_STEP
+from .pipeline.reference_sheets import ReferenceExecutor
 from .presets import PresetRegistry
 from .providers.factory import Providers, build_providers
 from .store.db import Database
@@ -124,6 +132,32 @@ def build_context(settings: Settings, providers: Providers | None = None) -> App
         poll_s=settings.comfyui_poll_s,
     )
     queue.add_step(TRIAL_STEP, QueueStep(execute=trial, describe_error=describe_error, interrupt=trial.interrupt))
+    # La finition d'impression aussi : un agrandissement ComfyUI, jamais pendant une génération.
+    finishing = FinishingExecutor(
+        db,
+        presets,
+        files,
+        providers.comfyui,
+        comfyui_error=providers.errors.get("comfyui"),
+        poll_s=settings.comfyui_poll_s,
+        presets_for=agents_service.presets_for,
+    )
+    queue.add_step(
+        FINISHING_STEP, QueueStep(execute=finishing, describe_error=describe_error, interrupt=finishing.interrupt)
+    )
+    # « Créer des références » de la bibliothèque : mêmes file, progression et annulation que les cases.
+    references = ReferenceExecutor(
+        db,
+        presets,
+        files,
+        providers.comfyui,
+        comfyui_error=providers.errors.get("comfyui"),
+        poll_s=settings.comfyui_poll_s,
+        presets_for=agents_service.presets_for,
+    )
+    queue.add_step(
+        REFERENCE_STEP, QueueStep(execute=references, describe_error=describe_error, interrupt=references.interrupt)
+    )
     queue.start()
     return AppContext(
         settings=settings,
@@ -155,11 +189,15 @@ def create_app(settings: Settings | None = None, providers: Providers | None = N
     app.include_router(system.router)
     app.include_router(projects.router)
     app.include_router(characters.router)
+    app.include_router(assets.router)
+    app.include_router(reference_sheets.router)
     app.include_router(comfyui.router)
     app.include_router(chapters.router)
     app.include_router(art_direction.router)
     app.include_router(jobs.router)
     app.include_router(generation.router)
+    app.include_router(sketch.router)
+    app.include_router(finishing.router)
     app.include_router(lettering.router)
     app.include_router(qc.router)
     app.include_router(qc_bench.router)

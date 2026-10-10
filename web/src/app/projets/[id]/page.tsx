@@ -4,28 +4,29 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 import { AgentOverrides } from "@/components/agent-overrides";
-import { Avatar } from "@/components/avatar";
 import { ChapterList } from "@/components/chapter-list";
+import { LibraryList, LibraryTabs } from "@/components/library";
 import { EstimateLabel } from "@/components/estimate";
 import { ProjectForm } from "@/components/project-form";
 import { SeriesBible } from "@/components/series-bible";
 import { DIRECTIONS, DirectionBadge } from "@/components/reading-direction";
 import { SeriesStatusBadge } from "@/components/status";
 import { Alert, Button, ButtonLink, Card, Loading, PageHeader } from "@/components/ui";
-import { api, errorMessage } from "@/lib/api";
+import { api, errorMessage, type LibraryKind } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
+import { libraryHref, newEntryHref } from "@/lib/library";
 
 export default function ProjectPage() {
   const id = Number(useParams<{ id: string }>().id);
   const router = useRouter();
   const project = useEngineData(() => api.getProject(id), [id]);
-  const characters = useEngineData(() => api.listCharacters(id), [id]);
+  const [tab, setTab] = useState<LibraryKind>("character");
   const [saved, setSaved] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   async function remove() {
     if (!project.data) return;
-    if (!window.confirm(`Supprimer « ${project.data.title} », ses chapitres et ses personnages ? Action définitive.`)) return;
+    if (!window.confirm(`Supprimer « ${project.data.title} », ses chapitres et sa bibliothèque (personnages, objets, décors) ? Action définitive.`)) return;
     try {
       await api.deleteProject(id);
       router.push("/projets");
@@ -88,30 +89,22 @@ export default function ProjectPage() {
           />
         </Card>
         <Card>
-          <div className="mb-4 flex items-center justify-between gap-2">
-            <h2 className="font-semibold text-zinc-100">Personnages</h2>
-            <ButtonLink href={`/projets/${id}/personnages/nouveau`} variant="secondary">
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h2 className="font-semibold text-zinc-100">
+              <Link href={libraryHref(id, tab)} className="hover:text-rose-300">
+                Bibliothèque
+              </Link>
+            </h2>
+            <ButtonLink href={newEntryHref(tab, id)} variant="secondary">
               Ajouter
             </ButtonLink>
           </div>
-          {characters.data?.length ? (
-            <ul className="divide-y divide-zinc-800">
-              {characters.data.map((c) => (
-                <li key={c.id}>
-                  <Link
-                    href={`/personnages/${c.id}`}
-                    className="flex items-center gap-3 py-2 text-sm text-zinc-200 hover:text-rose-300"
-                  >
-                    <Avatar url={c.reference_images[0]?.url} name={c.name} />
-                    <span className="truncate">{c.name}</span>
-                    <span className="ml-auto text-xs text-zinc-500">{c.reference_images.length} réf.</span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-sm text-zinc-500">Aucun personnage.</p>
-          )}
+          <div className="mb-2">
+            <LibraryTabs value={tab} onChange={setTab} idPrefix="serie-bibliotheque" />
+          </div>
+          <div role="tabpanel" id="serie-bibliotheque-panel" aria-labelledby={`serie-bibliotheque-tab-${tab}`}>
+            <LibraryList key={tab} kind={tab} projectId={id} compact />
+          </div>
         </Card>
       </div>
       <div className="mt-6">

@@ -72,6 +72,8 @@ settings:
       - layout_style
       - layout_styles
       - characters
+      - decors
+      - objets
       - chapter_number
       - chapter_title
       - synopsis

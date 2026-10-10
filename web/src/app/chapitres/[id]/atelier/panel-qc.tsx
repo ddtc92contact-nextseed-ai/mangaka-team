@@ -4,6 +4,7 @@ import { useState } from "react";
 import { DetectionLegend, DetectionOverlay, QCBadge } from "@/components/qc";
 import { Alert, Button, ProgressBar } from "@/components/ui";
 import { engineUrl, type PanelImage, type QCStatus, type QueueItem, type VisionMode } from "@/lib/api";
+import { isSketch, type RepairPreset } from "./repair-dialog";
 import { QC_LAYERS, QC_LAYER_STATUS, QC_SOURCE, QC_VERDICT, formatMs } from "@/lib/qc";
 
 function formatDate(iso: string | null | undefined): string {
@@ -19,6 +20,7 @@ export function PanelQC({
   busy,
   onRun,
   onOverride,
+  onRepair,
 }: {
   image: PanelImage | null;
   job: QueueItem | null;
@@ -26,6 +28,8 @@ export function PanelQC({
   busy: boolean;
   onRun: (vision: VisionMode) => void;
   onOverride: (img: PanelImage) => void;
+  /** « Réparer » : zone choisie depuis une détection (visage, main) ou tracée à la main. */
+  onRepair?: (img: PanelImage, preset?: RepairPreset) => void;
 }) {
   const [showBoxes, setShowBoxes] = useState(true);
   const qc = image?.qc ?? {};
@@ -144,6 +148,30 @@ export function PanelQC({
                 <img src={engineUrl(image.url)} alt={`Version ${image.version} avec les détections`} className="block max-h-72 w-full object-contain" />
                 {showBoxes && <DetectionOverlay detections={image.detections} fit="contain" />}
               </div>
+              {onRepair && !isSketch(image) && image.detections.faces.length + image.detections.hands.length > 0 && (
+                <div className="flex flex-wrap gap-1.5" data-testid="qc-repair-detections">
+                  {(["faces", "hands"] as const).flatMap((kind) =>
+                    image.detections![kind].map((_, index) => {
+                      const many = image.detections![kind].length > 1;
+                      const label =
+                        kind === "faces"
+                          ? many ? `Réparer le visage ${index + 1}` : "Réparer ce visage"
+                          : many ? `Réparer la main ${index + 1}` : "Réparer cette main";
+                      return (
+                        <Button
+                          key={`${kind}-${index}`}
+                          variant="secondary"
+                          className="!px-2 !py-1 text-xs"
+                          onClick={() => onRepair(image, { kind, index })}
+                          disabled={busy}
+                        >
+                          {label}
+                        </Button>
+                      );
+                    }),
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -162,6 +190,11 @@ export function PanelQC({
             >
               Avec la vision
             </Button>
+            {onRepair && !isSketch(image) && (
+              <Button variant="ghost" className="!px-2 !py-1.5 text-xs" onClick={() => onRepair(image)} disabled={busy} data-testid="qc-repair">
+                Réparer une zone…
+              </Button>
+            )}
             {image.qc_verdict && image.qc_verdict !== "ok" && (
               <Button className="!py-1.5 text-xs" onClick={() => onOverride(image)} disabled={busy} data-testid="qc-override-button">
                 Valider quand même

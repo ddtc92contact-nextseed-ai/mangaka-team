@@ -47,7 +47,12 @@ def test_presets_endpoint(client: TestClient) -> None:
         "workflow": "qwen-image-turbo",
         "workflow_with_references": "qwen-image-edit-ref-turbo",
         "workflow_quality": "qwen-image-base",
+        "workflow_inpaint": "qwen-image-inpaint-turbo",
         "layout_style": "dynamique",
+        "sketch_enabled": True,
+        "workflow_sketch": "qwen-image-croquis",
+        "upscaler": "realesrgan-x4plus-anime-6b",
+        "finishing_tolerance": 0.9,
     }
     assert {st["id"] for st in data["layout_styles"]} >= {"sage", "dynamique", "nerveuse"}
     assert [st["id"] for st in data["layout_styles"] if st["is_default"]] == ["dynamique"]

@@ -26,6 +26,12 @@ export interface Project {
   style_lora_trigger_words: string;
   /** Style de mise en page de la série (presets/layout_styles/). */
   layout_style: string;
+  /** Palier croquis : brouillon de page, tri, passage au propre (désactivable). */
+  sketch_enabled: boolean;
+  /** Débruitage du passage au propre (null : celui du preset). */
+  sketch_denoise: number | null;
+  /** Agrandisseur de la finition d'impression (presets/upscalers/) ; null = celui de defaults.yaml. */
+  upscaler: string | null;
   character_count: number;
   chapter_count: number;
   /** Pages déjà mises en page : changer le sens de lecture les met en miroir. */
@@ -46,6 +52,9 @@ export type ProjectInput = Pick<
   | "style_lora_weight"
   | "style_lora_trigger_words"
   | "layout_style"
+  | "sketch_enabled"
+  | "sketch_denoise"
+  | "upscaler"
 >;
 
 export interface Chapter {
@@ -88,6 +97,10 @@ export interface PanelData {
   index: number;
   description: string;
   characters: string[];
+  /** Décor de la bibliothèque de la série (id), null : aucun. */
+  decor?: number | null;
+  /** Objets de la bibliothèque de la série (ids). */
+  objets?: number[];
   shot_type: string | null;
   importance: number;
   intensity: Intensity | null;
@@ -113,10 +126,73 @@ export interface PanelData {
   detections: Detections | null;
   /** Le ratio de la case s'écarte trop de celui de l'image retenue : régénération conseillée. */
   regeneration_advised: boolean;
+  /** Palier croquis : nombre de croquis, croquis montré (validé, sinon le plus récent). */
+  sketch_count?: number;
+  sketch_image_id?: number | null;
+  sketch_image_url?: string | null;
+  /** Composition retenue au tri. */
+  sketch_validated?: boolean;
+  /** Débruitage du passage au propre imposé à la case (null : celui de la série). */
+  sketch_denoise?: number | null;
+  /** Une version propre a déjà été tirée du croquis validé. */
+  sketch_cleaned?: boolean;
+  /** Dpi de la version retenue à l'impression (null : pas de version retenue ou pas de mise en page). */
+  print_info?: PrintInfo | null;
   /** Dernière génération de la case (la plus récente, sans limite d'historique). */
   last_job_id: number | null;
   last_job_status: JobStatus | null;
   last_job_error: string | null;
+}
+
+/** Finition d'impression : dpi effectif de la version retenue une fois imprimée. */
+export interface PrintInfo {
+  image_id: number;
+  /** ok : déjà au dpi cible · finished : finalisée au dpi cible · low : sous le seuil. */
+  status: "ok" | "finished" | "low";
+  target_dpi: number;
+  min_dpi: number;
+  box_width: number;
+  box_height: number;
+  width_mm: number;
+  height_mm: number;
+  source_width: number;
+  source_height: number;
+  dpi: number;
+  factor: number;
+  target_width: number;
+  target_height: number;
+  needed: boolean;
+  finished: boolean;
+  finished_dpi: number | null;
+  finished_width: number | null;
+  finished_height: number | null;
+  finished_upscaler: string | null;
+}
+
+/** Agrandisseur de la finition d'impression (presets/upscalers/). */
+export interface Upscaler {
+  id: string;
+  name: string;
+  description: string;
+  model_scale: number | null;
+  high_fidelity: boolean;
+  is_default: boolean;
+  estimated_s: number | null;
+  timeout_s: number;
+}
+
+/** Image agrandie dérivée d'une version (finition d'impression). */
+export interface PanelImageFinish {
+  path: string;
+  width: number;
+  height: number;
+  upscaler: string;
+  upscaler_name: string;
+  factor: number;
+  dpi: number;
+  target_dpi: number;
+  created_at: string;
+  [key: string]: unknown;
 }
 
 export interface PanelSfx {
@@ -304,6 +380,10 @@ export interface PanelInput {
   id?: number;
   description: string;
   characters: string[];
+  /** Absent : décor gardé ; null : aucun décor. */
+  decor?: number | null;
+  /** Absent : objets gardés. */
+  objets?: number[];
   shot_type: string | null;
   importance: number;
   intensity?: Intensity | null;
@@ -337,10 +417,14 @@ export interface Job {
 }
 
 /** Une version générée d'une case. */
+export type ImageKind = "final" | "croquis";
+
 export interface PanelImage {
   id: number;
   panel_id: number;
   version: number;
+  /** croquis : brouillon de composition, jamais choisi, assemblé ni exporté. */
+  kind?: ImageKind;
   url: string;
   seed: Seed | null;
   selected: boolean;
@@ -354,7 +438,10 @@ export interface PanelImage {
     negative_prompt?: string;
     duration_ms?: number;
     loras?: unknown[];
-    references?: unknown[];
+    /** Emplacements de référence remplis (personnages, puis décor, puis objets). */
+    reference_images?: UsedReference[];
+    /** Réparation ciblée : version source et réglages (absent pour une génération). */
+    repair?: RepairParams;
     [key: string]: unknown;
   };
   qc_score: number | null;
@@ -364,7 +451,73 @@ export interface PanelImage {
   detections: Detections | null;
   /** Jugement humain bonne / mauvaise (banc d'essai du QC), indépendant du verdict QC. */
   annotation: Annotation | null;
+  /** Finition d'impression de la version (image agrandie), null : aucune. */
+  finish?: PanelImageFinish | null;
   created_at: string;
+}
+
+export type RepairTarget = "face" | "hand" | "zone";
+
+/** Rectangle à repeindre, en px de l'image de la version. */
+export interface RepairRegion {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
+/** Lien d'une version réparée vers sa source (`params.repair`). */
+export interface RepairParams {
+  source_image_id: number;
+  source_version: number;
+  target: RepairTarget;
+  character_id: number | null;
+  character_name: string | null;
+  regions: RepairRegion[];
+  painted: boolean;
+  grow_px: number;
+  feather_px: number;
+  denoise: number;
+}
+
+/** Préremplissage de « Réparer » : preset du palier, réglages par défaut, prompt, personnages. */
+export interface RepairInfo {
+  available: boolean;
+  problem: string | null;
+  preset: string | null;
+  preset_name: string | null;
+  tier: string | null;
+  grow_px: number;
+  feather_px: number;
+  denoise: number;
+  target: RepairTarget;
+  character_id: number | null;
+  characters: { id: number; name: string }[];
+  prompt: string;
+}
+
+export interface RepairInput {
+  regions: RepairRegion[];
+  /** Masque peint : PNG en data URL (opaque = à repeindre). */
+  mask_png?: string | null;
+  target: RepairTarget;
+  character_id: number | null;
+  prompt: string;
+  grow_px: number;
+  feather_px: number;
+  denoise: number;
+}
+
+/** Image de référence envoyée dans un emplacement du workflow. */
+export interface UsedReference {
+  slot?: number;
+  /** Absent sur les versions d'avant la bibliothèque (personnage). */
+  kind?: LibraryKind;
+  id?: number;
+  name?: string;
+  character_id?: number;
+  image_id: number;
+  comfyui_name?: string;
 }
 
 export type AnnotationLabel = "good" | "bad";
@@ -513,6 +666,8 @@ export interface PanelDetail {
   description: string;
   characters: string[];
   character_ids: number[];
+  decor: LibraryRef | null;
+  objets: LibraryRef[];
   shot_type: string | null;
   state: PanelState;
   bbox: Rect | null;
@@ -523,6 +678,12 @@ export interface PanelDetail {
   target: { width: number; height: number } | null;
   images: PanelImage[];
   active_jobs: Job[];
+  /** Croquis validé au tri (null : aucun). */
+  sketch_image_id?: number | null;
+  sketch_denoise?: number | null;
+  print_info?: PrintInfo | null;
+  /** Nom de l'agrandisseur de la série (finition d'impression), null : aucun configuré. */
+  upscaler?: string | null;
 }
 
 export interface GenerateInput {
@@ -587,6 +748,22 @@ export interface WorkflowPreset {
   estimated_s: number | null;
   /** Palier de « Régénérer en Qualité ». */
   is_quality: boolean;
+  /** generation : palier de série ; croquis ; propre : version finale depuis un croquis validé. */
+  role?: "generation" | "croquis" | "propre";
+  from_sketch?: string | null;
+  is_sketch?: boolean;
+}
+
+/** Temps estimés du palier croquis d'une page ou d'un chapitre. */
+export interface SketchEstimate {
+  panels: number;
+  /** Cases encore à croquer (sans version propre choisie ni croquis validé). */
+  to_sketch: number;
+  validated: number;
+  /** Cases validées sans version propre tirée de leur croquis. */
+  to_clean: number;
+  sketch: Estimate;
+  clean: Estimate;
 }
 
 /** Temps estimé des cases encore à générer (chapitre ou série). */
@@ -668,17 +845,99 @@ export interface Character {
   prompt_keywords: string[];
   lora_name: string | null;
   lora_weight: number;
-  /** Mots déclencheurs du LoRA d'identité, ajoutés au prompt quand il est appliqué. */
+  /** Mots déclencheurs du LoRA de la fiche, ajoutés au prompt quand il est appliqué. */
   lora_trigger_words: string;
   reference_images: ReferenceImage[];
   created_at: string;
   updated_at: string;
 }
 
-export type CharacterInput = Pick<
+/** Sortes de fiches de la bibliothèque d'une série. */
+export type LibraryKind = "character" | "object" | "decor";
+
+/** Objet ou décor récurrent : mêmes champs qu'un personnage. */
+export interface SeriesAsset extends Character {
+  kind: "object" | "decor";
+}
+
+/** Fiche de la bibliothèque (personnage, objet ou décor). */
+export type LibraryEntry = Character | SeriesAsset;
+export type LibraryEntryInput = Pick<
   Character,
   "name" | "visual_description" | "prompt_keywords" | "lora_name" | "lora_weight" | "lora_trigger_words"
 >;
+
+/** Élément de la bibliothèque cité par une case. */
+export interface LibraryRef {
+  id: number;
+  kind: LibraryKind;
+  name: string;
+}
+
+/** Type de fiche de référence (presets/reference_sheets/) : portrait, turnaround, plan large… */
+export interface ReferenceSheet {
+  id: string;
+  name: string;
+  description: string;
+  kinds: LibraryKind[];
+  width: number;
+  height: number;
+  /** null : palier de la série (ou Qualité). */
+  workflow: string | null;
+}
+
+/** Image générée par « Créer des références », gardée ou non. */
+export interface ReferenceVariant {
+  id: number;
+  entry_kind: LibraryKind;
+  entry_id: number;
+  url: string;
+  sheet: string;
+  sheet_name: string;
+  preset: string | null;
+  tier: string | null;
+  seed: Seed | null;
+  width: number;
+  height: number;
+  prompt: string;
+  instruction: string;
+  /** Variante de départ d'un « Affiner ». */
+  parent_id: number | null;
+  kept: boolean;
+  kept_image_id: number | null;
+  job_id: number | null;
+  params: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface ReferenceStudio {
+  /** Plus récentes d'abord. */
+  variants: ReferenceVariant[];
+  active_jobs: Job[];
+  max_kept: number;
+  kept_count: number;
+  /** Emplacements d'images de référence d'une case de la série. */
+  reference_slots: number;
+}
+
+export interface ReferenceGenerateInput {
+  sheet: string;
+  count?: number;
+  quality?: boolean;
+}
+
+export interface ReferenceRefineInput {
+  instruction: string;
+  count?: number;
+  quality?: boolean;
+}
+
+/** Segment d'URL du moteur pour chaque sorte. */
+const LIBRARY_SEGMENT: Record<LibraryKind, string> = {
+  character: "characters",
+  object: "objects",
+  decor: "decors",
+};
 
 export interface Health {
   engine: { status: string; version: string };
@@ -722,6 +981,11 @@ export interface Presets {
     workflow_with_references?: string | null;
     workflow_quality?: string | null;
     layout_style?: string | null;
+    sketch_enabled?: boolean;
+    workflow_sketch?: string | null;
+    /** Agrandisseur de la finition d'impression et part du dpi cible qui suffit (0,9). */
+    upscaler?: string | null;
+    finishing_tolerance?: number;
   } | null;
   page_formats: {
     id: string;
@@ -745,7 +1009,14 @@ export interface Presets {
     tier_choice: string | null;
     tier_order: number | null;
     estimated_s: number | null;
+    role?: "generation" | "croquis" | "propre";
+    /** Workflow « propre depuis croquis » du même palier. */
+    from_sketch?: string | null;
+    /** Débruitage livré (workflows « propre »). */
+    denoise?: number | null;
   }[];
+  /** Agrandisseurs de la finition d'impression (presets/upscalers/). */
+  upscalers?: Omit<Upscaler, "timeout_s">[];
   fonts: { id: string; name: string; bold: boolean; italic: boolean }[];
   layout_templates: LayoutTemplate[];
   layout_styles: LayoutStyle[];
@@ -1020,6 +1291,9 @@ export interface DaPanel {
   cadre: string | null;
   ambiance: string;
   sfx: DaSfx[];
+  /** Bibliothèque proposée par l'agent (null ou absent : garder le décor / les objets du scénario). */
+  decor?: number | null;
+  objets?: number[] | null;
 }
 
 /** Choix de direction artistique d'une page (`has_direction` faux : pas encore proposée). */
@@ -1240,6 +1514,9 @@ export interface Bible {
   rules: string;
   motifs: string;
   characters: { id: number; name: string; visual_description: string; note: string }[];
+  /** Décors et objets de la bibliothèque, repris dans la bible injectée aux agents. */
+  decors?: { id: number; name: string; visual_description: string }[];
+  objets?: { id: number; name: string; visual_description: string }[];
   chapter_summaries: ChapterSummaryEntry[];
   rendered: BibleSummary | null;
   updated_at: string | null;
@@ -1300,20 +1577,37 @@ export const api = {
   updateProject: (id: number, body: Partial<ProjectInput>) => request<Project>(`/projects/${id}`, json("PATCH", body)),
   deleteProject: (id: number) => request<void>(`/projects/${id}`, { method: "DELETE" }),
 
-  listCharacters: (projectId: number) => request<Character[]>(`/projects/${projectId}/characters`),
-  getCharacter: (id: number) => request<Character>(`/characters/${id}`),
-  createCharacter: (projectId: number, body: CharacterInput) =>
-    request<Character>(`/projects/${projectId}/characters`, json("POST", body)),
-  updateCharacter: (id: number, body: Partial<CharacterInput>) =>
-    request<Character>(`/characters/${id}`, json("PATCH", body)),
-  deleteCharacter: (id: number) => request<void>(`/characters/${id}`, { method: "DELETE" }),
-  uploadReferenceImages: (id: number, files: File[]) => {
+  listLibrary: <T extends LibraryEntry = LibraryEntry>(kind: LibraryKind, projectId: number) =>
+    request<T[]>(`/projects/${projectId}/${LIBRARY_SEGMENT[kind]}`),
+  getLibraryEntry: (kind: LibraryKind, id: number) => request<LibraryEntry>(`/${LIBRARY_SEGMENT[kind]}/${id}`),
+  createLibraryEntry: (kind: LibraryKind, projectId: number, body: LibraryEntryInput) =>
+    request<LibraryEntry>(`/projects/${projectId}/${LIBRARY_SEGMENT[kind]}`, json("POST", body)),
+  updateLibraryEntry: (kind: LibraryKind, id: number, body: Partial<LibraryEntryInput>) =>
+    request<LibraryEntry>(`/${LIBRARY_SEGMENT[kind]}/${id}`, json("PATCH", body)),
+  deleteLibraryEntry: (kind: LibraryKind, id: number) =>
+    request<void>(`/${LIBRARY_SEGMENT[kind]}/${id}`, { method: "DELETE" }),
+  uploadLibraryImages: (kind: LibraryKind, id: number, files: File[]) => {
     const form = new FormData();
     for (const f of files) form.append("files", f);
-    return request<Character>(`/characters/${id}/images`, { method: "POST", body: form });
+    return request<LibraryEntry>(`/${LIBRARY_SEGMENT[kind]}/${id}/images`, { method: "POST", body: form });
   },
-  deleteReferenceImage: (characterId: number, imageId: number) =>
-    request<void>(`/characters/${characterId}/images/${imageId}`, { method: "DELETE" }),
+  deleteLibraryImage: (kind: LibraryKind, id: number, imageId: number) =>
+    request<void>(`/${LIBRARY_SEGMENT[kind]}/${id}/images/${imageId}`, { method: "DELETE" }),
+  reorderLibraryImages: (kind: LibraryKind, id: number, imageIds: number[]) =>
+    request<LibraryEntry>(`/${LIBRARY_SEGMENT[kind]}/${id}/images/order`, json("PUT", { image_ids: imageIds })),
+  referenceSheets: (kind?: LibraryKind) =>
+    request<ReferenceSheet[]>(`/presets/reference-sheets${kind ? `?kind=${kind}` : ""}`),
+  referenceStudio: (kind: LibraryKind, id: number) =>
+    request<ReferenceStudio>(`/${LIBRARY_SEGMENT[kind]}/${id}/reference-variants`),
+  generateReferences: (kind: LibraryKind, id: number, body: ReferenceGenerateInput) =>
+    request<Job[]>(`/${LIBRARY_SEGMENT[kind]}/${id}/reference-variants`, json("POST", body)),
+  refineReference: (variantId: number, body: ReferenceRefineInput) =>
+    request<Job[]>(`/reference-variants/${variantId}/refine`, json("POST", body)),
+  keepReference: (variantId: number) =>
+    request<LibraryEntry>(`/reference-variants/${variantId}/keep`, { method: "POST" }),
+  deleteReferenceVariant: (variantId: number) =>
+    request<void>(`/reference-variants/${variantId}`, { method: "DELETE" }),
+  listCharacters: (projectId: number) => request<Character[]>(`/projects/${projectId}/characters`),
 
   listChapters: (projectId: number) => request<Chapter[]>(`/projects/${projectId}/chapters`),
   upcomingChapters: (days = 7) => request<Chapter[]>(`/chapters/upcoming?days=${days}`),
@@ -1363,7 +1657,15 @@ export const api = {
     request<LoraCatalog>(`/comfyui/loras${refresh ? "?refresh=true" : ""}`, { signal: AbortSignal.timeout(15_000) }),
   startComfyTrial: (preset: string) => request<Job>("/comfyui/trial", json("POST", { preset })),
   getPanel: (id: number) => request<PanelDetail>(`/panels/${id}`),
-  updatePanel: (id: number, body: { final_prompt?: string | null; generation_preset?: string | null }) =>
+  updatePanel: (
+    id: number,
+    body: {
+      final_prompt?: string | null;
+      generation_preset?: string | null;
+      description?: string;
+      sketch_denoise?: number | null;
+    },
+  ) =>
     request<PanelDetail>(`/panels/${id}`, json("PATCH", body)),
   rebuildPrompt: (id: number) => request<PanelDetail>(`/panels/${id}/prompt/rebuild`, { method: "POST" }),
   generatePanel: (id: number, body: GenerateInput = {}) => request<Job[]>(`/panels/${id}/generate`, json("POST", body)),
@@ -1374,8 +1676,31 @@ export const api = {
     request<BatchGenerateResult>(`/pages/${id}/generate`, json("POST", body)),
   generateChapter: (id: number, body: { force?: boolean; count?: number } = {}) =>
     request<BatchGenerateResult>(`/chapters/${id}/generate`, json("POST", body)),
+  sketchPanel: (id: number, body: { seed?: Seed | null } = {}) => request<Job[]>(`/panels/${id}/sketch`, json("POST", body)),
+  validateSketch: (id: number, imageId?: number) =>
+    request<PanelDetail>(`/panels/${id}/sketch/validate`, json("POST", imageId ? { image_id: imageId } : {})),
+  unvalidateSketch: (id: number) => request<PanelDetail>(`/panels/${id}/sketch/validate`, { method: "DELETE" }),
+  cleanPanel: (id: number, body: { denoise?: number | null } = {}) => request<Job[]>(`/panels/${id}/clean`, json("POST", body)),
+  sketchPage: (id: number) => request<BatchGenerateResult>(`/pages/${id}/sketch`, { method: "POST" }),
+  sketchChapter: (id: number) => request<BatchGenerateResult>(`/chapters/${id}/sketch`, { method: "POST" }),
+  cleanPage: (id: number) => request<BatchGenerateResult>(`/pages/${id}/clean`, { method: "POST" }),
+  cleanChapter: (id: number) => request<BatchGenerateResult>(`/chapters/${id}/clean`, { method: "POST" }),
+  pageSketchEstimate: (id: number) => request<SketchEstimate>(`/pages/${id}/sketch-estimate`),
+  chapterSketchEstimate: (id: number) => request<SketchEstimate>(`/chapters/${id}/sketch-estimate`),
+  upscalers: () => request<Upscaler[]>("/presets/upscalers"),
+  finishPanel: (id: number) => request<Job>(`/panels/${id}/finish`, { method: "POST" }),
+  finishPage: (id: number) => request<BatchGenerateResult>(`/pages/${id}/finish`, { method: "POST" }),
+  finishChapter: (id: number) => request<BatchGenerateResult>(`/chapters/${id}/finish`, { method: "POST" }),
   selectPanelImage: (id: number) => request<PanelImage[]>(`/panel-images/${id}/select`, { method: "POST" }),
   deletePanelImage: (id: number) => request<void>(`/panel-images/${id}`, { method: "DELETE" }),
+  /** `character` : « auto » (le seul personnage de la case), « none » (aucun) ou l'id d'un personnage. */
+  getRepairInfo: (id: number, target: RepairTarget, character: number | "auto" | "none") =>
+    request<RepairInfo>(
+      `/panel-images/${id}/repair?target=${target}${
+        typeof character === "number" ? `&character_id=${character}` : character === "none" ? "&auto_character=false" : ""
+      }`,
+    ),
+  repairPanelImage: (id: number, body: RepairInput) => request<Job[]>(`/panel-images/${id}/repair`, json("POST", body)),
 
   getLettering: (pageId: number) => request<PageLettering>(`/pages/${pageId}/lettering`),
   resetLettering: (pageId: number) => request<PageLettering>(`/pages/${pageId}/lettering/reset`, { method: "POST" }),

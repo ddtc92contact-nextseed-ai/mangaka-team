@@ -12,13 +12,17 @@ from sqlalchemy.orm import Session, selectinload
 
 from ..pipeline.comfy_trial import STEP as TRIAL_STEP
 from ..pipeline.estimate import Estimate, estimate_panels, remaining_panels
+from ..pipeline.finishing import STEP as FINISH_STEP
+from ..pipeline.finishing import FinishingError, drop_finishes, panel_print_info, resolve_upscaler
 from ..pipeline.generation import (
     ACTIVE,
     QC_STEP,
     STEP,
     GenerationError,
+    LibraryEntry,
     enqueue_panel,
-    panel_characters,
+    entry_kind,
+    panel_cast,
     panel_label,
     panel_target,
     panels_to_generate,
@@ -28,9 +32,24 @@ from ..pipeline.generation import (
     resolve_preset_id,
     update_panel_prompt,
 )
+from ..pipeline.inpaint import MaskError, Region, decode_png
 from ..pipeline.qc_bench import STEP as BENCH_STEP
+from ..pipeline.reference_sheets import KIND_LABELS
+from ..pipeline.reference_sheets import STEP as REFERENCE_STEP
+from ..pipeline.repair import concerned_character, default_repair_prompt, enqueue_repair, repair_context
+from ..pipeline.sketch import validated_sketch
 from ..presets import PresetError, PresetRegistry
-from ..store.models import Chapter, Job, JobStatus, Page, Panel, PanelImage, PanelImageAnnotation, Project
+from ..store.models import (
+    Chapter,
+    ImageKind,
+    Job,
+    JobStatus,
+    Page,
+    Panel,
+    PanelImage,
+    PanelImageAnnotation,
+    Project,
+)
 from .chapters import get_chapter_or_404, get_page_or_404
 from .deps import AppContext, get_ctx, get_session
 from .errors import FieldError
@@ -42,12 +61,17 @@ from .schemas import (
     EstimateOut,
     GenerateIn,
     JobOut,
+    LibraryRef,
     PanelDetailOut,
     PanelImageOut,
     PanelUpdate,
     PresetEstimateOut,
     QueueItemOut,
     QueueOut,
+    RepairCharacterOut,
+    RepairIn,
+    RepairInfoOut,
+    RepairTarget,
     WorkflowPresetOut,
 )
 
@@ -72,6 +96,7 @@ def panel_image_out(img: PanelImage, presets: PresetRegistry | None = None) -> P
         id=img.id,
         panel_id=img.panel_id,
         version=img.version,
+        kind=img.kind.value,
         url=image_url(img),
         seed=img.seed,
         selected=img.selected,
@@ -86,6 +111,7 @@ def panel_image_out(img: PanelImage, presets: PresetRegistry | None = None) -> P
         qc=dict(img.qc_details or {}),
         detections=img.detections,
         annotation=annotation_out(img.annotation),
+        finish=img.finish,
         created_at=img.created_at,
     )
 
@@ -116,11 +142,11 @@ def _get_image_or_404(session: Session, image_id: int) -> PanelImage:
 
 
 def _active_jobs(session: Session, panel_id: int) -> list[Job]:
-    """Générations et contrôles qualité en cours ou en attente pour la case."""
+    """Générations, contrôles qualité et finitions en cours ou en attente pour la case."""
     return list(
         session.scalars(
             select(Job)
-            .where(Job.panel_id == panel_id, Job.step.in_([STEP, QC_STEP]), Job.status.in_(ACTIVE))
+            .where(Job.panel_id == panel_id, Job.step.in_([STEP, QC_STEP, FINISH_STEP]), Job.status.in_(ACTIVE))
             .order_by(Job.id)
         )
     )
@@ -128,9 +154,13 @@ def _active_jobs(session: Session, panel_id: int) -> list[Job]:
 
 def panel_detail(session: Session, ctx: AppContext, panel: Panel) -> PanelDetailOut:
     page = panel.page
-    characters = panel_characters(session, panel)
+    cast = panel_cast(session, panel)
     presets = _presets(ctx, panel)
-    resolved = resolve_preset_id(presets, panel, characters)
+    resolved = resolve_preset_id(presets, panel, cast.entries)
+    try:
+        upscaler: str | None = resolve_upscaler(presets, page.chapter.project).preset.name
+    except FinishingError:
+        upscaler = None
     return PanelDetailOut(
         id=panel.id,
         page_id=page.id,
@@ -142,6 +172,8 @@ def panel_detail(session: Session, ctx: AppContext, panel: Panel) -> PanelDetail
         description=panel.description,
         characters=list(panel.character_names or []),
         character_ids=list(panel.character_ids or []),
+        decor=_ref(cast.decor) if cast.decor is not None else None,
+        objets=[_ref(o) for o in cast.objects],
         shot_type=panel.shot_type,
         state=panel.state.value,
         bbox=panel.bbox,
@@ -152,7 +184,15 @@ def panel_detail(session: Session, ctx: AppContext, panel: Panel) -> PanelDetail
         target=panel_target(presets, page, panel),
         images=[panel_image_out(i, presets) for i in panel.images],
         active_jobs=[job_out(j) for j in _active_jobs(session, panel.id)],
+        sketch_image_id=sketch.id if (sketch := validated_sketch(panel)) else None,
+        sketch_denoise=panel.sketch_denoise,
+        print_info=panel_print_info(presets, ctx.files, panel),  # type: ignore[arg-type]
+        upscaler=upscaler,
     )
+
+
+def _ref(entry: LibraryEntry) -> LibraryRef:
+    return LibraryRef(id=entry.id, kind=entry_kind(entry), name=entry.name)  # type: ignore[arg-type]
 
 
 def _presets(ctx: AppContext, panel: Panel) -> PresetRegistry:
@@ -187,13 +227,26 @@ def get_panel(
 def update_panel(
     panel_id: int, body: PanelUpdate, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
 ) -> PanelDetailOut:
-    """Édite le prompt final (conservé tel quel ensuite) et/ou impose un workflow à la case."""
+    """Édite le prompt final (conservé tel quel ensuite), la description, le débruitage du passage au
+    propre et/ou impose un workflow à la case."""
     panel = get_panel_or_404(session, panel_id)
     changes = body.model_dump(exclude_unset=True)
+    if "sketch_denoise" in changes:
+        panel.sketch_denoise = changes["sketch_denoise"]
+    if "description" in changes:
+        if changes["description"] is None:
+            raise FieldError("description", "ne peut pas être vide")
+        panel.description = changes["description"]
+        update_panel_prompt(_presets(ctx, panel), session, panel, ctx.knowledge)
     if "generation_preset" in changes:
         preset = changes["generation_preset"]
-        if preset is not None and preset not in _presets(ctx, panel).workflows:
+        known = _presets(ctx, panel).workflows
+        if preset is not None and preset not in known:
             raise FieldError("generation_preset", f"workflow inconnu : « {preset} »")
+        if preset is not None and known[preset].preset.inpaint is not None:
+            raise FieldError(
+                "generation_preset", f"« {preset} » est un preset de réparation : il ne génère pas de case"
+            )
         panel.generation_preset = preset
     if "final_prompt" in changes:
         text = (changes["final_prompt"] or "").strip()
@@ -226,7 +279,7 @@ def regenerate_panel_quality(
     _require_comfyui(ctx)
     panel = get_panel_or_404(session, panel_id)
     try:
-        preset = quality_preset_id(_presets(ctx, panel), panel_characters(session, panel))
+        preset = quality_preset_id(_presets(ctx, panel), panel_cast(session, panel).entries)
     except GenerationError as exc:
         raise FieldError("preset", str(exc)) from None
     jobs = _enqueue(session, ctx, panel, count=1, preset=preset, extra_params={"regenerate": "quality"})
@@ -297,6 +350,86 @@ def generate_chapter(
     return _generate_pages(session, ctx, pages, body or BatchGenerateIn())
 
 
+# --- réparation ciblée -----------------------------------------------------------------
+@router.get("/panel-images/{image_id}/repair", response_model=RepairInfoOut)
+def get_repair_info(
+    image_id: int,
+    target: RepairTarget = "zone",
+    character_id: int | None = None,
+    auto_character: bool = True,
+    session: Session = Depends(get_session),
+    ctx: AppContext = Depends(get_ctx),
+) -> RepairInfoOut:
+    """Préremplit « Réparer » : preset de réparation du palier, marge, adoucissement, denoise et prompt
+    (description de la case + personnage concerné : mots-clés, mots déclencheurs de son LoRA)."""
+    img = _get_image_or_404(session, image_id)
+    presets = _presets(ctx, img.panel)
+    try:
+        rctx = repair_context(session, presets, img)
+    except (GenerationError, PresetError) as exc:
+        return RepairInfoOut(available=False, problem=str(exc)[:1].upper() + str(exc)[1:], target=target)
+    characters = [RepairCharacterOut(id=c.id, name=c.name) for c in rctx.characters]
+    # Sans choix explicite (`auto_character`) : le seul personnage de la case est celui concerné.
+    if character_id is None and auto_character and len(rctx.characters) == 1:
+        character_id = rctx.characters[0].id
+    try:
+        character = concerned_character(rctx, character_id)
+    except GenerationError as exc:
+        raise FieldError("character_id", str(exc)) from None
+    preset = rctx.loaded.preset
+    return RepairInfoOut(
+        available=True,
+        preset=preset.id,
+        preset_name=preset.name,
+        tier=preset.tier.name if preset.tier else None,
+        grow_px=rctx.settings.grow_px,
+        feather_px=rctx.settings.feather_px,
+        denoise=float(preset.defaults.get("denoise", 0.45)),
+        target=target,
+        character_id=character.id if character is not None else None,
+        characters=characters,
+        prompt=default_repair_prompt(presets, rctx, img, target, character),
+    )
+
+
+@router.post("/panel-images/{image_id}/repair", response_model=list[JobOut], status_code=202)
+def repair_panel_image(
+    image_id: int, body: RepairIn, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
+) -> list[JobOut]:
+    """« Réparer » : repeint seulement la zone choisie de cette version (inpainting), via la file
+    ComfyUI. Le résultat est une nouvelle version liée à sa source (`params.repair`), contrôlée par le QC ;
+    la version choisie ne change pas."""
+    _require_comfyui(ctx)
+    img = _get_image_or_404(session, image_id)
+    try:
+        painted = decode_png(body.mask_png) if body.mask_png else None
+    except MaskError as exc:
+        raise FieldError("mask_png", str(exc)) from None
+    try:
+        job = enqueue_repair(
+            session,
+            _presets(ctx, img.panel),
+            ctx.files,
+            img,
+            regions=[Region(r.x1, r.y1, r.x2, r.y2) for r in body.regions],
+            painted=painted,
+            target=body.target,
+            character_id=body.character_id,
+            prompt=body.prompt,
+            grow_px=body.grow_px,
+            feather_px=body.feather_px,
+            denoise=body.denoise,
+            seed=body.seed,
+        )
+    except PresetError as exc:
+        raise FieldError("preset", str(exc)) from None
+    except GenerationError as exc:
+        raise FieldError("repair", str(exc)[:1].upper() + str(exc)[1:]) from None
+    session.commit()
+    ctx.generation.notify()
+    return [job_out(job)]
+
+
 # --- versions ---------------------------------------------------------------------------
 @router.get("/panels/{panel_id}/images", response_model=list[PanelImageOut])
 def list_panel_images(
@@ -326,11 +459,17 @@ def get_panel_image_file(
 def select_panel_image(
     image_id: int, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
 ) -> list[PanelImageOut]:
-    """Choisit cette version pour la case (une seule version choisie par case)."""
+    """Choisit cette version pour la case (une seule version choisie par case ; jamais un croquis).
+
+    La finition d'impression des autres versions de la case est effacée (celle des autres cases ne
+    bouge pas) : elle ne vaut que pour la version retenue."""
     img = _get_image_or_404(session, image_id)
+    if img.kind == ImageKind.croquis:
+        raise FieldError("image_id", "un croquis ne peut pas être choisi : valide-le puis « Passer au propre »")
     panel = img.panel
     for other in panel.images:
         other.selected = other.id == img.id
+    drop_finishes(ctx.files, panel, keep_image_id=img.id)
     session.flush()
     refresh_states(session, [panel.id])  # l'état de la case suit le verdict QC de la version choisie
     session.commit()
@@ -344,11 +483,19 @@ def delete_panel_image(
     """Supprime une version (et son fichier). Si c'était la version choisie, aucune ne l'est plus."""
     img = _get_image_or_404(session, image_id)
     panel_id, path = img.panel_id, img.path
+    if img.panel.sketch_image_id == img.id:
+        img.panel.sketch_image_id = None  # croquis validé supprimé : la case est à trier de nouveau
+    finished = (img.finish or {}).get("path")
+    mask = ((img.params or {}).get("repair") or {}).get("mask_path")
     session.delete(img)
     session.flush()
     refresh_states(session, [panel_id])
     session.commit()
     ctx.files.delete(path)
+    if isinstance(finished, str):
+        ctx.files.delete(finished)
+    if isinstance(mask, str) and mask:
+        ctx.files.delete(mask)
     return Response(status_code=204)
 
 
@@ -403,7 +550,9 @@ def _median_durations(session: Session) -> tuple[dict[str, float], float | None,
     """Médianes des durées réussies : par preset et toutes générations confondues, puis des contrôles QC."""
     rows = session.execute(
         select(Job.step, Job.params, Job.duration_ms)
-        .where(Job.step.in_([STEP, QC_STEP]), Job.status == JobStatus.succeeded, Job.duration_ms.is_not(None))
+        .where(
+            Job.step.in_([STEP, QC_STEP, FINISH_STEP]), Job.status == JobStatus.succeeded, Job.duration_ms.is_not(None)
+        )
         .order_by(Job.id.desc())
         .limit(500)
     ).all()
@@ -416,6 +565,11 @@ def _median_durations(session: Session) -> tuple[dict[str, float], float | None,
             n = len((params or {}).get("image_ids") or []) or 1
             if len(qc) < MEDIAN_SAMPLE:
                 qc.append(seconds / n)
+            continue
+        if step == FINISH_STEP:  # durées des finitions, par agrandisseur (clé « finishing:<id> »)
+            key = f"finishing:{(params or {}).get('upscaler')}"
+            if len(by_preset.setdefault(key, [])) < MEDIAN_SAMPLE:
+                by_preset[key].append(seconds)
             continue
         preset = (params or {}).get("preset")
         if isinstance(preset, str) and len(by_preset.setdefault(preset, [])) < MEDIAN_SAMPLE:
@@ -446,7 +600,10 @@ def get_queue(session: Session = Depends(get_session), ctx: AppContext = Depends
     jobs = list(
         session.scalars(
             select(Job)
-            .where(Job.step.in_([STEP, QC_STEP, BENCH_STEP, TRIAL_STEP]), Job.status.in_(ACTIVE))
+            .where(
+                Job.step.in_([STEP, QC_STEP, BENCH_STEP, TRIAL_STEP, REFERENCE_STEP, FINISH_STEP]),
+                Job.status.in_(ACTIVE),
+            )
             .order_by((Job.status == JobStatus.running).desc(), Job.id)
         )
     )
@@ -457,7 +614,13 @@ def get_queue(session: Session = Depends(get_session), ctx: AppContext = Depends
         params = job.params or {}
         preset = params.get("preset")
         is_qc = job.step in (QC_STEP, BENCH_STEP)
-        if job.step == BENCH_STEP:
+        if job.step == FINISH_STEP:
+            upscaler_id = params.get("upscaler")
+            estimate = medians.get(f"finishing:{upscaler_id}")
+            if estimate is None and isinstance(upscaler_id, str):
+                loaded = ctx.agents.presets_for(job.project_id).upscalers.get(upscaler_id)
+                estimate = loaded.preset.estimated_s if loaded is not None else None
+        elif job.step == BENCH_STEP:
             n_cases = int(params.get("sample_count") or 1)
             estimate = qc_median * n_cases if qc_median is not None else None
         elif is_qc:
@@ -480,7 +643,16 @@ def get_queue(session: Session = Depends(get_session), ctx: AppContext = Depends
             label = f"{chapter.project.title} · ch. {chapter.number}"
         else:
             label = f"Job {job.id}"
-        if job.step == TRIAL_STEP:
+        series = chapter.project if chapter else (session.get(Project, job.project_id) if job.project_id else None)
+        if job.step == FINISH_STEP:
+            label = f"Finition d'impression · {label} ({params.get('upscaler_name') or params.get('upscaler')})"
+        elif job.step == REFERENCE_STEP:
+            kind = KIND_LABELS.get(str(params.get("entry_kind")), "fiche")
+            action = "Affiner" if params.get("parent_id") is not None else "Références"
+            label = f"{action} · {params.get('entry_name') or kind} ({kind}) · {params.get('sheet_name') or ''}"
+            if series is not None:
+                label = f"{series.title} · {label}"
+        elif job.step == TRIAL_STEP:
             label = f"Case d'essai ComfyUI · {params.get('preset_name') or preset}"
         elif job.step == BENCH_STEP:
             n = int(params.get("sample_count") or 0)
@@ -500,8 +672,8 @@ def get_queue(session: Session = Depends(get_session), ctx: AppContext = Depends
                 chapter_id=chapter.id if chapter else None,
                 chapter_number=chapter.number if chapter else None,
                 chapter_title=chapter.title if chapter else None,
-                project_id=chapter.project_id if chapter else None,
-                series_title=chapter.project.title if chapter else None,
+                project_id=series.id if series else None,
+                series_title=series.title if series else None,
                 preset=preset if isinstance(preset, str) and not is_qc else None,
                 tier=(
                     preset_tier(ctx.agents.presets_for(chapter.project_id if chapter else None), preset)
@@ -548,6 +720,10 @@ def list_workflow_presets(ctx: AppContext = Depends(get_ctx)) -> list[WorkflowPr
             tier_order=w.preset.tier.order if w.preset.tier else None,
             estimated_s=w.preset.estimated_s,
             is_quality=bool(defaults and defaults.workflow_quality == w.preset.id),
+            role=w.preset.role,
+            from_sketch=w.preset.from_sketch,
+            is_sketch=bool(defaults and defaults.workflow_sketch == w.preset.id),
         )
         for w in presets.workflows.values()
+        if w.preset.inpaint is None  # presets de réparation : jamais proposés pour générer une case
     ]

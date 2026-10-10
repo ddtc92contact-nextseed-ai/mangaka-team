@@ -107,6 +107,49 @@ class LoraChain(_Strict):
 
 
 REQUIRED_WORKFLOW_PARAMS = ("positive_prompt", "negative_prompt", "seed", "width", "height")
+WorkflowRole = Literal["generation", "croquis", "propre"]
+# Un preset de réparation (inpainting) part de l'image source : pas de taille, mais un débruitage partiel.
+REQUIRED_INPAINT_PARAMS = ("positive_prompt", "negative_prompt", "seed", "denoise")
+REPAIR_TARGETS = ("face", "hand", "zone")
+REPAIR_PROMPT_VARIABLES = frozenset({"target", "character", "description", "style"})
+
+
+class InpaintSettings(_Strict):
+    """Réparation ciblée (inpainting) : ce bloc fait d'un workflow un preset de réparation.
+
+    `source_image` reçoit l'image de la version à réparer, `mask_image` le masque (blanc = zone à
+    repeindre, déjà agrandi et adouci par le moteur). Le résultat est recollé sur l'original hors
+    ComfyUI : hors du masque adouci, les pixels ne bougent pas.
+    """
+
+    source_image: NodeInput
+    mask_image: NodeInput
+    grow_px: int = Field(default=24, ge=0, le=256, description="Marge ajoutée autour de la zone (px)")
+    feather_px: int = Field(default=16, ge=0, le=128, description="Largeur des bords fondus (px)")
+    # Prompt de réparation prérempli : morceaux assemblés comme `image_prompt.yaml` (un morceau dont
+    # une variable est vide est omis). Variables : $target, $character, $description, $style.
+    prompt_parts: list[str] = Field(
+        default_factory=lambda: ["$target.", "$character.", "$description.", "Style : $style."]
+    )
+    # Texte de $target selon la zone : visage, main, zone dessinée à la main.
+    targets: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("prompt_parts")
+    @classmethod
+    def _check_parts(cls, parts: list[str]) -> list[str]:
+        for part in parts:
+            unknown = set(string.Template(part).get_identifiers()) - REPAIR_PROMPT_VARIABLES
+            if unknown:
+                raise ValueError(f"variable inconnue dans prompt_parts : ${', $'.join(sorted(unknown))}")
+        return parts
+
+    @field_validator("targets")
+    @classmethod
+    def _check_targets(cls, targets: dict[str, str]) -> dict[str, str]:
+        unknown = [k for k in targets if k not in REPAIR_TARGETS]
+        if unknown:
+            raise ValueError(f"zone inconnue : {', '.join(unknown)} (possibles : {', '.join(REPAIR_TARGETS)})")
+        return targets
 
 
 class WorkflowTier(_Strict):
@@ -141,10 +184,28 @@ class WorkflowPreset(_Strict):
     tier: WorkflowTier | None = None
     # Durée estimée d'une case (s), utilisée tant que les vraies durées de ce preset sont trop peu nombreuses.
     estimated_s: float | None = Field(default=None, gt=0)
+    # Rôle : `generation` (palier de série), `croquis` (brouillon rapide de la composition, jamais
+    # assemblé) ou `propre` (version finale tirée d'une image de composition : croquis validé).
+    role: WorkflowRole = "generation"
+    # Croquis : grand côté de l'image en px (même ratio que la case) ; absent = taille de la mise en page.
+    long_side: int | None = Field(default=None, ge=64, le=4096)
+    # Propre : nœud qui reçoit l'image de composition (croquis validé envoyé à ComfyUI).
+    source_image: NodeInput | None = None
+    # Palier de série : workflow « propre depuis croquis » du même palier (« Passer au propre »).
+    from_sketch: str | None = None
+    # Preset de réparation ciblée (inpainting) du même palier, pour les versions produites par ce workflow.
+    inpaint_with: str | None = Field(default=None, description="Id du preset de réparation (bloc `inpaint`)")
+    # Présent = ce workflow est un preset de réparation (jamais proposé pour générer une case).
+    inpaint: InpaintSettings | None = None
+
+    @property
+    def is_inpaint(self) -> bool:
+        return self.inpaint is not None
 
     @model_validator(mode="after")
     def _check_mapping(self) -> WorkflowPreset:
-        missing = [p for p in REQUIRED_WORKFLOW_PARAMS if p not in self.mapping]
+        required = REQUIRED_INPAINT_PARAMS if self.inpaint is not None else REQUIRED_WORKFLOW_PARAMS
+        missing = [p for p in required if p not in self.mapping]
         if missing:
             raise ValueError(f"paramètres obligatoires absents du mapping : {', '.join(missing)}")
         unknown = [k for k in self.defaults if k not in self.mapping]
@@ -157,9 +218,76 @@ class WorkflowPreset(_Strict):
             raise ValueError("trial : positive_prompt est obligatoire")
         if self.with_references == self.id:
             raise ValueError("with_references ne peut pas désigner le workflow lui-même")
+        if self.from_sketch == self.id:
+            raise ValueError("from_sketch ne peut pas désigner le workflow lui-même")
+        if self.role == "propre":
+            if self.source_image is None:
+                raise ValueError("un workflow « propre » doit déclarer source_image (image de composition)")
+            if "denoise" not in self.mapping:
+                raise ValueError("un workflow « propre » doit mapper denoise (débruitage partiel)")
+        elif self.source_image is not None:
+            raise ValueError("source_image est réservé aux workflows « propre »")
+        if self.long_side is not None and self.role != "croquis":
+            raise ValueError("long_side est réservé aux workflows « croquis »")
+        if self.inpaint is not None and (self.trial or self.with_references or self.inpaint_with):
+            raise ValueError("un preset de réparation (inpaint) n'a ni trial, ni with_references, ni inpaint_with")
+        if self.inpaint is not None and self.tier is not None and self.tier.choice:
+            raise ValueError("un preset de réparation (inpaint) ne peut pas être proposé comme palier (tier.choice)")
         nodes = [s.node for s in self.reference_images]
         if len(set(nodes)) != len(nodes):
             raise ValueError("reference_images : un même nœud est déclaré deux fois")
+        return self
+
+
+REQUIRED_UPSCALER_PARAMS = ("image", "width", "height")
+
+
+class UpscalerPreset(_Strict):
+    """Agrandissement d'une case avant l'assemblage (finition d'impression), `presets/upscalers/`.
+
+    Le JSON API charge l'image de la version retenue (`image` : un `LoadImage`), l'agrandit avec un
+    modèle et la ramène à la taille finale exacte (`width` / `height`), calculée par case.
+    """
+
+    id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
+    name: str
+    description: str = ""
+    workflow_file: str = Field(description="Chemin du JSON API ComfyUI, relatif au fichier preset")
+    output_node: str = Field(description="Nœud SaveImage dont on récupère l'image agrandie")
+    mapping: dict[str, NodeInput]
+    defaults: dict[str, Any] = Field(default_factory=dict)
+    # Facteur natif du modèle (×4 pour un ESRGAN 4x) : informatif, la taille finale reste exacte.
+    model_scale: float | None = Field(default=None, gt=0)
+    # Option « haute fidélité » (lente) : jamais choisie par défaut sans le dire.
+    high_fidelity: bool = False
+    timeout_s: float = Field(default=600, gt=0, le=24 * 3600, description="Durée max d'un agrandissement")
+    estimated_s: float | None = Field(default=None, gt=0)
+
+    # Même interface que WorkflowPreset pour les vérifications communes (mapping, test de connexion).
+    @property
+    def reference_images(self) -> list[ReferenceSlot]:
+        return []
+
+    @property
+    def lora_chain(self) -> LoraChain | None:
+        return None
+
+    @property
+    def inpaint(self) -> InpaintSettings | None:
+        return None
+
+    @property
+    def source_image(self) -> NodeInput | None:
+        return None
+
+    @model_validator(mode="after")
+    def _check_mapping(self) -> UpscalerPreset:
+        missing = [p for p in REQUIRED_UPSCALER_PARAMS if p not in self.mapping]
+        if missing:
+            raise ValueError(f"paramètres obligatoires absents du mapping : {', '.join(missing)}")
+        unknown = [k for k in self.defaults if k not in self.mapping]
+        if unknown:
+            raise ValueError(f"valeurs par défaut sans mapping : {', '.join(unknown)}")
         return self
 
 
@@ -194,6 +322,15 @@ class Defaults(_Strict):
     layout_style: str | None = None
     # Palier de « Régénérer en Qualité » (atelier) ; son `with_references` sert aux cases avec références.
     workflow_quality: str | None = None
+    # Palier croquis : activé pour les nouvelles séries, et workflow des croquis (rôle `croquis`).
+    sketch_enabled: bool = True
+    workflow_sketch: str | None = None
+    # Finition d'impression : agrandisseur par défaut (presets/upscalers/), surchargeable par série.
+    upscaler: str | None = None
+    # Pas d'agrandissement si la case atteint déjà cette part du dpi cible (0,9 × 300 = 270 dpi).
+    finishing_tolerance: float = Field(default=0.9, gt=0, le=1)
+    # Preset de réparation ciblée pour un workflow qui ne déclare pas `inpaint_with`.
+    workflow_inpaint: str | None = None
 
 
 # --- Découpage (étape 2) ------------------------------------------------------
@@ -710,6 +847,8 @@ IMAGE_PROMPT_VARIABLES = {
     "ambiance",
     "description",
     "characters",
+    "decor",
+    "objects",
     "style",
     "savoir_faire",
     "bible",
@@ -720,7 +859,8 @@ class ImagePromptSettings(_Strict):
     """Construction du prompt final d'une case (voir pipeline/prompt.py)."""
 
     # Morceaux assemblés dans l'ordre ; un morceau dont une variable est vide est omis.
-    # Variables : $shot, $description, $characters, $style, $savoir_faire (passages du savoir-faire),
+    # Variables : $shot, $description, $characters, $decor, $objects (bibliothèque de la série), $style,
+    # $savoir_faire (passages du savoir-faire),
     # $bible (notes de la bible sur les personnages de la case) ; direction artistique appliquée :
     # $plan (son type de plan, sinon celui du scénario), $angle, $ambiance.
     parts: list[str] = Field(
@@ -750,6 +890,50 @@ class ImagePromptSettings(_Strict):
             if unknown:
                 raise ValueError(f"variables inconnues : {', '.join(sorted(unknown))}")
         return value
+
+
+# --- Fiches de référence (« Créer des références » de la bibliothèque) ---------
+REFERENCE_SHEET_VARIABLES = {"name", "description", "keywords", "style", "instruction"}
+LibraryKindName = Literal["character", "object", "decor"]
+
+
+class ReferenceSheet(_Strict):
+    """Type de fiche de référence (`presets/reference_sheets/*.yaml`) : gabarit de prompt, taille, workflow.
+
+    `prompt` : morceaux assemblés dans l'ordre, un morceau dont une variable est vide est omis.
+    Variables : $name, $description (description visuelle de la fiche), $keywords (mots-clés + mots
+    déclencheurs de son LoRA), $style (style de la série + mots déclencheurs du LoRA de style),
+    $instruction (consigne d'« Affiner », vide pour une première génération).
+    """
+
+    id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
+    name: str
+    description: str = ""
+    kinds: list[LibraryKindName] = Field(min_length=1, description="Sortes de fiches concernées")
+    prompt: list[str] = Field(min_length=1)
+    negative_prompt: str = Field(default="", description="Ajouté au prompt négatif du workflow")
+    width: int = Field(ge=256, le=2048, multiple_of=8)
+    height: int = Field(ge=256, le=2048, multiple_of=8)
+    # None : palier de la série (Turbo par défaut), ou Qualité si demandé. Un id impose ce workflow.
+    workflow: str | None = None
+    order: int = Field(default=100, description="Ordre dans la liste déroulante")
+
+    @field_validator("prompt")
+    @classmethod
+    def _check_prompt(cls, value: list[str]) -> list[str]:
+        for part in value:
+            tpl = string.Template(part)
+            if not tpl.is_valid():
+                raise ValueError("gabarit invalide : un « $ » isolé doit s'écrire « $$ »")
+            unknown = set(tpl.get_identifiers()) - REFERENCE_SHEET_VARIABLES
+            if unknown:
+                raise ValueError(f"variables inconnues : {', '.join(sorted(unknown))}")
+        return value
+
+    @field_validator("kinds")
+    @classmethod
+    def _unique_kinds(cls, value: list[str]) -> list[str]:
+        return list(dict.fromkeys(value))
 
 
 # --- Contrôle qualité (étape 4) -----------------------------------------------

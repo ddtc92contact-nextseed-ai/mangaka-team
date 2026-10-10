@@ -36,7 +36,17 @@ PRESETS = [
     "qwen-image-edit-ref",
     "qwen-image-edit-ref-rapide",
     "qwen-image-edit-ref-turbo",
+    # Palier croquis et passage au propre (image → image depuis le croquis validé).
+    "qwen-image-croquis",
+    "qwen-image-edit-ref-croquis",
+    "qwen-image-turbo-from-sketch",
+    "qwen-image-edit-ref-turbo-from-sketch",
+    "qwen-image-base-rapide-from-sketch",
+    "qwen-image-edit-ref-rapide-from-sketch",
+    "qwen-image-base-from-sketch",
+    "qwen-image-edit-ref-from-sketch",
 ]
+SOURCE = "mangaka/croquis_case1_v1.png"
 # Paliers (texte → image, avec références) : Qualité, Rapide, Turbo.
 TIERS = {
     "": ("qwen-image-base", "qwen-image-edit-ref"),
@@ -48,7 +58,8 @@ TIERS = {
 def _build(preset_id: str) -> dict:
     loaded = REG.workflow(preset_id)
     refs = REFERENCES if loaded.preset.reference_images else []
-    return build_workflow(loaded, PARAMS, reference_images=refs, loras=LORAS).workflow
+    source = SOURCE if loaded.preset.source_image else None
+    return build_workflow(loaded, PARAMS, reference_images=refs, loras=LORAS, source_image=source).workflow
 
 
 @pytest.mark.parametrize("preset_id", PRESETS)
@@ -115,7 +126,8 @@ def test_tier_pairing_and_defaults() -> None:
     for base, edit in TIERS.values():
         assert REG.workflow(base).preset.with_references == edit
     for preset_id in PRESETS:
-        assert REG.workflow(preset_id).preset.trial["positive_prompt"]
+        if REG.workflow(preset_id).preset.role != "propre":  # « propre » demande un croquis source
+            assert REG.workflow(preset_id).preset.trial["positive_prompt"]
     # ordre des listes
     assert list(REG.workflows)[:3] == ["qwen-image-base", "qwen-image-base-rapide", "qwen-image-turbo"]
     # trois paliers proposés dans la fiche série, dans l'ordre Turbo, Rapide, Qualité
@@ -129,3 +141,30 @@ def test_tier_pairing_and_defaults() -> None:
     for (base, edit), seconds in zip(TIERS.values(), (70, 60, 20), strict=True):
         assert REG.workflow(base).preset.estimated_s == seconds
         assert REG.workflow(edit).preset.estimated_s == seconds * 4
+
+
+# Réparation ciblée (inpainting) : image source, masque, denoise, seed, références et LoRA injectés.
+INPAINT_PRESETS = ["qwen-image-inpaint", "qwen-image-inpaint-rapide", "qwen-image-inpaint-turbo"]
+INPAINT_PARAMS = {
+    "positive_prompt": "Main bien dessinée, cinq doigts. Personnage : Aiko (cheveux noirs).",
+    "negative_prompt": "texte, bulles",
+    "seed": 424242,
+    "denoise": 0.4,
+    "filename_prefix": "mangaka/serie-1/chapitre-1/page-1/case-1",
+}
+
+
+@pytest.mark.parametrize("preset_id", INPAINT_PRESETS)
+def test_inpaint_workflow_matches_golden(preset_id: str) -> None:
+    built = build_workflow(
+        REG.workflow(preset_id),
+        INPAINT_PARAMS,
+        reference_images=REFERENCES[:1],
+        loras=LORAS,
+        inpaint_images=("mangaka/source_img12.png", "mangaka/masque_job34.png"),
+    ).workflow
+    path = GOLDEN / f"{preset_id}.json"
+    text = json.dumps(built, indent=2, ensure_ascii=False, sort_keys=True) + "\n"
+    if os.environ.get("UPDATE_GOLDEN"):
+        path.write_text(text, encoding="utf-8")
+    assert json.loads(path.read_text(encoding="utf-8")) == built

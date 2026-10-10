@@ -11,7 +11,7 @@ Après modification d'un preset, redémarre le moteur (`npm run dev`).
 
 | Fichier | Rôle |
 | --- | --- |
-| `defaults.yaml` | Format de page, workflow (palier **Turbo**) et style de mise en page (`layout_style`) appliqués aux nouvelles séries ; workflow « avec références » de repli pour un preset qui ne déclare pas `with_references` (`workflow_with_references`) ; palier de « Régénérer en Qualité » (`workflow_quality`) |
+| `defaults.yaml` | Format de page, workflow (palier **Turbo**) et style de mise en page (`layout_style`) appliqués aux nouvelles séries ; workflow « avec références » de repli pour un preset qui ne déclare pas `with_references` (`workflow_with_references`) ; palier de « Régénérer en Qualité » (`workflow_quality`) ; agrandisseur de la finition d'impression (`upscaler`) et tolérance de dpi (`finishing_tolerance`) ; preset de réparation ciblée de repli (`workflow_inpaint`) ; palier croquis (`sketch_enabled`, `workflow_sketch`) |
 | `providers.yaml` | Paramètres des fournisseurs (URL, modèle LLM, timeouts). **Aucune clé d'API ici** : elles vont dans `.env` |
 | `page_formats/*.yaml` | Formats de page (dimensions en mm, DPI, marges, gouttières) : A4 (défaut) et B4 JIS à 300 DPI |
 | `layout.yaml` | Découpage : taille mini d'une case, taille cible de génération, zones de bulles, seuil de régénération conseillée |
@@ -21,9 +21,13 @@ Après modification d'un preset, redémarre le moteur (`npm run dev`).
 | `image_prompt.yaml` | Construction du prompt final des cases (étape 3) et termes « pas de texte » du prompt négatif |
 | `qc.yaml` | Contrôle qualité des cases (étape 4) : poids, seuils de verdict, règles des détecteurs, seuil CCIP, zone de doute de la vision, nouveaux essais automatiques |
 | `workflows/*.yaml` + `*.json` | Workflows ComfyUI : le JSON API exporté + le mapping des paramètres |
+| `upscalers/*.yaml` + `*.json` | Finition d'impression : agrandissement de la version retenue d'une case jusqu'au dpi du format, avant l'assemblage |
+
+| `workflows/*.yaml` + `*.json` | Workflows ComfyUI : le JSON API exporté + le mapping des paramètres (dont les presets de réparation ciblée, bloc `inpaint`) |
 | `fonts.yaml` + `fonts/` | Polices de lettrage (OFL, licences dans `fonts/OFL*.txt`) et style de texte par type de bulle |
 | `lettering.yaml` | Formes et placement des bulles, queues, bordures de case, repères de coupe |
 | `agents/*.yaml` | Agents du pipeline (écran « L'équipe ») : nom, rôle, étape et réglages éditables depuis l'UI |
+| `reference_sheets/*.yaml` | Types de fiches de référence de « Créer des références » (portrait, turnaround, expressions, vue 3/4, plan large, autre angle) : gabarit de prompt, taille, workflow facultatif |
 
 | `knowledge.yaml` | Savoir-faire (RAG local) : découpage des documents, recherche hybride, seuil « petite collection », budget de la bible, collections lues par chaque agent |
 
@@ -226,6 +230,17 @@ Gabarits `$variable` (écrire `$$` pour un dollar). `script.yaml` liste ses vari
 le nombre de résumés de chapitres précédents envoyés. Le bloc `<contexte>…</contexte>` transmet le
 même contexte en JSON (le LLM factice du mode mock s'en sert pour produire un découpage).
 
+**Bibliothèque de la série.** Le scénariste (`script.yaml`) et le directeur artistique
+(`direction-artistique.yaml`) reçoivent les décors et objets récurrents de la série (`$decors`,
+`$objets` : « - id N · nom : description courte », et `decors` / `objets` dans le contexte JSON). Par
+case, le scénario donne `decor` (id ou `null`) et `objets` (liste d'ids) à côté de `characters` ; la
+direction artistique peut les proposer aussi (`null` = garder ceux du scénario). Un id absent de la
+bibliothèque (ou d'une autre sorte) rend la réponse invalide : nouvel essai avec l'erreur (« page 1 ›
+case 2 › decor : id 9 inconnu (ids possibles : 3, 4, ou null) »), puis erreur lisible après
+`max_retries`. L'auteur corrige le décor et les objets d'une case dans l'écran Scénario. Les décors et
+objets figurent aussi dans la bible injectée aux agents. Mode mock : `[mock:id-invalide:N]` dans le
+synopsis fait citer un décor inexistant aux N premiers essais.
+
 ## Workflow ComfyUI
 
 1. Dans ComfyUI, construis le workflow puis exporte-le au format API (**Workflow → Export (API)**,
@@ -349,6 +364,69 @@ série Rapide, `qwen-image-edit-ref` dans une série Qualité. `defaults.yaml �
 ne sert plus qu'aux presets sans `with_references`. La taille de génération reste celle de la mise en page
 (≈ 1 Mpx, `layout.yaml`) pour tous les paliers, cases avec références comprises.
 
+### Palier croquis et passage au propre
+
+Montrer **toute la page en brouillon en quelques secondes**, laisser l'auteur trier, et ne payer la
+version propre que pour les compositions retenues — sans que le passage au propre change la composition.
+
+| Preset | Rôle | Usage | Taille | Étapes | `estimated_s` |
+| --- | --- | --- | --- | --- | --- |
+| `qwen-image-croquis` | `croquis` | brouillon texte → image (modèle Turbo) | `long_side: 512` | 6 | 6 |
+| `qwen-image-edit-ref-croquis` | `croquis` | brouillon avec images de référence | `long_side: 512` | 6 | 10 |
+| `qwen-image-turbo-from-sketch` | `propre` | Turbo depuis le croquis validé | mise en page | 8 | 15 |
+| `qwen-image-edit-ref-turbo-from-sketch` | `propre` | idem, avec références | mise en page | 8 | 55 |
+| `qwen-image-base-rapide-from-sketch` (+ `qwen-image-edit-ref-rapide-from-sketch`) | `propre` | Rapide depuis le croquis | mise en page | 25 | 40 / 160 |
+| `qwen-image-base-from-sketch` (+ `qwen-image-edit-ref-from-sketch`) | `propre` | Qualité depuis le croquis | mise en page | 50 | 50 / 190 |
+
+Champs propres à ce palier (vérifiés au chargement, erreurs dans `GET /presets`) :
+
+```yaml
+role: croquis                  # generation (défaut, palier de série) | croquis | propre
+long_side: 512                 # croquis : grand côté en px ; l'autre suit le ratio de la case (multiple de layout.yaml)
+from_sketch: qwen-image-turbo-from-sketch   # palier de série → son « propre depuis croquis » (même palier)
+source_image: { node: "30", input: image }  # propre : LoadImage qui reçoit le croquis validé
+mapping:
+  denoise: { node: "9", input: denoise }    # propre : obligatoire (débruitage partiel)
+defaults:
+  denoise: 0.65                # propre : 0 = croquis inchangé, 1 = image neuve (composition perdue)
+```
+
+- **Croquer** (onglet **Croquis** du chapitre, ou `POST /pages/{id}/sketch`, `/chapters/{id}/sketch`,
+  `/panels/{id}/sketch`) : un croquis par case **non encore validée** (ni version propre choisie, ni
+  croquis validé), avec `defaults.workflow_sketch` — ou son `with_references` si un personnage, le décor
+  ou un objet de la case a une image de référence. Mêmes LoRA (série, fiches) et mêmes références que la
+  version propre. File ComfyUI habituelle (une génération à la fois), progression en direct.
+- Un croquis est une version de case (`PanelImage`) marquée **`kind: croquis`** : jamais choisie (pas
+  même la 1re version d'une case), jamais assemblée, lettrée, exportée, ni contrôlée par le QC
+  automatique. Une case qui n'a que des croquis reste « à générer ».
+- **Trier** (écran Croquis, entièrement au clavier) : `V`/`Entrée` valide la composition et passe à la
+  case suivante, `R` re-croque (nouvelle graine ; retire la validation), `E` modifie la description puis
+  re-croque (`Ctrl+Entrée`), `U` retire la validation, `←`/`→` changent de case, `C` croque la page.
+  API : `POST /panels/{id}/sketch/validate` (`image_id` facultatif), `DELETE` pour retirer.
+- **Passer au propre** (case, page, chapitre : `POST /panels|pages|chapters/{id}/clean`) : version
+  finale au palier de la série (`from_sketch` du preset de la case ou de la série, puis son
+  `with_references` si besoin) en **image → image** : le croquis validé est envoyé à ComfyUI, agrandi à
+  la taille finale (`ImageScale`), encodé (`VAEEncode`) et débruité partiellement, **même graine et même
+  prompt** que le croquis. La version produite garde sa source dans `params.composition`
+  (`source`, `image_id`, `version`, `method: img2img`, `denoise`) : un futur passage au propre par
+  ControlNet ne sera qu'un autre preset `propre`. Une composition n'est passée au propre qu'une fois
+  (re-croquer et valider à nouveau pour recommencer). La 1re version propre est choisie d'office ;
+  « Régénérer en Qualité » est inchangé.
+- **Débruitage** : demande > case (atelier, `PATCH /panels/{id}` `sketch_denoise`) > série (fiche
+  série, `sketch_denoise`) > `defaults.denoise` du preset `propre`. Plus bas = plus fidèle au croquis.
+- **Activation** : `defaults.yaml → sketch_enabled` (vrai) pour les nouvelles séries ; case « Croquer
+  les pages avant de les produire » de la fiche série pour le désactiver (l'onglet Croquis disparaît).
+- **Estimation** : l'écran affiche « croquis de la page » et « passage au propre des cases validées »
+  (`GET /pages/{id}/sketch-estimate`, `/chapters/{id}/sketch-estimate`), même calcul que le temps
+  estimé (médiane réelle dès 3 générations du preset, sinon `estimated_s`).
+- Le réglage « Étapes » du dessinateur (écran « L'équipe ») ne s'applique **pas** aux presets croquis :
+  ils gardent leurs quelques étapes.
+- Graphes provisoires construits avec des nœuds natifs (nœuds `30` LoadImage → `31` ImageScale → `32`
+  VAEEncode → latent du KSampler `9`, `8 EmptyLatentImage` retiré) : **à remplacer** par les exports
+  réels de Morigane (`~/mangaka-comfy-exports/`) — seuls les JSON et le mapping changent, puis
+  `UPDATE_GOLDEN=1 npm run test:engine`. Le ComfyUI factice simule les deux : crayonné gris pour un
+  croquis, croquis « encré » à la taille finale pour un passage au propre.
+
 ### Case d'essai (`trial`)
 
 Le bloc `trial` d'un preset donne les paramètres de « Générer une case d'essai » (tableau de bord) :
@@ -367,8 +445,8 @@ Avec `COMFYUI_PROVIDER=mock`, il répond « ComfyUI simulé ».
 
 Les six presets acceptent des LoRA ; les trois presets « avec images de référence » ont 3 emplacements
 (Qwen-Image 2.1 : l'édition / la référence est intégrée au modèle, pas de modèle « edit » séparé). Ils sont
-choisis automatiquement (selon le palier de la série) quand un personnage de la case a une planche de
-référence.
+choisis automatiquement (selon le palier de la série) quand un personnage, le décor ou un objet de la
+case a une image de référence (bibliothèque de la série : onglets Personnages / Objets / Décors).
 
 ### Emplacements de référence (`reference_images`)
 
@@ -382,10 +460,15 @@ reference_images:
   # avec un redimensionnement propre à l'emplacement : { node: "20", input: image, remove: ["30"] }
 ```
 
-- Le moteur envoie les images de référence des personnages de la case à ComfyUI
-  (`POST /upload/image`, sous-dossier `input/mangaka/`) et écrit le nom obtenu dans
-  `workflow[node].inputs[input]`. Ordre : 1re image de chaque personnage (dans l'ordre de la
-  case), puis 2e image de chacun, etc., jusqu'à remplir les emplacements.
+- Le moteur envoie les images de référence de la case à ComfyUI (`POST /upload/image`,
+  sous-dossier `input/mangaka/`) et écrit le nom obtenu dans `workflow[node].inputs[input]`.
+  **Priorité** : les personnages de la case (dans l'ordre de la case), puis son décor, puis ses
+  objets. Les emplacements se remplissent par tours : 1re image de chaque fiche dans cet ordre, puis
+  2e image de chacune, etc. Exemple à 3 emplacements avec Aiko (2 images), le labo (2 images) et le
+  robot (1 image) : Aiko n° 1, labo n° 1, robot n° 1 ; sans le robot : Aiko n° 1, labo n° 1, Aiko n° 2.
+  Les emplacements retenus sont notés sur le job (`params.references` : emplacement, sorte, fiche,
+  image) et sur la version produite (`params.reference_images`) : l'atelier les affiche
+  (« Références utilisées »).
 - Un emplacement **inutilisé est retiré** : son nœud et ceux listés dans `remove` (ex. son
   redimensionnement) sont supprimés, puis toute entrée d'un autre nœud qui pointait vers un nœud
   retiré est effacée. Exemple : avec une seule référence, `images.image_2`/`images.image_3` disparaissent
@@ -413,8 +496,9 @@ lora_chain:
   # extra_inputs: {}                       # entrées constantes du chargeur
 ```
 
-LoRA appliqués, dans l'ordre : **LoRA de style de la série** puis **LoRA d'identité de chaque
-personnage** de la case (nom de fichier + poids saisis dans la série / la fiche). Chaque LoRA
+LoRA appliqués, dans l'ordre : **LoRA de style de la série**, puis **LoRA d'identité de chaque
+personnage** de la case, puis le LoRA de son **décor** et de chacun de ses **objets** (nom de fichier +
+poids saisis dans la série / la fiche ; un même fichier n'est chargé qu'une fois). Chaque LoRA
 devient un nœud `class_type` (identifiant numérique après le plus grand du JSON) :
 `model_from → LoRA 1 → LoRA 2 → …`, et tous les nœuds qui consommaient `model_from` (ici le nœud
 `4`, `QwenImage21Cache`) reçoivent la sortie du dernier LoRA. Sans LoRA, le workflow est
@@ -446,12 +530,191 @@ référence de la GX10, puis validés contre le ComfyUI 0.37 de la machine. Pour
    connexion » et « Générer une case d'essai » sur le tableau de bord.
 5. Régénère les JSON de référence des tests : `UPDATE_GOLDEN=1 npm run test:engine`, relis le diff.
 
+## Finition d'impression (`upscalers/*.yaml`)
+
+Les cases sont générées à ≈ 1 Mpx (`layout.yaml`) alors que la zone utile A4 300 dpi fait 2161 × 3154 px :
+imprimée, une case pleine page sort à ≈ 115 dpi, une bande sur deux à ≈ 164 dpi. La **finition** agrandit la
+version **retenue** avec un modèle (quelques secondes, composition gardée) au lieu de la régénérer en Qualité
+(≈ 280 s, composition qui peut changer).
+
+### Facteur calculé par case
+
+- **Boîte imprimée** : la boîte de la case en px du format (dpi du format de page), **fond perdu compris**
+  (+ `bleed_mm` sur chaque bord posé au bord de la page, comme à l'export « fond perdu »).
+- **Dpi effectif** = dpi du format ÷ max(largeur boîte ÷ largeur image, hauteur boîte ÷ hauteur image) (l'image
+  est posée « au remplissage », recadrée au centre).
+- Sous `finishing_tolerance` × dpi cible (`defaults.yaml`, 0,9 → 270 dpi pour 300 dpi), la case est à finaliser ;
+  le **facteur** est celui qui amène l'image au dpi cible (jamais un ×3 fixe) et la **taille finale exacte** est
+  `ceil(image × facteur)` : un côté tombe juste sur la boîte, l'autre la couvre.
+
+### Quand
+
+- **« Finaliser la page »** (atelier) : met en file la finition des cases dont la version retenue est sous le
+  seuil ; **« Finaliser cette case »** (panneau de la case) ; **« Finaliser le chapitre pour l'impression »**
+  (Lettrage › Export). API : `POST /pages/{id}/finish`, `POST /panels/{id}/finish`, `POST /chapters/{id}/finish`,
+  `GET /pages/{id}/finishing`, `GET /presets/upscalers`.
+- Les finitions passent dans **la même file** que les générations (job `finishing`) : une seule tâche ComfyUI à
+  la fois.
+- Le résultat est un **dérivé de la version** (`PanelImage.finish`), pas une nouvelle version de composition. Il
+  est réutilisé tant que la version reste retenue ; retenir une autre version de la case efface la finition des
+  autres versions **de cette case seulement** (fichier compris).
+- **Assemblage** (rendu PNG / SVG, export ZIP) : image finalisée si elle existe, sinon la version retenue (comme
+  avant). L'aperçu écran reste sur l'image légère. L'export signale les cases encore sous le seuil.
+- **Indicateur** : chaque case de l'atelier affiche son dpi (« 115 dpi → 300 dpi après finition ») avec un badge
+  d'alerte sous le seuil, vert au dpi cible ou une fois finalisée.
+
+### Presets livrés
+
+| Preset | Modèle (`ComfyUI/models/…`) | Usage |
+| --- | --- | --- |
+| `realesrgan-x4plus-anime-6b` (**défaut**) | `upscale_models/RealESRGAN_x4plus_anime_6B.pth` | Meilleur pour le trait encré et les aplats |
+| `ultrasharp-4x` | `upscale_models/4x-UltraSharp.pth` | Plus de micro-détail (peut durcir les trames) |
+| `remacri-4x` | `upscale_models/4x_foolhardy_Remacri.pth` | Rendu doux : lavis, couleur directe |
+| `seedvr2-7b` (haute fidélité) | `diffusion_models/seedvr2_7b_int8_convrot.safetensors` + `vae/seedvr2_ema_vae_fp16.safetensors` | Restauration par diffusion (nœuds SeedVR2 natifs de ComfyUI), bien plus lente : jamais par défaut |
+
+Tous sont déjà sur la GX10 : rien à télécharger. L'agrandisseur par défaut est `upscaler` dans `defaults.yaml` ;
+chaque série peut choisir le sien (fiche série › « Agrandisseur (finition d'impression) », champ `upscaler` de
+`PATCH /projects/{id}`, `null` = celui de `defaults.yaml`).
+
+```yaml
+id: realesrgan-x4plus-anime-6b
+name: Real-ESRGAN x4plus anime 6B
+workflow_file: realesrgan-x4plus-anime-6b.json
+output_node: "5"                       # SaveImage
+model_scale: 4                         # facteur natif du modèle (informatif)
+high_fidelity: false                   # true : option lente, signalée dans la fiche série
+timeout_s: 300
+estimated_s: 6                         # durée estimée dans la file tant qu'il n'y a pas de mesures
+mapping:                               # obligatoires : image, width, height
+  image: { node: "1", input: image }   # LoadImage : la version retenue, envoyée par le moteur (/upload/image)
+  width: { node: "4", input: width }   # taille finale exacte, calculée par case
+  height: { node: "4", input: height }
+  filename_prefix: { node: "5", input: filename_prefix }
+```
+
+Graphe ESRGAN : `1 LoadImage` → `3 ImageUpscaleWithModel` (modèle `2 UpscaleModelLoader`, ×4) → `4 ImageScale`
+(lanczos, taille finale exacte, sans recadrage) → `5 SaveImage`. Graphe SeedVR2 (repris du workflow « Upscale
+planche - SeedVR2 7B » de la GX10) : `1 LoadImage` → `3 ImageScale` (taille finale) → `4 SeedVR2Preprocess` →
+`5 VAEEncodeTiled` → `7 SeedVR2Conditioning` + `9 KSampler` (1 étape) → `10 VAEDecodeTiled` →
+`11 SeedVR2PostProcessing` (recalé sur `3`) → `12 SaveImage`.
+
+Comme pour les workflows, les noms de modèles vivent **uniquement** dans les JSON : le moteur n'en connaît aucun.
+« Tester la connexion » vérifie aussi les agrandisseurs (nœuds inconnus, « modèle introuvable dans ComfyUI : … — à
+placer dans ComfyUI/models/upscale_models/ »). En mode mock, le ComfyUI factice agrandit l'image envoyée avec
+Pillow (aucune GPU).
+
+
+## Réparation ciblée (inpainting)
+
+Une case réussie à 90 % avec une main ou un visage raté ne se régénère plus entièrement : dans
+l'atelier, « Réparer cette main / ce visage » (panneau Contrôle qualité, depuis les boîtes du QC
+stockées dans `PanelImage.detections`) ou « Réparer une zone… » (fenêtre d'une version : rectangle,
+pinceau, gomme) ouvre la fenêtre de réparation. Échap annule, Ctrl + Entrée lance.
+
+**Presets.** Un workflow qui a un bloc `inpaint` est un preset de réparation : il n'est jamais
+proposé pour générer une case (ni dans la liste « Workflow » de l'atelier, ni comme palier). Un par
+palier, avec les mêmes fichiers de modèle que le palier :
+
+| Preset | Palier | Étapes | `estimated_s` |
+| --- | --- | --- | --- |
+| `qwen-image-inpaint-turbo` | Turbo (`workflow_inpaint` de `defaults.yaml`) | 8 | 40 |
+| `qwen-image-inpaint-rapide` | Rapide | 25 | 120 |
+| `qwen-image-inpaint` | Qualité | 50 | 140 |
+
+Chaque workflow de génération désigne le sien (`inpaint_with: qwen-image-inpaint-rapide`) ; le
+moteur prend celui du workflow **de la version réparée**, sinon celui du workflow de la série, sinon
+`defaults.workflow_inpaint`. Vérifié au chargement : `inpaint_with` / `workflow_inpaint` doivent
+désigner un preset chargé qui a un bloc `inpaint` (sinon avertissement dans `GET /presets`).
+
+Graphe (nœuds natifs, mêmes numéros que les autres presets) : `30 LoadImage` (version source) →
+`32 VAEEncode` → `33 SetLatentNoiseMask` (← `31 LoadImageMask`, canal rouge, blanc = à repeindre) →
+`9 KSampler` (`denoise` partiel) → `10 VAEDecode` → `11 SaveImage`. Pas d'`EmptyLatentImage` : la
+taille est celle de la version. Références (`20`–`22`) et chaîne LoRA comme le preset « avec
+références » du palier. **À confirmer** sur la GX10 avec un vrai essai (comme l'échantillonnage Turbo).
+
+```yaml
+mapping:                      # positive_prompt, negative_prompt, seed et denoise obligatoires
+  denoise: { node: "9", input: denoise }      # pas de width / height
+defaults:
+  denoise: 0.45               # 0,3 = retouche légère ; 0,6 = zone redessinée franchement
+inpaint:
+  source_image: { node: "30", input: image }  # LoadImage : la version à réparer
+  mask_image: { node: "31", input: image }    # LoadImageMask : masque agrandi et adouci par le moteur
+  grow_px: 24                 # marge ajoutée autour de la zone (réglable dans l'atelier)
+  feather_px: 16              # bords fondus (réglable)
+  prompt_parts:               # prompt prérempli ; un morceau dont une variable est vide est omis
+    - "$target."              # texte de `targets` selon la zone choisie
+    - "Personnage : $character."   # personnage concerné : description, mots-clés, mots déclencheurs du LoRA
+    - "Case : $description."
+    - "Style : $style."
+  targets: { face: "…", hand: "…", zone: "…" }
+```
+
+Un preset de réparation n'a ni `trial`, ni `with_references`, ni `inpaint_with`, ni `tier.choice`.
+
+**Masque et recollage.** Le masque brut (rectangles + masque peint) est gardé dans `data/`
+(`params.repair.mask_path`), agrandi de `grow_px` puis adouci sur `feather_px` (flou gaussien borné :
+au-delà de zone + marge + adoucissement, il vaut exactement 0). ComfyUI repeint ; le moteur **recolle
+ensuite seulement la zone masquée** sur l'original (`pipeline/inpaint.py`) : hors de cette limite, les
+pixels sont ceux de l'original au pixel près, même si l'aller-retour VAE a légèrement changé toute
+l'image. Une image renvoyée un peu plus petite (côtés arrondis au multiple du VAE) est replacée au
+centre.
+
+**Résultat.** Une nouvelle version de la case, liée à sa source (`params.repair` : `source_image_id`,
+`source_version`, zone, personnage, réglages), qui passe par la file unique (progression en direct) et
+par le QC ; elle n'est pas choisie d'office (sauf si la case n'a aucune version choisie) et un rejet du
+QC ne relance rien automatiquement (« à revoir ») : l'auteur la retient ou non. LoRA : style de la
+série puis LoRA d'identité du personnage concerné ; images de référence du personnage concerné (sinon
+celles de la case). Les versions du palier croquis (`params.kind: croquis`) ne se réparent pas.
+
+API : `GET /panel-images/{id}/repair?target=hand&character_id=…` (préremplissage : preset, marge,
+adoucissement, denoise, prompt) et `POST /panel-images/{id}/repair` (`regions` en px de l'image — une
+boîte de `detections` peut être renvoyée telle quelle —, `mask_png` en data URL, `target`,
+`character_id`, `prompt`, `grow_px`, `feather_px`, `denoise`, `seed`). ComfyUI factice : renvoie la
+source légèrement modifiée partout et la zone masquée remplie d'une couleur hachurée.
+
+**Plus tard (pas en v1)** : FaceDetailer (Impact Pack) + SAM `sam_vit_b_01ec64`, déjà installés sur la
+GX10, pour un détourage plus fin qu'un rectangle — ce sera un autre preset `inpaint`, sans changer le moteur.
+
+## Fiches de référence (`reference_sheets/*.yaml`)
+
+Sur chaque fiche de la bibliothèque (personnage, objet, décor), le panneau **« Créer des références »**
+génère des variantes d'un type de fiche dans la file ComfyUI (même progression, même annulation que
+les cases), à partir de la description visuelle, des mots-clés, du LoRA de style de la série et du
+LoRA de la fiche. **« Affiner »** repart d'une variante, envoyée comme image de référence (workflow
+« avec références » du même palier), avec une consigne (« cheveux plus courts »). **« Garder comme
+référence »** copie la variante parmi les images de référence de la fiche (8 au plus) ; la première
+image est la référence principale, servie en premier quand les emplacements d'une case manquent.
+
+Un type de fiche = un fichier ; en ajouter un ne demande aucun code (il est validé au démarrage, une
+erreur apparaît dans `GET /presets` et `GET /health`) :
+
+```yaml
+id: objet-eclate                 # unique, minuscules et tirets
+name: Vue éclatée                # libellé de la liste déroulante
+description: "Pièces séparées, alignées sur un axe."
+kinds: [object]                  # character | object | decor (plusieurs possibles)
+order: 30                        # ordre dans la liste
+width: 1024                      # multiples de 8, 256 à 2048
+height: 768
+workflow: null                   # null : palier de la série (Turbo par défaut) ou Qualité si demandé ;
+                                 # un id de workflows/ l'impose (le choix du palier est alors ignoré)
+prompt:                          # morceaux assemblés ; un morceau dont une variable est vide est omis
+  - "Vue éclatée de $name."
+  - "$description."
+  - "Détails : $keywords."       # mots-clés + mots déclencheurs du LoRA de la fiche
+  - "Modification demandée : $instruction."   # consigne d'« Affiner » (omis sinon)
+  - "Style : $style."            # style de la série + mots déclencheurs du LoRA de style
+negative_prompt: "personnage"    # ajouté au négatif du workflow (les termes « pas de texte » y sont toujours)
+```
+
 ## Prompt final des cases (`image_prompt.yaml`)
 
 `parts` est une liste de morceaux `string.Template` assemblés dans l'ordre (`$plan` = plan de la
 direction artistique appliquée, sinon celui du scénario, `$angle` et `$ambiance` de la direction
 artistique, `$shot` = plan du scénario,
-`$description`, `$characters`, `$style`, `$bible` = notes de la bible sur les personnages de la
+`$description`, `$characters`, `$decor` et `$objects` = décor et objets de la bibliothèque cités par la
+case (présentés comme les personnages), `$style`, `$bible` = notes de la bible sur les personnages de la
 case, `$savoir_faire` = passages du savoir-faire de l'agent `image_prompt`) ; un morceau dont une
 variable est vide est omis.
 `character` met en forme un personnage (`$name`, `$details` = description visuelle + mots-clés).

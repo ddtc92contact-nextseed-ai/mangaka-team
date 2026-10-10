@@ -1,7 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { AnnotationBar } from "@/components/annotation";
+import { DpiBadge } from "@/components/print-dpi";
 import { ProductionLink } from "@/components/production-link";
 import { useQueue } from "@/components/queue";
 import { Alert, Button, Field, Input, Loading, ProgressBar, Select, Textarea } from "@/components/ui";
@@ -10,16 +12,23 @@ import {
   fullErrorMessage,
   type Annotation,
   type GenerateInput,
+  type Job,
   type PanelImage,
+  type PrintInfo,
+  type QueueItem,
   type QCStatus,
   type VisionMode,
   type WorkflowPreset,
 } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
 import { MAX_VARIANTS, PANEL_STATE, formatDuration, isValidSeed } from "@/lib/generation";
+import { dpiLabel, dpiTitle } from "@/lib/finishing";
 import { useJob } from "@/lib/jobs";
+import { LIBRARY_KINDS } from "@/lib/library";
+import { useChapter } from "../chapter-context";
 import type { PanelView } from "./page-canvas";
 import { PanelQC } from "./panel-qc";
+import { RepairDialog, type RepairPreset } from "./repair-dialog";
 import { VersionsStrip } from "./versions";
 
 /** Panneau latéral d'une case : contenu, prompt final, réglages de génération, progression, versions. */
@@ -47,6 +56,7 @@ export function PanelInspector({
 }) {
   const detail = useEngineData(() => api.getPanel(panelId), [panelId, refreshKey]);
   const { refresh, cancel } = useQueue();
+  const { series } = useChapter();
   // Prompt en cours d'édition (null = pas touché), rattaché à la case pour repartir à zéro en changeant de case.
   const [draftState, setDraft] = useState<{ panelId: number; text: string } | null>(null);
   const [seed, setSeed] = useState("");
@@ -56,9 +66,13 @@ export function PanelInspector({
   const [notice, setNotice] = useState<string | null>(null);
   // La dernière action a mis une génération en file : lien « Voir la production ».
   const [generated, setGenerated] = useState(false);
+  // Fenêtre « Réparer une zone » ouverte sur une version (détection présélectionnée éventuelle).
+  const [repair, setRepair] = useState<{ image: PanelImage; preset?: RepairPreset } | null>(null);
 
   const running = view?.running ?? null;
   const live = useJob(running?.job ?? null);
+  const finishing = view?.finishing ?? null;
+  const liveFinish = useJob(finishing?.job ?? null);
   const pending = view?.pending ?? [];
 
   const d = detail.data && detail.data.id === panelId ? detail.data : null;
@@ -137,6 +151,15 @@ export function PanelInspector({
   }
   const cancelJob = (jobId: number) => run(() => cancel(jobId));
 
+  const finishPanel = () =>
+    run(async () => {
+      await api.finishPanel(panelId);
+      refresh();
+      onChanged();
+      detail.reload();
+      setNotice("Finition d'impression mise en file : la version retenue est agrandie jusqu'au dpi du format (composition gardée).");
+    });
+
   const runQC = (vision: VisionMode, image?: PanelImage) =>
     run(async () => {
       await api.runPanelQC(panelId, { vision, ...(image ? { image_id: image.id } : {}) });
@@ -152,16 +175,33 @@ export function PanelInspector({
       setNotice("Version validée à la main (décision tracée dans le QC).");
     });
 
+  const repairQueued = (source: PanelImage) => {
+    setRepair(null);
+    setError(null);
+    refresh();
+    onChanged();
+    detail.reload();
+    setGenerated(true);
+    setNotice(
+      `Réparation de la version ${source.version} mise en file : elle deviendra une nouvelle version (le reste de l'image ne bouge pas), à retenir ou non.`,
+    );
+  };
+
   function annotated(imageId: number, annotation: Annotation | null) {
     detail.setData((cur) =>
       cur ? { ...cur, images: cur.images.map((i) => (i.id === imageId ? { ...i, annotation } : i)) } : cur,
     );
   }
 
-  const qcImage = chosen ?? (d?.images.length ? d.images[d.images.length - 1] : null);
+  // Versions propres seulement : un croquis n'est ni contrôlé ni choisi.
+  const finals = d?.images.filter((i) => i.kind !== "croquis") ?? [];
+  const sketches = d?.images.filter((i) => i.kind === "croquis") ?? [];
+  const qcImage = chosen ?? (finals.length ? finals[finals.length - 1] : null);
+  // « Références utilisées » : celles de la version choisie, sinon de la plus récente.
+  const refsImage = qcImage;
 
   const resolvedName = presets?.find((p) => p.id === d?.resolved_preset)?.name ?? d?.resolved_preset ?? "—";
-  const hasImages = (d?.images.length ?? 0) > 0;
+  const hasImages = finals.length > 0;
   const quality = presets?.find((p) => p.is_quality) ?? null;
 
   return (
@@ -219,7 +259,18 @@ export function PanelInspector({
               ) : (
                 <span className="text-zinc-500">Aucun personnage</span>
               )}
+              {d.decor && (
+                <span className={`rounded px-2 py-0.5 ${LIBRARY_KINDS.decor.badge}`} title="Décor récurrent">
+                  Décor : {d.decor.name}
+                </span>
+              )}
+              {d.objets.map((o) => (
+                <span key={o.id} className={`rounded px-2 py-0.5 ${LIBRARY_KINDS.object.badge}`} title="Objet récurrent">
+                  {o.name}
+                </span>
+              ))}
             </div>
+            {refsImage && <UsedReferences image={refsImage} />}
           </div>
 
           {(running || pending.length > 0) && (
@@ -306,7 +357,7 @@ export function PanelInspector({
               <Field label="Workflow" htmlFor="preset">
                 <Select id="preset" value={d.generation_preset ?? ""} onChange={(e) => setPreset(e.target.value)} disabled={busy || !presets}>
                   <option value="">Automatique ({resolvedName})</option>
-                  {(presets ?? []).map((p) => (
+                  {(presets ?? []).filter((p) => (p.role ?? "generation") === "generation").map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.name}
                       {p.reference_slots ? ` · ${p.reference_slots} réf.` : ""}
@@ -390,6 +441,18 @@ export function PanelInspector({
             </Button>
           </div>
 
+          <PrintSection
+            info={d.print_info ?? null}
+            upscaler={d.upscaler ?? null}
+            finishing={finishing}
+            progress={liveFinish?.progress ?? finishing?.job.progress ?? 0}
+            message={liveFinish?.message ?? finishing?.job.message ?? ""}
+            failure={view?.finishFailure ?? null}
+            busy={busy}
+            onFinish={finishPanel}
+            onCancel={(id) => cancelJob(id)}
+          />
+
           {qcImage && <AnnotationBar image={qcImage} onChange={annotated} keyboard onPrev={onPrev} onNext={onNext} />}
 
           <PanelQC
@@ -399,16 +462,283 @@ export function PanelInspector({
             busy={busy}
             onRun={(vision) => runQC(vision, qcImage ?? undefined)}
             onOverride={overrideQC}
+            onRepair={(image, preset) => setRepair({ image, preset })}
           />
+
+          {series.sketch_enabled && (
+            <SketchBlock
+              panelId={panelId}
+              chapterId={d.chapter_id}
+              pageId={d.page_id}
+              sketches={sketches}
+              validatedId={d.sketch_image_id ?? null}
+              denoise={d.sketch_denoise ?? null}
+              seriesDenoise={series.sketch_denoise}
+              busy={busy}
+              run={run}
+              onDone={(message, queued) => {
+                if (queued) refresh();
+                onChanged();
+                detail.reload();
+                setGenerated(queued);
+                setNotice(message);
+              }}
+            />
+          )}
 
           <div className="space-y-2">
             <h3 className="text-sm font-medium text-zinc-300">
               Versions <span className="text-zinc-500">({d.images.length})</span>
             </h3>
-            <VersionsStrip images={d.images} onSelect={selectImage} onDelete={deleteImage} onAnnotated={annotated} />
+            <VersionsStrip
+              images={d.images}
+              onSelect={selectImage}
+              onDelete={deleteImage}
+              onAnnotated={annotated}
+              onRepair={(image) => setRepair({ image })}
+            />
           </div>
         </div>
       ) : null}
+      {repair && (
+        <RepairDialog
+          key={`${repair.image.id}-${repair.preset?.kind ?? ""}-${repair.preset?.index ?? ""}`}
+          image={repair.image}
+          preset={repair.preset}
+          onClose={() => setRepair(null)}
+          onQueued={() => repairQueued(repair.image)}
+        />
+      )}
     </section>
+  );
+}
+
+/** Finition d'impression : dpi effectif de la version retenue, « Finaliser cette case », progression. */
+function PrintSection({
+  info,
+  upscaler,
+  finishing,
+  progress,
+  message,
+  failure,
+  busy,
+  onFinish,
+  onCancel,
+}: {
+  info: PrintInfo | null;
+  upscaler: string | null;
+  finishing: QueueItem | null;
+  progress: number;
+  message: string;
+  failure: Job | null;
+  busy: boolean;
+  onFinish: () => void;
+  onCancel: (jobId: number) => void;
+}) {
+  return (
+    <div className="space-y-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3" data-testid="print-section">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-sm font-medium text-zinc-300">Impression</h3>
+        {info && <DpiBadge info={info} />}
+      </div>
+      {!info ? (
+        <p className="text-xs text-zinc-500">Choisis d&apos;abord une version : le dpi se calcule sur la version retenue.</p>
+      ) : (
+        <>
+          <p className="text-sm text-zinc-200" title={dpiTitle(info)} data-testid="print-dpi">
+            {dpiLabel(info)}
+          </p>
+          <p className="text-[11px] text-zinc-500">
+            Case imprimée : {info.width_mm.toLocaleString("fr-FR")} × {info.height_mm.toLocaleString("fr-FR")} mm (fond perdu
+            compris) · cible {info.target_dpi} dpi, seuil {info.min_dpi} dpi
+            {info.status === "low" && ` · agrandissement ×${info.factor.toLocaleString("fr-FR", { maximumFractionDigits: 2 })} → ${info.target_width} × ${info.target_height} px`}
+            {info.status === "finished" && info.finished_upscaler && ` · ${info.finished_upscaler}`}
+          </p>
+        </>
+      )}
+      {finishing ? (
+        <div className="space-y-1.5" aria-live="polite">
+          <div className="flex items-center justify-between gap-2 text-xs">
+            <span className="text-zinc-200">
+              {finishing.job.status === "running"
+                ? `${message || "Finition…"} · ${progress} %`
+                : `Finition en file (position ${finishing.position})`}
+            </span>
+            <Button variant="ghost" className="!px-2 !py-0.5 text-xs" onClick={() => onCancel(finishing.job.id)} disabled={busy}>
+              Annuler
+            </Button>
+          </div>
+          {finishing.job.status === "running" && (
+            <ProgressBar key={finishing.job.id} value={progress} label="Progression de la finition" />
+          )}
+        </div>
+      ) : (
+        info?.status === "low" && (
+          <div className="space-y-2">
+            {failure && (
+              <Alert>
+                <strong className="font-semibold">Dernière finition en échec.</strong> {failure.error ?? "Erreur inconnue."}
+              </Alert>
+            )}
+            <Button
+              variant="secondary"
+              onClick={onFinish}
+              disabled={busy || !upscaler}
+              title={
+                upscaler
+                  ? `Agrandit la version retenue avec ${upscaler} (quelques secondes, composition gardée)`
+                  : "Aucun agrandisseur configuré (upscaler de presets/defaults.yaml)"
+              }
+              data-testid="finish-panel"
+            >
+              Finaliser cette case
+            </Button>
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
+/** Images de référence envoyées au workflow pour une version : personnages, puis décor, puis objets. */
+function UsedReferences({ image }: { image: PanelImage }) {
+  const refs = image.params.reference_images ?? [];
+  return (
+    <div className="text-xs text-zinc-400" data-testid="used-references">
+      <span className="text-zinc-500">Références utilisées (v{image.version}) : </span>
+      {refs.length === 0 ? (
+        <span>aucune</span>
+      ) : (
+        <ol className="mt-1 flex flex-wrap gap-1.5">
+          {refs.map((r, i) => {
+            const kind = r.kind ?? "character";
+            return (
+              <li key={`${r.image_id}-${i}`} className={`rounded px-2 py-0.5 ${LIBRARY_KINDS[kind].badge}`}>
+                {r.slot ?? i + 1}. {r.name ?? `${LIBRARY_KINDS[kind].singular} n° ${r.id ?? r.character_id ?? "?"}`}
+                <span className="opacity-70"> · {LIBRARY_KINDS[kind].singular}</span>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+/** Palier croquis d'une case : croquer, valider la composition, débruitage propre à la case, passer au propre. */
+function SketchBlock({
+  panelId,
+  chapterId,
+  pageId,
+  sketches,
+  validatedId,
+  denoise,
+  seriesDenoise,
+  busy,
+  run,
+  onDone,
+}: {
+  panelId: number;
+  chapterId: number;
+  pageId: number;
+  sketches: PanelImage[];
+  validatedId: number | null;
+  denoise: number | null;
+  seriesDenoise: number | null;
+  busy: boolean;
+  run: (action: () => Promise<void>) => Promise<void>;
+  onDone: (message: string, queued: boolean) => void;
+}) {
+  const [denoiseText, setDenoiseText] = useState<string | null>(null);
+  const validated = sketches.find((s) => s.id === validatedId) ?? null;
+  const latest = sketches.length ? sketches[sketches.length - 1] : null;
+  const text = denoiseText ?? (denoise !== null ? String(denoise) : "");
+  const value = text.trim() === "" ? null : Number(text.replace(",", "."));
+  const invalid = value !== null && !(value >= 0.05 && value <= 1);
+  return (
+    <div className="space-y-2 rounded-lg border border-zinc-800 p-3" data-testid="panel-sketch">
+      <div className="flex items-baseline justify-between gap-2">
+        <h3 className="text-sm font-medium text-zinc-300">Croquis</h3>
+        <Link href={`/chapitres/${chapterId}/croquis?page=${pageId}&case=${panelId}`} className="text-xs text-zinc-400 hover:text-zinc-100">
+          Trier la page →
+        </Link>
+      </div>
+      <p className="text-xs text-zinc-400">
+        {sketches.length === 0
+          ? "Aucun croquis : un brouillon en quelques secondes pour juger la composition."
+          : validated
+            ? `Composition validée : croquis v${validated.version} (seed ${validated.seed ?? "—"}).`
+            : `${sketches.length} croquis, aucun validé.`}
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          variant="secondary"
+          className="!px-2.5 !py-1 text-xs"
+          disabled={busy}
+          onClick={() =>
+            run(async () => {
+              await api.sketchPanel(panelId);
+              onDone("Croquis mis en file (nouvelle graine).", true);
+            })
+          }
+        >
+          {sketches.length ? "Re-croquer" : "Croquer"}
+        </Button>
+        {latest && !validated && (
+          <Button
+            variant="secondary"
+            className="!px-2.5 !py-1 text-xs"
+            disabled={busy}
+            onClick={() =>
+              run(async () => {
+                await api.validateSketch(panelId, latest.id);
+                onDone(`Croquis v${latest.version} validé.`, false);
+              })
+            }
+          >
+            Valider le dernier croquis
+          </Button>
+        )}
+        <Button
+          className="!px-2.5 !py-1 text-xs"
+          disabled={busy || !validated || invalid}
+          title={validated ? "Version finale au palier de la série, même cadrage que le croquis validé" : "Valide d'abord un croquis"}
+          onClick={() =>
+            run(async () => {
+              if (denoiseText !== null) await api.updatePanel(panelId, { sketch_denoise: value });
+              setDenoiseText(null);
+              await api.cleanPanel(panelId);
+              onDone("Passage au propre mis en file (même graine et même prompt que le croquis).", true);
+            })
+          }
+          data-testid="clean-panel"
+        >
+          Passer au propre
+        </Button>
+      </div>
+      <Field
+        label="Débruitage du passage au propre (cette case)"
+        htmlFor="sketch-denoise"
+        error={invalid ? "Entre 0,05 et 1" : undefined}
+        hint={`Vide : ${seriesDenoise !== null ? `celui de la série (${seriesDenoise})` : "celui du preset"}. Plus bas = plus fidèle au croquis.`}
+      >
+        <Input
+          id="sketch-denoise"
+          inputMode="decimal"
+          className="!w-28"
+          value={text}
+          onChange={(e) => setDenoiseText(e.target.value)}
+          onBlur={() => {
+            if (denoiseText === null || invalid) return;
+            void run(async () => {
+              await api.updatePanel(panelId, { sketch_denoise: value });
+              setDenoiseText(null);
+              onDone(value === null ? "Débruitage de la case retiré." : `Débruitage de la case : ${value}.`, false);
+            });
+          }}
+          aria-invalid={invalid || undefined}
+        />
+      </Field>
+    </div>
   );
 }

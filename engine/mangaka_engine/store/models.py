@@ -1,6 +1,8 @@
 """Modèle de données SQLite (SQLAlchemy 2).
 
 Série (`Project`) → Character (+ images de référence)
+Série → SeriesAsset : objets et décors récurrents de la bibliothèque (+ images de référence)
+Série → ReferenceVariant : images générées par « Créer des références » d'une fiche, gardées ou non
 Série → Chapter → Page → Panel (+ versions d'image → annotation humaine) → Bubble · Job.
 Banc d'essai du QC : `QCBenchRun` (historique des mesures du QC sur les cases annotées).
 Savoir-faire : `KnowledgeCollection` (globale ou d'une série) → `KnowledgeDocument` → `KnowledgeChunk`
@@ -81,6 +83,11 @@ class PanelState(enum.StrEnum):
     approved = "approved"
 
 
+class ImageKind(enum.StrEnum):
+    final = "final"  # version de case (choisie, assemblée, lettrée, exportée)
+    croquis = "croquis"  # brouillon de composition (palier croquis) : jamais choisi ni assemblé
+
+
 class QCVerdict(enum.StrEnum):
     ok = "ok"
     review = "review"  # à revoir
@@ -127,12 +134,21 @@ class Project(TimestampMixin, Base):
     style_lora_trigger_words: Mapped[str] = mapped_column(Text, default="")
     # Grammaire de mise en page de la série (presets/layout_styles/) : sage, dynamique, nerveuse…
     layout_style: Mapped[str] = mapped_column(String(100), default="dynamique")
+    # Palier croquis (brouillon de page, tri, passage au propre) ; `sketch_denoise` : débruitage du
+    # passage au propre (None = `denoise` du preset « propre »).
+    sketch_enabled: Mapped[bool] = mapped_column(default=True)
+    sketch_denoise: Mapped[float | None] = mapped_column(Float, default=None)
+    # Agrandisseur de la finition d'impression (presets/upscalers/) ; None = celui de defaults.yaml.
+    upscaler: Mapped[str | None] = mapped_column(String(100), default=None)
 
     characters: Mapped[list[Character]] = relationship(
         back_populates="project", cascade="all, delete-orphan", order_by="Character.name"
     )
     chapters: Mapped[list[Chapter]] = relationship(
         back_populates="project", cascade="all, delete-orphan", order_by="Chapter.number"
+    )
+    assets: Mapped[list[SeriesAsset]] = relationship(
+        back_populates="project", cascade="all, delete-orphan", order_by="SeriesAsset.name"
     )
 
 
@@ -150,7 +166,9 @@ class Character(TimestampMixin, Base):
 
     project: Mapped[Project] = relationship(back_populates="characters")
     reference_images: Mapped[list[CharacterImage]] = relationship(
-        back_populates="character", cascade="all, delete-orphan", order_by="CharacterImage.id"
+        back_populates="character",
+        cascade="all, delete-orphan",
+        order_by="[CharacterImage.position, CharacterImage.id]",
     )
 
 
@@ -164,9 +182,91 @@ class CharacterImage(Base):
     content_type: Mapped[str] = mapped_column(String(50))
     width: Mapped[int] = mapped_column(Integer)
     height: Mapped[int] = mapped_column(Integer)
+    # Ordre choisi par l'auteur : la première image est la référence principale (servie en premier
+    # quand les emplacements du workflow manquent).
+    position: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
     character: Mapped[Character] = relationship(back_populates="reference_images")
+
+
+class AssetKind(enum.StrEnum):
+    object = "object"  # objet récurrent : un robot, une épée, une voiture…
+    decor = "decor"  # décor récurrent : la salle de classe, le labo, la rue…
+
+
+class SeriesAsset(TimestampMixin, Base):
+    """Objet ou décor récurrent de la bibliothèque d'une série (mêmes champs qu'un personnage)."""
+
+    __tablename__ = "series_assets"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[AssetKind] = mapped_column(_enum(AssetKind))
+    name: Mapped[str] = mapped_column(String(120))
+    visual_description: Mapped[str] = mapped_column(Text, default="")
+    prompt_keywords: Mapped[list[str]] = mapped_column(JSON, default=list)
+    lora_name: Mapped[str | None] = mapped_column(String(255), default=None)
+    lora_weight: Mapped[float] = mapped_column(Float, default=0.8)
+    lora_trigger_words: Mapped[str] = mapped_column(Text, default="")  # ajoutés au prompt avec le LoRA
+
+    project: Mapped[Project] = relationship(back_populates="assets")
+    reference_images: Mapped[list[SeriesAssetImage]] = relationship(
+        back_populates="asset",
+        cascade="all, delete-orphan",
+        order_by="[SeriesAssetImage.position, SeriesAssetImage.id]",
+    )
+
+
+class SeriesAssetImage(Base):
+    __tablename__ = "series_asset_images"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    asset_id: Mapped[int] = mapped_column(ForeignKey("series_assets.id", ondelete="CASCADE"), index=True)
+    path: Mapped[str] = mapped_column(String(500))  # relatif à data/
+    original_name: Mapped[str] = mapped_column(String(255))
+    content_type: Mapped[str] = mapped_column(String(50))
+    width: Mapped[int] = mapped_column(Integer)
+    height: Mapped[int] = mapped_column(Integer)
+    position: Mapped[int] = mapped_column(Integer, default=0)  # comme CharacterImage.position
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+    asset: Mapped[SeriesAsset] = relationship(back_populates="reference_images")
+
+
+class ReferenceVariant(Base):
+    """Image générée par « Créer des références » pour une fiche de la bibliothèque.
+
+    La fiche est repérée par (`entry_kind`, `entry_id`) — personnage, objet ou décor —, sans clé
+    étrangère (deux tables possibles) : l'API supprime les variantes avec leur fiche. « Garder comme
+    référence » copie l'image parmi les références de la fiche (`kept_image_id`) ; la variante reste
+    dans l'historique.
+    """
+
+    __tablename__ = "reference_variants"
+    # Ids jamais réutilisés : /reference-variants/{id}/file est mis en cache « immutable », un id
+    # recyclé après suppression afficherait l'image supprimée.
+    __table_args__ = {"sqlite_autoincrement": True}
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    entry_kind: Mapped[str] = mapped_column(String(20))  # character | object | decor
+    entry_id: Mapped[int] = mapped_column(Integer, index=True)
+    job_id: Mapped[int | None] = mapped_column(ForeignKey("jobs.id", ondelete="SET NULL"), default=None)
+    sheet: Mapped[str] = mapped_column(String(100))  # presets/reference_sheets/
+    path: Mapped[str] = mapped_column(String(500))  # relatif à data/
+    content_type: Mapped[str] = mapped_column(String(50))
+    width: Mapped[int] = mapped_column(Integer)
+    height: Mapped[int] = mapped_column(Integer)
+    seed: Mapped[int | None] = mapped_column(Integer, default=None)
+    # Variante de départ d'un « Affiner » (sans clé étrangère : la variante de départ peut être supprimée).
+    parent_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    instruction: Mapped[str] = mapped_column(Text, default="")
+    # Preset, palier, prompts, LoRA, image de référence envoyée, durée…
+    params: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    # Image de référence créée par « Garder comme référence » (None : pas gardée).
+    kept_image_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
 
 class Chapter(TimestampMixin, Base):
@@ -230,6 +330,10 @@ class Panel(TimestampMixin, Base):
     character_ids: Mapped[list[int]] = mapped_column(JSON, default=list)
     # Noms tels qu'écrits par le scénario (personnages secondaires compris).
     character_names: Mapped[list[str]] = mapped_column(JSON, default=list)
+    # Bibliothèque de la série : décor de la case et objets visibles (ids de `series_assets`, sans clé
+    # étrangère : un objet ou un décor supprimé est retiré des cases par l'API, ignoré sinon).
+    decor_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    object_ids: Mapped[list[int]] = mapped_column(JSON, default=list)
     shot_type: Mapped[str | None] = mapped_column(String(50), default=None)
     dialogues: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)  # inutilisé : voir Bubble
     importance: Mapped[int] = mapped_column(Integer, default=1)
@@ -245,6 +349,10 @@ class Panel(TimestampMixin, Base):
     # True : prompt final édité à la main, conservé tant qu'on ne demande pas de le reconstruire.
     final_prompt_manual: Mapped[bool] = mapped_column(default=False)
     generation_preset: Mapped[str | None] = mapped_column(String(100), default=None)
+    # Croquis validé au tri (composition retenue, id de `panel_images` de sorte croquis) ; None = aucun.
+    sketch_image_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    # Débruitage du passage au propre imposé à cette case (None = celui de la série, sinon du preset).
+    sketch_denoise: Mapped[float | None] = mapped_column(Float, default=None)
     qc_score: Mapped[int | None] = mapped_column(Integer, default=None)
     state: Mapped[PanelState] = mapped_column(_enum(PanelState), default=PanelState.draft)
 
@@ -266,6 +374,8 @@ class PanelImage(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     panel_id: Mapped[int] = mapped_column(ForeignKey("panels.id", ondelete="CASCADE"), index=True)
     version: Mapped[int] = mapped_column(Integer)
+    # Sorte de version : `final` (par défaut) ou `croquis` (jamais choisie, assemblée ni exportée).
+    kind: Mapped[ImageKind] = mapped_column(_enum(ImageKind), default=ImageKind.final)
     path: Mapped[str] = mapped_column(String(500))
     seed: Mapped[int | None] = mapped_column(Integer, default=None)
     params: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
@@ -276,6 +386,11 @@ class PanelImage(Base):
     qc_details: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     # Boîtes détectées (visages, mains, texte) en px de l'image : réutilisées par le lettrage.
     detections: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
+    # Finition d'impression : dérivé agrandi de cette version (pas une nouvelle version de composition) —
+    # {"path", "width", "height", "upscaler", "upscaler_name", "factor", "source_width", "source_height",
+    # "target_dpi", "dpi", "job_id", "duration_ms", "created_at"}. Utilisé par l'assemblage tant que la
+    # version reste retenue ; effacé (fichier compris) quand une autre version de la case est retenue.
+    finish: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
     selected: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
@@ -356,7 +471,7 @@ class Job(Base):
     project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     chapter_id: Mapped[int | None] = mapped_column(ForeignKey("chapters.id", ondelete="CASCADE"), index=True)
     panel_id: Mapped[int | None] = mapped_column(ForeignKey("panels.id", ondelete="CASCADE"), index=True)
-    step: Mapped[str] = mapped_column(String(30))  # script | layout | generation | qc | qc_bench | lettering
+    step: Mapped[str] = mapped_column(String(30))  # script | layout | generation | qc | qc_bench | finishing | …
     status: Mapped[JobStatus] = mapped_column(_enum(JobStatus), default=JobStatus.pending)
     progress: Mapped[int] = mapped_column(Integer, default=0)  # 0–100
     message: Mapped[str] = mapped_column(Text, default="")

@@ -19,6 +19,7 @@ from ..pipeline.knowledge import (
     title_from,
 )
 from ..store.models import (
+    AssetKind,
     Chapter,
     Character,
     KnowledgeChunk,
@@ -26,12 +27,14 @@ from ..store.models import (
     KnowledgeDocument,
     LLMRun,
     Project,
+    SeriesAsset,
 )
 from .chapters import get_chapter_or_404
 from .deps import AppContext, get_ctx, get_session
 from .errors import FieldError
 from .projects import get_project_or_404
 from .schemas import (
+    BibleAsset,
     BibleCharacter,
     BibleOut,
     BibleSummary,
@@ -461,6 +464,9 @@ def bible_out(session: Session, ctx: AppContext, project: Project) -> BibleOut:
         select(Character).where(Character.project_id == project.id).order_by(Character.name)
     ).all()
     rendered = render_bible(session, project.id, max_tokens=ctx.knowledge.settings.bible_max_tokens)
+    assets = session.scalars(
+        select(SeriesAsset).where(SeriesAsset.project_id == project.id).order_by(SeriesAsset.name)
+    ).all()
     return BibleOut(
         project_id=project.id,
         world=bible.world if bible else "",
@@ -470,6 +476,16 @@ def bible_out(session: Session, ctx: AppContext, project: Project) -> BibleOut:
         characters=[
             BibleCharacter(id=c.id, name=c.name, visual_description=c.visual_description, note=notes.get(str(c.id), ""))
             for c in characters
+        ],
+        decors=[
+            BibleAsset(id=a.id, name=a.name, visual_description=a.visual_description)
+            for a in assets
+            if a.kind == AssetKind.decor
+        ],
+        objets=[
+            BibleAsset(id=a.id, name=a.name, visual_description=a.visual_description)
+            for a in assets
+            if a.kind == AssetKind.object
         ],
         chapter_summaries=[ChapterSummaryEntry(**e) for e in (bible.chapter_summaries if bible else [])],
         rendered=BibleSummary(**rendered.as_dict()) if rendered else None,

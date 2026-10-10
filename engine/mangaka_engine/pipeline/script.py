@@ -1,9 +1,10 @@
 """Étape 1 — scénario : découpage d'un chapitre en pages → cases par le LLM.
 
-1. contexte : série, personnages, résumés des chapitres précédents (continuité), synopsis, bible de
+1. contexte : série, personnages, bibliothèque (décors et objets, avec leurs ids), résumés des chapitres précédents (continuité), synopsis, bible de
    la série et passages du savoir-faire (`pipeline/knowledge.py`, enregistrés dans `llm_runs`) ;
 2. prompt rendu depuis `presets/prompts/script.yaml` (aucun texte de prompt dans ce module) ;
-3. réponse JSON validée par Pydantic ; invalide → nouvel essai avec l'erreur renvoyée au LLM
+3. réponse JSON validée par Pydantic, puis les ids de décor / d'objets contre la bibliothèque de la
+   série ; invalide → nouvel essai avec l'erreur renvoyée au LLM
    (`max_retries` du preset, 2 au maximum) → sinon `ScriptError` lisible ;
 4. enregistrement en Pages + Panels + Bubbles (remplace les pages « story » du chapitre) et
    du résumé du chapitre, puis découpage automatique des pages (étape 2).
@@ -15,7 +16,7 @@ import json
 import re
 import string
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, field_validator
@@ -38,6 +39,7 @@ from ..store.models import (
 )
 from ..validation import format_errors
 from .knowledge import AgentKnowledge, KnowledgeBase
+from .library import SeriesLibrary
 from .pages import layout_pages
 
 AGENT = "script"  # rôle de l'agent dans presets/knowledge.yaml
@@ -78,6 +80,7 @@ IntensityName = Literal["calme", "normal", "choc"]
 RythmeName = Literal["lent", "normal", "rapide"]
 MAX_PANELS_PER_PAGE = 9
 MAX_PAGES = 60
+MAX_PANEL_OBJECTS = 8
 
 Short = Annotated[str, StringConstraints(strip_whitespace=True, max_length=120)]
 
@@ -132,9 +135,27 @@ class ScriptPanel(_LLMModel):
     importance: int = Field(default=2, ge=1, le=3)
     intensity: IntensityName | None = None
     sfx: list[ScriptSfx] = Field(default_factory=list, max_length=4)
+    # Bibliothèque de la série : id du décor (ou null) et ids des objets visibles.
+    decor: int | None = None
+    objets: list[int] = Field(default_factory=list, max_length=MAX_PANEL_OBJECTS)
 
     _shot = field_validator("shot_type", mode="before")(normalize_shot_type)
     _intensity = field_validator("intensity", mode="before")(_hint)
+
+    @field_validator("decor", mode="before")
+    @classmethod
+    def _no_decor(cls, v: Any) -> Any:
+        return None if v in ("", "null", "aucun") else v
+
+    @field_validator("objets", mode="before")
+    @classmethod
+    def _no_objects(cls, v: Any) -> Any:
+        return [] if v is None else v
+
+    @field_validator("objets")
+    @classmethod
+    def _unique_objects(cls, v: list[int]) -> list[int]:
+        return list(dict.fromkeys(v))
 
     @field_validator("characters")
     @classmethod
@@ -164,6 +185,7 @@ ERROR_LABELS = {
     "dialogues": "réplique",
     "characters": "personnage",
     "sfx": "onomatopée",
+    "objets": "objet",
 }
 
 
@@ -178,8 +200,11 @@ class ScriptValidationError(ValueError):
 _FENCE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.DOTALL)
 
 
-def parse_script(text: str) -> ScriptOutput:
-    """Valide la réponse brute du LLM ; `ScriptValidationError` explique ce qui ne va pas."""
+def parse_script(text: str, library: SeriesLibrary | None = None) -> ScriptOutput:
+    """Valide la réponse brute du LLM ; `ScriptValidationError` explique ce qui ne va pas.
+
+    Avec `library`, chaque décor et objet cité doit exister dans la bibliothèque de la série.
+    """
     m = _FENCE.match(text)
     raw = m.group(1) if m else text.strip()
     try:
@@ -189,9 +214,20 @@ def parse_script(text: str) -> ScriptOutput:
     if not isinstance(data, dict):
         raise ScriptValidationError("la racine doit être un objet JSON avec « pages » et « summary »")
     try:
-        return ScriptOutput.model_validate(data)
+        out = ScriptOutput.model_validate(data)
     except ValidationError as exc:
         raise ScriptValidationError(format_errors(exc, ERROR_LABELS)) from None
+    if library is not None:
+        problems = [
+            f"page {p} › case {c} › {problem}"
+            for p, page in enumerate(out.pages, start=1)
+            for c, panel in enumerate(page.panels, start=1)
+            for problem in library.check_refs(panel.decor, panel.objets)
+        ]
+        if problems:
+            extra = f" ; … et {len(problems) - 8} autre(s)" if len(problems) > 8 else ""
+            raise ScriptValidationError(" ; ".join(problems[:8]) + extra)
+    return out
 
 
 # --- contexte -------------------------------------------------------------------
@@ -202,12 +238,14 @@ class ScriptContext:
     previous_chapters: list[dict[str, Any]]
     chapter: dict[str, Any]
     knowledge: AgentKnowledge | None = None
+    library: SeriesLibrary = field(default_factory=SeriesLibrary)
 
     def as_json(self) -> dict[str, Any]:
         return {
             "task": "script",
             "series": self.series,
             "characters": self.characters,
+            **self.library.as_json(),
             "previous_chapters": self.previous_chapters,
             "chapter": self.chapter,
             "shot_types": list(SHOT_TYPES),
@@ -256,6 +294,7 @@ def build_context(
             "target_pages": chapter.target_page_count,
         },
         knowledge=knowledge.for_agent(session, AGENT, series.id, knowledge_query(chapter)) if knowledge else None,
+        library=SeriesLibrary.load(session, series.id),
     )
 
 
@@ -279,6 +318,8 @@ def render_messages(prompt: PromptPreset, ctx: ScriptContext) -> list[ChatMessag
         "series_style": ctx.series["style"] or "(non précisé)",
         "reading_direction": DIRECTION_LABELS.get(ctx.series["reading_direction"], ctx.series["reading_direction"]),
         "characters": chars or "(aucun personnage enregistré)",
+        "decors": ctx.library.text("decors") or "(aucun décor enregistré : « decor » vaut null)",
+        "objets": ctx.library.text("objets") or "(aucun objet enregistré : « objets » reste vide)",
         "previous_chapters": prev or "(premier chapitre de la série)",
         "chapter_number": str(ctx.chapter["number"]),
         "chapter_title": ctx.chapter["title"] or "sans titre",
@@ -325,7 +366,7 @@ def run_script(llm: LLMProvider, prompt: PromptPreset, ctx: ScriptContext, progr
             progress(10 + attempt * 25, f"Le LLM n'a pas répondu ({exc}), nouvel essai…")
             continue
         try:
-            output = parse_script(result.text)
+            output = parse_script(result.text, ctx.library)
         except ScriptValidationError as exc:
             last_error = str(exc)
             if attempt < total:
@@ -366,6 +407,8 @@ def save_script(session: Session, chapter: Chapter, output: ScriptOutput) -> lis
                 shot_type=sc.shot_type,
                 importance=sc.importance,
                 intensity=sc.intensity,
+                decor_id=sc.decor,
+                object_ids=list(sc.objets),
             )
             for j, d in enumerate(sc.dialogues):
                 panel.bubbles.append(
@@ -435,7 +478,7 @@ def script_job(
             chapter = session.get(Chapter, chapter_id)
             if chapter is None:
                 raise ScriptError("Chapitre introuvable (supprimé pendant le découpage ?)")
-            progress(5, "Préparation du contexte (série, personnages, chapitres précédents, bible, savoir-faire)…")
+            progress(5, "Préparation du contexte (série, personnages, décors et objets, chapitres précédents, bible…)…")
             ctx = build_context(session, chapter, max_previous=prompt.max_previous_chapters, knowledge=knowledge)
             if ctx.knowledge is not None:
                 record_run(session, chapter, ctx.knowledge, job_id=job_id, model=getattr(llm, "model", llm.name))

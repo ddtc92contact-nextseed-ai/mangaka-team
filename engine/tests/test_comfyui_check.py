@@ -71,13 +71,25 @@ def test_check_ok_with_recorded_object_info() -> None:
     assert REG.issues == []
     report = _report(_object_info(), [LoraUse(_installed_lora(), "série « Les Lames », style")])
     assert report["ok"] and report["online"] and not report["simulated"]
-    assert set(_problems(report)) == {
+    checked = set(_problems(report))
+    assert checked >= set(REG.workflows)  # tous les workflows, plus les agrandisseurs
+    assert checked >= {
         "qwen-image-base",
         "qwen-image-base-rapide",
         "qwen-image-edit-ref",
         "qwen-image-edit-ref-rapide",
         "qwen-image-turbo",
         "qwen-image-edit-ref-turbo",
+        "qwen-image-croquis",
+        "qwen-image-turbo-from-sketch",
+        # agrandisseurs de la finition d'impression (presets/upscalers/)
+        "realesrgan-x4plus-anime-6b",
+        "ultrasharp-4x",
+        "remacri-4x",
+        "seedvr2-7b",
+        "qwen-image-inpaint",
+        "qwen-image-inpaint-rapide",
+        "qwen-image-inpaint-turbo",
     }
     assert all(p["ok"] and p["problems"] == [] for p in report["presets"])
     assert report["loras"] == {"checked": 1, "problems": []}
@@ -111,7 +123,8 @@ def test_missing_model_file_is_reported_per_preset() -> None:
 
 
 def test_missing_turbo_file_names_the_file_and_the_folder() -> None:
-    """Fichier Turbo absent de la GX10 : message lisible pour les deux presets Turbo, et eux seuls."""
+    """Fichier Turbo absent de la GX10 : message lisible pour les presets Turbo (croquis et propre depuis
+    croquis compris : même modèle), et eux seuls."""
     info = _object_info()
     missing = _preset_value("qwen-image-turbo", "1", "unet_name")
     assert missing == _preset_value("qwen-image-edit-ref-turbo", "1", "unet_name")
@@ -123,7 +136,8 @@ def test_missing_turbo_file_names_the_file_and_the_folder() -> None:
     )
     assert problems["qwen-image-turbo"] == [expected]
     assert problems["qwen-image-edit-ref-turbo"] == [expected]
-    assert all(not v for k, v in problems.items() if "turbo" not in k)
+    assert problems["qwen-image-croquis"] == [expected] and problems["qwen-image-turbo-from-sketch"] == [expected]
+    assert all(not v for k, v in problems.items() if "turbo" not in k and "croquis" not in k)
 
 
 def test_missing_encoder_and_vae_are_named() -> None:
@@ -144,10 +158,23 @@ def test_unknown_node_class() -> None:
     info = _object_info()
     del info["QwenImage21Cache"]
     report = _report(info)
-    for problems in _problems(report).values():
-        assert problems == ["nœud inconnu : QwenImage21Cache (nœud 4)"]
+    for preset_id, problems in _problems(report).items():
+        expected = ["nœud inconnu : QwenImage21Cache (nœud 4)"] if preset_id in REG.workflows else []
+        assert problems == expected
     del info["LoraLoaderModelOnly"]
     assert "nœud inconnu : LoraLoaderModelOnly (chargeur de LoRA)" in _problems(_report(info))["qwen-image-base"]
+
+
+def test_missing_upscale_model_names_the_file_and_the_folder() -> None:
+    info = _object_info()
+    model = REG.upscaler("realesrgan-x4plus-anime-6b").workflow["2"]["inputs"]["model_name"]
+    info["UpscaleModelLoader"]["input"]["required"]["model_name"][0].remove(model)
+    problems = _problems(_report(info))
+    assert problems["realesrgan-x4plus-anime-6b"] == [
+        f"modèle introuvable dans ComfyUI : {model} — à placer dans ComfyUI/models/upscale_models/"
+        " (nœud 2, UpscaleModelLoader)"
+    ]
+    assert problems["ultrasharp-4x"] == [] and problems["qwen-image-turbo"] == []
 
 
 def test_missing_lora_from_series_and_characters() -> None:

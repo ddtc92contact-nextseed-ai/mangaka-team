@@ -23,6 +23,9 @@ LoraTriggers = Annotated[str, StringConstraints(strip_whitespace=True, max_lengt
 IntensityName = Literal["calme", "normal", "choc"]
 RythmeName = Literal["lent", "normal", "rapide"]
 FrameKindName = Literal["border", "none", "fade"]
+# Débruitage du passage au propre (palier croquis) : 0 = croquis inchangé, 1 = image neuve.
+Denoise = Annotated[float, Field(ge=0.05, le=1)]
+ImageKindName = Literal["final", "croquis"]
 
 
 class _In(BaseModel):
@@ -42,6 +45,11 @@ class ProjectCreate(_In):
     style_lora_trigger_words: LoraTriggers = ""
     # Absent : style par défaut des presets (« dynamique »).
     layout_style: PresetId | None = None
+    # Absent : `sketch_enabled` de presets/defaults.yaml (activé).
+    sketch_enabled: bool | None = None
+    sketch_denoise: Denoise | None = None
+    # Agrandisseur de la finition d'impression (None : celui de defaults.yaml).
+    upscaler: PresetId | None = None
 
 
 class ProjectUpdate(_In):
@@ -55,6 +63,9 @@ class ProjectUpdate(_In):
     style_lora_weight: LoraWeight | None = None
     style_lora_trigger_words: LoraTriggers | None = None
     layout_style: PresetId | None = None
+    sketch_enabled: bool | None = None
+    sketch_denoise: Denoise | None = None  # null : `denoise` du preset « propre »
+    upscaler: PresetId | None = None  # null : revient à l'agrandisseur de defaults.yaml
 
 
 class ProjectOut(BaseModel):
@@ -69,6 +80,9 @@ class ProjectOut(BaseModel):
     style_lora_weight: float
     style_lora_trigger_words: str
     layout_style: str
+    sketch_enabled: bool = True
+    sketch_denoise: float | None = None
+    upscaler: str | None = None
     character_count: int
     chapter_count: int
     # Pages déjà mises en page : changer le sens de lecture les recalcule (confirmation dans l'UI).
@@ -141,6 +155,9 @@ class SfxIn(_In):
     intensity: IntensityName | None = None
 
 
+MAX_PANEL_OBJECTS = 8
+
+
 class PanelIn(_In):
     id: int | None = None
     description: LongText = ""
@@ -151,6 +168,9 @@ class PanelIn(_In):
     dialogues: Annotated[list[BubbleIn], Field(max_length=12)] = Field(default_factory=list)
     # Onomatopées : absent = celles de la case sont gardées telles quelles.
     sfx: Annotated[list[SfxIn], Field(max_length=8)] | None = None
+    # Bibliothèque de la série (ids) : absent = gardés tels quels ; decor null = pas de décor.
+    decor: int | None = None
+    objets: Annotated[list[int], Field(max_length=MAX_PANEL_OBJECTS)] | None = None
 
 
 class PageIn(_In):
@@ -185,11 +205,38 @@ class PanelFrameIn(_In):
     inset: bool | None = None
 
 
+class PrintInfoOut(BaseModel):
+    """Dpi effectif de la version retenue à l'impression (finition d'impression)."""
+
+    image_id: int
+    status: Literal["ok", "finished", "low"]  # au dpi cible · finalisée · sous le seuil
+    target_dpi: int  # dpi du format de page
+    min_dpi: int  # seuil : finishing_tolerance × dpi cible
+    box_width: int  # boîte imprimée (px au dpi cible, fond perdu compris)
+    box_height: int
+    width_mm: float
+    height_mm: float
+    source_width: int
+    source_height: int
+    dpi: int  # dpi effectif de la version retenue
+    factor: float  # agrandissement nécessaire pour atteindre le dpi cible
+    target_width: int  # taille finale de la finition
+    target_height: int
+    needed: bool
+    finished: bool
+    finished_dpi: int | None = None
+    finished_width: int | None = None
+    finished_height: int | None = None
+    finished_upscaler: str | None = None
+
+
 class PanelOut(BaseModel):
     id: int
     index: int
     description: str
     characters: list[str]
+    decor: int | None = None  # décor de la bibliothèque (id)
+    objets: list[int] = Field(default_factory=list)  # objets de la bibliothèque (ids)
     shot_type: str | None
     importance: int
     intensity: IntensityName | None = None
@@ -203,9 +250,17 @@ class PanelOut(BaseModel):
     final_prompt: str | None = None
     final_prompt_manual: bool = False
     generation_preset: str | None = None
-    image_count: int = 0
+    image_count: int = 0  # versions propres (les croquis sont comptés à part)
     selected_image_id: int | None = None
     selected_image_url: str | None = None
+    # Palier croquis : nombre de croquis, croquis montré (validé, sinon le plus récent), validation.
+    sketch_count: int = 0
+    sketch_image_id: int | None = None
+    sketch_image_url: str | None = None
+    sketch_validated: bool = False
+    sketch_denoise: float | None = None
+    # Version propre déjà tirée du croquis validé.
+    sketch_cleaned: bool = False
     # QC de la version choisie (None : pas encore contrôlée).
     qc_verdict: QCVerdictName | None = None
     qc_score: int | None = None
@@ -214,6 +269,8 @@ class PanelOut(BaseModel):
     detections: dict[str, Any] | None = None  # boîtes de la version choisie
     # Le ratio de la case s'écarte trop de celui de l'image retenue (seuil : presets/layout.yaml).
     regeneration_advised: bool = False
+    # Dpi de la version retenue à l'impression (None : pas de version retenue ou pas de mise en page).
+    print_info: PrintInfoOut | None = None
     # Dernière génération de la case (tous jobs confondus, sans limite) : pour afficher un échec et son erreur.
     last_job_id: int | None = None
     last_job_status: str | None = None
@@ -354,6 +411,58 @@ class GenerateIn(_In):
     prompt_override: FinalPrompt | None = None
 
 
+RepairTarget = Literal["face", "hand", "zone"]
+
+
+class RepairRegionIn(_In):
+    """Rectangle à repeindre, en px de l'image de la version (détection du QC ou rectangle tracé)."""
+
+    x1: Annotated[float, Field(ge=0, le=100_000)]
+    y1: Annotated[float, Field(ge=0, le=100_000)]
+    x2: Annotated[float, Field(ge=0, le=100_000)]
+    y2: Annotated[float, Field(ge=0, le=100_000)]
+    # Une boîte de `PanelImage.detections` peut être renvoyée telle quelle (score et étiquette ignorés).
+    score: float | None = None
+    label: Annotated[str, StringConstraints(max_length=40)] | None = None
+
+
+class RepairIn(_In):
+    """Réparation ciblée d'une version : zone (rectangles et/ou masque peint), prompt et réglages."""
+
+    regions: Annotated[list[RepairRegionIn], Field(max_length=50)] = Field(default_factory=list)
+    # Masque peint : PNG en base64 (data URL acceptée), blanc ou opaque = à repeindre ; redimensionné.
+    mask_png: Annotated[str, StringConstraints(max_length=20_000_000)] | None = None
+    target: RepairTarget = "zone"
+    character_id: int | None = None
+    prompt: FinalPrompt | None = None
+    grow_px: Annotated[int, Field(ge=0, le=256)] | None = None
+    feather_px: Annotated[int, Field(ge=0, le=128)] | None = None
+    denoise: Annotated[float, Field(ge=0.05, le=1)] | None = None
+    seed: Annotated[int, Field(ge=0, le=MAX_SEED)] | None = None
+
+
+class RepairCharacterOut(BaseModel):
+    id: int
+    name: str
+
+
+class RepairInfoOut(BaseModel):
+    """Préremplissage de la fenêtre « Réparer » : preset, réglages par défaut, prompt, personnages."""
+
+    available: bool
+    problem: str | None = None  # pourquoi la réparation est impossible (croquis, preset manquant…)
+    preset: str | None = None
+    preset_name: str | None = None
+    tier: str | None = None
+    grow_px: int = 0
+    feather_px: int = 0
+    denoise: float = 0.45
+    target: RepairTarget = "zone"
+    character_id: int | None = None
+    characters: list[RepairCharacterOut] = Field(default_factory=list)
+    prompt: str = ""
+
+
 class BatchGenerateIn(_In):
     force: bool = False
     count: VariantCount = 1
@@ -370,6 +479,7 @@ class PanelImageOut(BaseModel):
     id: int
     panel_id: int
     version: int
+    kind: ImageKindName = "final"  # croquis : jamais choisi, assemblé ni exporté
     url: str
     seed: int | None
     selected: bool
@@ -387,7 +497,33 @@ class PanelImageOut(BaseModel):
     detections: dict[str, Any] | None = None
     # Jugement humain « bonne / mauvaise » (banc d'essai du QC), indépendant du verdict QC.
     annotation: AnnotationOut | None = None
+    # Finition d'impression de la version (image agrandie dérivée) : taille, agrandisseur, dpi…
+    finish: dict[str, Any] | None = None
     created_at: datetime
+
+
+class UpscalerOut(BaseModel):
+    id: str
+    name: str
+    description: str
+    model_scale: float | None
+    high_fidelity: bool
+    is_default: bool
+    estimated_s: float | None
+    timeout_s: float
+
+
+class FinishBatchOut(BaseModel):
+    jobs: list[JobOut]
+    panel_ids: list[int]
+    skipped: int  # cases déjà au dpi cible, déjà finalisées, sans version ou déjà en file
+
+
+class PageFinishingOut(BaseModel):
+    page_id: int
+    upscaler: str | None  # nom de l'agrandisseur de la série
+    panels: dict[int, PrintInfoOut | None]
+    active_jobs: list[JobOut]
 
 
 class PanelUpdate(_In):
@@ -395,6 +531,18 @@ class PanelUpdate(_In):
     final_prompt: FinalPrompt | None = None
     # generation_preset : null = choix automatique.
     generation_preset: PresetId | None = None
+    # Description de la case (tri des croquis : « modifier la description puis re-croquer »).
+    description: LongText | None = None
+    # Débruitage du passage au propre de cette case ; null = celui de la série (sinon du preset).
+    sketch_denoise: Denoise | None = None
+
+
+class LibraryRef(BaseModel):
+    """Élément de la bibliothèque cité par une case (personnage, objet ou décor)."""
+
+    id: int
+    kind: Literal["character", "object", "decor"]
+    name: str
 
 
 class PanelDetailOut(BaseModel):
@@ -408,6 +556,8 @@ class PanelDetailOut(BaseModel):
     description: str
     characters: list[str]
     character_ids: list[int]
+    decor: LibraryRef | None = None
+    objets: list[LibraryRef] = Field(default_factory=list)
     shot_type: str | None
     state: str
     bbox: dict[str, int] | None
@@ -418,6 +568,10 @@ class PanelDetailOut(BaseModel):
     target: dict[str, int] | None
     images: list[PanelImageOut]
     active_jobs: list[JobOut]
+    sketch_image_id: int | None = None  # croquis validé
+    sketch_denoise: float | None = None
+    print_info: PrintInfoOut | None = None
+    upscaler: str | None = None  # agrandisseur de la finition (nom), None si aucun configuré
 
 
 class QueueItemOut(BaseModel):
@@ -466,6 +620,9 @@ class WorkflowPresetOut(BaseModel):
     tier_order: int | None = None
     estimated_s: float | None = None
     is_quality: bool = False  # palier de « Régénérer en Qualité »
+    role: Literal["generation", "croquis", "propre"] = "generation"
+    from_sketch: str | None = None  # workflow « propre depuis croquis » du même palier
+    is_sketch: bool = False  # workflow des croquis (defaults.workflow_sketch)
 
 
 class PresetEstimateOut(BaseModel):
@@ -482,6 +639,28 @@ class EstimateOut(BaseModel):
     total_s: float | None  # None : un preset sans durée connue ni `estimated_s`
     measured: bool  # False : au moins une partie vient des estimations des presets (« estimation »)
     by_preset: list[PresetEstimateOut]
+
+
+# --- Palier croquis ----------------------------------------------------------------
+class SketchIn(_In):
+    seed: Annotated[int, Field(ge=0, le=MAX_SEED)] | None = None  # null : nouvelle graine
+
+
+class SketchValidateIn(_In):
+    image_id: int | None = None  # null : le croquis le plus récent
+
+
+class CleanIn(_In):
+    denoise: Denoise | None = None  # null : case > série > preset
+
+
+class SketchEstimateOut(BaseModel):
+    panels: int  # cases de la page / du chapitre
+    to_sketch: int  # cases encore à croquer (sans version propre ni croquis validé)
+    validated: int  # cases au croquis validé
+    to_clean: int  # cases validées sans version propre tirée de leur croquis
+    sketch: EstimateOut  # « croquis de la page »
+    clean: EstimateOut  # « passage au propre des cases validées »
 
 
 # --- Contrôle qualité (étape 4) ------------------------------------------------
@@ -600,6 +779,83 @@ class CharacterOut(BaseModel):
     reference_images: list[ReferenceImageOut]
     created_at: datetime
     updated_at: datetime
+
+
+# --- Objets et décors de la bibliothèque (mêmes champs qu'un personnage) ------
+AssetKindName = Literal["object", "decor"]
+AssetCreate = CharacterCreate
+AssetUpdate = CharacterUpdate
+
+
+class AssetOut(CharacterOut):
+    kind: AssetKindName
+
+
+class ImageOrderIn(_In):
+    """Nouvel ordre des images de référence d'une fiche (toutes, une fois chacune) ; la 1re est la principale."""
+
+    image_ids: list[int] = Field(min_length=1, max_length=200)
+
+
+# --- « Créer des références » (fiches générées par ComfyUI) ---------------------
+LibraryKindName = Literal["character", "object", "decor"]
+Instruction = Annotated[str, StringConstraints(strip_whitespace=True, max_length=500)]
+
+
+class ReferenceSheetOut(BaseModel):
+    id: str
+    name: str
+    description: str
+    kinds: list[LibraryKindName]
+    width: int
+    height: int
+    workflow: str | None  # None : palier de la série (ou Qualité)
+
+
+class ReferenceGenerateIn(_In):
+    sheet: PresetId
+    count: VariantCount = 4
+    quality: bool = False  # palier Qualité au lieu de celui de la série
+    seed: Annotated[int, Field(ge=0, le=MAX_SEED)] | None = None
+
+
+class ReferenceRefineIn(_In):
+    instruction: Instruction = Field(min_length=1)
+    count: VariantCount = 4
+    quality: bool = False
+    sheet: PresetId | None = None  # par défaut : celui de la variante de départ
+
+
+class ReferenceVariantOut(BaseModel):
+    id: int
+    entry_kind: LibraryKindName
+    entry_id: int
+    url: str
+    sheet: str
+    sheet_name: str
+    preset: str | None
+    tier: str | None
+    seed: int | None
+    width: int
+    height: int
+    prompt: str
+    instruction: str
+    parent_id: int | None
+    kept: bool  # gardée parmi les images de référence de la fiche (et toujours présente)
+    kept_image_id: int | None
+    job_id: int | None
+    params: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+
+
+class ReferenceStudioOut(BaseModel):
+    """Historique des variantes d'une fiche (plus récentes d'abord) et générations en cours."""
+
+    variants: list[ReferenceVariantOut]
+    active_jobs: list[JobOut]
+    max_kept: int
+    kept_count: int
+    reference_slots: int  # emplacements d'images de référence d'une case (workflow « avec références »)
 
 
 # --- Banc d'essai du QC -----------------------------------------------------------
@@ -802,6 +1058,14 @@ class BibleCharacter(BaseModel):
     note: str
 
 
+class BibleAsset(BaseModel):
+    """Objet ou décor de la bibliothèque, repris dans la bible injectée aux agents."""
+
+    id: int
+    name: str
+    visual_description: str
+
+
 class ChapterSummaryEntry(BaseModel):
     chapter_id: int | None = None
     number: int | None = None
@@ -826,6 +1090,8 @@ class BibleOut(BaseModel):
     rules: str
     motifs: str
     characters: list[BibleCharacter]
+    decors: list[BibleAsset] = Field(default_factory=list)
+    objets: list[BibleAsset] = Field(default_factory=list)
     chapter_summaries: list[ChapterSummaryEntry]
     rendered: BibleSummary | None
     updated_at: datetime | None

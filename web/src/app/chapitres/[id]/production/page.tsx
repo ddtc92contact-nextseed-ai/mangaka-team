@@ -333,6 +333,7 @@ function CurrentJob({
   onQueued: (message: string) => void;
 }) {
   const { cancel } = useQueue();
+  const sketchEnabled = useChapter().series.sketch_enabled;
   const here = running && running.chapter_id === chapterId ? running : null;
   const now = useNow(here !== null);
   const [busy, setBusy] = useState(false);
@@ -392,6 +393,11 @@ function CurrentJob({
               {busy ? "Annulation…" : "Annuler cette case"}
             </Button>
           )}
+          {!here && mine.length === 0 && sketchEnabled && (
+            <ButtonLink variant="secondary" href={`/chapitres/${chapterId}/croquis`} data-testid="production-sketch">
+              Croquis et tri
+            </ButtonLink>
+          )}
           {!here && mine.length === 0 && <GenerateChapterButton chapterId={chapterId} onQueued={onQueued} variant="primary" />}
         </div>
       </div>
@@ -435,15 +441,17 @@ function CurrentJob({
 }
 
 // --- planches -------------------------------------------------------------------------------
-function thumbState(view: PanelView | undefined): "running" | "queued" | "failed" | "done" | "empty" {
+function thumbState(view: PanelView | undefined): "running" | "queued" | "failed" | "done" | "sketch" | "empty" {
   if (view?.running) return "running";
   if (view?.pending.length) return "queued";
   if (view?.panel.selected_image_url) return "done";
+  if (view?.panel.sketch_image_url) return "sketch";
   if (view?.failure) return "failed";
   return "empty";
 }
 
 const THUMB_BG: Record<ReturnType<typeof thumbState>, string> = {
+  sketch: "bg-zinc-100",
   running: "bg-rose-200 animate-pulse",
   queued: "bg-zinc-400",
   failed: "bg-red-400",
@@ -455,7 +463,8 @@ function ThumbPanel({ lp, view, W, H }: { lp: LayoutPanel; view: PanelView | und
   const state = thumbState(view);
   const poly = lp.slanted ? panelPolygon(lp) : null;
   const pct = (v: number, total: number) => `${(v / total) * 100}%`;
-  const url = view?.panel.selected_image_url ?? null;
+  // Sans version choisie : le croquis de la case (palier croquis), estompé.
+  const url = view?.panel.selected_image_url ?? view?.panel.sketch_image_url ?? null;
   return (
     <div
       className={`absolute overflow-hidden ${THUMB_BG[state]} ${poly ? "" : "outline outline-1 outline-zinc-900"}`}
@@ -471,7 +480,11 @@ function ThumbPanel({ lp, view, W, H }: { lp: LayoutPanel; view: PanelView | und
     >
       {url && (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={engineUrl(url)} alt="" className={`h-full w-full object-cover ${state === "running" || state === "queued" ? "opacity-60" : ""}`} />
+        <img
+          src={engineUrl(url)}
+          alt=""
+          className={`h-full w-full object-cover ${state === "running" || state === "queued" || state === "sketch" ? "opacity-60" : ""}`}
+        />
       )}
       {state === "queued" && !url && (
         <span className="flex h-full w-full items-center justify-center text-[9px] font-bold text-zinc-100">
