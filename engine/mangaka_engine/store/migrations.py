@@ -27,6 +27,9 @@
 - 16 : packs de style (genre, rendu, ton, réglages fins). L'ancien texte libre `style` devient
   `legacy_style` (lecture seule, utilisé tant qu'aucun pack n'est choisi) ; les mots déclencheurs saisis
   du LoRA de style disparaissent (ils viennent du catalogue presets/style_loras.yaml).
+- 17 : référence de style active (planche de style).
+- 18 : note « mise en page sage héritée » : les séries encore en « sage » (réglé par la v8, pas par
+  l'utilisateur) gardent leur style, mais la fiche série le signale une fois. Rien d'autre ne change.
 
 Une base neuve est créée directement à la dernière version. Chaque migration tourne dans une
 transaction unique, clés étrangères désactivées (recette « 12 étapes » de SQLite pour reconstruire
@@ -63,7 +66,7 @@ from .models import (
 
 log = logging.getLogger("mangaka_engine")
 
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 
 
 class MigrationError(RuntimeError):
@@ -269,6 +272,11 @@ def _v16_to_v17(cur: sqlite3.Cursor) -> None:
         cur.execute("ALTER TABLE series_assets ADD COLUMN active BOOLEAN NOT NULL DEFAULT 1")
 
 
+def _v17_to_v18(cur: sqlite3.Cursor) -> None:
+    cur.execute("ALTER TABLE projects ADD COLUMN layout_style_notice BOOLEAN NOT NULL DEFAULT 0")
+    cur.execute("UPDATE projects SET layout_style_notice = 1 WHERE layout_style = 'sage'")
+
+
 MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     # version de départ → (version d'arrivée, fonction)
     0: (2, _v0_to_v2),
@@ -288,6 +296,7 @@ MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     14: (15, _v14_to_v15),
     15: (16, _v15_to_v16),
     16: (17, _v16_to_v17),
+    17: (18, _v17_to_v18),
 }
 
 

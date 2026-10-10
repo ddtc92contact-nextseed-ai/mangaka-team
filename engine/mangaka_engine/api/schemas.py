@@ -57,7 +57,7 @@ class ProjectCreate(_In):
     style_lora_name: LoraName | None = None
     # Absent : poids conseillé du catalogue style_loras.yaml (0,8 hors catalogue).
     style_lora_weight: LoraWeight | None = None
-    # Absent : style de mise en page du genre.
+    # Absent : style suggéré par le genre (jamais « sage »), sinon `layout_style` de presets/defaults.yaml.
     layout_style: PresetId | None = None
     # Polices des bulles de parole et des cris (fonts.yaml) ; absentes : celles du genre.
     dialogue_font: PresetId | None = None
@@ -91,6 +91,8 @@ class ProjectUpdate(_In):
     clean_mode: CleanModeName | None = None
     clean_control: ControlTypeId | None = None  # null : type par défaut du preset ControlNet
     upscaler: PresetId | None = None  # null : revient à l'agrandisseur de defaults.yaml
+    # false : masque la note « série passée en sage par une ancienne mise à jour » (seule valeur admise).
+    layout_style_notice: Literal[False] | None = None
 
 
 class ProjectOut(BaseModel):
@@ -126,8 +128,17 @@ class ProjectOut(BaseModel):
     chapter_count: int
     # Pages déjà mises en page : changer le sens de lecture les recalcule (confirmation dans l'UI).
     laid_out_page_count: int = 0
+    # Pages non générées (aucune image, croquis compris) qu'un changement de style peut remettre en page.
+    relayout_page_count: int = 0
+    # Série passée en « sage » par la migration v8 (pas par l'utilisateur) : note unique de la fiche série.
+    layout_style_notice: bool = False
     created_at: datetime
     updated_at: datetime
+
+
+class RelayoutOut(BaseModel):
+    relaid_page_ids: list[int]  # pages remises en page (sans aucune image)
+    kept_pages: int  # pages avec des cases déjà générées (ou en cours) : inchangées
 
 
 # --- Chapitres ------------------------------------------------------------------
@@ -513,6 +524,29 @@ class BatchGenerateIn(_In):
 class BatchGenerateOut(BaseModel):
     jobs: list[JobOut]
     panel_ids: list[int]
+    skipped: int
+
+
+ProductionModeName = Literal["sketch", "final"]
+
+
+class ChapterProductionPlanOut(BaseModel):
+    """« Générer le chapitre » (pages de l'histoire et bonus) : ce qu'un clic mettra en file."""
+
+    mode: ProductionModeName  # sketch : croquis d'abord (palier croquis de la série), final : versions finales
+    panels: int  # cases à croquer (sketch) ou à générer (final)
+    to_clean: int  # sketch : croquis validés à passer au propre
+    pages: int  # pages concernées
+    unlaid_pages: list[int]  # numéros des pages mises en page juste avant la génération
+    total: int  # cases des pages de l'histoire et bonus
+
+
+class ChapterProductionOut(BaseModel):
+    mode: ProductionModeName
+    jobs: list[JobOut]
+    panel_ids: list[int]  # cases croquées (sketch) ou générées (final)
+    cleaned_panel_ids: list[int]  # sketch : cases passées au propre depuis leur croquis validé
+    laid_out_pages: list[int]
     skipped: int
 
 

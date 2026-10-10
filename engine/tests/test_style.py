@@ -71,7 +71,9 @@ def test_v1_packs_are_loaded_in_order_with_their_defaults() -> None:
     }
     assert REG.style_options.options["trames"].monochrome_only
     fb = REG.style_genres["franco-belge"]
-    assert fb.reading_direction == "ltr" and fb.layout_style in REG.layout_styles
+    assert fb.reading_direction == "ltr" and fb.layout_style is None  # mise en page : celle de defaults.yaml
+    # Un genre suggère au plus un style « vivant », jamais les découpes droites de « sage ».
+    assert {g.layout_style for g in REG.style_genres.values()} <= {None, "dynamique", "nerveuse"}
     assert REG.style_genres["jeunesse"].allowed_tones is not None
     assert "dark" not in REG.style_genres["jeunesse"].allowed_tones
     for genre in REG.style_genres.values():
@@ -252,7 +254,8 @@ def test_genre_prefills_layout_direction_and_fonts(client: TestClient) -> None:
         201,
     )
     genre = REG.style_genres["franco-belge"]
-    assert (fb["reading_direction"], fb["layout_style"]) == ("ltr", genre.layout_style)
+    # Pas de suggestion du genre : style par défaut des nouvelles séries (defaults.yaml).
+    assert (fb["reading_direction"], fb["layout_style"]) == ("ltr", "dynamique")
     assert (fb["dialogue_font"], fb["shout_font"]) == (genre.fonts.dialogue, genre.fonts.shout)
     # Les polices vont dans les réglages de série du lettreur : le lettrage les applique.
     presets = client.app.state.ctx.agents.presets_for(fb["id"])  # type: ignore[attr-defined]

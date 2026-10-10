@@ -66,6 +66,8 @@ from .schemas import (
 )
 
 # Ordre des rôles de workflow dans les listes : paliers de série, croquis, propre depuis croquis, ControlNet.
+# Style de mise en page « droit » : jamais suggéré par un genre, seulement choisi par l'utilisateur.
+SAGE = "sage"
 ROLE_ORDER = {"generation": 0, "croquis": 1, "propre": 2, "controle": 3}
 
 
@@ -165,6 +167,14 @@ class PresetRegistry:
         if self.defaults and self.defaults.layout_style in self.layout_styles:
             return self.defaults.layout_style
         return next(iter(self.layout_styles), None)
+
+    def genre_layout_style(self, genre_id: str | None) -> str | None:
+        """Style de mise en page d'une nouvelle série de ce genre : sa suggestion (jamais « sage »),
+        sinon celui de defaults.yaml."""
+        genre = self.style_genres.get(genre_id) if genre_id else None
+        if genre is not None and genre.layout_style != SAGE and genre.layout_style in self.layout_styles:
+            return genre.layout_style
+        return self.default_layout_style
 
     def reference_sheet(self, sheet_id: str) -> ReferenceSheet:
         try:
@@ -433,8 +443,13 @@ class PresetRegistry:
         fonts = self.fonts.fonts if self.fonts else {}
         for genre_id, (genre, path) in packs("style_genres", StyleGenre).items():
             problems: list[str] = []
-            if genre.layout_style not in self.layout_styles:
+            if genre.layout_style is not None and genre.layout_style not in self.layout_styles:
                 problems.append(f"layout_style : style de mise en page inconnu « {genre.layout_style} »")
+            if genre.layout_style == SAGE:
+                # Le genre ne fait que suggérer : « sage » (découpes droites) reste un choix de l'utilisateur.
+                self.issues.append(
+                    PresetIssue(self._rel(path), "layout_style : un genre ne peut pas suggérer « sage » (ignoré)")
+                )
             for label, font in (("fonts.dialogue", genre.fonts.dialogue), ("fonts.shout", genre.fonts.shout)):
                 if font not in fonts:
                     problems.append(f"{label} : police inconnue « {font} » (fonts.yaml)")

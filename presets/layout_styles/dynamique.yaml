@@ -19,14 +19,16 @@ avoid_repeat: true
 
 # Une découpe passe en biais selon la case voisine la plus « forte » : son intensité si le scénario
 # l'a donnée, sinon son importance (1 transition, 2 normale, 3 forte).
+# Calibrage : une page de 4 cases ou plus a le plus souvent au moins une découpe en biais (≈ 7 sur 10
+# à 4 cases normales, davantage au-delà) ; cases calmes et rythme lent gardent les pages posées.
 slants:
   by_importance:
     1: { probability: 0.05, rows_deg: { min: 1.5, max: 2.5 }, cols_deg: { min: 2, max: 4 } }
-    2: { probability: 0.15, rows_deg: { min: 1.5, max: 3 }, cols_deg: { min: 2.5, max: 5 } }
-    3: { probability: 0.55, rows_deg: { min: 2, max: 4 }, cols_deg: { min: 3, max: 6 } }
+    2: { probability: 0.35, rows_deg: { min: 1.5, max: 3 }, cols_deg: { min: 2.5, max: 5 } }
+    3: { probability: 0.6, rows_deg: { min: 2, max: 4 }, cols_deg: { min: 3, max: 6 } }
   by_intensity:
     calme: { probability: 0.0, rows_deg: { min: 0, max: 0 }, cols_deg: { min: 0, max: 0 } }
-    normal: { probability: 0.15, rows_deg: { min: 1.5, max: 3 }, cols_deg: { min: 2.5, max: 5 } }
+    normal: { probability: 0.35, rows_deg: { min: 1.5, max: 3 }, cols_deg: { min: 2.5, max: 5 } }
     choc: { probability: 0.8, rows_deg: { min: 2.5, max: 5 }, cols_deg: { min: 4, max: 7 } }
 
 # Indice de rythme de la page donné par le scénario (facultatif ; absent = normal).
