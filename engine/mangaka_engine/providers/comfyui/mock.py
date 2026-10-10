@@ -11,7 +11,7 @@ import io
 import threading
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont
@@ -30,6 +30,15 @@ from .base import (
 DEFAULT_SIZE = (512, 512)
 DEFAULT_STEPS = 8
 MAX_REPORTED_STEPS = 30
+
+# LoRA « vus » par le ComfyUI factice (sélecteur de LoRA de l'interface), sous-dossiers compris.
+MOCK_LORAS = (
+    "encre-seinen_v2.safetensors",
+    "trame-shojo.safetensors",
+    "personnages/aiko_v1.safetensors",
+    "personnages/kenji_v3.safetensors",
+    "styles/aquarelle/lavis-doux.safetensors",
+)
 
 
 def requested_size(workflow: dict[str, Any]) -> tuple[int, int]:
@@ -101,8 +110,10 @@ class MockComfyUIClient:
         online: bool = True,
         seconds_per_image: float = 0.0,
         sleep: Callable[[float], None] = time.sleep,
+        loras: Sequence[str] = MOCK_LORAS,
     ) -> None:
         self.online = online
+        self.loras = list(loras)
         self.seconds_per_image = seconds_per_image
         self._sleep = sleep
         self.prompts: dict[str, dict[str, Any]] = {}
@@ -126,6 +137,14 @@ class MockComfyUIClient:
 
     def object_info(self) -> dict[str, Any]:
         raise ComfyUIError("ComfyUI simulé : aucun serveur à interroger")
+
+    def node_info(self, class_type: str) -> dict[str, Any]:
+        raise ComfyUIError("ComfyUI simulé : aucun serveur à interroger")
+
+    def lora_names(self) -> list[str]:
+        """Liste factice des LoRA (`MOCK_LORAS`, ou celle passée au constructeur)."""
+        self._check_online()
+        return list(self.loras)
 
     def upload_image(self, data: bytes, filename: str, *, subfolder: str = "mangaka") -> str:
         self._check_online()

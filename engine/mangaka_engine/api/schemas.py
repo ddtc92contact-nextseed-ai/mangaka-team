@@ -19,6 +19,7 @@ BubbleKindName = Literal["speech", "thought", "shout", "narration", "off"]
 QCVerdictName = Literal["ok", "review", "reject"]
 LoraName = Annotated[str, StringConstraints(strip_whitespace=True, max_length=255)]
 LoraWeight = Annotated[float, Field(ge=0, le=2)]
+LoraTriggers = Annotated[str, StringConstraints(strip_whitespace=True, max_length=500)]
 IntensityName = Literal["calme", "normal", "choc"]
 RythmeName = Literal["lent", "normal", "rapide"]
 FrameKindName = Literal["border", "none", "fade"]
@@ -38,6 +39,7 @@ class ProjectCreate(_In):
     workflow_preset: PresetId | None = None
     style_lora_name: LoraName | None = None
     style_lora_weight: LoraWeight = 0.8
+    style_lora_trigger_words: LoraTriggers = ""
     # Absent : style par défaut des presets (« dynamique »).
     layout_style: PresetId | None = None
 
@@ -51,6 +53,7 @@ class ProjectUpdate(_In):
     workflow_preset: PresetId | None = None
     style_lora_name: LoraName | None = None
     style_lora_weight: LoraWeight | None = None
+    style_lora_trigger_words: LoraTriggers | None = None
     layout_style: PresetId | None = None
 
 
@@ -64,6 +67,7 @@ class ProjectOut(BaseModel):
     workflow_preset: str
     style_lora_name: str | None
     style_lora_weight: float
+    style_lora_trigger_words: str
     layout_style: str
     character_count: int
     chapter_count: int
@@ -548,6 +552,7 @@ class CharacterCreate(_In):
     prompt_keywords: Keywords = Field(default_factory=list)
     lora_name: Annotated[str, StringConstraints(strip_whitespace=True, max_length=255)] | None = None
     lora_weight: float = Field(default=0.8, ge=0, le=2)
+    lora_trigger_words: LoraTriggers = ""
 
     _kw = field_validator("prompt_keywords")(_clean_keywords)
 
@@ -563,6 +568,7 @@ class CharacterUpdate(_In):
     prompt_keywords: Keywords | None = None
     lora_name: Annotated[str, StringConstraints(strip_whitespace=True, max_length=255)] | None = None
     lora_weight: float | None = Field(default=None, ge=0, le=2)
+    lora_trigger_words: LoraTriggers | None = None
 
     _kw = field_validator("prompt_keywords")(_clean_keywords)
 
@@ -585,6 +591,7 @@ class CharacterOut(BaseModel):
     prompt_keywords: list[str]
     lora_name: str | None
     lora_weight: float
+    lora_trigger_words: str
     reference_images: list[ReferenceImageOut]
     created_at: datetime
     updated_at: datetime

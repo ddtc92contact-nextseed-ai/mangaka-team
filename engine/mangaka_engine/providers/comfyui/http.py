@@ -14,7 +14,7 @@ import time
 import uuid
 from collections.abc import Callable
 from typing import Any, Protocol
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import quote, urlsplit, urlunsplit
 
 import httpx
 
@@ -135,6 +135,10 @@ class HttpComfyUIClient:
     def object_info(self) -> dict[str, Any]:
         # Plusieurs Mo (toutes les classes de nœuds et leurs listes de fichiers) : délai plus large.
         return self._get_dict("/object_info", timeout_s=OBJECT_INFO_TIMEOUT_S)
+
+    def node_info(self, class_type: str) -> dict[str, Any]:
+        # Une seule classe (ex. le chargeur de LoRA) : quelques Ko, délai normal.
+        return self._get_dict(f"/object_info/{quote(class_type, safe='')}")
 
     def queue_prompt(self, workflow: dict[str, Any]) -> str:
         resp = self._request("POST", "/prompt", json={"prompt": workflow, "client_id": self.client_id})

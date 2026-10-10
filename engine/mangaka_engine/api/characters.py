@@ -32,6 +32,7 @@ def character_out(c: Character) -> CharacterOut:
         prompt_keywords=list(c.prompt_keywords or []),
         lora_name=c.lora_name,
         lora_weight=c.lora_weight,
+        lora_trigger_words=c.lora_trigger_words or "",
         reference_images=[
             ReferenceImageOut(
                 id=img.id,
@@ -91,6 +92,8 @@ def update_character(character_id: int, body: CharacterUpdate, session: Session 
             raise FieldError(key, "ne peut pas être vide")
     if "lora_name" in changes:
         changes["lora_name"] = changes["lora_name"] or None
+    if "lora_trigger_words" in changes:
+        changes["lora_trigger_words"] = changes["lora_trigger_words"] or ""
     for key, value in changes.items():
         setattr(character, key, value)
     session.commit()
