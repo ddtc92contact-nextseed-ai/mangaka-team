@@ -97,6 +97,7 @@ def _with_control(info: dict[str, Any]) -> dict[str, Any]:
         "DWPreprocessor",
         "ScribblePreprocessor",
         "Canny",
+        "ImageInvert",  # natif ; absent de l'enregistrement de la GX10 (aucun preset ne s'en servait)
     ):
         info[cls] = {"input": {"required": {"image": ["IMAGE"]}}}
     return info
@@ -207,6 +208,22 @@ def test_missing_preprocessor_only_hides_its_type() -> None:
     assert not types["pose"]["available"] and "DWPreprocessor" in types["pose"]["problem"]
     assert types["lineart"]["available"] and types["carte"]["available"]
     assert _problems(report)["qwen-image-turbo-controlnet"] == []  # le prétraitement dépend du type choisi
+
+
+def test_missing_image_invert_only_hides_lineart() -> None:
+    """« Trait » inverse sa carte (`post: ImageInvert`) : sans ce nœud, seul ce type est masqué."""
+    info = _object_info()
+    del info["ImageInvert"]
+    report = _report(info)
+    control = report["control"]
+    assert control["available"] and control["problems"] == []
+    types = {t["id"]: t for t in control["types"]}
+    assert not types["lineart"]["available"]
+    assert types["lineart"]["problem"] == (
+        "nœud ImageInvert (post-traitement de la carte) absent de ce ComfyUI (mise à jour de ComfyUI nécessaire)"
+    )
+    assert all(t["available"] for k, t in types.items() if k != "lineart")
+    assert _problems(report)["qwen-image-turbo-controlnet"] == []
 
 
 def test_every_preset_file_name_is_known_to_the_recorded_comfyui() -> None:

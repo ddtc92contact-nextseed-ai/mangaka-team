@@ -28,6 +28,7 @@ from .base import (
     ImageRef,
     ProgressFn,
     StopFn,
+    check_prompt_nodes,
     describe_prompt_error,
     images_from_history,
 )
@@ -141,6 +142,7 @@ class HttpComfyUIClient:
         return self._get_dict(f"/object_info/{quote(class_type, safe='')}")
 
     def queue_prompt(self, workflow: dict[str, Any]) -> str:
+        check_prompt_nodes(workflow)
         resp = self._request("POST", "/prompt", json={"prompt": workflow, "client_id": self.client_id})
         data = self._json(resp)
         if resp.status_code != 200:

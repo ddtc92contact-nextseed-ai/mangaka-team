@@ -131,7 +131,7 @@
       "crop": "center",
       "height": 1216,
       "image": [
-        "42",
+        "46",
         0
       ],
       "upscale_method": "lanczos",
@@ -149,7 +149,7 @@
         0
       ],
       "model": [
-        "47",
+        "48",
         0
       ],
       "model_patch": [
@@ -165,6 +165,18 @@
   },
   "46": {
     "_meta": {
+      "title": "Carte (Trait) : Inversion"
+    },
+    "class_type": "ImageInvert",
+    "inputs": {
+      "image": [
+        "42",
+        0
+      ]
+    }
+  },
+  "47": {
+    "_meta": {
       "title": "LoRA style"
     },
     "class_type": "LoraLoaderModelOnly",
@@ -177,7 +189,7 @@
       "strength_model": 0.7
     }
   },
-  "47": {
+  "48": {
     "_meta": {
       "title": "LoRA Aiko"
     },
@@ -185,7 +197,7 @@
     "inputs": {
       "lora_name": "aiko-v3.safetensors",
       "model": [
-        "46",
+        "47",
         0
       ],
       "strength_model": 0.9

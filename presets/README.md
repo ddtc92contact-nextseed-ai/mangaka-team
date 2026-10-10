@@ -470,14 +470,30 @@ control:
   default_type: lineart
   default_strength: 1.0                     # 0 = contrôle ignoré, 1 = composition tenue, jusqu'à 2
   types:
-    lineart: { name: Trait, class_type: LineArtPreprocessor, inputs: { coarse: disable, resolution: 1024 } }
+    lineart:
+      name: Trait
+      class_type: LineArtPreprocessor
+      inputs: { coarse: disable, resolution: 1024 }
+      post:                                 # post-traitements de la carte, entre `preprocessor` et `resize`
+        - { class_type: ImageInvert, name: Inversion }
     carte: { name: Carte déjà prête }       # sans class_type : l'image guide est déjà une carte
 ```
 
+**Pourquoi « Trait » inverse sa carte** (`post: ImageInvert`, mesuré le 10/10 sur la GX10, ComfyUI 0.39) :
+`LineArtPreprocessor` rend un **trait blanc sur fond noir**, et le ControlNet Union de Qwen-Image 2.1
+**encode la carte avec le VAE** (contrairement à un ControlNet classique) : le modèle recopiait ce fond
+noir et la case sortait **en négatif** (88 % de noir, luminance moyenne 17). Inversée — trait noir sur fond
+clair — la case est correcte (moyenne 237, 11-13 s à chaud). Les autres types (Profondeur, Pose, Croquis à
+la main, Contours nets) marchent tels quels, et « Carte déjà prête » n'est jamais retouchée : aucun `post`.
+Le constructeur insère chaque nœud de `post` (ids après ceux du JSON : `46` pour l'inversion) entre le
+prétraitement `42` et la mise à la taille `43` ; l'aperçu de l'atelier (`map_output`) montre donc la carte
+réellement envoyée au modèle. « Tester la connexion » vérifie aussi ces nœuds dans `/object_info` : s'il
+en manque un, seul le type concerné est masqué, comme pour un prétraitement absent.
+
 Types livrés : **Trait** (`lineart`, défaut), **Profondeur** (`depth`), **Pose** (`pose`), **Croquis à
 la main** (`scribble`), **Contours nets** (`canny`), **Carte déjà prête** (`carte`, sans prétraitement).
-Un type se règle ou s'ajoute dans le YAML (classe, entrées constantes, `image_input`, `order`), jamais
-dans le code.
+Un type se règle ou s'ajoute dans le YAML (classe, entrées constantes, `image_input`, `post`, `order`),
+jamais dans le code.
 
 - **Verrouiller** (atelier, bloc « Composition » d'une case) : source = croquis validé, n'importe quelle
   version de la case (propre ou croquis) ou image importée (croquis à la main, photo de pose) ; type ;
