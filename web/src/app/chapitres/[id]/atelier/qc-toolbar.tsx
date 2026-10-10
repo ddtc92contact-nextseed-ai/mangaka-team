@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { InfoTip } from "@/components/info-tip";
 import { useQueue } from "@/components/queue";
+import { useToast } from "@/components/toast";
 import { DetectionLegend, QCBadge } from "@/components/qc";
 import { Alert, Button, ProgressBar } from "@/components/ui";
 import { api, fullErrorMessage, type Job, type PageData, type QCStatus } from "@/lib/api";
@@ -77,6 +79,7 @@ export function QCToolbar({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const toast = useToast();
   const live = useJob(job, (done) => {
     onChanged();
     if (done.status === "failed") setError(done.error ?? "Contrôle qualité en échec");
@@ -98,6 +101,7 @@ export function QCToolbar({
       if (res.job) {
         setJob(res.job);
         const n = res.panel_ids.length;
+        toast(`Contrôle qualité lancé (${n} case${n > 1 ? "s" : ""} en file)`);
         setNotice(`${n} case${n > 1 ? "s" : ""} à contrôler : le contrôle passe après les générations en file.`);
       } else {
         setNotice(
@@ -116,9 +120,12 @@ export function QCToolbar({
   return (
     <section aria-labelledby="qc-title" className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-900/60 p-3" data-testid="qc-toolbar">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <h2 id="qc-title" className="text-sm font-semibold text-zinc-200">
-          Contrôle qualité
-        </h2>
+        <span className="flex items-center gap-1.5">
+          <h2 id="qc-title" className="text-sm font-semibold text-zinc-200">
+            Contrôle qualité
+          </h2>
+          <InfoTip help="atelier.qc" label="Contrôle qualité" />
+        </span>
         <p className="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400" data-testid="qc-counter" aria-label={`Chapitre : ${counts.ok} ok, ${counts.review} à revoir, ${counts.reject} rejet, ${counts.unchecked} non contrôlées`}>
           <QCBadge verdict="ok" soft /> <span className="tabular-nums text-zinc-200">{counts.ok}</span>
           <QCBadge verdict="review" soft className="ml-2" /> <span className="tabular-nums text-zinc-200">{counts.review}</span>
@@ -150,6 +157,7 @@ export function QCToolbar({
           >
             Tout recontrôler
           </Button>
+          <InfoTip help="atelier.qc_chapter" label="Contrôler le chapitre" />
         </div>
       </div>
 

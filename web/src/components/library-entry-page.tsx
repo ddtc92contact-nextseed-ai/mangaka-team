@@ -9,6 +9,7 @@ import { useEngineData } from "@/lib/hooks";
 import { LIBRARY_KINDS, entryHref, libraryHref } from "@/lib/library";
 import { LibraryEntryForm, ReferenceImages } from "./library-entry-form";
 import { ReferenceStudio } from "./reference-studio";
+import { useToast } from "./toast";
 
 /** Fiche d'un personnage, d'un objet ou d'un décor : champs, images de référence, suppression. */
 export function LibraryEntryPage({ kind, id }: { kind: LibraryKind; id: number }) {
@@ -23,6 +24,7 @@ export function LibraryEntryPage({ kind, id }: { kind: LibraryKind; id: number }
   }, [uploadError, router, kind, id]);
   const [saved, setSaved] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const toast = useToast();
 
   if (entry.loading) return <Loading />;
   if (entry.error || !entry.data) return <Alert>{entry.error ?? `Fiche introuvable (${info.singular})`}</Alert>;
@@ -32,6 +34,7 @@ export function LibraryEntryPage({ kind, id }: { kind: LibraryKind; id: number }
     if (!window.confirm(info.deleteConfirm(e.name))) return;
     try {
       await api.deleteLibraryEntry(kind, e.id);
+      toast("Fiche supprimée");
       router.push(libraryHref(e.project_id, kind));
     } catch (err) {
       setDeleteError(errorMessage(err));
@@ -79,6 +82,7 @@ export function LibraryEntryPage({ kind, id }: { kind: LibraryKind; id: number }
             onSaved={(updated) => {
               entry.setData(updated);
               setSaved(true);
+              toast(info.saved.replace(/\.$/, ""));
             }}
           />
         </Card>
@@ -106,6 +110,7 @@ export function NewLibraryEntryPage({ kind, projectId }: { kind: LibraryKind; pr
   const info = LIBRARY_KINDS[kind];
   const router = useRouter();
   const project = useEngineData(() => api.getProject(projectId), [projectId]);
+  const toast = useToast();
 
   if (project.loading) return <Loading />;
   if (project.error || !project.data) return <Alert>{project.error ?? "Série introuvable"}</Alert>;
@@ -124,11 +129,12 @@ export function NewLibraryEntryPage({ kind, projectId }: { kind: LibraryKind; pr
         <LibraryEntryForm
           kind={kind}
           projectId={projectId}
-          onSaved={(saved, uploadError) =>
+          onSaved={(saved, uploadError) => {
+            toast(info.saved.replace(/\.$/, ""));
             router.push(
               `${entryHref(kind, saved.id)}${uploadError ? `?erreur_images=${encodeURIComponent(uploadError)}` : ""}`,
-            )
-          }
+            );
+          }}
         />
       </Card>
     </>

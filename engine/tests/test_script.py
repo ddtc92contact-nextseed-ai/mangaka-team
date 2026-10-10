@@ -4,6 +4,7 @@ import json
 from collections.abc import Callable
 
 import pytest
+from fastapi.testclient import TestClient
 
 from mangaka_engine.pipeline.script import (
     ScriptContext,
@@ -16,7 +17,7 @@ from mangaka_engine.pipeline.script import (
 from mangaka_engine.presets import PresetError, PresetRegistry
 from mangaka_engine.providers.llm import ChatMessage, LLMAuthError, LLMResult, LLMTimeoutError, MockLLMProvider
 from mangaka_engine.providers.llm.mock import mock_script
-from tests.conftest import PRESETS_DIR
+from tests.conftest import PRESETS_DIR, STYLE
 
 PRESETS = PresetRegistry.load(PRESETS_DIR)
 PROMPT = PRESETS.prompt("script")
@@ -288,3 +289,21 @@ def test_mock_script_fills_some_sfx_and_prompt_documents_them() -> None:
     _, user = render_messages(PROMPT, _ctx())
     assert "« sfx »" in user.content and '"sfx": [{"text": "VROUM !"' in user.content
     assert "sfx" not in _ctx().as_json()["bubble_kinds"]  # pas un type de réplique
+
+
+def test_second_decoupage_replaces_story_pages_and_is_persisted(client: TestClient) -> None:
+    """Re-« Découper » un chapitre déjà découpé (et mis en page) : le nouveau découpage est enregistré."""
+    project = client.post("/projects", json={**STYLE, "title": "Redécoupe"}).json()
+    ch = client.post(
+        f"/projects/{project['id']}/chapters",
+        json={"synopsis": "Aiko arrive à Kyoto sous la pluie.", "target_page_count": 3},
+    ).json()
+    jobs = client.app.state.ctx.jobs  # type: ignore[attr-defined]
+    for _ in range(2):
+        job = client.post(f"/chapters/{ch['id']}/script").json()
+        jobs.wait(job["id"])
+        done = client.get(f"/jobs/{job['id']}").json()
+        assert done["status"] == "succeeded", done["error"]
+    pages = client.get(f"/chapters/{ch['id']}/pages").json()
+    assert pages and all(p["kind"] == "story" for p in pages)
+    assert [p["number"] for p in pages] == list(range(1, len(pages) + 1))

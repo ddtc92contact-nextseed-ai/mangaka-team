@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useMemo, useState } from "react";
+import { HelpLabel, InfoTip } from "@/components/info-tip";
+import { useToast } from "@/components/toast";
 import { Alert, Button, Card, Field, Input, Loading, PageHeader, Select } from "@/components/ui";
 import {
   api,
@@ -39,6 +41,7 @@ function AgentPage() {
   const versions = useEngineData(() => api.agentVersions(id, projectId), [id, projectId]);
   const projects = useEngineData(() => api.listProjects());
   const [notice, setNotice] = useState<string | null>(null);
+  const toast = useToast();
 
   function setScope(value: string) {
     setNotice(null);
@@ -74,7 +77,7 @@ function AgentPage() {
 
       <Card className="mb-6 flex flex-wrap items-end gap-4">
         <div className="w-full max-w-xs">
-          <Field label="Réglages de" htmlFor="scope">
+          <Field label="Réglages de" htmlFor="scope" help="equipe.scope">
             <Select id="scope" value={projectId ?? ""} onChange={(e) => setScope(e.target.value)}>
               <option value="">Profil global (toutes les séries)</option>
               {projects.data?.map((p) => (
@@ -125,6 +128,7 @@ function AgentPage() {
           agent.setData(d);
           versions.reload();
           setNotice(text);
+          toast(d.saved_version ? `Réglages enregistrés (version ${d.saved_version})` : "Aucun changement à enregistrer", d.saved_version ? "success" : "info");
         }}
       />
 
@@ -136,6 +140,7 @@ function AgentPage() {
           agent.setData(d);
           versions.reload();
           setNotice(text);
+          toast(d.saved_version ? `Version restaurée (version ${d.saved_version} créée)` : "Version identique aux réglages en cours", d.saved_version ? "success" : "info");
         }}
       />
     </>
@@ -167,6 +172,7 @@ function AgentForm({
   const [message, setMessage] = useState<{ tone: "info" | "error"; text: string } | null>(null);
   const [busy, setBusy] = useState<"save" | "trial" | "reset" | null>(null);
   const [trial, setTrial] = useState<TrialResult | null>(null);
+  const toast = useToast();
 
   const dirty = agent.settings.some((s) => JSON.stringify(values[s.key]) !== JSON.stringify(initial[s.key]));
   const knowledgeValue: Knowledge = {
@@ -220,6 +226,7 @@ function AgentForm({
     setTrial(null);
     try {
       setTrial(await api.tryAgent(agent.id, projectId, payload()));
+      toast("Essai terminé");
     } catch (err) {
       fail(err);
     } finally {
@@ -283,7 +290,9 @@ function AgentForm({
           ))}
 
           <fieldset className="mb-6 border-b border-zinc-800 pb-6">
-            <legend className="mb-1 text-sm font-semibold text-zinc-100">Savoir-faire</legend>
+            <legend className="mb-1 text-sm font-semibold text-zinc-100">
+              <HelpLabel help="equipe.knowledge">Savoir-faire</HelpLabel>
+            </legend>
             <p className="mb-4 text-xs text-zinc-500">
               Collections de la{" "}
               <Link href="/savoir-faire" className="text-rose-300 hover:underline">
@@ -305,7 +314,7 @@ function AgentForm({
                   placeholder="ex. Rythme et découpage, Humour jeunesse"
                 />
               </Field>
-              <Field label="Passages au plus (top-k)" htmlFor="knowledge-top-k" error={errors["knowledge.top_k"]}>
+              <Field label="Passages au plus (top-k)" htmlFor="knowledge-top-k" error={errors["knowledge.top_k"]} help="equipe.top_k">
                 <Input
                   id="knowledge-top-k"
                   inputMode="numeric"
@@ -350,9 +359,12 @@ function AgentForm({
               {busy === "save" ? "Enregistrement…" : "Enregistrer"}
             </Button>
             {agent.trial && (
-              <Button type="button" variant="secondary" disabled={busy !== null} onClick={() => void runTrial()}>
-                {busy === "trial" ? "Essai en cours…" : "Essayer"}
-              </Button>
+              <span className="flex items-center gap-1.5">
+                <Button type="button" variant="secondary" disabled={busy !== null} onClick={() => void runTrial()}>
+                  {busy === "trial" ? "Essai en cours…" : "Essayer"}
+                </Button>
+                <InfoTip help="equipe.trial" label="Essayer l'agent" />
+              </span>
             )}
             <Button
               type="button"
@@ -431,7 +443,9 @@ function History({
 
   return (
     <Card>
-      <h2 className="mb-1 font-semibold text-zinc-100">Historique des versions</h2>
+      <h2 className="mb-1 font-semibold text-zinc-100">
+        <HelpLabel help="equipe.versions">Historique des versions</HelpLabel>
+      </h2>
       <p className="mb-4 text-sm text-zinc-400">
         {projectId ? `Réglages propres à « ${agent.scope.project_title} ».` : "Profil global."} Chaque enregistrement crée une
         version ; revenir à une version en crée une nouvelle.

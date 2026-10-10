@@ -2,6 +2,7 @@
 
 import type { DetectionBox, Detections, QCVerdict } from "@/lib/api";
 import { QC_VERDICT } from "@/lib/qc";
+import { InfoTip } from "./info-tip";
 
 const VERDICT_TONES: Record<QCVerdict, string> = {
   ok: "bg-emerald-500 text-emerald-950",
@@ -61,6 +62,7 @@ export function DetectionLegend() {
           {KIND_LABELS[k]}
         </span>
       ))}
+      <InfoTip help="qc.detections" label="Détections du contrôle qualité" />
     </span>
   );
 }

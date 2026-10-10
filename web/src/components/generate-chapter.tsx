@@ -5,7 +5,9 @@ import { useState } from "react";
 import { api, fullErrorMessage, type PageData } from "@/lib/api";
 import { formatDuration, median } from "@/lib/generation";
 import { Modal } from "./modal";
+import { InfoTip } from "./info-tip";
 import { useQueue } from "./queue";
+import { useToast } from "./toast";
 import { Alert, Button } from "./ui";
 
 const BUSY = new Set(["queued", "generating"]);
@@ -38,6 +40,7 @@ export function GenerateChapterButton({
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const toast = useToast();
 
   async function prepare() {
     setOpen(true);
@@ -72,6 +75,7 @@ export function GenerateChapterButton({
       refresh();
       setOpen(false);
       const n = res.panel_ids.length;
+      toast(n ? `Génération lancée (${n} en file)` : "Rien à générer", n ? "success" : "info");
       onQueued?.(
         n
           ? `${n} case${n > 1 ? "s" : ""} mise${n > 1 ? "s" : ""} en file pour tout le chapitre.`
@@ -89,9 +93,12 @@ export function GenerateChapterButton({
 
   return (
     <>
-      <Button variant={variant} onClick={prepare} data-testid="generate-chapter">
-        Générer tout le chapitre
-      </Button>
+      <span className="inline-flex items-center gap-1.5">
+        <Button variant={variant} onClick={prepare} data-testid="generate-chapter">
+          Générer tout le chapitre
+        </Button>
+        <InfoTip help="chapitre_infos.generate_all" label="Générer tout le chapitre" />
+      </span>
       <Modal
         open={open}
         onClose={() => setOpen(false)}

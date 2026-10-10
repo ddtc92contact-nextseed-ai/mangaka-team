@@ -11,11 +11,14 @@ import {
   type ProjectInput,
   type StyleGenre,
 } from "@/lib/api";
+import { HELP, type HelpId } from "@/lib/help";
 import { useEngineData } from "@/lib/hooks";
+import { InfoTip } from "./info-tip";
 import { Modal } from "./modal";
 import { LoraPicker } from "./lora-picker";
 import { DIRECTIONS, DirectionPicker } from "./reading-direction";
 import { SERIES_STATUS } from "./status";
+import { useToast } from "./toast";
 import { Alert, Button, Field, Input, Select } from "./ui";
 
 const DIRECTION_REQUIRED = "Choisis le sens de lecture : manga (droite → gauche) ou BD (gauche → droite).";
@@ -24,6 +27,12 @@ const STYLE_REQUIRED: Record<"style_genre" | "style_rendering" | "style_tone", s
   style_rendering: "Choisis le rendu dans la liste.",
   style_tone: "Choisis le ton dans la liste.",
 };
+
+/** Bulle d'aide d'un réglage fin (`serie.option.<id>` dans lib/help.ts), s'il y en a une. */
+function optionHelp(id: string): HelpId | undefined {
+  const key = `serie.option.${id}`;
+  return key in HELP ? (key as HelpId) : undefined;
+}
 
 function toneAllowed(genre: StyleGenre | undefined, tone: string): boolean {
   return !genre?.allowed_tones || genre.allowed_tones.includes(tone);
@@ -81,6 +90,7 @@ export function ProjectForm({
   const [saving, setSaving] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
+  const toast = useToast();
 
   const defaults = presets.data?.defaults;
   const pageFormat = form.page_format ?? defaults?.page_format ?? "";
@@ -205,6 +215,7 @@ export function ProjectForm({
     };
     try {
       const saved = initial ? await api.updateProject(initial.id, body) : await api.createProject(body);
+      toast(initial ? "Série enregistrée" : "Série créée");
       onSaved(saved);
     } catch (err) {
       if (err instanceof EngineError && Object.keys(err.fieldErrors).length) setErrors(err.fieldErrors);
@@ -246,12 +257,13 @@ export function ProjectForm({
           )}
         </div>
       )}
-      <fieldset className="space-y-4 rounded-lg border border-zinc-800 p-4" data-testid="style-packs">
+      <fieldset className="min-w-0 space-y-4 rounded-lg border border-zinc-800 p-4" data-testid="style-packs">
         <legend className="px-1 text-sm font-medium text-zinc-200">Style de la série</legend>
         <div className="grid gap-5 md:grid-cols-3">
           <Field
             label="Genre"
             htmlFor="style_genre"
+            help="serie.genre"
             error={errors.style_genre}
             hint={genre?.description ?? "Pré-remplit la mise en page, le sens de lecture et les polices."}
           >
@@ -274,7 +286,7 @@ export function ProjectForm({
               )}
             </Select>
           </Field>
-          <Field label="Rendu" htmlFor="style_rendering" error={errors.style_rendering} hint={rendering?.description}>
+          <Field label="Rendu" htmlFor="style_rendering" help="serie.rendering" error={errors.style_rendering} hint={rendering?.description}>
             <Select
               id="style_rendering"
               value={renderingId}
@@ -297,6 +309,7 @@ export function ProjectForm({
           <Field
             label="Ton"
             htmlFor="style_tone"
+            help="serie.tone"
             error={
               errors.style_tone ||
               (toneRefused && genre && tone ? `Le ton « ${tone.name} » n'est pas proposé pour le genre « ${genre.name} ».` : undefined)
@@ -332,6 +345,7 @@ export function ProjectForm({
                 key={o.id}
                 label={o.name}
                 htmlFor={`style_option_${o.id}`}
+                help={optionHelp(o.id)}
                 hint={o.description}
                 error={errors.style_options && o.id === visibleOptions[0].id ? errors.style_options : undefined}
               >
@@ -360,6 +374,8 @@ export function ProjectForm({
         <LoraPicker
           id="style_lora_name"
           label="LoRA de style (optionnel)"
+          help="serie.lora"
+          weightHelp="serie.lora_weight"
           hint="Appliqué à toutes les cases de la série."
           placeholder="encre-seinen-v2.safetensors"
           value={form.style_lora_name ?? ""}
@@ -413,6 +429,7 @@ export function ProjectForm({
       <Field
         label="Style de mise en page"
         htmlFor="layout_style"
+        help="serie.layout_style"
         error={errors.layout_style}
         hint={styleInfo?.description || "Découpes, biais et gouttières de toutes les pages de la série."}
       >
@@ -440,7 +457,7 @@ export function ProjectForm({
             ["shout_font", "Police des cris", shoutFont],
           ] as const
         ).map(([key, label, value]) => (
-          <Field key={key} label={label} htmlFor={key} error={errors[key]} hint="Pré-remplie par le genre.">
+          <Field key={key} label={label} htmlFor={key} help="serie.fonts" error={errors[key]} hint="Pré-remplie par le genre.">
             <Select
               id={key}
               value={value}
@@ -477,7 +494,7 @@ export function ProjectForm({
         </Field>
       </div>
       <div className="grid gap-5 md:grid-cols-2">
-        <Field label="Format de page" htmlFor="page_format" error={errors.page_format}>
+        <Field label="Format de page" htmlFor="page_format" help="serie.page_format" error={errors.page_format}>
           <Select
             id="page_format"
             value={pageFormat}
@@ -498,6 +515,7 @@ export function ProjectForm({
         <Field
           label="Palier de génération"
           htmlFor="workflow_preset"
+          help="serie.tier"
           error={errors.workflow_preset}
           hint="Chaque case peut ensuite être régénérée en Qualité depuis l'atelier."
         >
@@ -521,8 +539,11 @@ export function ProjectForm({
           <WorkflowHint presets={presets.data?.workflows} workflow={workflow} />
         </Field>
       </div>
-      <fieldset className="space-y-3 rounded-lg border border-zinc-800 p-4" data-testid="sketch-settings">
-        <legend className="px-1 text-sm font-medium text-zinc-200">Palier croquis</legend>
+      <fieldset className="min-w-0 space-y-3 rounded-lg border border-zinc-800 p-4" data-testid="sketch-settings">
+        <legend className="flex items-center gap-1.5 px-1 text-sm font-medium text-zinc-200">
+          Palier croquis
+          <InfoTip help="serie.sketch" label="Palier croquis" />
+        </legend>
         <label className="flex items-start gap-2 text-sm text-zinc-300">
           <input
             type="checkbox"
@@ -542,6 +563,7 @@ export function ProjectForm({
         <Field
           label="Débruitage du passage au propre"
           htmlFor="sketch_denoise"
+          help="serie.sketch_denoise"
           error={errors.sketch_denoise}
           hint={`Part du croquis redessinée : plus bas = composition plus fidèle, plus haut = plus de détails neufs. Vide : valeur du preset${
             presetDenoise !== null ? ` (${String(presetDenoise).replace(".", ",")})` : ""
@@ -564,6 +586,7 @@ export function ProjectForm({
         <Field
           label="Passage au propre"
           htmlFor="clean_mode"
+          help="serie.clean_mode"
           error={errors.clean_mode}
           hint={
             cleanMode === "controlnet"
@@ -576,7 +599,7 @@ export function ProjectForm({
             value={cleanMode}
             disabled={!sketchEnabled}
             onChange={(e) => set("clean_mode", e.target.value as CleanMode)}
-            className="!w-auto"
+            className="!w-auto max-w-full"
           >
             <option value="img2img">Image → image depuis le croquis (débruitage)</option>
             {(controlAvailable || cleanMode === "controlnet") && (
@@ -590,13 +613,13 @@ export function ProjectForm({
           </p>
         )}
         {cleanMode === "controlnet" && controlTypes.length > 0 && (
-          <Field label="Type de contrôle du passage au propre" htmlFor="clean_control" error={errors.clean_control}>
+          <Field label="Type de contrôle du passage au propre" htmlFor="clean_control" help="serie.clean_control" error={errors.clean_control}>
             <Select
               id="clean_control"
               value={form.clean_control ?? ""}
               disabled={!sketchEnabled}
               onChange={(e) => set("clean_control", e.target.value || null)}
-              className="!w-auto"
+              className="!w-auto max-w-full"
             >
               <option value="">Par défaut{controlDefault ? ` (${controlDefault.name})` : ""}</option>
               {controlTypes.map((t) => (
@@ -611,6 +634,7 @@ export function ProjectForm({
       <Field
         label="Agrandisseur (finition d'impression)"
         htmlFor="upscaler"
+        help="serie.upscaler"
         error={errors.upscaler}
         hint={
           upscalerInfo?.description ||

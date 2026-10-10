@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { EngineStatusProvider, OfflineBanner, ProvidersBadge } from "@/components/engine-status";
 import { QueueIndicator, QueueProvider } from "@/components/queue";
 import { Sidebar } from "@/components/sidebar";
+import { ToastProvider } from "@/components/toast";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -15,6 +16,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <body className="min-h-full">
         <EngineStatusProvider>
           <QueueProvider>
+            <ToastProvider>
             <div className="flex min-h-screen flex-col md:flex-row">
               <Sidebar />
               <div className="flex min-w-0 flex-1 flex-col">
@@ -26,6 +28,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
                 <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-8 md:px-10">{children}</main>
               </div>
             </div>
+            </ToastProvider>
           </QueueProvider>
         </EngineStatusProvider>
       </body>

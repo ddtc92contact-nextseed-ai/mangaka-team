@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { useMemo, useState, type ComponentProps } from "react";
+import { HelpLabel, InfoTip } from "@/components/info-tip";
 import { PassageList, formatTokens } from "@/components/knowledge";
+import { useToast } from "@/components/toast";
 import { Alert, Button, ButtonLink, Card, EmptyState, Field, Input, Loading, Select, Textarea } from "@/components/ui";
 import {
   api,
@@ -14,7 +16,7 @@ import {
   type Rythme,
   type ScriptSources,
 } from "@/lib/api";
-import { useEngineData } from "@/lib/hooks";
+import { useEngineData, useUnsavedWarning } from "@/lib/hooks";
 import { isFinished, useJob } from "@/lib/jobs";
 import { INTENSITIES, RYTHMES } from "@/lib/layout";
 import { LIBRARY_KINDS, libraryHref } from "@/lib/library";
@@ -58,11 +60,14 @@ export default function ScenarioPage() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  const toast = useToast();
+  useUnsavedWarning(dirty);
 
   const current = started ?? lastJob.data ?? null;
   const job = useJob(current, (done) => {
     sources.reload();
     if (done.status === "succeeded") {
+      toast("Découpage enregistré automatiquement");
       setEdited(null);
       pages.reload();
       reloadChapter();
@@ -83,6 +88,7 @@ export default function ScenarioPage() {
     try {
       if (synopsis !== chapter.synopsis) setChapter(await api.updateChapter(chapter.id, { synopsis }));
       setStarted(await api.startScript(chapter.id));
+      toast("Découpage lancé", "info");
     } catch (err) {
       setStartError(
         err instanceof EngineError && err.fieldErrors.synopsis ? err.fieldErrors.synopsis : errorMessage(err),
@@ -106,6 +112,7 @@ export default function ScenarioPage() {
       pages.setData(saved);
       setEdited(null);
       setSavedAt(Date.now());
+      toast("Découpage enregistré");
       reloadChapter();
     } catch (err) {
       const fields = err instanceof EngineError ? Object.entries(err.fieldErrors) : [];
@@ -126,6 +133,7 @@ export default function ScenarioPage() {
         <Field
           label="Synopsis ou script brut du chapitre"
           htmlFor="synopsis"
+          help="scenario.synopsis"
           hint="Le LLM reçoit aussi la fiche de la série, sa bibliothèque (personnages, décors et objets récurrents), le résumé des chapitres précédents, la bible de la série et les passages du savoir-faire."
         >
           <Textarea
@@ -141,9 +149,12 @@ export default function ScenarioPage() {
           <p className="text-xs text-zinc-500">
             Objectif : {chapter.target_page_count} pages · modifiable dans l&apos;onglet Infos.
           </p>
-          <Button onClick={decouper} disabled={starting || running || !synopsis.trim()} data-testid="decouper">
-            {running ? "Découpage en cours…" : starting ? "Lancement…" : "Découper"}
-          </Button>
+          <span className="flex items-center gap-2">
+            <InfoTip help="scenario.decouper" label="Découper" />
+            <Button onClick={decouper} disabled={starting || running || !synopsis.trim()} data-testid="decouper">
+              {running ? "Découpage en cours…" : starting ? "Lancement…" : "Découper"}
+            </Button>
+          </span>
         </div>
         {startError && (
           <div className="mt-4">
@@ -163,17 +174,22 @@ export default function ScenarioPage() {
               <p className="text-xs text-zinc-500">
                 {draft.length} page{draft.length > 1 ? "s" : ""} · {panelCount} case{panelCount > 1 ? "s" : ""}
                 {dirty && <span className="ml-2 text-amber-300">· modifications non enregistrées</span>}
-                {savedAt && !dirty && <span className="ml-2 text-emerald-300">· enregistré</span>}
+                {savedAt && !dirty && (
+                  <span className="ml-2 text-emerald-300" data-testid="saved-at">
+                    · retouches enregistrées à {formatTime(savedAt)}
+                  </span>
+                )}
               </p>
             )}
           </div>
           {draft && draft.length > 0 && (
-            <div className="flex gap-2">
+            <div className="flex items-center gap-2">
               <ButtonLink href={`/chapitres/${chapter.id}/mise-en-page`} variant="secondary">
                 Voir la mise en page
               </ButtonLink>
+              <InfoTip help="scenario.enregistrer" label="Enregistrer" />
               <Button onClick={save} disabled={!dirty || saving || running} data-testid="save-breakdown">
-                {saving ? "Enregistrement…" : "Enregistrer"}
+                {saveLabel(dirty, saving, "Enregistrer")}
               </Button>
             </div>
           )}
@@ -228,7 +244,7 @@ export default function ScenarioPage() {
                 + Page bonus
               </Button>
               <Button onClick={save} disabled={!dirty || saving || running} className="ml-auto">
-                {saving ? "Enregistrement…" : "Enregistrer le découpage"}
+                {saveLabel(dirty, saving, "Enregistrer le découpage")}
               </Button>
             </div>
           </div>
@@ -248,7 +264,7 @@ function UsedSources({ sources }: { sources: ScriptSources }) {
         <div>
           <h2 className="font-semibold text-zinc-100">Sources utilisées</h2>
           <p className="text-xs text-zinc-500">
-            Dernier découpage du {new Date(sources.created_at).toLocaleString("fr-FR")} ·{" "}
+            Dernier découpage du {engineDate(sources.created_at).toLocaleString("fr-FR")} ·{" "}
             {count} passage{count > 1 ? "s" : ""} du savoir-faire
             {sources.collections.length > 0 && ` (${sources.collections.join(", ")})`} ·{" "}
             {sources.bible ? `bible de la série (${formatTokens(sources.bible.tokens)})` : "pas de bible pour cette série"}
@@ -279,6 +295,20 @@ function UsedSources({ sources }: { sources: ScriptSources }) {
       )}
     </Card>
   );
+}
+
+/** « Enregistré ✓ » quand il n'y a rien à enregistrer (le découpage du LLM l'est dès qu'il est terminé). */
+function saveLabel(dirty: boolean, saving: boolean, label: string): string {
+  return saving ? "Enregistrement…" : dirty ? label : "Enregistré ✓";
+}
+
+/** Les dates du moteur sont en UTC sans fuseau (« 2026-10-10T11:49:57 ») : à lire comme telles. */
+function engineDate(at: string | number): Date {
+  return new Date(typeof at === "string" && !/[zZ]|[+-]\d\d:?\d\d$/.test(at) ? `${at}Z` : at);
+}
+
+function formatTime(at: string | number): string {
+  return engineDate(at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
 }
 
 function readableField(path: string): string {
@@ -313,7 +343,8 @@ function JobProgress({ job, onRetry }: { job: Job; onRetry: () => void }) {
   if (job.status === "succeeded") {
     return (
       <p className="mt-4 text-sm text-emerald-300" role="status" data-testid="job-done">
-        Découpage terminé : {job.message}.
+        Découpage enregistré automatiquement
+        {job.finished_at && ` à ${formatTime(job.finished_at)}`} ({job.message}).
       </p>
     );
   }
@@ -348,9 +379,12 @@ function ObjectPicker({
   const options = [...library.objets.map((o) => ({ id: o.id, name: o.name })), ...unknown.map((v) => ({ id: v, name: `Objet n° ${v}` }))];
   return (
     <div className="mt-3 space-y-1" role="group" aria-labelledby={`${id}-label`}>
-      <p id={`${id}-label`} className="text-xs text-zinc-400">
-        Objets récurrents visibles
-      </p>
+      <div className="flex items-center gap-1.5">
+        <p id={`${id}-label`} className="text-xs text-zinc-400">
+          Objets récurrents visibles
+        </p>
+        <InfoTip help="scenario.objets" label="Objets récurrents visibles" />
+      </div>
       {options.length === 0 ? (
         <p className="text-xs text-zinc-600">
           Aucun objet dans la bibliothèque de la série.{" "}
@@ -421,7 +455,7 @@ function PageEditor({
     <Card className="p-4" data-testid="page-editor">
       <div className="mb-3 flex flex-wrap items-center gap-3">
         <h3 className="font-semibold text-zinc-100">Page {index + 1}</h3>
-        <div className="w-56">
+        <div className="flex w-60 items-center gap-1.5">
         <Select
           aria-label={`Type de la page ${index + 1}`}
           className="py-1 text-xs"
@@ -435,12 +469,12 @@ function PageEditor({
             </option>
           ))}
         </Select>
+        <InfoTip help="scenario.page_kind" label="Type de page" />
         </div>
         {page.kind === "story" && (
-          <div className="w-44">
+          <div className="flex w-52 items-center gap-1.5">
             <Select
               aria-label={`Rythme de la page ${index + 1}`}
-              title="Indice de rythme pour la mise en page (biais, contraste des tailles)"
               className="py-1 text-xs"
               value={page.rythme ?? ""}
               onChange={(e) => onChange({ ...page, rythme: (e.target.value || null) as Rythme | null })}
@@ -453,6 +487,7 @@ function PageEditor({
                 </option>
               ))}
             </Select>
+            <InfoTip help="scenario.rythme" label="Rythme de la page" />
           </div>
         )}
         <span className="text-xs text-zinc-500">
@@ -557,9 +592,12 @@ function PanelEditor({
         </div>
         <div className="grid gap-2">
           <div className="space-y-1">
-            <label htmlFor={`${id}-shot`} className="text-xs text-zinc-400">
-              Type de plan
-            </label>
+            <div className="flex items-center gap-1.5">
+              <label htmlFor={`${id}-shot`} className="text-xs text-zinc-400">
+                Type de plan
+              </label>
+              <InfoTip help="scenario.shot_type" label="Type de plan" />
+            </div>
             <Select
               id={`${id}-shot`}
               className="py-1.5"
@@ -579,9 +617,12 @@ function PanelEditor({
             </Select>
           </div>
           <div className="space-y-1">
-            <label htmlFor={`${id}-imp`} className="text-xs text-zinc-400">
-              Importance
-            </label>
+            <div className="flex items-center gap-1.5">
+              <label htmlFor={`${id}-imp`} className="text-xs text-zinc-400">
+                Importance
+              </label>
+              <InfoTip help="scenario.importance" label="Importance" />
+            </div>
             <Select
               id={`${id}-imp`}
               className="py-1.5"
@@ -597,9 +638,12 @@ function PanelEditor({
             </Select>
           </div>
           <div className="space-y-1">
-            <label htmlFor={`${id}-int`} className="text-xs text-zinc-400">
-              Intensité (mise en page)
-            </label>
+            <div className="flex items-center gap-1.5">
+              <label htmlFor={`${id}-int`} className="text-xs text-zinc-400">
+                Intensité (mise en page)
+              </label>
+              <InfoTip help="scenario.intensity" label="Intensité (mise en page)" />
+            </div>
             <Select
               id={`${id}-int`}
               className="py-1.5"
@@ -659,7 +703,9 @@ function PanelEditor({
         disabled={disabled}
       />
       <div className="mt-3 space-y-2">
-        <p className="text-xs text-zinc-400">Dialogues</p>
+        <p className="text-xs text-zinc-400">
+          <HelpLabel help="scenario.bubbles">Dialogues</HelpLabel>
+        </p>
         {panel.dialogues.length === 0 && <p className="text-xs text-zinc-600">Case muette.</p>}
         {panel.dialogues.map((d, di) => (
           <div key={d.key} className="grid gap-2 sm:grid-cols-[9rem_8rem_minmax(0,1fr)_auto]">

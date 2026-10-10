@@ -1,7 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import { InfoTip } from "@/components/info-tip";
+import { useToast } from "@/components/toast";
 import { Alert, Button, Card, ProgressBar } from "@/components/ui";
+import type { HelpId } from "@/lib/help";
 import { api, engineUrl, exportFileUrl, fullErrorMessage, type ExportOptions, type Job, type PageRender } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
 import { useJob } from "@/lib/jobs";
@@ -12,14 +15,17 @@ function Check({
   checked,
   onChange,
   hint,
+  help,
 }: {
   id: string;
   label: string;
   checked: boolean;
   onChange: (v: boolean) => void;
   hint?: string;
+  help: HelpId;
 }) {
   return (
+    <div className="flex items-start gap-1.5">
     <label htmlFor={id} className="flex items-start gap-2 text-sm text-zinc-300">
       <input
         id={id}
@@ -33,6 +39,8 @@ function Check({
         {hint && <span className="block text-xs text-zinc-500">{hint}</span>}
       </span>
     </label>
+    <InfoTip help={help} label={label} className="mt-0.5" />
+    </div>
   );
 }
 
@@ -43,6 +51,7 @@ export function ExportPanel({ chapterId, pageId, bleedMm }: { chapterId: number;
   const [job, setJob] = useState<Job | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const toast = useToast();
   const exports = useEngineData(() => api.chapterJobs(chapterId, "export"), [chapterId]);
   const live = useJob(job, () => exports.reload());
   const lastDone = (exports.data ?? []).find((j) => j.status === "succeeded");
@@ -53,6 +62,7 @@ export function ExportPanel({ chapterId, pageId, bleedMm }: { chapterId: number;
     setError(null);
     try {
       setRender(await api.renderPage(pageId, options));
+      toast("Page rendue");
     } catch (e) {
       setError(fullErrorMessage(e));
     } finally {
@@ -68,6 +78,7 @@ export function ExportPanel({ chapterId, pageId, bleedMm }: { chapterId: number;
     try {
       const res = await api.finishChapter(chapterId);
       const n = res.panel_ids.length;
+      toast(n ? `Finition lancée (${n} en file)` : "Rien à finaliser", n ? "success" : "info");
       setFinishNotice(
         n
           ? `Finition d'impression de ${n} case${n > 1 ? "s" : ""} mise en file : suis-la dans la file d'attente, puis exporte.`
@@ -85,6 +96,7 @@ export function ExportPanel({ chapterId, pageId, bleedMm }: { chapterId: number;
     setError(null);
     try {
       setJob(await api.exportChapter(chapterId, options));
+      toast("Export lancé");
     } catch (e) {
       setError(fullErrorMessage(e));
     } finally {
@@ -103,12 +115,14 @@ export function ExportPanel({ chapterId, pageId, bleedMm }: { chapterId: number;
           id="opt-bleed"
           label={`Fond perdu (${bleedMm.toLocaleString("fr-FR")} mm)`}
           hint="L'image déborde du format rogné ; valeur du format de page."
+          help="lettrage.bleed"
           checked={options.bleed}
           onChange={(bleed) => setOptions({ ...options, bleed })}
         />
         <Check
           id="opt-marks"
           label="Repères de coupe"
+          help="lettrage.crop_marks"
           checked={options.crop_marks}
           onChange={(crop_marks) => setOptions({ ...options, crop_marks })}
         />
@@ -116,17 +130,26 @@ export function ExportPanel({ chapterId, pageId, bleedMm }: { chapterId: number;
       {error && <Alert>{error}</Alert>}
       {finishNotice && !error && <Alert tone="info">{finishNotice}</Alert>}
       <div className="flex flex-wrap gap-2">
-        <Button variant="secondary" onClick={renderPage} disabled={busy} data-testid="render-page">
-          Rendre cette page
-        </Button>
-        <Button onClick={exportChapter} disabled={busy || Boolean(running)} data-testid="export-chapter">
-          Exporter le chapitre
-        </Button>
+        <span className="flex items-center gap-1.5">
+          <Button variant="secondary" onClick={renderPage} disabled={busy} data-testid="render-page">
+            Rendre cette page
+          </Button>
+          <InfoTip help="lettrage.render" label="Rendre cette page" />
+        </span>
+        <span className="flex items-center gap-1.5">
+          <Button onClick={exportChapter} disabled={busy || Boolean(running)} data-testid="export-chapter">
+            Exporter le chapitre
+          </Button>
+          <InfoTip help="lettrage.export" label="Exporter le chapitre" />
+        </span>
       </div>
       <div className="space-y-1">
-        <Button variant="secondary" onClick={finishChapter} disabled={busy} data-testid="finish-chapter">
-          Finaliser le chapitre pour l&apos;impression
-        </Button>
+        <span className="flex items-center gap-1.5">
+          <Button variant="secondary" onClick={finishChapter} disabled={busy} data-testid="finish-chapter">
+            Finaliser le chapitre pour l&apos;impression
+          </Button>
+          <InfoTip help="lettrage.finish" label="Finaliser le chapitre pour l'impression" />
+        </span>
         <p className="text-xs text-zinc-500">
           Avant l&apos;export d&apos;impression : agrandit les cases retenues sous le seuil de dpi (l&apos;export utilise
           les images finalisées ; les cases sous le seuil y sont signalées).

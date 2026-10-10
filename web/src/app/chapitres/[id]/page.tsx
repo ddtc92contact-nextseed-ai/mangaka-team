@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { ChapterForm } from "@/components/chapter-form";
 import { GenerateChapterButton } from "@/components/generate-chapter";
+import { InfoTip } from "@/components/info-tip";
 import { ProductionLink } from "@/components/production-link";
 import { Alert, Button, ButtonLink, Card } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
@@ -27,7 +28,7 @@ export default function ChapterInfoPage() {
   }
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
       <Card>
         <h2 className="mb-4 font-semibold text-zinc-100">Chapitre</h2>
         {saved && (
@@ -48,7 +49,10 @@ export default function ChapterInfoPage() {
       </Card>
       <div className="space-y-6">
         <Card>
-          <h2 className="mb-2 font-semibold text-zinc-100">Résumé pour la continuité</h2>
+          <h2 className="mb-2 flex items-center gap-1.5 font-semibold text-zinc-100">
+            Résumé pour la continuité
+            <InfoTip help="chapitre_infos.summary" label="Résumé pour la continuité" />
+          </h2>
           <p className="mb-3 text-xs text-zinc-500">
             Écrit par le LLM au découpage, relu par les chapitres suivants de la série.
           </p>

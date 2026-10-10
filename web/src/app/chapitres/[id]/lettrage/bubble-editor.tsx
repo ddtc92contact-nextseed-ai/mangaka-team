@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import { InfoTip } from "@/components/info-tip";
 import { Alert, Button, Card, Field, Input, Select, Textarea } from "@/components/ui";
 import type { BubbleKind, BubbleUpdate, LetteredBubble, LetteringWarning } from "@/lib/api";
 import { BUBBLE_KINDS } from "@/lib/script";
@@ -75,7 +76,7 @@ export function BubbleEditor({
           />
         </Field>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Type" htmlFor="bubble-kind">
+          <Field label="Type" htmlFor="bubble-kind" help="lettrage.bubble_kind">
             <Select id="bubble-kind" value={kind} onChange={(e) => setKind(e.target.value as BubbleKind)} data-testid="bubble-kind">
               {(Object.keys(BUBBLE_KINDS) as BubbleKind[]).map((k) => (
                 <option key={k} value={k}>
@@ -122,14 +123,17 @@ export function BubbleEditor({
             ))}
           </div>
         )}
-        <Button
-          variant="ghost"
-          disabled={busy || (!bubble.manual && !bubble.manual_tail)}
-          onClick={() => onSave({ position: null, tail: null })}
-          data-testid="bubble-auto"
-        >
-          Replacer automatiquement
-        </Button>
+        <span className="flex items-center gap-1.5">
+          <Button
+            variant="ghost"
+            disabled={busy || (!bubble.manual && !bubble.manual_tail)}
+            onClick={() => onSave({ position: null, tail: null })}
+            data-testid="bubble-auto"
+          >
+            Replacer automatiquement
+          </Button>
+          <InfoTip help="lettrage.bubble_auto" label="Replacer automatiquement" />
+        </span>
       </div>
     </Card>
   );

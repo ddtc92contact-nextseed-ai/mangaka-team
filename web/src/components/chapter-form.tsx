@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from "react";
 import { api, EngineError, errorMessage, type Chapter, type ChapterInput } from "@/lib/api";
 import { CHAPTER_STATUS } from "./status";
+import { useToast } from "./toast";
 import { Alert, Button, Field, Input, Select, Textarea } from "./ui";
 
 export function ChapterForm({
@@ -26,6 +27,7 @@ export function ChapterForm({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const toast = useToast();
 
   const set = <K extends keyof ChapterInput>(key: K, value: ChapterInput[K]) => {
     setForm((f) => ({ ...f, [key]: value }));
@@ -39,6 +41,7 @@ export function ChapterForm({
     setErrors({});
     try {
       const saved = initial ? await api.updateChapter(initial.id, form) : await api.createChapter(projectId, form);
+      toast(initial ? "Chapitre enregistré" : "Chapitre créé");
       onSaved(saved);
     } catch (err) {
       if (err instanceof EngineError && Object.keys(err.fieldErrors).length) setErrors(err.fieldErrors);
@@ -64,6 +67,7 @@ export function ChapterForm({
       <Field
         label="Synopsis ou script brut"
         htmlFor="chapter-synopsis"
+        help="scenario.synopsis"
         error={errors.synopsis}
         hint="Envoyé au LLM avec la fiche de la série, les personnages et le résumé des chapitres précédents."
       >
@@ -77,7 +81,7 @@ export function ChapterForm({
         />
       </Field>
       <div className="grid gap-5 md:grid-cols-3">
-        <Field label="Pages visées" htmlFor="chapter-pages" error={errors.target_page_count}>
+        <Field label="Pages visées" htmlFor="chapter-pages" help="chapitre_infos.target_pages" error={errors.target_page_count}>
           <Input
             id="chapter-pages"
             type="number"
@@ -88,7 +92,7 @@ export function ChapterForm({
             aria-invalid={Boolean(errors.target_page_count)}
           />
         </Field>
-        <Field label="Statut" htmlFor="chapter-status" error={errors.status}>
+        <Field label="Statut" htmlFor="chapter-status" help="chapitre_infos.status" error={errors.status}>
           <Select
             id="chapter-status"
             value={form.status}
@@ -101,7 +105,7 @@ export function ChapterForm({
             ))}
           </Select>
         </Field>
-        <Field label="Publication prévue" htmlFor="chapter-date" error={errors.planned_date}>
+        <Field label="Publication prévue" htmlFor="chapter-date" help="chapitre_infos.planned_date" error={errors.planned_date}>
           <Input
             id="chapter-date"
             type="date"

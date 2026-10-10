@@ -2,7 +2,9 @@
 
 import { useId, useMemo, useState, type KeyboardEvent } from "react";
 import { api, type LoraCatalog } from "@/lib/api";
+import type { HelpId } from "@/lib/help";
 import { useEngineData } from "@/lib/hooks";
+import { InfoTip } from "./info-tip";
 import { Field, Input } from "./ui";
 
 type Entry = LoraCatalog["loras"][number];
@@ -32,6 +34,8 @@ export function LoraPicker({
   id,
   label,
   hint,
+  help,
+  weightHelp,
   placeholder,
   value,
   onChange,
@@ -48,6 +52,9 @@ export function LoraPicker({
   id: string;
   label: string;
   hint?: string;
+  /** Bulles d'aide « ? » du choix du LoRA et de son poids (textes dans lib/help.ts). */
+  help?: HelpId;
+  weightHelp?: HelpId;
   placeholder?: string;
   value: string;
   onChange: (value: string) => void;
@@ -139,9 +146,12 @@ export function LoraPicker({
     <div className="space-y-4">
       <div className="grid gap-5 md:grid-cols-[1fr_8rem]">
         <div className="space-y-1.5">
-          <label htmlFor={id} className="block text-sm font-medium text-zinc-300">
-            {label}
-          </label>
+          <div className="flex items-center gap-1.5">
+            <label htmlFor={id} className="block text-sm font-medium text-zinc-300">
+              {label}
+            </label>
+            {help && <InfoTip help={help} label={label} />}
+          </div>
           <div className="relative">
             <div className="flex gap-1.5">
               <div className="relative flex-1">
@@ -265,7 +275,7 @@ export function LoraPicker({
             </p>
           )}
         </div>
-        <Field label={weightLabel} htmlFor={`${id}_weight`} error={weightError}>
+        <Field label={weightLabel} htmlFor={`${id}_weight`} help={weightHelp} error={weightError}>
           <Input
             id={`${id}_weight`}
             type="number"

@@ -4,8 +4,10 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { GenerateChapterButton } from "@/components/generate-chapter";
+import { HelpLabel, InfoTip } from "@/components/info-tip";
 import { hasLettering, LetteredPreview } from "@/components/lettered-preview";
 import { queueItems, useQueue } from "@/components/queue";
+import { useToast } from "@/components/toast";
 import { Alert, Button, ButtonLink, Card, EmptyState, Loading, ProgressBar } from "@/components/ui";
 import { api, engineUrl, fullErrorMessage, type Job, type LayoutPanel, type PageData, type QueueItem } from "@/lib/api";
 import { engineTime, formatDuration, formatEstimate, workshopHref } from "@/lib/generation";
@@ -276,7 +278,9 @@ function AgentsCard({
   const laid = withPanels.filter((p) => p.layout).length;
   return (
     <Card className="p-4">
-      <h2 className="text-sm font-semibold text-zinc-200">Les agents</h2>
+      <h2 className="text-sm font-semibold text-zinc-200">
+        <HelpLabel help="production.agents">Les agents</HelpLabel>
+      </h2>
       {error && !jobs ? (
         <p role="alert" className="mt-2 text-sm text-red-400">
           Activité des agents indisponible : {error}
@@ -333,6 +337,7 @@ function CurrentJob({
   onQueued: (message: string) => void;
 }) {
   const { cancel } = useQueue();
+  const toast = useToast();
   const sketchEnabled = useChapter().series.sketch_enabled;
   const here = running && running.chapter_id === chapterId ? running : null;
   const now = useNow(here !== null);
@@ -348,6 +353,7 @@ function CurrentJob({
     setError(null);
     try {
       await cancel(item.job.id);
+      toast("Case annulée", "info");
     } catch (e) {
       setError(fullErrorMessage(e));
     } finally {
@@ -359,7 +365,9 @@ function CurrentJob({
     <Card className="space-y-3 p-4" data-testid="production-current">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h2 className="text-sm font-semibold text-zinc-200">Génération</h2>
+          <h2 className="text-sm font-semibold text-zinc-200">
+            <HelpLabel help="production.generation">Génération</HelpLabel>
+          </h2>
           {queueError && !running ? (
             <p role="alert" className="mt-1 text-sm text-red-400">
               File d&apos;attente indisponible : {queueError}
@@ -417,6 +425,7 @@ function CurrentJob({
       )}
 
       <p className="flex flex-wrap gap-x-4 gap-y-1 border-t border-zinc-800 pt-3 text-xs text-zinc-400" data-testid="production-remaining">
+        <InfoTip help="production.remaining" label="Cases restantes" />
         <span>
           {waiting.length} case{waiting.length > 1 ? "s" : ""} en attente
           {mine.length > 0 && lastEta !== null && <> · file du chapitre vide dans ≈ {formatDuration(lastEta)}</>}
@@ -589,16 +598,19 @@ function PagePreview({
           </span>
         </h2>
         {canLetter && page.layout && (
-          <label className="flex items-center gap-2 text-sm text-zinc-300">
-            <input
-              type="checkbox"
-              checked={lettered}
-              onChange={(e) => onLettered(e.target.checked)}
-              className="accent-rose-500"
-              data-testid="toggle-lettering"
-            />
-            Afficher les bulles et onomatopées
-          </label>
+          <span className="flex items-center gap-1.5">
+            <label className="flex items-center gap-2 text-sm text-zinc-300">
+              <input
+                type="checkbox"
+                checked={lettered}
+                onChange={(e) => onLettered(e.target.checked)}
+                className="accent-rose-500"
+                data-testid="toggle-lettering"
+              />
+              Afficher les bulles et onomatopées
+            </label>
+            <InfoTip help="production.lettered" label="Afficher les bulles et onomatopées" />
+          </span>
         )}
         <ButtonLink variant="secondary" className="ml-auto" href={workshopHref(chapterId, page.id)}>
           Ouvrir dans l&apos;atelier

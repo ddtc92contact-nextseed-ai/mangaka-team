@@ -5,7 +5,9 @@ import { api, engineUrl, fullErrorMessage, type Job, type StyleBoard, type Style
 import { generationStep } from "@/lib/generation";
 import { useEngineData } from "@/lib/hooks";
 import { useJob } from "@/lib/jobs";
+import { InfoTip } from "./info-tip";
 import { modalOpen } from "./modal";
+import { useToast } from "./toast";
 import { Alert, Button, Card, Loading, ProgressBar } from "./ui";
 
 export const STYLE_BOARD_ANCHOR = "planche-de-style";
@@ -51,6 +53,7 @@ export function StyleBoardCard({ projectId, board }: { projectId: number; board:
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const toast = useToast();
 
   const jobs = useMemo(() => {
     const byId = new Map<number, Job>();
@@ -84,6 +87,7 @@ export function StyleBoardCard({ projectId, board }: { projectId: number; board:
       const newJobs = await api.generateStyleTrials(projectId);
       setLaunched((l) => [...l, ...newJobs]);
       setNotice(`${newJobs.length} ${QUEUED_NOTICE}`);
+      toast(`Essais lancés (${newJobs.length} en file)`);
     } catch (err) {
       setError(fullErrorMessage(err));
     } finally {
@@ -99,6 +103,7 @@ export function StyleBoardCard({ projectId, board }: { projectId: number; board:
       const job = await api.chooseStyleTrial(trial.id);
       setLaunched((l) => [...l, job]);
       setNotice(`Essai ${trial.variant ?? ""} retenu : passage au propre en cours, il deviendra la référence de style.`);
+      toast(`Essai ${trial.variant ?? ""} retenu : passage au propre lancé`);
     } catch (err) {
       setError(fullErrorMessage(err));
     } finally {
@@ -111,6 +116,7 @@ export function StyleBoardCard({ projectId, board }: { projectId: number; board:
     try {
       board.setData(await api.activateStyleReference(ref.id));
       setNotice("Référence de style reprise depuis l’historique.");
+      toast("Référence de style reprise");
     } catch (err) {
       setError(fullErrorMessage(err));
     }
@@ -127,6 +133,7 @@ export function StyleBoardCard({ projectId, board }: { projectId: number; board:
       setError(`${what} : ${job.error ?? "échec"}`);
     } else if (job.params?.mode === "clean" && job.status === "succeeded") {
       setNotice("Nouvelle référence de style enregistrée : les prochaines fiches de référence naîtront dans ce style.");
+      toast("Référence de style enregistrée");
     }
     board.reload();
   }
@@ -159,9 +166,12 @@ export function StyleBoardCard({ projectId, board }: { projectId: number; board:
     <Card id={STYLE_BOARD_ANCHOR} className="scroll-mt-6" aria-labelledby="planche-de-style-titre">
       <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 id="planche-de-style-titre" className="font-semibold text-zinc-100">
-            Planche de style
-          </h2>
+          <div className="flex items-center gap-1.5">
+            <h2 id="planche-de-style-titre" className="font-semibold text-zinc-100">
+              Planche de style
+            </h2>
+            <InfoTip help="style_board.trials" label="Planche de style" />
+          </div>
           <p className="mt-1 text-sm text-zinc-500">
             Voir le style avant de lancer la série : {data?.trials_per_batch || 4} croquis d&apos;une scène test du genre. L&apos;essai
             retenu passe au propre et devient la référence de style de la série.
@@ -212,6 +222,7 @@ export function StyleBoardCard({ projectId, board }: { projectId: number; board:
                 </h3>
                 {latest.length > 0 && trialJobs.length === 0 && (
                   <p className="text-xs text-zinc-500">
+                    <InfoTip help="style_board.keys" label="Raccourcis clavier" className="mr-1" />
                     Clique sur un essai ou tape <kbd className="rounded bg-zinc-800 px-1">1</kbd>–
                     <kbd className="rounded bg-zinc-800 px-1">{latest.length}</kbd> pour le choisir,{" "}
                     <kbd className="rounded bg-zinc-800 px-1">R</kbd> pour relancer.
@@ -294,6 +305,7 @@ function ActiveReference({ reference: ref, board }: { reference: StyleReference;
         <p className="flex items-center gap-2 font-medium text-emerald-200">
           <span className="rounded bg-emerald-500/15 px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-emerald-300">Active</span>
           Référence de style
+          <InfoTip help="style_board.reference" label="Référence de style" />
         </p>
         <p className="text-xs text-zinc-400">{uses ? `Utilisée : ${uses}.` : "Non utilisée (désactivée dans presets/defaults.yaml)."}</p>
         {ref.outdated && (

@@ -5,12 +5,14 @@ import { useState } from "react";
 import { api, errorMessage, type Chapter } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
 import { ChapterStatusBadge, formatPlannedDate } from "./status";
+import { useToast } from "./toast";
 import { Alert, Button, ButtonLink, Card, EmptyState, Loading } from "./ui";
 
 export function ChapterList({ projectId }: { projectId: number }) {
   const chapters = useEngineData(() => api.listChapters(projectId), [projectId]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const toast = useToast();
 
   async function move(index: number, delta: -1 | 1) {
     const list = chapters.data;
@@ -23,6 +25,7 @@ export function ChapterList({ projectId }: { projectId: number }) {
     setError(null);
     try {
       chapters.setData(await api.reorderChapters(projectId, ids));
+      toast("Ordre des chapitres enregistré");
     } catch (err) {
       setError(errorMessage(err));
     } finally {

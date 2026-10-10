@@ -6,6 +6,7 @@ import { useEngineData } from "@/lib/hooks";
 import { isFinished, useJob } from "@/lib/jobs";
 import { Badge, useEngineStatus } from "./engine-status";
 import { useQueue } from "./queue";
+import { useToast } from "./toast";
 import { Alert, Button, Card, ProgressBar, Select } from "./ui";
 
 const GIB = 1024 ** 3;
@@ -150,6 +151,7 @@ export function ComfyConnection() {
   const online = status.state === "online";
   const presets = useEngineData(() => api.workflowPresets(), [online]);
   const { refresh } = useQueue();
+  const toast = useToast();
   const [preset, setPreset] = useState("");
   const [report, setReport] = useState<ComfyCheck | null>(null);
   const [checking, setChecking] = useState(false);
@@ -186,6 +188,7 @@ export function ComfyConnection() {
     try {
       setTrial(await api.startComfyTrial(chosen));
       refresh();
+      toast("Case d'essai lancée");
     } catch (err) {
       setTrialError(fullErrorMessage(err));
     }

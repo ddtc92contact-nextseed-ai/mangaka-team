@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { InfoTip } from "@/components/info-tip";
+import { useToast } from "@/components/toast";
 import { Alert, Button, ButtonLink, Card, EmptyState, Loading, Select } from "@/components/ui";
 import { PageSvg } from "@/components/page-svg";
 import { api, errorMessage, type FrameKind, type LayoutGutter, type LayoutPanel, type PageData, type PanelData, type PanelFrame } from "@/lib/api";
@@ -18,6 +20,7 @@ export default function LayoutPreviewPage() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const toast = useToast();
 
   const list = pages.data ?? [];
   const selected = list.find((p) => p.id === selectedId) ?? list.find((p) => p.layout) ?? list[0] ?? null;
@@ -26,11 +29,12 @@ export default function LayoutPreviewPage() {
     pages.setData((list ?? []).map((p) => (p.id === page.id ? page : p)));
   }
 
-  async function run(action: () => Promise<void>) {
+  async function run(action: () => Promise<void>, done?: string) {
     setBusy(true);
     setError(null);
     try {
       await action();
+      if (done) toast(done);
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -39,15 +43,23 @@ export default function LayoutPreviewPage() {
   }
 
   const relayout = (body: { template_id?: string | null; style?: string | null; reroll?: boolean } = {}) =>
-    selected && run(async () => replacePage(await api.layoutPage(selected.id, body)));
-  const recomputeAll = () => run(async () => pages.setData(await api.layoutChapter(chapter.id)));
+    selected &&
+    run(
+      async () => replacePage(await api.layoutPage(selected.id, body)),
+      body.reroll ? "Nouvelle mise en page enregistrée" : `Mise en page de la page ${selected.number} enregistrée`,
+    );
+  const recomputeAll = () =>
+    run(async () => pages.setData(await api.layoutChapter(chapter.id)), "Mise en page du chapitre recalculée");
   const moveGutter = (g: LayoutGutter, position: number) =>
     selected &&
     run(async () => replacePage(await api.moveGutter(selected.id, { path: g.path, index: g.index, position })));
   const slantCut = (g: LayoutGutter, ends: [number, number]) =>
     selected && run(async () => replacePage(await api.slantCut(selected.id, { path: g.path, index: g.index, ends })));
   const setFrame = (panel: PanelData, change: Partial<PanelFrame>) =>
-    run(async () => replacePage(await api.setPanelFrame(panel.id, { ...(panel.frame ?? {}), ...change })));
+    run(
+      async () => replacePage(await api.setPanelFrame(panel.id, { ...(panel.frame ?? {}), ...change })),
+      `Cadre de la case ${panel.index + 1} enregistré`,
+    );
 
   if (pages.loading && !pages.data) return <Loading />;
   if (pages.error) return <Alert>Impossible de charger les pages : {pages.error}</Alert>;
@@ -127,6 +139,7 @@ export default function LayoutPreviewPage() {
                   </option>
                 ))}
               </Select>
+              <InfoTip help="layout.style" label="Style de mise en page" />
               <label htmlFor="template" className="sr-only">
                 Gabarit
               </label>
@@ -144,12 +157,14 @@ export default function LayoutPreviewPage() {
                   </option>
                 ))}
               </Select>
+              <InfoTip help="layout.template" label="Gabarit" />
               <Button onClick={() => relayout({ reroll: true })} disabled={busy} data-testid="reroll-page">
                 Nouvelle mise en page
               </Button>
               <Button variant="secondary" onClick={() => relayout()} disabled={busy} data-testid="recompute-page">
                 Recalculer
               </Button>
+              <InfoTip help="layout.reroll" label="Nouvelle mise en page et Recalculer" />
             </>
           )}
           <Button variant="ghost" onClick={recomputeAll} disabled={busy}>
@@ -218,7 +233,10 @@ export default function LayoutPreviewPage() {
       <aside className="order-3" aria-label="Détail des cases">
         {selected?.layout && (
           <Card className="p-4">
-            <h3 className="mb-3 text-sm font-semibold text-zinc-100">Cases (ordre de lecture)</h3>
+            <h3 className="mb-3 flex items-center gap-1.5 text-sm font-semibold text-zinc-100">
+              Cases (ordre de lecture)
+              <InfoTip help="layout.panels" label="Cases" />
+            </h3>
             <ol className="space-y-3 text-xs">
               {selected.layout.panels.map((lp) => {
                 const panel = selected.panels.find((p) => p.id === lp.panel_id) ?? selected.panels[lp.index];
@@ -296,7 +314,10 @@ function FrameControls({
   return (
     <div className="mt-2 grid grid-cols-1 gap-1.5" data-testid="frame-controls">
       <label className="flex items-center justify-between gap-2 text-zinc-400">
-        <span>Bord</span>
+        <span className="flex items-center gap-1.5">
+          Bord
+          <InfoTip help="layout.frame" label="Bord" />
+        </span>
         <Select
           className="!w-36 py-1 text-xs"
           value={forced.frame ?? ""}
@@ -312,7 +333,10 @@ function FrameControls({
         </Select>
       </label>
       <label className="flex items-center justify-between gap-2 text-zinc-400" title={bleedOff ? "La case ne touche pas un bord extérieur de la page" : undefined}>
-        <span>Fond perdu</span>
+        <span className="flex items-center gap-1.5">
+          Fond perdu
+          <InfoTip help="layout.bleed" label="Fond perdu" />
+        </span>
         <Select
           className="!w-36 py-1 text-xs"
           value={yesNo(forced.bleed)}
@@ -327,7 +351,10 @@ function FrameControls({
         </Select>
       </label>
       <label className="flex items-center justify-between gap-2 text-zinc-400">
-        <span>Incrustation</span>
+        <span className="flex items-center gap-1.5">
+          Incrustation
+          <InfoTip help="layout.inset" label="Incrustation" />
+        </span>
         <Select
           className="!w-36 py-1 text-xs"
           value={yesNo(forced.inset)}

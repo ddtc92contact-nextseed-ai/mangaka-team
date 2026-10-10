@@ -2,6 +2,7 @@
 
 // Savoir-faire : passages (sources, scores), zone d'envoi de documents, panneau de test de la recherche.
 import { useRef, useState, type DragEvent, type FormEvent } from "react";
+import { InfoTip } from "@/components/info-tip";
 import { Alert, Button, Field, Input, Select } from "@/components/ui";
 import { api, errorMessage, type KnowledgeCollection, type Passage, type Project, type SearchResult } from "@/lib/api";
 
@@ -240,6 +241,7 @@ export function RetrievalTester({
       {result && (
         <div className="mt-5 space-y-3" data-testid="retrieval-result">
           <p className="text-xs text-zinc-400">
+            <InfoTip help="knowledge.scores" label="Score des passages" className="mr-1.5" />
             {result.passages.length} passage{result.passages.length > 1 ? "s" : ""} classé
             {result.passages.length > 1 ? "s" : ""} · en surbrillance, ce qu&apos;un agent recevrait (top {result.top_k},{" "}
             {formatTokens(result.selected_tokens)} sur un budget de {formatTokens(result.budget_tokens)}) · collections :{" "}

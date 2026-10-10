@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { useState, type ReactNode } from "react";
+import { InfoTip } from "@/components/info-tip";
 import { PageSvg } from "@/components/page-svg";
+import { useToast } from "@/components/toast";
 import { Alert, Button, ButtonLink, Card, EmptyState, Input, Loading, ProgressBar, Select } from "@/components/ui";
 import {
   api,
@@ -25,6 +27,7 @@ import {
   pageState,
   panelKey,
 } from "@/lib/direction";
+import type { HelpId } from "@/lib/help";
 import { useEngineData } from "@/lib/hooks";
 import { isFinished, useJob } from "@/lib/jobs";
 import { useChapter } from "../chapter-context";
@@ -64,12 +67,15 @@ export default function DirectionPage() {
   const anyDirection = list.some((p) => p.has_direction);
   const pendingCount = list.filter((p) => p.has_direction && p.pending && !p.out_of_date).length;
 
-  async function run(action: () => Promise<void>) {
+  const toast = useToast();
+
+  async function run(action: () => Promise<void>, done?: string) {
     setBusy(true);
     setError(null);
     setNotice(null);
     try {
       await action();
+      if (done) toast(done);
     } catch (err) {
       setError(fullErrorMessage(err));
     } finally {
@@ -80,13 +86,14 @@ export default function DirectionPage() {
   const start = (pageId?: number) =>
     run(async () => {
       setStarted(await api.startDirection(chapter.id, pageId));
-    });
+    }, pageId ? "Nouvelle proposition lancée pour la page" : "Direction artistique lancée");
 
   function replace(d: PageDirection) {
     if (data) direction.setData({ ...data, pages: data.pages.map((p) => (p.page_id === d.page_id ? d : p)) });
   }
 
-  const edit = (d: PageDirection, body: DirectionEdit) => run(async () => replace(await api.editDirection(d.page_id, body)));
+  const edit = (d: PageDirection, body: DirectionEdit) =>
+    run(async () => replace(await api.editDirection(d.page_id, body)), editMessage(body));
 
   const apply = (pageIds?: number[]) =>
     run(async () => {
@@ -95,7 +102,7 @@ export default function DirectionPage() {
       direction.reload();
       const skipped = res.skipped.map((s) => `page ${s.number} : ${s.reason}`).join(" · ");
       setNotice(`${capitalize(res.message)}.${skipped ? ` ${skipped}.` : ""}`);
-    });
+    }, "Direction artistique appliquée à la mise en page");
 
   if ((direction.loading && !data) || (pages.loading && !pages.data)) return <Loading />;
   if (direction.error) return <Alert>Impossible de charger la direction artistique : {direction.error}</Alert>;
@@ -125,10 +132,12 @@ export default function DirectionPage() {
               <Link href="/equipe/directeur-artistique" className="text-rose-300 hover:text-rose-200">
                 régler l&apos;agent dans « L&apos;équipe »
               </Link>
-              . Un choix que tu modifies est verrouillé 🔒 : l&apos;agent le garde quand il repropose.
+              . Un choix que tu modifies est verrouillé 🔒 : l&apos;agent le garde quand il repropose.{" "}
+              <InfoTip help="direction.lock" label="Choix verrouillés" />
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <InfoTip help="direction.lancer" label="Direction artistique" />
             <Button onClick={() => start()} disabled={busy || running} data-testid="run-direction">
               {running ? "Direction en cours…" : anyDirection ? "Relancer sur tout le chapitre" : "Lancer la direction artistique"}
             </Button>
@@ -140,6 +149,7 @@ export default function DirectionPage() {
             >
               Appliquer à la mise en page{pendingCount ? ` (${pendingCount})` : ""}
             </Button>
+            <InfoTip help="direction.appliquer" label="Appliquer à la mise en page" />
           </div>
         </div>
         {job && <JobLine job={job} />}
@@ -219,6 +229,14 @@ export default function DirectionPage() {
       </div>
     </div>
   );
+}
+
+/** Confirmation courte d'une retouche de la proposition. */
+function editMessage(body: DirectionEdit): string {
+  if (body.accept !== undefined) return body.accept ? "Page acceptée" : "Acceptation annulée";
+  if (body.lock?.length) return "Choix verrouillé";
+  if (body.unlock?.length) return "Choix rendu à l'agent";
+  return "Choix enregistré";
 }
 
 function JobLine({ job }: { job: Job }) {
@@ -335,7 +353,7 @@ function PageEditor({
               </Card>
 
               <Card className="grid gap-3 p-4 sm:grid-cols-2">
-                <LockedField label="Rythme" id="da-rythme" locked={isLocked(d, "rythme")} onToggle={() => toggleLock("rythme")}>
+                <LockedField label="Rythme" id="da-rythme" help="direction.rythme" locked={isLocked(d, "rythme")} onToggle={() => toggleLock("rythme")}>
                   <Select
                     id="da-rythme"
                     value={d.rythme ?? ""}
@@ -352,6 +370,7 @@ function PageEditor({
                 <LockedField
                   label="Page choc"
                   id="da-choc"
+                  help="direction.page_choc"
                   locked={isLocked(d, "page_choc")}
                   onToggle={() => toggleLock("page_choc")}
                 >
@@ -372,6 +391,7 @@ function PageEditor({
                 <LockedField
                   label="Style de mise en page"
                   id="da-style"
+                  help="layout.style"
                   locked={isLocked(d, "layout_style")}
                   onToggle={() => toggleLock("layout_style")}
                 >
@@ -392,6 +412,7 @@ function PageEditor({
                 <LockedField
                   label="Gabarit suggéré"
                   id="da-template"
+                  help="layout.template"
                   locked={isLocked(d, "template")}
                   onToggle={() => toggleLock("template")}
                 >
@@ -456,12 +477,14 @@ function LockButton({ locked, label, onToggle }: { locked: boolean; label: strin
 function LockedField({
   label,
   id,
+  help,
   locked,
   onToggle,
   children,
 }: {
   label: string;
   id: string;
+  help?: HelpId;
   locked: boolean;
   onToggle: () => void;
   children: ReactNode;
@@ -469,9 +492,12 @@ function LockedField({
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between">
-        <label htmlFor={id} className="text-xs font-medium text-zinc-400">
-          {label}
-        </label>
+        <span className="flex items-center gap-1.5">
+          <label htmlFor={id} className="text-xs font-medium text-zinc-400">
+            {label}
+          </label>
+          {help && <InfoTip help={help} label={label} />}
+        </span>
         <LockButton locked={locked} label={label} onToggle={onToggle} />
       </div>
       {children}
@@ -540,7 +566,8 @@ function PanelRow({
       className={`rounded-xl border bg-zinc-900/60 p-4 transition-colors ${active ? "border-rose-400/70" : "border-zinc-800"}`}
     >
       <p className="mb-3 text-sm text-zinc-300">
-        <span className="font-semibold text-zinc-100">Case {n}</span>
+        <span className="font-semibold text-zinc-100">Case {n}</span>{" "}
+        <InfoTip help="direction.panel" label={`Choix de la case ${n}`} />
         {scriptShot && <span className="text-zinc-500"> · scénario : {scriptShot}</span>}
         {description && <span className="block text-xs text-zinc-500">{description}</span>}
         {(pa.decor != null || pa.objets != null) && (
