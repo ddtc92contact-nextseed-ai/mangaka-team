@@ -232,7 +232,8 @@ références » (`defaults.yaml` → `workflow_with_references`, `qwen-image-edi
 de la case a une planche de référence > workflow de la série (`qwen-image-base` par défaut).
 
 **Prompt final** (`presets/image_prompt.yaml`) : type de plan + description de la case (répliques
-entre guillemets retirées) + personnages (description visuelle + mots-clés) + style de la série. Le
+entre guillemets retirées) + personnages (description visuelle + mots-clés) + style de la série (packs
+genre / rendu / ton choisis dans des listes, voir `presets/README.md` « Packs de style »). Le
 prompt négatif contient toujours « texte, lettres, bulles… » : le modèle ne dessine jamais de texte.
 
 **Références et LoRA** : les images de référence des personnages (1re image de chacun, puis 2e…)

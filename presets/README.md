@@ -17,6 +17,11 @@ Après modification d'un preset, redémarre le moteur (`npm run dev`).
 | `layout.yaml` | Découpage : taille mini d'une case, taille cible de génération, zones de bulles, seuil de régénération conseillée |
 | `layouts/*.yaml` | Bibliothèque de gabarits de planche (arbres de découpes) |
 | `layout_styles/*.yaml` | Grammaires de mise en page par série : `sage`, `dynamique` (défaut), `nerveuse` — biais, gouttières, gabarits favoris |
+| `style_genres/*.yaml` | Packs de style : **genre et public** (shōnen, seinen, shōjo, jeunesse, magical girl, tranche de vie, franco-belge) — mots-clés, mise en page, sens de lecture, polices, consignes LLM, tons autorisés |
+| `style_renderings/*.yaml` | Packs de style : **rendu** (N&B à trames par défaut, N&B encre, couleur, couleur douce) |
+| `style_tones/*.yaml` | Packs de style : **ton** (lumineux, neutre par défaut, dark, humour) |
+| `style_options.yaml` | Réglages fins bornés du style : trait, trames (N&B seulement), détail des décors |
+| `style_loras.yaml` | Catalogue des LoRA de style : mots déclencheurs et poids conseillé |
 | `prompts/*.yaml` | Prompts des étapes LLM (`script` : découpage d'un chapitre) |
 | `image_prompt.yaml` | Construction du prompt final des cases (étape 3) et termes « pas de texte » du prompt négatif |
 | `qc.yaml` | Contrôle qualité des cases (étape 4) : poids, seuils de verdict, règles des détecteurs, seuil CCIP, zone de doute de la vision, nouveaux essais automatiques |
@@ -222,6 +227,99 @@ alimentent aussi le prompt image (`$plan`, `$angle`, `$ambiance`). Le cadre devi
 de la case (sans bord → `frame: none`, fond perdu → `bleed`, incrustation → `inset`) et les onomatopées
 des `sfx` du lettrage (léger → calme, moyen → normal, fort → choc) ; une option ou une onomatopée
 réglée par l'auteur n'est jamais écrasée, celles de l'application précédente sont remplacées. Si le découpage d'une page change, sa direction est marquée « à refaire ».
+
+## Packs de style (`style_genres/`, `style_renderings/`, `style_tones/`)
+
+Le style d'une série se choisit **uniquement dans des listes fermées** : un genre, un rendu, un ton
+(obligatoires), puis des réglages fins facultatifs et un LoRA de style. Il n'y a plus de texte libre :
+**ajouter un style = ajouter un fichier**, jamais du code. Un pack invalide est écarté au démarrage
+avec un message clair dans `GET /presets` (`issues`).
+
+Un seul module (`engine/mangaka_engine/pipeline/style.py`) compose le style d'une série :
+
+- **`$style`** des prompts image (cases, fiches de référence, réparation, croquis et passage au
+  propre) = mots déclencheurs du LoRA de style (catalogue), puis mots-clés du **genre**, du **rendu**,
+  du **ton** et des **réglages fins** (dans l'ordre de `style_options.yaml`), sans doublon ;
+- **`$style_packs`** et **`$style_guidelines`** des prompts LLM (scénario, direction artistique) : nom
+  et description des packs, puis consignes du genre et du ton.
+
+Champs communs : `id` (minuscules, chiffres, tirets), `name` et `description` **en français** (affichés
+dans la fiche série), `prompt_keywords` (liste), `order` (ordre dans la liste déroulante).
+
+**Mots-clés : positifs, courts, en anglais.** Avec le palier Turbo (cfg 1), le prompt négatif est
+quasiment sans effet : un mot-clé dit ce qu'on veut voir, jamais ce qu'on ne veut pas (« no color »,
+« sans trame »… sont refusés au chargement). Qwen-Image suit très bien les mots-clés anglais courts
+(« screentone shading », « thick bold linework ») : les packs sont écrits en anglais, le reste du prompt
+reste en français. Les valeurs v1 sont un premier jet, à calibrer sur la machine.
+
+### Ajouter un genre
+
+```yaml
+# presets/style_genres/sport.yaml
+id: sport
+name: Sport
+description: Compétition et dépassement — matchs, entraînements, esprit d'équipe.
+order: 80
+prompt_keywords: [sports manga style, dynamic athletic poses, motion blur, stadium atmosphere]
+layout_style: nerveuse        # grammaire par défaut (layout_styles/) : sage | dynamique | nerveuse
+reading_direction: rtl        # rtl (manga) | ltr (BD)
+fonts: { dialogue: baloo2, shout: bowlby-one }   # polices de fonts.yaml
+llm_guidelines: >-            # consignes du scénariste et du directeur artistique
+  Sport, public adolescent : 4 à 6 cases par page, grandes cases pour les actions décisives…
+allowed_tones: [lumineux, neutre, humour]        # facultatif (absent = tous les tons)
+style_lora: encre-seinen_v2.safetensors          # facultatif : LoRA conseillé (catalogue style_loras.yaml)
+```
+
+Choisir un genre **pré-remplit** la mise en page, le sens de lecture et les polices de dialogue et de
+cris de la série ; ils restent modifiables dans leurs listes. Les polices sont enregistrées comme
+réglages de série de l'agent Lettreur (écran « L'équipe »). Un ton absent de `allowed_tones` est grisé
+dans la fiche série et refusé par l'API (422). Une référence inconnue (mise en page, police, ton, LoRA)
+écarte le genre au chargement.
+
+### Ajouter un rendu
+
+```yaml
+# presets/style_renderings/sepia.yaml
+id: sepia
+name: Sépia
+description: Monochrome brun, aspect gravure ancienne.
+order: 50
+monochrome: true      # noir et blanc : seul à accepter le réglage « trames »
+prompt_keywords: [sepia toned illustration, engraved hatching]
+# default: true       # un seul rendu par défaut (celui des séries d'avant les packs)
+```
+
+Le rendu remplace toute mention de rendu en dur : `image_prompt.yaml` et les prompts de réparation
+ne parlent plus d'« encre » ni de « manga », sinon un rendu couleur serait contredit.
+
+### Ajouter un ton
+
+```yaml
+# presets/style_tones/epique.yaml
+id: epique
+name: Épique
+description: Souffle et grandeur — paysages immenses, héroïsme.
+order: 50
+prompt_keywords: [epic grand scale, heroic lighting]
+llm_guidelines: Ton épique ; scènes larges, enjeux qui dépassent les personnages.   # facultatif
+```
+
+### Réglages fins (`style_options.yaml`) et catalogue de LoRA (`style_loras.yaml`)
+
+`options` : un réglage (`trait`, `trames`, `detail`…) = `name`, `description`, `choices` (id →
+`name` + `prompt_keywords`) et `monochrome_only: true` pour un réglage réservé aux rendus N&B (masqué
+dans la fiche pour un rendu couleur, 422 à l'API). Un réglage non choisi n'ajoute rien.
+
+`loras` : `file` (nom exact listé par ComfyUI, sous-dossier compris), `name`, `trigger_words` (ajoutés
+en tête de `$style`) et `weight` (pré-rempli quand on choisit ce LoRA). Le LoRA de style se choisit
+dans la liste de ComfyUI ; **les mots déclencheurs ne se tapent plus**. Un LoRA hors catalogue
+s'applique sans mots déclencheurs (indice visible dans la fiche série).
+
+### Séries d'avant les packs
+
+L'ancien texte « Style graphique » est conservé en lecture seule (`legacy_style`) et affiché sur la
+fiche série sous le bandeau « Style à choisir dans les listes ». Tant qu'aucun pack n'est choisi, il
+tient lieu de genre dans `$style` (avec le rendu par défaut) ; il est ignoré dès qu'un pack est choisi.
 
 ## Prompts (`prompts/*.yaml`)
 
@@ -581,7 +679,7 @@ lora_chain:
 
 LoRA appliqués, dans l'ordre : **LoRA de style de la série**, puis **LoRA d'identité de chaque
 personnage** de la case, puis le LoRA de son **décor** et de chacun de ses **objets** (nom de fichier +
-poids saisis dans la série / la fiche ; un même fichier n'est chargé qu'une fois). Chaque LoRA
+poids choisis dans la série / la fiche ; un même fichier n'est chargé qu'une fois). Chaque LoRA
 devient un nœud `class_type` (identifiant numérique après le plus grand du JSON) :
 `model_from → LoRA 1 → LoRA 2 → …`, et tous les nœuds qui consommaient `model_from` (ici le nœud
 `4`, `QwenImage21Cache`) reçoivent la sortie du dernier LoRA. Sans LoRA, le workflow est
@@ -787,7 +885,7 @@ prompt:                          # morceaux assemblés ; un morceau dont une var
   - "$description."
   - "Détails : $keywords."       # mots-clés + mots déclencheurs du LoRA de la fiche
   - "Modification demandée : $instruction."   # consigne d'« Affiner » (omis sinon)
-  - "Style : $style."            # style de la série + mots déclencheurs du LoRA de style
+  - "Style : $style."            # packs de style de la série + mots déclencheurs du LoRA de style
 negative_prompt: "personnage"    # ajouté au négatif du workflow (les termes « pas de texte » y sont toujours)
 ```
 
@@ -797,7 +895,7 @@ negative_prompt: "personnage"    # ajouté au négatif du workflow (les termes �
 direction artistique appliquée, sinon celui du scénario, `$angle` et `$ambiance` de la direction
 artistique, `$shot` = plan du scénario,
 `$description`, `$characters`, `$decor` et `$objects` = décor et objets de la bibliothèque cités par la
-case (présentés comme les personnages), `$style`, `$bible` = notes de la bible sur les personnages de la
+case (présentés comme les personnages), `$style` (packs de style, voir « Packs de style »), `$bible` = notes de la bible sur les personnages de la
 case, `$savoir_faire` = passages du savoir-faire de l'agent `image_prompt`) ; un morceau dont une
 variable est vide est omis.
 `character` met en forme un personnage (`$name`, `$details` = description visuelle + mots-clés).
