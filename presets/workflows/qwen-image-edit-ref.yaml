@@ -13,6 +13,7 @@ output_node: "11"
 timeout_s: 1500   # au-delà, la génération est interrompue et le job passe en échec
 from_sketch: qwen-image-edit-ref-from-sketch   # « Passer au propre » depuis un croquis validé, même palier
 inpaint_with: qwen-image-inpaint   # réparation ciblée (inpainting) du même palier
+with_control: qwen-image-edit-ref-controlnet   # composition verrouillée (ControlNet), même palier
 tier:
   name: Qualité
 # Durée d'une case (s) tant qu'il y a moins de 3 générations terminées avec ce preset.

@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from ..pipeline.comfy_check import control_types
 from ..pipeline.pages import change_reading_direction
 from ..store.models import Chapter, Character, Page, Project, ReadingDirection, SeriesStatus
 from .deps import AppContext, get_ctx, get_session
@@ -30,6 +31,8 @@ def project_out(project: Project, character_count: int, chapter_count: int, laid
         layout_style=project.layout_style,
         sketch_enabled=project.sketch_enabled,
         sketch_denoise=project.sketch_denoise,
+        clean_mode=project.clean_mode or "img2img",
+        clean_control=project.clean_control,
         upscaler=project.upscaler,
         character_count=character_count,
         chapter_count=chapter_count,
@@ -67,6 +70,7 @@ def _check_presets(
     workflow: str | None,
     layout_style: str | None = None,
     upscaler: str | None = None,
+    clean_control: str | None = None,
 ) -> None:
     if page_format is not None and page_format not in ctx.presets.page_formats:
         raise FieldError("page_format", f"format de page inconnu : « {page_format} »")
@@ -76,6 +80,9 @@ def _check_presets(
         raise FieldError("layout_style", f"style de mise en page inconnu : « {layout_style} »")
     if upscaler is not None and upscaler not in ctx.presets.upscalers:
         raise FieldError("upscaler", f"agrandisseur inconnu : « {upscaler} »")
+    if clean_control is not None and clean_control not in control_types(ctx.presets):
+        known = ", ".join(control_types(ctx.presets)) or "aucun"
+        raise FieldError("clean_control", f"type de contrôle inconnu : « {clean_control} » (possibles : {known})")
 
 
 @router.get("", response_model=list[ProjectOut])
@@ -101,7 +108,7 @@ def create_project(
     layout_style = body.layout_style or ctx.presets.default_layout_style
     if layout_style is None:
         raise FieldError("layout_style", "aucun style de mise en page disponible (presets/layout_styles/)")
-    _check_presets(ctx, page_format, workflow, layout_style, body.upscaler)
+    _check_presets(ctx, page_format, workflow, layout_style, body.upscaler, body.clean_control)
     project = Project(
         title=body.title,
         style=body.style,
@@ -118,6 +125,8 @@ def create_project(
         if body.sketch_enabled is not None
         else defaults is None or defaults.sketch_enabled,
         sketch_denoise=body.sketch_denoise,
+        clean_mode=body.clean_mode,
+        clean_control=body.clean_control,
         upscaler=body.upscaler,
     )
     session.add(project)
@@ -150,6 +159,7 @@ def update_project(
         "style_lora_weight",
         "layout_style",
         "sketch_enabled",
+        "clean_mode",
     ):
         if key in changes and changes[key] is None:
             raise FieldError(key, "ne peut pas être vide")
@@ -159,6 +169,7 @@ def update_project(
         changes.get("workflow_preset"),
         changes.get("layout_style"),
         changes.get("upscaler"),
+        changes.get("clean_control"),
     )
     direction = changes.pop("reading_direction", None)
     if "status" in changes:

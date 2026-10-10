@@ -111,6 +111,8 @@ def _sketch_fields(panel: Panel) -> dict[str, Any]:
         "sketch_validated": validated is not None,
         "sketch_denoise": panel.sketch_denoise,
         "sketch_cleaned": validated is not None and cleaned_from(panel, validated) is not None,
+        # Composition verrouillée (ControlNet) : type de contrôle du verrou.
+        "composition_lock": lock.get("type") if isinstance(lock := panel.composition_lock, dict) else None,
     }
 
 

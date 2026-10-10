@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import statistics
 from datetime import UTC, datetime
+from pathlib import PurePosixPath
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import FileResponse
@@ -11,6 +12,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from ..pipeline.comfy_trial import STEP as TRIAL_STEP
+from ..pipeline.composition import SOURCE_LABELS, control_settings, drop_lock_on_delete, lock_preset_id, type_problem
+from ..pipeline.composition import STEP as CONTROL_MAP_STEP
 from ..pipeline.estimate import Estimate, estimate_panels, remaining_panels
 from ..pipeline.finishing import STEP as FINISH_STEP
 from ..pipeline.finishing import FinishingError, drop_finishes, panel_print_info, resolve_upscaler
@@ -58,6 +61,8 @@ from .schemas import (
     AnnotationOut,
     BatchGenerateIn,
     BatchGenerateOut,
+    CompositionLockOut,
+    ControlPreviewOut,
     EstimateOut,
     GenerateIn,
     JobOut,
@@ -188,7 +193,90 @@ def panel_detail(session: Session, ctx: AppContext, panel: Panel) -> PanelDetail
         sketch_denoise=panel.sketch_denoise,
         print_info=panel_print_info(presets, ctx.files, panel),  # type: ignore[arg-type]
         upscaler=upscaler,
+        composition_lock=lock_out(session, presets, panel),
     )
+
+
+def lock_out(session: Session, presets: PresetRegistry, panel: Panel) -> CompositionLockOut | None:
+    """Verrou de composition de la case : source, type, force, preset ControlNet et aperçu de la carte."""
+    lock = panel.composition_lock
+    if not isinstance(lock, dict):
+        return None
+    type_id = str(lock.get("type") or "")
+    preset: str | None = None
+    preset_name: str | None = None
+    type_name = type_id
+    problem: str | None = None
+    type_names: dict[str, str] = {}
+    try:
+        preset = lock_preset_id(session, presets, panel)
+        preset_name = presets.workflow(preset).preset.name
+        type_names = {k: t.name for k, t in control_settings(presets, preset).types.items()}
+        type_name = type_names.get(type_id, type_id)
+    except (GenerationError, PresetError) as exc:
+        problem = str(exc)[:1].upper() + str(exc)[1:]
+    source = str(lock.get("source"))
+    version = lock.get("version")
+    label = SOURCE_LABELS.get(source, source)
+    if source in ("croquis", "version") and version is not None:
+        label = f"croquis v{version}" if source == "croquis" else f"version {version}"
+    image_id = lock.get("image_id")
+    source_url = (
+        f"/panel-images/{image_id}/file" if source != "import" else f"/panels/{panel.id}/composition-lock/source"
+    )
+    raw = lock.get("preview") if isinstance(lock.get("preview"), dict) else {}
+    job = session.get(Job, raw["job_id"]) if isinstance(raw.get("job_id"), int) else None
+    status = "ready" if raw.get("path") else "none"
+    if job is not None and job.status != JobStatus.succeeded:
+        status = job.status.value if job.status != JobStatus.pending else "pending"
+    # L'URL est servie « immutable » : elle se versionne par la carte réellement servie (le job qui l'a
+    # produite), jamais par le dernier job demandé, sinon le navigateur garderait l'ancienne carte.
+    shown = raw.get("path") if isinstance(raw.get("path"), str) else None
+    shown_type = str(raw.get("type")) if shown and raw.get("type") else None
+    version_tag = raw.get("map_job_id") or (PurePosixPath(shown).stem if shown else None)
+    preview = ControlPreviewOut(
+        status=status,  # type: ignore[arg-type]
+        url=f"/panels/{panel.id}/composition-lock/preview?v={version_tag}" if shown else None,
+        type=shown_type,
+        type_name=type_names.get(shown_type, shown_type) if shown_type else None,
+        job_id=raw.get("job_id"),
+        error=job.error if job is not None and job.status == JobStatus.failed else None,
+        width=raw.get("width"),
+        height=raw.get("height"),
+    )
+    return CompositionLockOut(
+        source=source,  # type: ignore[arg-type]
+        source_label=label,
+        image_id=image_id,
+        version=version,
+        source_url=source_url,
+        type=type_id,
+        type_name=type_name,
+        strength=float(lock.get("strength") or 0),
+        locked_at=lock.get("locked_at"),
+        preset=preset,
+        preset_name=preset_name,
+        problem=problem,
+        preview=preview,
+    )
+
+
+def lock_problem(ctx: AppContext, panel: Panel) -> str | None:
+    """Case verrouillée alors que le verrouillage est indisponible dans ComfyUI : message clair."""
+    lock = panel.composition_lock
+    if not isinstance(lock, dict):
+        return None
+    return type_problem(ctx.control_status(), str(lock.get("type") or ""))
+
+
+def _require_lock_available(ctx: AppContext, panel: Panel) -> None:
+    problem = lock_problem(ctx, panel)
+    if problem is not None:
+        raise FieldError(
+            "composition_lock",
+            f"case {panel.index + 1} de la page {panel.page.number} : composition verrouillée, mais {problem[:1].lower()}"
+            f"{problem[1:]} Déverrouille la case pour la générer sans.",
+        )
 
 
 def _ref(entry: LibraryEntry) -> LibraryRef:
@@ -247,6 +335,11 @@ def update_panel(
             raise FieldError(
                 "generation_preset", f"« {preset} » est un preset de réparation : il ne génère pas de case"
             )
+        if preset is not None and known[preset].preset.control is not None:
+            raise FieldError(
+                "generation_preset",
+                f"« {preset} » est un preset ControlNet : verrouille plutôt la composition de la case",
+            )
         panel.generation_preset = preset
     if "final_prompt" in changes:
         text = (changes["final_prompt"] or "").strip()
@@ -278,6 +371,7 @@ def regenerate_panel_quality(
     versions (et la version choisie) ne bougent pas."""
     _require_comfyui(ctx)
     panel = get_panel_or_404(session, panel_id)
+    _require_lock_available(ctx, panel)
     try:
         preset = quality_preset_id(_presets(ctx, panel), panel_cast(session, panel).entries)
     except GenerationError as exc:
@@ -299,6 +393,7 @@ def generate_panel(
     body = body or GenerateIn()
     _require_comfyui(ctx)
     panel = get_panel_or_404(session, panel_id)
+    _require_lock_available(ctx, panel)
     jobs = _enqueue(
         session, ctx, panel, count=body.count, seed=body.seed, preset=body.preset, prompt_override=body.prompt_override
     )
@@ -310,7 +405,9 @@ def generate_panel(
 def _generate_pages(session: Session, ctx: AppContext, pages: list[Page], body: BatchGenerateIn) -> BatchGenerateOut:
     _require_comfyui(ctx)
     total = sum(len(p.panels) for p in pages)
-    panels = panels_to_generate(session, pages, force=body.force)
+    # Cases verrouillées alors que le ControlNet manque dans ComfyUI : laissées de côté (comptées dans
+    # `skipped`), les autres se génèrent normalement.
+    panels = [p for p in panels_to_generate(session, pages, force=body.force) if lock_problem(ctx, p) is None]
     jobs: list[Job] = []
     for panel in panels:
         jobs += _enqueue(session, ctx, panel, count=body.count, preset=body.preset)
@@ -485,6 +582,7 @@ def delete_panel_image(
     panel_id, path = img.panel_id, img.path
     if img.panel.sketch_image_id == img.id:
         img.panel.sketch_image_id = None  # croquis validé supprimé : la case est à trier de nouveau
+    drop_lock_on_delete(ctx.files, img.panel, img.id)  # image guide supprimée : composition libre
     finished = (img.finish or {}).get("path")
     mask = ((img.params or {}).get("repair") or {}).get("mask_path")
     session.delete(img)
@@ -601,7 +699,7 @@ def get_queue(session: Session = Depends(get_session), ctx: AppContext = Depends
         session.scalars(
             select(Job)
             .where(
-                Job.step.in_([STEP, QC_STEP, BENCH_STEP, TRIAL_STEP, REFERENCE_STEP, FINISH_STEP]),
+                Job.step.in_([STEP, QC_STEP, BENCH_STEP, TRIAL_STEP, REFERENCE_STEP, FINISH_STEP, CONTROL_MAP_STEP]),
                 Job.status.in_(ACTIVE),
             )
             .order_by((Job.status == JobStatus.running).desc(), Job.id)
@@ -646,6 +744,8 @@ def get_queue(session: Session = Depends(get_session), ctx: AppContext = Depends
         series = chapter.project if chapter else (session.get(Project, job.project_id) if job.project_id else None)
         if job.step == FINISH_STEP:
             label = f"Finition d'impression · {label} ({params.get('upscaler_name') or params.get('upscaler')})"
+        elif job.step == CONTROL_MAP_STEP:
+            label = f"Carte de contrôle · {label} ({(params.get('control') or {}).get('type') or '?'})"
         elif job.step == REFERENCE_STEP:
             kind = KIND_LABELS.get(str(params.get("entry_kind")), "fiche")
             action = "Affiner" if params.get("parent_id") is not None else "Références"
@@ -722,6 +822,7 @@ def list_workflow_presets(ctx: AppContext = Depends(get_ctx)) -> list[WorkflowPr
             is_quality=bool(defaults and defaults.workflow_quality == w.preset.id),
             role=w.preset.role,
             from_sketch=w.preset.from_sketch,
+            with_control=w.preset.with_control,
             is_sketch=bool(defaults and defaults.workflow_sketch == w.preset.id),
         )
         for w in presets.workflows.values()

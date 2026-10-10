@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import string
 from typing import Any, ClassVar, Literal
 
@@ -107,7 +108,7 @@ class LoraChain(_Strict):
 
 
 REQUIRED_WORKFLOW_PARAMS = ("positive_prompt", "negative_prompt", "seed", "width", "height")
-WorkflowRole = Literal["generation", "croquis", "propre"]
+WorkflowRole = Literal["generation", "croquis", "propre", "controle"]
 # Un preset de réparation (inpainting) part de l'image source : pas de taille, mais un débruitage partiel.
 REQUIRED_INPAINT_PARAMS = ("positive_prompt", "negative_prompt", "seed", "denoise")
 REPAIR_TARGETS = ("face", "hand", "zone")
@@ -152,6 +153,51 @@ class InpaintSettings(_Strict):
         return targets
 
 
+class ControlType(_Strict):
+    """Un type de contrôle (trait, profondeur, pose…) : le prétraitement qui tire la carte de contrôle de
+    l'image guide. `class_type` absent = l'image guide est déjà une carte (croquis à la main, scribble)."""
+
+    name: str = Field(min_length=1, description="Libellé affiché (« Trait »)")
+    description: str = ""
+    class_type: str | None = Field(default=None, description="Nœud de prétraitement (comfyui_controlnet_aux)")
+    image_input: str = "image"
+    inputs: dict[str, Any] = Field(default_factory=dict, description="Entrées constantes du prétraitement")
+    order: int = 0
+
+
+class ControlSettings(_Strict):
+    """Verrouillage de composition : ce bloc fait d'un workflow un preset ControlNet (rôle `controle`).
+
+    Le ControlNet Union de Qwen-Image est un *patch de modèle* : `patch` est le chargeur du patch
+    (`ModelPatchLoader`, fichier dans `models/model_patches/`), `apply` le nœud qui l'applique au
+    modèle (`QwenImageDiffsynthControlnet`, entrée `strength`), branché entre le modèle (après les
+    LoRA) et l'échantillonneur. `image` reçoit l'image guide envoyée à ComfyUI ; le nœud
+    `preprocessor` est remplacé selon le type choisi (retiré si le type n'a pas de prétraitement) ;
+    `resize` reçoit la taille de la case ; `map_output` enregistre la carte de contrôle (aperçu).
+    """
+
+    patch: NodeInput = Field(description="Chargeur du patch et entrée du nom de fichier")
+    apply: NodeInput = Field(description="Nœud qui applique le patch et son entrée de force")
+    image: NodeInput = Field(description="LoadImage de l'image guide")
+    preprocessor: str = Field(min_length=1, description="Nœud de prétraitement, remplacé selon le type")
+    resize: str | None = Field(default=None, description="Nœud de mise à la taille (entrées width / height)")
+    map_output: str | None = Field(default=None, description="Nœud qui enregistre la carte (aperçu)")
+    default_type: str
+    default_strength: float = Field(default=1.0, ge=0, le=2)
+    types: dict[str, ControlType]
+
+    @model_validator(mode="after")
+    def _check(self) -> ControlSettings:
+        if not self.types:
+            raise ValueError("types : au moins un type de contrôle")
+        bad = [k for k in self.types if not re.fullmatch(r"[a-z][a-z0-9_-]*", k)]
+        if bad:
+            raise ValueError(f"types : identifiant invalide : {', '.join(bad)}")
+        if self.default_type not in self.types:
+            raise ValueError(f"default_type : type inconnu : {self.default_type}")
+        return self
+
+
 class WorkflowTier(_Strict):
     """Palier d'un workflow (Turbo, Rapide, Qualité) : affiché sur les versions et dans la fiche série."""
 
@@ -193,6 +239,10 @@ class WorkflowPreset(_Strict):
     source_image: NodeInput | None = None
     # Palier de série : workflow « propre depuis croquis » du même palier (« Passer au propre »).
     from_sketch: str | None = None
+    # Palier de série : workflow ControlNet du même palier (composition verrouillée, rôle `controle`).
+    with_control: str | None = None
+    # Présent = workflow ControlNet (rôle `controle`) : patch de modèle, image guide, prétraitements.
+    control: ControlSettings | None = None
     # Preset de réparation ciblée (inpainting) du même palier, pour les versions produites par ce workflow.
     inpaint_with: str | None = Field(default=None, description="Id du preset de réparation (bloc `inpaint`)")
     # Présent = ce workflow est un preset de réparation (jamais proposé pour générer une case).
@@ -220,6 +270,10 @@ class WorkflowPreset(_Strict):
             raise ValueError("with_references ne peut pas désigner le workflow lui-même")
         if self.from_sketch == self.id:
             raise ValueError("from_sketch ne peut pas désigner le workflow lui-même")
+        if self.with_control == self.id:
+            raise ValueError("with_control ne peut pas désigner le workflow lui-même")
+        if (self.role == "controle") != (self.control is not None):
+            raise ValueError("un workflow « controle » déclare un bloc control, et lui seul")
         if self.role == "propre":
             if self.source_image is None:
                 raise ValueError("un workflow « propre » doit déclarer source_image (image de composition)")
@@ -278,6 +332,10 @@ class UpscalerPreset(_Strict):
 
     @property
     def source_image(self) -> NodeInput | None:
+        return None
+
+    @property
+    def control(self) -> ControlSettings | None:
         return None
 
     @model_validator(mode="after")

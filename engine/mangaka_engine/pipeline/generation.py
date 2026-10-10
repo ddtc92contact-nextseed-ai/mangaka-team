@@ -16,6 +16,11 @@ version `kind = croquis` (petite image, jamais choisie, sans QC automatique) ; u
 reçoit l'image de composition (le croquis validé, `params.source_image_id`) et la version produite
 garde sa source dans `params.composition`.
 
+Composition verrouillée (voir `pipeline/composition.py`) : tant qu'une case est verrouillée, chaque
+génération d'un palier passe par son pendant ControlNet (`with_control`, rôle `controle`) avec l'image
+guide du verrou (`params.control` du job) ; la version produite note sa source et son contrôle
+(`params.composition`, méthode `controlnet`, et `params.control`).
+
 Aucun nom de modèle, de LoRA ni de nœud ici : tout vient des presets et des fiches.
 """
 
@@ -35,7 +40,7 @@ from PIL import Image, UnidentifiedImageError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from ..presets import LoadedWorkflow, LoraSpec, PresetError, PresetRegistry, build_workflow
+from ..presets import ControlInput, LoadedWorkflow, LoraSpec, PresetError, PresetRegistry, build_workflow
 from ..providers.comfyui import (
     ComfyUIClient,
     ComfyUIError,
@@ -260,10 +265,20 @@ def sketch_size(target: dict[str, int], long_side: int, multiple: int) -> dict[s
     return {"width": snap(w), "height": snap(h)}
 
 
+# Clés d'un contrôle (verrou de composition) recopiées dans les paramètres d'un job.
+CONTROL_KEYS = ("source", "image_id", "version", "path", "type", "strength")
+
+
 def composition_params(img: PanelImage) -> dict[str, Any]:
-    """Paramètres de job qui rejouent la source de composition d'une version (croquis validé) :
-    un nouvel essai automatique du QC repart du même croquis, avec une nouvelle graine."""
+    """Paramètres de job qui rejouent la source de composition d'une version (croquis validé, image
+    guide d'un verrou) : un nouvel essai automatique du QC repart de la même composition, avec une
+    nouvelle graine."""
     comp = (img.params or {}).get("composition")
+    if isinstance(comp, dict) and comp.get("method") == "controlnet":
+        out: dict[str, Any] = {"control": {k: comp.get(k) for k in CONTROL_KEYS}, "locked": bool(comp.get("locked"))}
+        if not comp.get("locked"):  # passage au propre par ControlNet : même prompt que le croquis
+            out["sketch_prompt"] = (img.params or {}).get("prompt")
+        return out
     if not isinstance(comp, dict) or comp.get("image_id") is None:
         return {}
     return {
@@ -271,6 +286,57 @@ def composition_params(img: PanelImage) -> dict[str, Any]:
         "denoise": comp.get("denoise"),
         "sketch_prompt": (img.params or {}).get("prompt"),
     }
+
+
+def control_variant(presets: PresetRegistry, base_id: str, entries: Sequence[LibraryEntry]) -> str:
+    """Pendant ControlNet (`with_control`) d'un palier ; son `with_references` si la case a des références."""
+    base = presets.workflows.get(base_id)
+    if base is None:
+        raise GenerationError(f"workflow inconnu : « {base_id} »")
+    loaded = base if base.preset.control is not None else presets.workflows.get(base.preset.with_control or "")
+    if loaded is None or loaded.preset.control is None:
+        tier = base.preset.tier.name if base.preset.tier else base.preset.id
+        raise GenerationError(
+            f"le palier {tier} ({base.preset.id}) ne propose pas de verrouillage de composition (with_control)"
+        )
+    if any(e.reference_images for e in entries) and not loaded.preset.reference_images:
+        refs = presets.workflows.get(loaded.preset.with_references or "")
+        if refs is None or refs.preset.control is None:
+            raise GenerationError(f"le workflow {loaded.preset.id} ne déclare pas de with_references ControlNet")
+        return refs.preset.id
+    return loaded.preset.id
+
+
+def lock_control_params(lock: dict[str, Any]) -> dict[str, Any]:
+    """Paramètres de job d'un verrou de composition (source, image guide, type, force)."""
+    return {k: lock.get(k) for k in CONTROL_KEYS}
+
+
+def guide_image(
+    session: Session, files: FileStore, panel: Panel, control: dict[str, Any]
+) -> tuple[dict[str, Any], bytes, str]:
+    """Image guide d'un contrôle : (source décrite, octets, nom du fichier envoyé à ComfyUI)."""
+    source = control.get("source")
+    if source in ("croquis", "version"):
+        image_id = control.get("image_id")
+        img = session.get(PanelImage, int(image_id)) if isinstance(image_id, int) else None
+        if img is None or img.panel_id != panel.id:
+            raise GenerationError(
+                "image guide introuvable (version supprimée entre-temps ?) : déverrouille puis reverrouille la case"
+            )
+        rel = img.path
+        info: dict[str, Any] = {"source": source, "image_id": img.id, "version": img.version}
+        filename = f"guide_case{panel.id}_v{img.version}{PurePosixPath(rel).suffix or '.png'}"
+    elif source == "import":
+        rel = str(control.get("path") or "")
+        info = {"source": source, "path": rel}
+        filename = f"guide_case{panel.id}_{PurePosixPath(rel).name}"
+    else:
+        raise GenerationError(f"source de composition inconnue : « {source} »")
+    path = files.absolute(rel)
+    if not rel or not path.is_file():
+        raise GenerationError(f"fichier de l'image guide absent de data/ ({rel or '?'})")
+    return info, path.read_bytes(), filename
 
 
 def pick_references(
@@ -343,9 +409,21 @@ def enqueue_panel(
     page = panel.page
     if panel_target(presets, page, panel) is None:
         raise GenerationError(f"la page {page.number} n'est pas mise en page : lance « Recalculer » d'abord")
-    preset_id = resolve_preset_id(presets, panel, panel_cast(session, panel).entries, preset)
-    if presets.workflow(preset_id).preset.inpaint is not None:  # PresetError si inconnu
+    entries = panel_cast(session, panel).entries
+    preset_id = resolve_preset_id(presets, panel, entries, preset)
+    loaded = presets.workflow(preset_id)  # PresetError si inconnu
+    if loaded.preset.inpaint is not None:
         raise GenerationError(f"le workflow {preset_id} sert à réparer une version, pas à générer une case")
+    extra = dict(extra_params or {})
+    lock = panel.composition_lock
+    if isinstance(lock, dict) and loaded.preset.role == "generation" and "control" not in extra:
+        # Composition verrouillée : le pendant ControlNet du palier demandé, jusqu'au déverrouillage.
+        extra = {**extra, "control": lock_control_params(lock), "locked": True, "base_preset": preset_id}
+        preset_id = control_variant(presets, preset_id, entries)
+    if presets.workflow(preset_id).preset.control is not None and not isinstance(extra.get("control"), dict):
+        raise GenerationError(
+            f"le workflow {preset_id} verrouille la composition : verrouille d'abord la case (source, type, force)"
+        )
     if prompt_override is not None and prompt_override.strip():
         panel.final_prompt = prompt_override.strip()
         panel.final_prompt_manual = True
@@ -368,7 +446,7 @@ def enqueue_panel(
                 "seed": seed + i if seed is not None else None,
                 "variant": i + 1,
                 "count": count,
-                **(extra_params or {}),
+                **extra,
             },
         )
         session.add(job)
@@ -489,6 +567,10 @@ class _Plan:
     # Image de composition (preset `propre`) : {image_id, version, method, denoise, filename} + son contenu.
     sketch: dict[str, Any] | None = None
     sketch_data: bytes | None = None
+    # Composition verrouillée (preset `controle`) : {source, image_id, version, path, type, strength,
+    # locked, filename} + contenu de l'image guide.
+    control: dict[str, Any] | None = None
+    control_data: bytes | None = None
 
 
 def _capitalize(text: str) -> str:
@@ -589,6 +671,7 @@ class GenerationExecutor:
             if repair is None and loaded.preset.role == "croquis" and loaded.preset.long_side:
                 size = sketch_size(size, loaded.preset.long_side, presets.layout.generation.multiple)
             sketch, sketch_data = self._sketch_source(session, job, panel, loaded)
+            control, control_data = self._control_source(session, job, panel, loaded)
             references: list[dict[str, Any]] = []
             reference_data: list[bytes] = []
             for entry, image in pick_references(entries, len(loaded.preset.reference_images)):
@@ -643,6 +726,8 @@ class GenerationExecutor:
                 mask_data=mask_data,
                 sketch=sketch,
                 sketch_data=sketch_data,
+                control=control,
+                control_data=control_data,
             )
             session.commit()  # prompt final éventuellement reconstruit
             return plan
@@ -675,6 +760,34 @@ class GenerationExecutor:
             "filename": f"croquis_case{panel.id}_v{sketch.version}{PurePosixPath(sketch.path).suffix or '.png'}",
         }
         return source, path.read_bytes()
+
+    def _control_source(
+        self, session: Session, job: Job, panel: Panel, loaded: LoadedWorkflow
+    ) -> tuple[dict[str, Any] | None, bytes | None]:
+        """Image guide d'un preset ControlNet : celle du verrou (ou du croquis validé) notée sur le job."""
+        settings = loaded.preset.control
+        if settings is None:
+            return None, None
+        params = job.params.get("control")
+        if not isinstance(params, dict):
+            raise GenerationError(
+                f"le workflow {loaded.preset.id} verrouille la composition : aucune image guide pour ce job"
+            )
+        type_id = str(params.get("type") or settings.default_type)
+        if type_id not in settings.types:
+            raise GenerationError(
+                f"type de contrôle inconnu pour le workflow {loaded.preset.id} : « {type_id} » "
+                f"(possibles : {', '.join(settings.types)})"
+            )
+        strength = params.get("strength")
+        info, data, filename = guide_image(session, self.files, panel, params)
+        return {
+            **info,
+            "type": type_id,
+            "strength": float(strength) if isinstance(strength, int | float) else settings.default_strength,
+            "locked": bool(job.params.get("locked")),
+            "filename": filename,
+        }, data
 
     def _repair_inputs(
         self, session: Session, panel_id: int, repair: dict[str, Any]
@@ -715,6 +828,11 @@ class GenerationExecutor:
         if plan.sketch is not None and plan.sketch_data is not None:
             report(6, f"Envoi du croquis validé (version {plan.sketch['version']}) à ComfyUI…")
             sketch_name = comfy.upload_image(plan.sketch_data, plan.sketch["filename"], subfolder=UPLOAD_SUBFOLDER)
+        control: ControlInput | None = None
+        if plan.control is not None and plan.control_data is not None:
+            report(6, "Envoi de l'image guide (composition verrouillée) à ComfyUI…")
+            name = comfy.upload_image(plan.control_data, plan.control["filename"], subfolder=UPLOAD_SUBFOLDER)
+            control = ControlInput(image=name, type=plan.control["type"], strength=plan.control["strength"])
         inpaint_images: tuple[str, str] | None = None
         if plan.repair is not None:
             report(6, "Envoi de la version source et du masque à ComfyUI…")
@@ -730,6 +848,7 @@ class GenerationExecutor:
             loras=plan.loras,
             inpaint_images=inpaint_images,
             source_image=sketch_name,
+            control=control,
         )
         if cancel.is_set():
             raise ComfyUIInterruptedError("génération annulée")
@@ -803,6 +922,15 @@ class GenerationExecutor:
                 if plan.sketch is not None
                 else None
             )
+            if plan.control is not None and built.control is not None:
+                composition = {
+                    **{k: v for k, v in plan.control.items() if k != "filename"},
+                    "method": "controlnet",
+                    "type_name": built.control["name"],
+                    "preprocessor": built.control["preprocessor"],
+                    "comfyui_name": built.control["image"],
+                }
+            from_sketch = composition is not None and composition.get("source") == "croquis"
             image = PanelImage(
                 panel_id=panel.id,
                 version=version,
@@ -813,7 +941,9 @@ class GenerationExecutor:
                 selected=has_selected is None and kind == ImageKind.final,
                 params={
                     "kind": kind.value,
-                    **({"composition": composition, "sketch_image_id": composition["image_id"]} if composition else {}),
+                    **({"composition": composition} if composition else {}),
+                    **({"sketch_image_id": composition["image_id"]} if composition and from_sketch else {}),
+                    **({"control": built.control} if built.control is not None else {}),
                     "preset": preset.id,
                     "preset_name": preset.name,
                     "tier": preset.tier.name if preset.tier else None,

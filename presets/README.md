@@ -408,8 +408,9 @@ defaults:
   `with_references` si besoin) en **image → image** : le croquis validé est envoyé à ComfyUI, agrandi à
   la taille finale (`ImageScale`), encodé (`VAEEncode`) et débruité partiellement, **même graine et même
   prompt** que le croquis. La version produite garde sa source dans `params.composition`
-  (`source`, `image_id`, `version`, `method: img2img`, `denoise`) : un futur passage au propre par
-  ControlNet ne sera qu'un autre preset `propre`. Une composition n'est passée au propre qu'une fois
+  (`source`, `image_id`, `version`, `method: img2img`, `denoise`). Mode du passage au propre (fiche
+  série, `clean_mode`) : `img2img` (défaut, ci-dessus) ou `controlnet` — voir « Verrouillage de
+  composition » ci-dessous. Une composition n'est passée au propre qu'une fois
   (re-croquer et valider à nouveau pour recommencer). La 1re version propre est choisie d'office ;
   « Régénérer en Qualité » est inchangé.
 - **Débruitage** : demande > case (atelier, `PATCH /panels/{id}` `sketch_denoise`) > série (fiche
@@ -427,6 +428,84 @@ defaults:
   `UPDATE_GOLDEN=1 npm run test:engine`. Le ComfyUI factice simule les deux : crayonné gris pour un
   croquis, croquis « encré » à la taille finale pour un passage au propre.
 
+### Verrouillage de composition (ControlNet Union, patch de modèle)
+
+Sans ControlNet, la composition est *demandée* par le texte ; avec, elle est **imposée** par une image
+guide : le passage au propre et les régénérations gardent exactement le cadrage et les poses.
+
+Modèle : **Qwen-Image-2.1-Fun-Controlnet-Union** (Alibaba PAI), fichier
+`qwen_image_2.1_fun_controlnet_union_int8_convrot.safetensors` (3,78 Go), **un seul fichier** pour
+toutes les conditions (trait, profondeur, pose, scribble, Canny…). Ce n'est **pas** un ControlNet
+classique mais un **patch de modèle** : dossier `ComfyUI/models/model_patches/`, chargé par
+`ModelPatchLoader` et appliqué au modèle par `QwenImageDiffsynthControlnet` (modèle, patch, VAE, image
+de contrôle, `strength`, masque optionnel). Ne pas utiliser `ControlNetLoader` / `ControlNetApply`.
+Prétraitements : `comfyui_controlnet_aux` (`LineArtPreprocessor`, `DepthAnythingV2Preprocessor`,
+`DWPreprocessor`, `ScribblePreprocessor`) et le nœud natif `Canny`.
+
+| Preset | Pendant ControlNet de | `estimated_s` |
+| --- | --- | --- |
+| `qwen-image-turbo-controlnet` (+ `qwen-image-edit-ref-turbo-controlnet`) | Turbo | 25 / 90 |
+| `qwen-image-base-rapide-controlnet` (+ `qwen-image-edit-ref-rapide-controlnet`) | Rapide | 70 / 250 |
+| `qwen-image-base-controlnet` (+ `qwen-image-edit-ref-controlnet`) | Qualité | 85 / 300 |
+
+Même graphe que le palier, **mêmes ids** (`1` modèle, `2` encodeur, `6` prompts, `8` latent, `9`
+échantillonneur, `11` sortie) ; nœuds ajoutés : `40` ModelPatchLoader, `41` LoadImage (image guide), `42`
+prétraitement (remplacé selon le type), `43` ImageScale (carte à la taille de la case), `44`
+QwenImageDiffsynthControlnet (entre le modèle et le cache `4` → échantillonneur `9`), `45` SaveImage de
+la carte (aperçu seulement, retiré du graphe de génération). Les **LoRA sont chaînés avant le patch**
+(`lora_chain.model_from` = nœud `1`, consommé par `44`).
+
+```yaml
+# Palier de série → son pendant ControlNet (même palier ; with_references du pendant pour les références)
+with_control: qwen-image-turbo-controlnet
+# Preset ControlNet
+role: controle
+control:
+  patch: { node: "40", input: name }        # chargeur du patch : fichier vérifié par « Tester la connexion »
+  apply: { node: "44", input: strength }    # nœud qui applique le patch, entrée de la force
+  image: { node: "41", input: image }       # LoadImage qui reçoit l'image guide envoyée à ComfyUI
+  preprocessor: "42"                        # nœud remplacé par le prétraitement du type choisi
+  resize: "43"                              # reçoit width / height de la case
+  map_output: "45"                          # SaveImage de la carte (aperçu de l'atelier)
+  default_type: lineart
+  default_strength: 1.0                     # 0 = contrôle ignoré, 1 = composition tenue, jusqu'à 2
+  types:
+    lineart: { name: Trait, class_type: LineArtPreprocessor, inputs: { coarse: disable, resolution: 1024 } }
+    carte: { name: Carte déjà prête }       # sans class_type : l'image guide est déjà une carte
+```
+
+Types livrés : **Trait** (`lineart`, défaut), **Profondeur** (`depth`), **Pose** (`pose`), **Croquis à
+la main** (`scribble`), **Contours nets** (`canny`), **Carte déjà prête** (`carte`, sans prétraitement).
+Un type se règle ou s'ajoute dans le YAML (classe, entrées constantes, `image_input`, `order`), jamais
+dans le code.
+
+- **Verrouiller** (atelier, bloc « Composition » d'une case) : source = croquis validé, n'importe quelle
+  version de la case (propre ou croquis) ou image importée (croquis à la main, photo de pose) ; type ;
+  force. API : `POST /panels/{id}/composition-lock` (`source: croquis|version`, `image_id`, `type`,
+  `strength`), `POST /panels/{id}/composition-lock/import` (multipart `file`, `type`, `strength`),
+  `PATCH` (type, force), `DELETE` (déverrouiller). Un aperçu de la **carte de contrôle** est calculé
+  dans la file ComfyUI (job `control_map` : image guide → prétraitement → carte, sans modèle) et
+  affiché dans l'atelier (`GET /panels/{id}/composition-lock/preview`) ; changer de type le recalcule.
+- **Tant que la case est verrouillée**, toute génération (Générer, variantes, Même seed, Régénérer en
+  Qualité, essais automatiques du QC) passe par le pendant `with_control` du palier demandé, avec l'image
+  guide. Badge « composition verrouillée » sur la case. La version produite note sa source et son
+  contrôle : `params.composition` (`method: controlnet`, `source`, `image_id`/`path`, `type`,
+  `strength`, `locked`) et `params.control` (type, prétraitement, fichier du patch, force).
+- **Passage au propre par ControlNet** (fiche série, « Passage au propre : ControlNet », `clean_mode:
+  controlnet`, type `clean_control`) : le croquis validé est l'image guide, même graine et même prompt,
+  pas de débruitage. `img2img` reste le défaut.
+- Supprimer la version qui sert d'image guide déverrouille la case (jamais de case cassée).
+- **Disponibilité** : `GET /comfyui/control` (gardé 30 s, rafraîchi par « Tester la connexion ») dit si
+  `ModelPatchLoader`, `QwenImageDiffsynthControlnet` et le fichier du patch figurent dans
+  `/object_info`, et quels prétraitements sont installés. Sinon : message clair en français, l'atelier
+  et la fiche série masquent l'option, verrouiller est refusé, une case déjà verrouillée refuse d'être
+  régénérée (« déverrouille la case »), « Générer la page » la laisse de côté — les autres paliers et
+  les autres cases marchent normalement. Avec le ComfyUI factice (mock), tout est disponible : la carte
+  simulée est le contour de l'image guide, la version « CONTROLNET » repart de l'image guide.
+- Installation (mise à jour de ComfyUI + téléchargement du patch) : en attente du feu vert du manager ;
+  le code ne dépend que des presets. Graphes à confronter à l'export réel de Morigane puis
+  `UPDATE_GOLDEN=1 npm run test:engine`.
+
 ### Case d'essai (`trial`)
 
 Le bloc `trial` d'un preset donne les paramètres de « Générer une case d'essai » (tableau de bord) :
@@ -439,6 +518,10 @@ l'image et sa durée en secondes s'affichent sous le bouton.
 `/object_info` du vrai ComfyUI et liste, par preset : les nœuds inconnus (« nœud inconnu : … ») et les
 valeurs fixes absentes des listes de ComfyUI (« modèle introuvable dans ComfyUI : x.safetensors — à
 placer dans ComfyUI/models/diffusion_models/ », encodeur, VAE, échantillonneur…), puis les LoRA saisis dans les séries et les fiches absents de `models/loras/`.
+Les presets ControlNet (`role: controle`) sont **optionnels** : s'il manque `QwenImageDiffsynthControlnet`,
+`ModelPatchLoader` (« ComfyUI à mettre à jour ») ou le fichier du patch (« à placer dans
+ComfyUI/models/model_patches/ »), ils sont signalés mais le test reste bon ; la section « Verrouillage de
+composition » du rapport (`control`) explique pourquoi l'option est masquée dans l'atelier.
 Avec `COMFYUI_PROVIDER=mock`, il répond « ComfyUI simulé ».
 
 ## Images de référence et LoRA (étape 3)

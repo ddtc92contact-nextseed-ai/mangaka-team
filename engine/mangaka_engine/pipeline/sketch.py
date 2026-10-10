@@ -10,8 +10,11 @@
    débruitage partiel (`denoise` : case > série > preset). Le croquis source est noté sur la version.
 
 Un croquis n'est jamais choisi : ni assemblage, ni lettrage, ni export, ni QC automatique. La source
-de composition est une donnée de la version (`params.composition`), pas un cas codé en dur : un
-passage au propre par ControlNet n'aura qu'un autre preset `propre`.
+de composition est une donnée de la version (`params.composition`), pas un cas codé en dur.
+
+Mode du passage au propre (fiche série, `Project.clean_mode`) : `img2img` (défaut, ci-dessus) ou
+`controlnet` — le pendant ControlNet du palier (`with_control`, rôle `controle`) avec le croquis validé
+comme image guide (type `Project.clean_control`, sinon celui du preset), même graine, même prompt.
 """
 
 from __future__ import annotations
@@ -29,12 +32,14 @@ from .generation import (
     STEP,
     GenerationError,
     LibraryEntry,
+    control_variant,
     enqueue_panel,
     panel_cast,
 )
 from .knowledge import KnowledgeBase
 
 KIND_SKETCH = ImageKind.croquis.value
+CLEAN_MODES = ("img2img", "controlnet")
 
 
 def require_sketch_enabled(panel: Panel) -> None:
@@ -57,8 +62,11 @@ def sketch_preset_id(presets: PresetRegistry, entries: Sequence[LibraryEntry]) -
 
 
 def clean_preset_id(presets: PresetRegistry, panel: Panel, entries: Sequence[LibraryEntry]) -> str:
-    """Workflow « propre depuis croquis » du palier de la case (preset imposé) ou de la série."""
+    """Workflow « propre depuis croquis » du palier de la case (preset imposé) ou de la série : img2img
+    (`from_sketch`) ou ControlNet (`with_control`) selon le mode de passage au propre de la série."""
     base_id = panel.generation_preset or panel.page.chapter.project.workflow_preset
+    if panel.page.chapter.project.clean_mode == "controlnet":
+        return control_variant(presets, base_id, entries)
     base = presets.workflows.get(base_id)
     if base is None:
         raise GenerationError(f"workflow inconnu : « {base_id} »")
@@ -185,9 +193,23 @@ def enqueue_clean(
     extra: dict[str, Any] = {
         "kind": ImageKind.final.value,
         "source_image_id": sketch.id,
-        "denoise": clean_denoise(presets, panel, preset, denoise),
         "sketch_prompt": (sketch.params or {}).get("prompt"),
     }
+    settings = presets.workflow(preset).preset.control
+    if settings is not None:
+        # Passage au propre par ControlNet : le croquis validé est l'image guide (pas de débruitage).
+        project = panel.page.chapter.project
+        control_type = project.clean_control if project.clean_control in settings.types else settings.default_type
+        extra["control"] = {
+            "source": "croquis",
+            "image_id": sketch.id,
+            "version": sketch.version,
+            "path": None,
+            "type": control_type,
+            "strength": settings.default_strength,
+        }
+    else:
+        extra["denoise"] = clean_denoise(presets, panel, preset, denoise)
     return enqueue_panel(
         session, presets, panel, count=1, seed=sketch.seed, preset=preset, knowledge=knowledge, extra_params=extra
     )[0]

@@ -22,6 +22,8 @@
 - 14 : palier croquis (sorte des versions : `final` / `croquis`, croquis validé et débruitage du
   passage au propre par case, réglages croquis de la série). Les versions existantes sont `final` ;
   le palier croquis est activé sur les séries existantes (il n'ajoute que des boutons).
+- 15 : verrouillage de composition (ControlNet) par case, mode du passage au propre par série. Aucune
+  case n'est verrouillée ; les séries existantes gardent le passage au propre en img2img.
 
 Une base neuve est créée directement à la dernière version. Chaque migration tourne dans une
 transaction unique, clés étrangères désactivées (recette « 12 étapes » de SQLite pour reconstruire
@@ -58,7 +60,7 @@ from .models import (
 
 log = logging.getLogger("mangaka_engine")
 
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 
 
 class MigrationError(RuntimeError):
@@ -243,6 +245,12 @@ def _v13_to_v14(cur: sqlite3.Cursor) -> None:
     cur.execute("ALTER TABLE projects ADD COLUMN sketch_denoise FLOAT")
 
 
+def _v14_to_v15(cur: sqlite3.Cursor) -> None:
+    cur.execute("ALTER TABLE panels ADD COLUMN composition_lock JSON")
+    cur.execute("ALTER TABLE projects ADD COLUMN clean_mode VARCHAR(20) NOT NULL DEFAULT 'img2img'")
+    cur.execute("ALTER TABLE projects ADD COLUMN clean_control VARCHAR(40)")
+
+
 MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     # version de départ → (version d'arrivée, fonction)
     0: (2, _v0_to_v2),
@@ -259,6 +267,7 @@ MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     11: (12, _v11_to_v12),
     12: (13, _v12_to_v13),
     13: (14, _v13_to_v14),
+    14: (15, _v14_to_v15),
 }
 
 

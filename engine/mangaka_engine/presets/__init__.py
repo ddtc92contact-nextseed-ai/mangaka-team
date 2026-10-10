@@ -15,10 +15,18 @@ from .schemas import (
     UpscalerPreset,
     WorkflowPreset,
 )
-from .workflow import BuiltWorkflow, LoraSpec, build_upscale_workflow, build_workflow
+from .workflow import (
+    BuiltWorkflow,
+    ControlInput,
+    LoraSpec,
+    build_control_map_workflow,
+    build_upscale_workflow,
+    build_workflow,
+)
 
 __all__ = [
     "BuiltWorkflow",
+    "ControlInput",
     "ImagePromptSettings",
     "KnowledgeAgent",
     "KnowledgeSettings",
@@ -39,6 +47,7 @@ __all__ = [
     "PresetRegistry",
     "UpscalerPreset",
     "WorkflowPreset",
+    "build_control_map_workflow",
     "build_upscale_workflow",
     "build_workflow",
 ]

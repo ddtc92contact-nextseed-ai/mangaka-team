@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from mangaka_engine.presets import LoraSpec, PresetRegistry, build_workflow
+from mangaka_engine.presets import ControlInput, LoraSpec, PresetRegistry, build_workflow
 from tests.conftest import PRESETS_DIR
 
 REG = PresetRegistry.load(PRESETS_DIR)
@@ -45,8 +45,16 @@ PRESETS = [
     "qwen-image-edit-ref-rapide-from-sketch",
     "qwen-image-base-from-sketch",
     "qwen-image-edit-ref-from-sketch",
+    # Composition verrouillée (ControlNet Union : patch de modèle, image guide, prétraitement).
+    "qwen-image-turbo-controlnet",
+    "qwen-image-edit-ref-turbo-controlnet",
+    "qwen-image-base-rapide-controlnet",
+    "qwen-image-edit-ref-rapide-controlnet",
+    "qwen-image-base-controlnet",
+    "qwen-image-edit-ref-controlnet",
 ]
 SOURCE = "mangaka/croquis_case1_v1.png"
+CONTROL = ControlInput(image="mangaka/guide_case1_v2.png", type="lineart", strength=0.85)
 # Paliers (texte → image, avec références) : Qualité, Rapide, Turbo.
 TIERS = {
     "": ("qwen-image-base", "qwen-image-edit-ref"),
@@ -59,7 +67,10 @@ def _build(preset_id: str) -> dict:
     loaded = REG.workflow(preset_id)
     refs = REFERENCES if loaded.preset.reference_images else []
     source = SOURCE if loaded.preset.source_image else None
-    return build_workflow(loaded, PARAMS, reference_images=refs, loras=LORAS, source_image=source).workflow
+    control = CONTROL if loaded.preset.control else None
+    return build_workflow(
+        loaded, PARAMS, reference_images=refs, loras=LORAS, source_image=source, control=control
+    ).workflow
 
 
 @pytest.mark.parametrize("preset_id", PRESETS)
@@ -126,7 +137,7 @@ def test_tier_pairing_and_defaults() -> None:
     for base, edit in TIERS.values():
         assert REG.workflow(base).preset.with_references == edit
     for preset_id in PRESETS:
-        if REG.workflow(preset_id).preset.role != "propre":  # « propre » demande un croquis source
+        if REG.workflow(preset_id).preset.role not in ("propre", "controle"):  # demandent une image source
             assert REG.workflow(preset_id).preset.trial["positive_prompt"]
     # ordre des listes
     assert list(REG.workflows)[:3] == ["qwen-image-base", "qwen-image-base-rapide", "qwen-image-turbo"]

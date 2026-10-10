@@ -54,8 +54,8 @@ from .schemas import (
     WorkflowPreset,
 )
 
-# Ordre des rôles de workflow dans les listes : paliers de série, croquis, propre depuis croquis.
-ROLE_ORDER = {"generation": 0, "croquis": 1, "propre": 2}
+# Ordre des rôles de workflow dans les listes : paliers de série, croquis, propre depuis croquis, ControlNet.
+ROLE_ORDER = {"generation": 0, "croquis": 1, "propre": 2, "controle": 3}
 
 
 class PresetError(Exception):
@@ -209,6 +209,7 @@ class PresetRegistry:
 
         reg._check_reference_pairs()
         reg._check_sketch_pairs()
+        reg._check_control_pairs()
         # Ordre des listes déroulantes : paliers de série, puis croquis, puis « propre depuis croquis » ;
         # texte → image d'abord, puis avec références ; par nom ensuite (« … · Qualité » avant « … · Rapide »).
         reg.workflows = dict(
@@ -416,6 +417,26 @@ class PresetRegistry:
             for problem in problems:
                 self.issues.append(PresetIssue(self._rel(wf.preset_path or wf.source), problem))
 
+    def _check_control_pairs(self) -> None:
+        """`with_control` doit désigner un workflow chargé de rôle `controle`. Le workflow reste chargé ;
+        verrouiller la composition d'une case de ce palier échoue avec un message clair."""
+        for wf in self.workflows.values():
+            target = wf.preset.with_control
+            if target is None:
+                continue
+            other = self.workflows.get(target)
+            if other is None:
+                problem = f"with_control : workflow inconnu ou invalide : {target}"
+            elif other.preset.role != "controle":
+                problem = f"with_control : le workflow {target} n'a pas le rôle « controle »"
+            else:
+                continue
+            self.issues.append(PresetIssue(self._rel(wf.preset_path or wf.source), problem))
+
+    def control_presets(self) -> list[LoadedWorkflow]:
+        """Workflows ControlNet (rôle `controle`), dans l'ordre des listes."""
+        return [w for w in self.workflows.values() if w.preset.control is not None]
+
     def _rel(self, path: Path) -> str:
         try:
             return str(path.relative_to(self.root))
@@ -520,6 +541,22 @@ def check_workflow_mapping(preset: WorkflowPreset | UpscalerPreset, workflow: An
                 errors.append(f"inpaint.{label} : entrée « {target.input} » absente du nœud {target.node}")
             if any(target.node in (slot.node, *slot.remove) for slot in preset.reference_images):
                 errors.append(f"inpaint.{label} : le nœud {target.node} est un emplacement de référence")
+    control = preset.control
+    if control is not None:
+        targets = (("patch", control.patch), ("apply", control.apply), ("image", control.image))
+        for label, target in targets:
+            node = workflow.get(target.node)
+            if not isinstance(node, dict):
+                errors.append(f"control.{label} : nœud {target.node} absent du workflow")
+            elif target.input not in node.get("inputs", {}):
+                errors.append(f"control.{label} : entrée « {target.input} » absente du nœud {target.node}")
+        for label, node_id in (
+            ("preprocessor", control.preprocessor),
+            ("resize", control.resize),
+            ("map_output", control.map_output),
+        ):
+            if node_id is not None and not isinstance(workflow.get(node_id), dict):
+                errors.append(f"control.{label} : nœud {node_id} absent du workflow")
     chain = preset.lora_chain
     if chain is not None:
         for label, src in (("model_from", chain.model_from), ("clip_from", chain.clip_from)):

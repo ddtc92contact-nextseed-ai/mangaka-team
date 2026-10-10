@@ -480,6 +480,9 @@ def test_database_v11_keeps_reference_order(make_settings: Callable[..., Setting
         _ok(client.post(f"/characters/{entry['id']}/images", files=files), 201)
     con = sqlite3.connect(settings.database_path)
     for table, column in [
+        ("panels", "composition_lock"),  # v15 : verrouillage de composition
+        ("projects", "clean_mode"),
+        ("projects", "clean_control"),
         ("panel_images", "kind"),
         ("panels", "sketch_image_id"),
         ("panels", "sketch_denoise"),

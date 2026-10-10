@@ -13,6 +13,7 @@ timeout_s: 600   # au-delà, la génération est interrompue et le job passe en 
 from_sketch: qwen-image-base-rapide-from-sketch   # « Passer au propre » depuis un croquis validé, même palier
 with_references: qwen-image-edit-ref-rapide   # même palier pour les cases avec références
 inpaint_with: qwen-image-inpaint-rapide   # réparation ciblée (inpainting) du même palier
+with_control: qwen-image-base-rapide-controlnet   # composition verrouillée (ControlNet), même palier
 tier:
   name: Rapide
   choice: Rapide   # libellé du palier dans la fiche série
