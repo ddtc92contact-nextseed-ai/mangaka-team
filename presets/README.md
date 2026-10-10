@@ -244,13 +244,32 @@ Un seul module (`engine/mangaka_engine/pipeline/style.py`) compose le style d'un
   et description des packs, puis consignes du genre et du ton.
 
 Champs communs : `id` (minuscules, chiffres, tirets), `name` et `description` **en français** (affichés
-dans la fiche série), `prompt_keywords` (liste), `order` (ordre dans la liste déroulante).
+dans la fiche série), `prompt_keywords` (liste), `lang` (`fr` ou `en`, obligatoire : langue des
+mots-clés, voir « Calibrage »), `order` (ordre dans la liste déroulante). Une description signale une
+**dominante** quand le pack prend le pas sur les autres (ex. franco-belge sur le rendu, humour sur le genre).
 
-**Mots-clés : positifs, courts, en anglais.** Avec le palier Turbo (cfg 1), le prompt négatif est
-quasiment sans effet : un mot-clé dit ce qu'on veut voir, jamais ce qu'on ne veut pas (« no color »,
-« sans trame »… sont refusés au chargement). Qwen-Image suit très bien les mots-clés anglais courts
-(« screentone shading », « thick bold linework ») : les packs sont écrits en anglais, le reste du prompt
-reste en français. Les valeurs v1 sont un premier jet, à calibrer sur la machine.
+### Calibrage
+
+Les mots-clés v1 ont été **mesurés le 10/10/2026** sur la machine : Qwen-Image 2.1 Turbo int8, 8 pas,
+cfg 1, 832 × 1248, graine fixe, même scène, chaque pack testé en français et en anglais (60 images).
+Tout nouveau pack s'écrit selon les mêmes règles, et se mesure de la même façon :
+
+- **Prompt positif uniquement, cfg 1.** Le prompt négatif est quasiment sans effet en Turbo : les
+  mots-clés disent ce qu'on veut voir. Une exclusion explicite (« pas de hachures ») est permise
+  **en renfort** de mots-clés positifs ; un pack fait uniquement d'exclusions (« no color ») est refusé
+  au chargement.
+- **La langue dépend du pack** : l'anglais marche mieux pour le trait et les trames, le français pour le
+  ton et le décor riche. `lang` documente le choix mesuré ; il ne traduit rien.
+- **Trames : nommer les points** (« points de trame », « halftone ») : « screentone » seul sort des
+  hachures.
+- **Franco-belge : cumuler** ligne claire + aplats + trait de contour uniforme **et exclure
+  explicitement l'anime** (« PAS de style anime japonais ») ; sans cela le modèle sort de l'anime
+  générique. Le français marche mieux.
+- **Niveaux « moyen » : nommer la position relative** (« entre fin et épais »), sinon ils ne se lisent
+  pas.
+- Le style ne change pas le temps de génération (médiane 9,7 s par image).
+
+Les accents sont écrits normalement (le modèle les lit comme sans accent).
 
 ### Ajouter un genre
 
@@ -260,6 +279,7 @@ id: sport
 name: Sport
 description: Compétition et dépassement — matchs, entraînements, esprit d'équipe.
 order: 80
+lang: en                      # langue mesurée au calibrage (fr | en)
 prompt_keywords: [sports manga style, dynamic athletic poses, motion blur, stadium atmosphere]
 layout_style: nerveuse        # grammaire par défaut (layout_styles/) : sage | dynamique | nerveuse
 reading_direction: rtl        # rtl (manga) | ltr (BD)
@@ -285,6 +305,7 @@ name: Sépia
 description: Monochrome brun, aspect gravure ancienne.
 order: 50
 monochrome: true      # noir et blanc : seul à accepter le réglage « trames »
+lang: en
 prompt_keywords: [sepia toned illustration, engraved hatching]
 # default: true       # un seul rendu par défaut (celui des séries d'avant les packs)
 ```
@@ -300,14 +321,15 @@ id: epique
 name: Épique
 description: Souffle et grandeur — paysages immenses, héroïsme.
 order: 50
-prompt_keywords: [epic grand scale, heroic lighting]
+lang: fr
+prompt_keywords: [souffle épique, grande échelle, lumière héroïque]
 llm_guidelines: Ton épique ; scènes larges, enjeux qui dépassent les personnages.   # facultatif
 ```
 
 ### Réglages fins (`style_options.yaml`) et catalogue de LoRA (`style_loras.yaml`)
 
 `options` : un réglage (`trait`, `trames`, `detail`…) = `name`, `description`, `choices` (id →
-`name` + `prompt_keywords`) et `monochrome_only: true` pour un réglage réservé aux rendus N&B (masqué
+`name` + `lang` + `prompt_keywords`) et `monochrome_only: true` pour un réglage réservé aux rendus N&B (masqué
 dans la fiche pour un rendu couleur, 422 à l'API). Un réglage non choisi n'ajoute rien.
 
 `loras` : `file` (nom exact listé par ComfyUI, sous-dossier compris), `name`, `trigger_words` (ajoutés

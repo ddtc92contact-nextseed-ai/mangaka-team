@@ -487,9 +487,9 @@ def test_v15_database_keeps_its_old_style_read_only(make_settings: Callable[...,
             {},
         )
         # Aucun pack : l'ancien texte tient lieu de genre, avec le rendu par défaut.
-        assert (
-            got["style_prompt"]
-            == "Seinen sombre, encrage épais, black and white manga, inked linework, screentone shading"
+        assert got["style_prompt"] == (
+            "Seinen sombre, encrage épais, manga noir et blanc, ombres en points de trame réguliers (halftone), "
+            "screentone, motifs de points gris, pas de hachures"
         )
         # Un pack seul ne suffit pas : genre, rendu et ton vont ensemble.
         bad = c.patch(f"/projects/{project['id']}", json={"style_genre": "seinen"})
@@ -501,7 +501,7 @@ def test_v15_database_keeps_its_old_style_read_only(make_settings: Callable[...,
         assert res.status_code == 200, res.text
         chosen = res.json()
         assert chosen["legacy_style"] == "Seinen sombre, encrage épais"  # conservé, en lecture seule
-        assert "Seinen sombre" not in chosen["style_prompt"] and "seinen manga style" in chosen["style_prompt"]
+        assert "Seinen sombre" not in chosen["style_prompt"] and "manga seinen" in chosen["style_prompt"]
         assert c.patch(f"/projects/{project['id']}", json={"legacy_style": "x"}).status_code == 422
     assert _version(settings.database_path) == SCHEMA_VERSION
     fresh = settings.database_path.parent / "fresh.db"

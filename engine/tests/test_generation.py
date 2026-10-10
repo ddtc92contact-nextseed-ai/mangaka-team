@@ -220,9 +220,7 @@ def test_generate_panel_mock_end_to_end(make_client: Callable[..., TestClient]) 
     assert [lo["name"] for lo in params["loras"]] == ["encre.safetensors", "aiko-v3.safetensors"]
     assert params["loras"][1]["weight"] == 0.9
     assert len(params["reference_images"]) == 1 and params["reference_images"][0]["comfyui_name"] in comfy.uploads
-    assert (
-        "Aiko" in params["prompt"] and "kimono rouge" in params["prompt"] and "seinen manga style" in params["prompt"]
-    )
+    assert "Aiko" in params["prompt"] and "kimono rouge" in params["prompt"] and "manga seinen" in params["prompt"]
     assert "bulles" in params["negative_prompt"] and "texte" in params["negative_prompt"]
     assert params["duration_ms"] >= 0 and params["workflow_params"]["width"] == w
 
