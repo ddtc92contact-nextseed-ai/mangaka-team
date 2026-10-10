@@ -33,7 +33,6 @@ function Workshop() {
   const { queue, finished, refresh } = useQueue();
 
   const pages = useEngineData(() => api.listPages(chapter.id), [chapter.id, finished]);
-  const jobs = useEngineData(() => api.chapterJobs(chapter.id, "generation"), [chapter.id, finished]);
   const presets = useEngineData(() => api.workflowPresets());
   const qcStatus = useEngineData(() => api.qcStatus());
   const [onlyReview, setOnlyReview] = useState(false);
@@ -63,7 +62,7 @@ function Workshop() {
     router.replace(`${pathname}?${q.toString()}`, { scroll: false });
   }
 
-  const views = useMemo(() => buildPanelViews(list, queueItems(queue), jobs.data ?? []), [list, queue, jobs.data]);
+  const views = useMemo(() => buildPanelViews(list, queueItems(queue)), [list, queue]);
 
   // Échap ferme le panneau latéral (sauf si une fenêtre modale est ouverte) et rend le focus à la case.
   useEffect(() => {
@@ -203,7 +202,6 @@ function Workshop() {
           {notice} <ProductionLink chapterId={chapter.id} pageId={page.id} />
         </Alert>
       )}
-      {jobs.error && <Alert>Historique des générations indisponible : {jobs.error}</Alert>}
 
       <QCToolbar
         chapterId={chapter.id}
@@ -214,10 +212,7 @@ function Workshop() {
         showBoxes={showBoxes}
         onShowBoxes={setShowBoxes}
         onOpenPanel={(pageId, panelId) => navigate(pageId, panelId)}
-        onChanged={() => {
-          pages.reload();
-          jobs.reload();
-        }}
+        onChanged={() => pages.reload()}
       />
 
       <div className={`grid gap-6 ${openPanelId ? "lg:grid-cols-[minmax(0,1fr)_24rem]" : ""}`}>
@@ -288,10 +283,7 @@ function Workshop() {
               qcStatus={qcStatus.data}
               refreshKey={finished}
               onClose={close}
-              onChanged={() => {
-                pages.reload();
-                jobs.reload();
-              }}
+              onChanged={() => pages.reload()}
               onPrev={prevPanel ? () => navigate(prevPanel.pageId, prevPanel.panelId) : undefined}
               onNext={nextPanel ? () => navigate(nextPanel.pageId, nextPanel.panelId) : undefined}
             />

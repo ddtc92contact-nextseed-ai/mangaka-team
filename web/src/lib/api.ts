@@ -113,6 +113,10 @@ export interface PanelData {
   detections: Detections | null;
   /** Le ratio de la case s'écarte trop de celui de l'image retenue : régénération conseillée. */
   regeneration_advised: boolean;
+  /** Dernière génération de la case (la plus récente, sans limite d'historique). */
+  last_job_id: number | null;
+  last_job_status: JobStatus | null;
+  last_job_error: string | null;
 }
 
 export interface PanelSfx {

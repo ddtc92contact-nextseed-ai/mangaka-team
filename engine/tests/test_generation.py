@@ -829,3 +829,33 @@ def test_queue_reports_tier(make_client: Callable[..., TestClient]) -> None:
     assert q["running"]["tier"] == "Turbo"
     comfy.gate.set()
     _wait(c)
+
+
+def test_pages_report_last_generation_failure_beyond_job_history(make_client: Callable[..., TestClient]) -> None:
+    """L'échec d'une case reste visible même quand plus de 20 jobs plus récents existent dans le chapitre."""
+    c = make_client()
+    data = setup_chapter(c)
+    chapter_id = data["chapter"]["id"]
+    first, second, third = (p["id"] for p in data["panels"])
+    with c.app.state.ctx.db.session_scope() as session:  # type: ignore[attr-defined]
+        session.add(Job(step="generation", panel_id=first, status=JobStatus.failed, error="Mémoire GPU insuffisante"))
+        session.flush()
+        for _ in range(25):
+            session.add(Job(step="generation", chapter_id=chapter_id, panel_id=second, status=JobStatus.succeeded))
+        session.add(
+            Job(step="generation", chapter_id=chapter_id, panel_id=third, status=JobStatus.failed, error="ancien")
+        )
+        session.flush()
+        session.add(Job(step="generation", chapter_id=chapter_id, panel_id=third, status=JobStatus.succeeded))
+        session.commit()
+    assert len(_ok(c.get(f"/chapters/{chapter_id}/jobs", params={"step": "generation"}))) == 20
+
+    panels = {p["id"]: p for pg in _ok(c.get(f"/chapters/{chapter_id}/pages")) for p in pg["panels"]}
+    assert panels[first]["last_job_status"] == "failed"
+    assert panels[first]["last_job_error"] == "Mémoire GPU insuffisante"
+    assert panels[second]["last_job_status"] == "succeeded" and panels[second]["last_job_error"] is None
+    # seul le dernier job compte : l'échec antérieur de la 3e case est effacé par sa réussite
+    assert panels[third]["last_job_status"] == "succeeded"
+    # routes qui renvoient une seule page
+    page = _ok(c.post(f"/pages/{data['pages'][0]['id']}/layout"))
+    assert page["panels"][0]["last_job_error"] == "Mémoire GPU insuffisante"

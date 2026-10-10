@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session, selectinload
 from ..pipeline import art_direction as da
 from ..presets import PresetError
 from ..store.models import Job, JobStatus, Page, PageDirection, Panel
-from .chapters import _load_pages, _page_out, get_chapter_or_404, get_page_or_404
+from .chapters import _load_pages, get_chapter_or_404, get_page_or_404, pages_out
 from .deps import AppContext, get_ctx, get_session
 from .errors import FieldError
 from .jobs import job_out
@@ -305,5 +305,5 @@ def apply_direction(
         relaid=result.relaid,
         skipped=result.skipped,
         message=" · ".join(parts) or "rien à appliquer",
-        pages=[_page_out(ctx, p) for p in _load_pages(session, chapter_id)],
+        pages=pages_out(session, ctx, _load_pages(session, chapter_id)),
     )

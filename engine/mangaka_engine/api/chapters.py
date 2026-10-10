@@ -6,7 +6,7 @@ from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, object_session, selectinload
 
 from ..pipeline.knowledge import record_chapter_summary
 from ..pipeline.layout import LayoutError
@@ -94,7 +94,22 @@ def _one_out(session: Session, chapter: Chapter) -> ChapterOut:
     return chapter_out(chapter, _page_counts(session, [chapter.id]).get(chapter.id, (0, 0)))
 
 
-def page_out(page: Page, regen_threshold: float | None = None) -> PageOut:
+def last_generation_jobs(session: Session | None, panel_ids: list[int]) -> dict[int, Job]:
+    """Dernier job de génération de chaque case (le plus récent, quel que soit le nombre de jobs du chapitre)."""
+    if session is None or not panel_ids:
+        return {}
+    latest = (
+        select(func.max(Job.id))
+        .where(Job.step == "generation", Job.panel_id.in_(panel_ids))
+        .group_by(Job.panel_id)
+        .scalar_subquery()
+    )
+    return {j.panel_id: j for j in session.scalars(select(Job).where(Job.id.in_(latest))) if j.panel_id is not None}
+
+
+def page_out(page: Page, regen_threshold: float | None = None, last_jobs: dict[int, Job] | None = None) -> PageOut:
+    if last_jobs is None:
+        last_jobs = last_generation_jobs(object_session(page), [p.id for p in page.panels])
     chosen = {p.id: next((i for i in p.images if i.selected), None) for p in page.panels}
     layout_panels = {lp.get("panel_id"): lp for lp in (page.layout or {}).get("panels", [])}
     return PageOut(
@@ -145,6 +160,9 @@ def page_out(page: Page, regen_threshold: float | None = None) -> PageOut:
                 detections=c.detections if c else None,
                 regeneration_advised=regen_threshold is not None
                 and regeneration_advised(p, layout_panels.get(p.id), regen_threshold),
+                last_job_id=j.id if (j := last_jobs.get(p.id)) else None,
+                last_job_status=j.status.value if j else None,
+                last_job_error=j.error if j else None,
             )
             for p in page.panels
         ],
@@ -324,11 +342,17 @@ def list_pages(
     chapter_id: int, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
 ) -> list[PageOut]:
     get_chapter_or_404(session, chapter_id)
-    return [_page_out(ctx, p) for p in _load_pages(session, chapter_id)]
+    return pages_out(session, ctx, _load_pages(session, chapter_id))
 
 
-def _page_out(ctx: AppContext, page: Page) -> PageOut:
-    return page_out(page, ctx.presets.layout.regeneration.ratio_threshold)
+def _page_out(ctx: AppContext, page: Page, last_jobs: dict[int, Job] | None = None) -> PageOut:
+    return page_out(page, ctx.presets.layout.regeneration.ratio_threshold, last_jobs)
+
+
+def pages_out(session: Session, ctx: AppContext, pages: list[Page]) -> list[PageOut]:
+    """Pages d'un chapitre, avec le dernier job de génération de chaque case lu en une seule requête."""
+    last_jobs = last_generation_jobs(session, [p.id for page in pages for p in page.panels])
+    return [_page_out(ctx, page, last_jobs) for page in pages]
 
 
 @router.put("/chapters/{chapter_id}/pages", response_model=list[PageOut])
@@ -456,7 +480,7 @@ def replace_pages(
         elif not page.panels:
             page.layout = None
     session.commit()
-    return [_page_out(ctx, p) for p in _load_pages(session, chapter_id)]
+    return pages_out(session, ctx, _load_pages(session, chapter_id))
 
 
 # --- étape 2 : mise en page -----------------------------------------------------
@@ -479,7 +503,7 @@ def layout_chapter(
         if page.panels:
             _layout(ctx, page)
     session.commit()
-    return [_page_out(ctx, p) for p in pages]
+    return pages_out(session, ctx, pages)
 
 
 @router.post("/pages/{page_id}/layout", response_model=PageOut)

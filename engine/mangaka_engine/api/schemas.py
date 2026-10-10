@@ -214,6 +214,10 @@ class PanelOut(BaseModel):
     detections: dict[str, Any] | None = None  # boîtes de la version choisie
     # Le ratio de la case s'écarte trop de celui de l'image retenue (seuil : presets/layout.yaml).
     regeneration_advised: bool = False
+    # Dernière génération de la case (tous jobs confondus, sans limite) : pour afficher un échec et son erreur.
+    last_job_id: int | None = None
+    last_job_status: str | None = None
+    last_job_error: str | None = None
 
 
 class PageOut(BaseModel):
