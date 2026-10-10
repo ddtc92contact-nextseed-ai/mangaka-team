@@ -62,13 +62,20 @@ def _version(path: Path) -> int:
     return v
 
 
-def _drop_v12_columns(con: sqlite3.Connection) -> None:
+def _drop_v13_finishing(con: sqlite3.Connection) -> None:
     con.execute("ALTER TABLE panel_images DROP COLUMN finish")
     con.execute("ALTER TABLE projects DROP COLUMN upscaler")
 
 
+def _drop_v12_references(con: sqlite3.Connection) -> None:
+    _drop_v13_finishing(con)
+    con.execute("DROP TABLE reference_variants")
+    con.execute("ALTER TABLE character_images DROP COLUMN position")
+    con.execute("ALTER TABLE series_asset_images DROP COLUMN position")
+
+
 def _drop_v11_library(con: sqlite3.Connection) -> None:
-    _drop_v12_columns(con)
+    _drop_v12_references(con)
     con.execute("ALTER TABLE panels DROP COLUMN decor_id")
     con.execute("ALTER TABLE panels DROP COLUMN object_ids")
     con.execute("DROP TABLE series_asset_images")
@@ -367,14 +374,14 @@ def test_v8_database_gets_frame_and_sfx_columns(make_settings: Callable[..., Set
     assert _columns(settings.database_path) == _columns(fresh)
 
 
-def test_v11_database_gets_finishing_columns(make_settings: Callable[..., Settings]) -> None:
-    """v11 → v12 : finition d'impression (dérivé agrandi d'une version, agrandisseur de la série)."""
+def test_v12_database_gets_finishing_columns(make_settings: Callable[..., Settings]) -> None:
+    """v12 → v13 : finition d'impression (dérivé agrandi d'une version, agrandisseur de la série)."""
     settings = make_settings()
     with TestClient(create_app(settings)) as c:
-        project = c.post("/projects", json={"title": "Série v11"}).json()
+        project = c.post("/projects", json={"title": "Série v12"}).json()
     con = sqlite3.connect(settings.database_path)
-    _drop_v12_columns(con)
-    con.execute("PRAGMA user_version = 11")
+    _drop_v13_finishing(con)
+    con.execute("PRAGMA user_version = 12")
     con.commit()
     con.close()
 

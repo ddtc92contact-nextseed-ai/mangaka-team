@@ -803,6 +803,50 @@ class ImagePromptSettings(_Strict):
         return value
 
 
+# --- Fiches de référence (« Créer des références » de la bibliothèque) ---------
+REFERENCE_SHEET_VARIABLES = {"name", "description", "keywords", "style", "instruction"}
+LibraryKindName = Literal["character", "object", "decor"]
+
+
+class ReferenceSheet(_Strict):
+    """Type de fiche de référence (`presets/reference_sheets/*.yaml`) : gabarit de prompt, taille, workflow.
+
+    `prompt` : morceaux assemblés dans l'ordre, un morceau dont une variable est vide est omis.
+    Variables : $name, $description (description visuelle de la fiche), $keywords (mots-clés + mots
+    déclencheurs de son LoRA), $style (style de la série + mots déclencheurs du LoRA de style),
+    $instruction (consigne d'« Affiner », vide pour une première génération).
+    """
+
+    id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
+    name: str
+    description: str = ""
+    kinds: list[LibraryKindName] = Field(min_length=1, description="Sortes de fiches concernées")
+    prompt: list[str] = Field(min_length=1)
+    negative_prompt: str = Field(default="", description="Ajouté au prompt négatif du workflow")
+    width: int = Field(ge=256, le=2048, multiple_of=8)
+    height: int = Field(ge=256, le=2048, multiple_of=8)
+    # None : palier de la série (Turbo par défaut), ou Qualité si demandé. Un id impose ce workflow.
+    workflow: str | None = None
+    order: int = Field(default=100, description="Ordre dans la liste déroulante")
+
+    @field_validator("prompt")
+    @classmethod
+    def _check_prompt(cls, value: list[str]) -> list[str]:
+        for part in value:
+            tpl = string.Template(part)
+            if not tpl.is_valid():
+                raise ValueError("gabarit invalide : un « $ » isolé doit s'écrire « $$ »")
+            unknown = set(tpl.get_identifiers()) - REFERENCE_SHEET_VARIABLES
+            if unknown:
+                raise ValueError(f"variables inconnues : {', '.join(sorted(unknown))}")
+        return value
+
+    @field_validator("kinds")
+    @classmethod
+    def _unique_kinds(cls, value: list[str]) -> list[str]:
+        return list(dict.fromkeys(value))
+
+
 # --- Contrôle qualité (étape 4) -----------------------------------------------
 # Aucune valeur par défaut pour les seuils : tout est écrit dans presets/qc.yaml.
 Severity = Literal["review", "reject"]

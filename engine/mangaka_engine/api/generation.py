@@ -33,6 +33,8 @@ from ..pipeline.generation import (
     update_panel_prompt,
 )
 from ..pipeline.qc_bench import STEP as BENCH_STEP
+from ..pipeline.reference_sheets import KIND_LABELS
+from ..pipeline.reference_sheets import STEP as REFERENCE_STEP
 from ..presets import PresetError, PresetRegistry
 from ..store.models import Chapter, Job, JobStatus, Page, Panel, PanelImage, PanelImageAnnotation, Project
 from .chapters import get_chapter_or_404, get_page_or_404
@@ -478,7 +480,10 @@ def get_queue(session: Session = Depends(get_session), ctx: AppContext = Depends
     jobs = list(
         session.scalars(
             select(Job)
-            .where(Job.step.in_([STEP, QC_STEP, BENCH_STEP, TRIAL_STEP, FINISH_STEP]), Job.status.in_(ACTIVE))
+            .where(
+                Job.step.in_([STEP, QC_STEP, BENCH_STEP, TRIAL_STEP, REFERENCE_STEP, FINISH_STEP]),
+                Job.status.in_(ACTIVE),
+            )
             .order_by((Job.status == JobStatus.running).desc(), Job.id)
         )
     )
@@ -518,8 +523,15 @@ def get_queue(session: Session = Depends(get_session), ctx: AppContext = Depends
             label = f"{chapter.project.title} · ch. {chapter.number}"
         else:
             label = f"Job {job.id}"
+        series = chapter.project if chapter else (session.get(Project, job.project_id) if job.project_id else None)
         if job.step == FINISH_STEP:
             label = f"Finition d'impression · {label} ({params.get('upscaler_name') or params.get('upscaler')})"
+        elif job.step == REFERENCE_STEP:
+            kind = KIND_LABELS.get(str(params.get("entry_kind")), "fiche")
+            action = "Affiner" if params.get("parent_id") is not None else "Références"
+            label = f"{action} · {params.get('entry_name') or kind} ({kind}) · {params.get('sheet_name') or ''}"
+            if series is not None:
+                label = f"{series.title} · {label}"
         elif job.step == TRIAL_STEP:
             label = f"Case d'essai ComfyUI · {params.get('preset_name') or preset}"
         elif job.step == BENCH_STEP:
@@ -540,8 +552,8 @@ def get_queue(session: Session = Depends(get_session), ctx: AppContext = Depends
                 chapter_id=chapter.id if chapter else None,
                 chapter_number=chapter.number if chapter else None,
                 chapter_title=chapter.title if chapter else None,
-                project_id=chapter.project_id if chapter else None,
-                series_title=chapter.project.title if chapter else None,
+                project_id=series.id if series else None,
+                series_title=series.title if series else None,
                 preset=preset if isinstance(preset, str) and not is_qc else None,
                 tier=(
                     preset_tier(ctx.agents.presets_for(chapter.project_id if chapter else None), preset)
