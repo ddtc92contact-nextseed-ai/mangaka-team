@@ -286,8 +286,9 @@ def enqueue_preview(session: Session, presets: PresetRegistry, panel: Panel, pre
     )
     session.add(job)
     session.flush()
+    # La carte en place (path, type, map_job_id) reste affichée jusqu'à ce que ce job la remplace.
     old = lock.get("preview") if isinstance(lock.get("preview"), dict) else {}
-    panel.composition_lock = {**lock, "preview": {**old, "job_id": job.id, "type": lock.get("type")}}
+    panel.composition_lock = {**lock, "preview": {**old, "job_id": job.id}}
     return job
 
 
@@ -382,6 +383,7 @@ class ControlMapExecutor:
                 **lock,
                 "preview": {
                     "job_id": job_id,
+                    "map_job_id": job_id,  # job qui a produit `path` : version de l'URL d'aperçu
                     "type": type_id,
                     "path": stored.path,
                     "width": stored.width,

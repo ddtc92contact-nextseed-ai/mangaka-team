@@ -4,6 +4,7 @@ passage au propre img2img / ControlNet, ComfyUI sans le patch."""
 from __future__ import annotations
 
 import io
+import threading
 from collections.abc import Callable
 from typing import Any
 
@@ -251,6 +252,61 @@ def test_lock_from_sketch_then_regenerate(make_client: Callable[..., TestClient]
     [job] = _ok(c.post(f"/panels/{p2['id']}/generate"), 202)
     assert job["params"]["preset"] == "qwen-image-turbo" and "control" not in job["params"]
     _wait(c)
+
+
+class MapGatedComfy(MockComfyUIClient):
+    """ComfyUI factice qui retient chaque carte de contrôle (graphe sans KSampler) tant que `hold` est posé."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.hold = threading.Event()
+        self.release = threading.Event()
+        self.started = threading.Event()
+        self.fetched = 0
+
+    def wait_for_images(self, prompt_id: str, output_node: str, **kw: Any):  # type: ignore[no-untyped-def]
+        if self.hold.is_set() and "9" not in self.prompts[prompt_id]:
+            self.started.set()
+            assert self.release.wait(10)
+        return super().wait_for_images(prompt_id, output_node, **kw)
+
+    def fetch_image(self, ref: Any) -> bytes:  # chaque image diffère, pour reconnaître la carte servie
+        self.fetched += 1
+        buf = io.BytesIO()
+        Image.new("RGB", (64, 48), (self.fetched * 40 % 256, 30, 30)).save(buf, format="PNG")
+        return buf.getvalue()
+
+
+def test_preview_url_follows_the_served_map(make_client: Callable[..., TestClient]) -> None:  # noqa: F811
+    """L'aperçu est servi « immutable » : son URL ne change qu'avec la carte réellement servie."""
+    comfy = MapGatedComfy()
+    c = make_client(comfy)
+    data = setup_chapter(c)
+    p2 = data["panels"][1]
+    _sketch_and_validate(c, p2["id"])
+    _ok(c.post(f"/panels/{p2['id']}/composition-lock", json={"source": "croquis"}))
+    _wait(c)
+    before = _ok(c.get(f"/panels/{p2['id']}"))["composition_lock"]["preview"]
+    assert before["status"] == "ready" and (before["type"], before["type_name"]) == ("lineart", "Trait")
+    old_map = c.get(before["url"])
+    assert "immutable" in old_map.headers["cache-control"]
+
+    # Changement de type : tant que la nouvelle carte n'est pas prête, l'ancienne reste servie sous la même URL.
+    comfy.hold.set()
+    lock = _ok(c.patch(f"/panels/{p2['id']}/composition-lock", json={"type": "pose"}))["composition_lock"]
+    assert comfy.started.wait(10)
+    for preview in (lock["preview"], _ok(c.get(f"/panels/{p2['id']}"))["composition_lock"]["preview"]):
+        assert preview["job_id"] != before["job_id"] and preview["status"] in ("pending", "running")
+        assert (preview["url"], preview["type"], preview["type_name"]) == (before["url"], "lineart", "Trait")
+    assert c.get(before["url"]).content == old_map.content
+
+    # Carte terminée : nouvelle URL, nouveau type, et le fichier servi est bien la nouvelle carte.
+    comfy.release.set()
+    _wait(c)
+    after = _ok(c.get(f"/panels/{p2['id']}"))["composition_lock"]["preview"]
+    assert after["status"] == "ready" and (after["type"], after["type_name"]) == ("pose", "Pose")
+    assert after["url"] != before["url"] and after["url"].endswith(f"?v={after['job_id']}")
+    assert c.get(after["url"]).content != old_map.content
 
 
 def test_lock_from_version_update_and_delete_source(make_client: Callable[..., TestClient]) -> None:  # noqa: F811

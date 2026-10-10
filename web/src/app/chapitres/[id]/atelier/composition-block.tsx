@@ -313,6 +313,8 @@ function LockedView({
   const dirty = type !== lock.type || (strength !== null && strength !== lock.strength);
   const preview = lock.preview;
   const computing = preview.status === "pending" || preview.status === "running";
+  // Nom du type de la carte réellement affichée (l'ancienne reste visible pendant un recalcul).
+  const shownName = preview.type_name ?? lock.type_name;
   const types = status.types.length ? status.types : [{ id: lock.type, name: lock.type_name, description: "", preprocessor: null, available: true, problem: null }];
 
   const save = () =>
@@ -353,7 +355,7 @@ function LockedView({
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={engineUrl(preview.url)}
-              alt={`Carte de contrôle (${lock.type_name})`}
+              alt={`Carte de contrôle (${shownName})`}
               className={`aspect-square w-full rounded border border-zinc-800 bg-white object-contain ${computing ? "opacity-40" : ""}`}
               data-testid="control-map"
             />
@@ -363,8 +365,8 @@ function LockedView({
             </div>
           )}
           <figcaption className="text-[11px] text-zinc-400">
-            Carte de contrôle · {lock.type_name}
-            {computing && " · calcul en cours…"}
+            Carte de contrôle · {shownName}
+            {computing && (preview.type && preview.type !== lock.type ? ` · ${lock.type_name} en calcul…` : " · calcul en cours…")}
           </figcaption>
         </figure>
       </div>

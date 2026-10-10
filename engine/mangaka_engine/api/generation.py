@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import statistics
 from datetime import UTC, datetime
+from pathlib import PurePosixPath
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import FileResponse
@@ -206,11 +207,12 @@ def lock_out(session: Session, presets: PresetRegistry, panel: Panel) -> Composi
     preset_name: str | None = None
     type_name = type_id
     problem: str | None = None
+    type_names: dict[str, str] = {}
     try:
         preset = lock_preset_id(session, presets, panel)
         preset_name = presets.workflow(preset).preset.name
-        ctype = control_settings(presets, preset).types.get(type_id)
-        type_name = ctype.name if ctype is not None else type_id
+        type_names = {k: t.name for k, t in control_settings(presets, preset).types.items()}
+        type_name = type_names.get(type_id, type_id)
     except (GenerationError, PresetError) as exc:
         problem = str(exc)[:1].upper() + str(exc)[1:]
     source = str(lock.get("source"))
@@ -227,10 +229,16 @@ def lock_out(session: Session, presets: PresetRegistry, panel: Panel) -> Composi
     status = "ready" if raw.get("path") else "none"
     if job is not None and job.status != JobStatus.succeeded:
         status = job.status.value if job.status != JobStatus.pending else "pending"
+    # L'URL est servie « immutable » : elle se versionne par la carte réellement servie (le job qui l'a
+    # produite), jamais par le dernier job demandé, sinon le navigateur garderait l'ancienne carte.
+    shown = raw.get("path") if isinstance(raw.get("path"), str) else None
+    shown_type = str(raw.get("type")) if shown and raw.get("type") else None
+    version_tag = raw.get("map_job_id") or (PurePosixPath(shown).stem if shown else None)
     preview = ControlPreviewOut(
         status=status,  # type: ignore[arg-type]
-        url=f"/panels/{panel.id}/composition-lock/preview?v={raw.get('job_id')}" if raw.get("path") else None,
-        type=raw.get("type") if raw.get("path") else None,
+        url=f"/panels/{panel.id}/composition-lock/preview?v={version_tag}" if shown else None,
+        type=shown_type,
+        type_name=type_names.get(shown_type, shown_type) if shown_type else None,
         job_id=raw.get("job_id"),
         error=job.error if job is not None and job.status == JobStatus.failed else None,
         width=raw.get("width"),

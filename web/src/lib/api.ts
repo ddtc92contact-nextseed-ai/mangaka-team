@@ -717,7 +717,9 @@ export interface CompositionLock {
     status: "none" | "pending" | "running" | "ready" | "failed" | "cancelled";
     /** Dernière carte calculée (celle d'un type précédent pendant un nouveau calcul). */
     url: string | null;
+    /** Type de la carte affichée (celui du verrou une fois le recalcul terminé). */
     type: string | null;
+    type_name: string | null;
     job_id: number | null;
     error: string | null;
     width: number | null;

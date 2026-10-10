@@ -563,7 +563,8 @@ class CompositionLockUpdate(_In):
 class ControlPreviewOut(BaseModel):
     status: Literal["none", "pending", "running", "ready", "failed", "cancelled"]
     url: str | None = None  # dernière carte produite (peut être celle d'un type précédent pendant le calcul)
-    type: str | None = None  # type de la carte affichée
+    type: str | None = None  # type de la carte affichée (peut différer du type du verrou pendant un recalcul)
+    type_name: str | None = None
     job_id: int | None = None
     error: str | None = None
     width: int | None = None
