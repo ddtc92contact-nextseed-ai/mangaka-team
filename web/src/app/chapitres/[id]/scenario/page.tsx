@@ -1,12 +1,23 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState, type ComponentProps } from "react";
 import { PassageList, formatTokens } from "@/components/knowledge";
 import { Alert, Button, ButtonLink, Card, EmptyState, Field, Input, Loading, Select, Textarea } from "@/components/ui";
-import { api, EngineError, errorMessage, type Intensity, type Job, type Rythme, type ScriptSources } from "@/lib/api";
+import {
+  api,
+  EngineError,
+  errorMessage,
+  type Intensity,
+  type Job,
+  type LibraryEntry,
+  type Rythme,
+  type ScriptSources,
+} from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
 import { isFinished, useJob } from "@/lib/jobs";
 import { INTENSITIES, RYTHMES } from "@/lib/layout";
+import { LIBRARY_KINDS, libraryHref } from "@/lib/library";
 import {
   BUBBLE_KINDS,
   IMPORTANCE,
@@ -28,6 +39,9 @@ export default function ScenarioPage() {
   const { chapter, setChapter, reload: reloadChapter } = useChapter();
   const pages = useEngineData(() => api.listPages(chapter.id), [chapter.id]);
   const characters = useEngineData(() => api.listCharacters(chapter.project_id), [chapter.project_id]);
+  const decors = useEngineData(() => api.listLibrary("decor", chapter.project_id), [chapter.project_id]);
+  const objets = useEngineData(() => api.listLibrary("object", chapter.project_id), [chapter.project_id]);
+  const library: SceneLibrary = { decors: decors.data ?? [], objets: objets.data ?? [], projectId: chapter.project_id };
   const lastJob = useEngineData(() => api.chapterJobs(chapter.id, "script").then((j) => j[0] ?? null), [chapter.id]);
   const sources = useEngineData(() => api.chapterSources(chapter.id), [chapter.id]);
 
@@ -112,7 +126,7 @@ export default function ScenarioPage() {
         <Field
           label="Synopsis ou script brut du chapitre"
           htmlFor="synopsis"
-          hint="Le LLM reçoit aussi la fiche de la série, les personnages, le résumé des chapitres précédents, la bible de la série et les passages du savoir-faire."
+          hint="Le LLM reçoit aussi la fiche de la série, sa bibliothèque (personnages, décors et objets récurrents), le résumé des chapitres précédents, la bible de la série et les passages du savoir-faire."
         >
           <Textarea
             id="synopsis"
@@ -196,6 +210,7 @@ export default function ScenarioPage() {
                 page={page}
                 index={pi}
                 total={draft.length}
+                library={library}
                 disabled={running}
                 onChange={(next) => edit((d) => d.map((p, i) => (i === pi ? next : p)))}
                 onMove={(delta) => edit((d) => moveItem(d, pi, delta))}
@@ -269,6 +284,7 @@ function UsedSources({ sources }: { sources: ScriptSources }) {
 function readableField(path: string): string {
   // « pages.0.panels.2.dialogues.1.text » → « page 1 › case 3 › réplique 2 › text »
   const labels: Record<string, string> = { pages: "page", panels: "case", dialogues: "réplique" };
+  const names: Record<string, string> = { decor: "décor", objets: "objets" };
   const parts = path.split(".");
   const out: string[] = [];
   for (let i = 0; i < parts.length; i++) {
@@ -276,7 +292,7 @@ function readableField(path: string): string {
     if (labels[parts[i]] && Number.isInteger(next)) {
       out.push(`${labels[parts[i]]} ${next + 1}`);
       i++;
-    } else out.push(parts[i]);
+    } else out.push(names[parts[i]] ?? parts[i]);
   }
   return out.join(" › ");
 }
@@ -314,14 +330,78 @@ function JobProgress({ job, onRetry }: { job: Job; onRetry: () => void }) {
   );
 }
 
+/** Objets récurrents visibles dans la case : boutons à cocher (utilisables au doigt). */
+function ObjectPicker({
+  id,
+  library,
+  value,
+  onChange,
+  disabled,
+}: {
+  id: string;
+  library: SceneLibrary;
+  value: number[];
+  onChange: (ids: number[]) => void;
+  disabled: boolean;
+}) {
+  const unknown = value.filter((v) => !library.objets.some((o) => o.id === v));
+  const options = [...library.objets.map((o) => ({ id: o.id, name: o.name })), ...unknown.map((v) => ({ id: v, name: `Objet n° ${v}` }))];
+  return (
+    <div className="mt-3 space-y-1" role="group" aria-labelledby={`${id}-label`}>
+      <p id={`${id}-label`} className="text-xs text-zinc-400">
+        Objets récurrents visibles
+      </p>
+      {options.length === 0 ? (
+        <p className="text-xs text-zinc-600">
+          Aucun objet dans la bibliothèque de la série.{" "}
+          <Link href={libraryHref(library.projectId, "object")} className="underline-offset-2 hover:text-zinc-300 hover:underline">
+            En ajouter
+          </Link>
+        </p>
+      ) : (
+        <div className="flex flex-wrap gap-1.5">
+          {options.map((o) => {
+            const on = value.includes(o.id);
+            return (
+              <button
+                key={o.id}
+                type="button"
+                aria-pressed={on}
+                disabled={disabled}
+                onClick={() => onChange(on ? value.filter((v) => v !== o.id) : [...value, o.id])}
+                className={`rounded-full border px-2.5 py-1 text-xs transition-colors focus-visible:outline-2 focus-visible:outline-rose-400 disabled:opacity-50 ${
+                  on
+                    ? `border-transparent ${LIBRARY_KINDS.object.badge}`
+                    : "border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-zinc-200"
+                }`}
+              >
+                {on ? "✓ " : ""}
+                {o.name}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SmallButton(props: ComponentProps<typeof Button>) {
   return <Button variant="ghost" className="px-2 py-1 text-xs" {...props} />;
+}
+
+/** Décors et objets récurrents de la série, proposés dans chaque case. */
+interface SceneLibrary {
+  decors: LibraryEntry[];
+  objets: LibraryEntry[];
+  projectId: number;
 }
 
 function PageEditor({
   page,
   index,
   total,
+  library,
   disabled,
   onChange,
   onMove,
@@ -330,6 +410,7 @@ function PageEditor({
   page: DraftPage;
   index: number;
   total: number;
+  library: SceneLibrary;
   disabled: boolean;
   onChange: (p: DraftPage) => void;
   onMove: (delta: number) => void;
@@ -397,6 +478,7 @@ function PageEditor({
             index={ci}
             total={page.panels.length}
             pageIndex={index}
+            library={library}
             disabled={disabled}
             onChange={(next) => setPanels((ps) => ps.map((p, i) => (i === ci ? next : p)))}
             onMove={(delta) => setPanels((ps) => moveItem(ps, ci, delta))}
@@ -421,6 +503,7 @@ function PanelEditor({
   index,
   total,
   pageIndex,
+  library,
   disabled,
   onChange,
   onMove,
@@ -430,6 +513,7 @@ function PanelEditor({
   index: number;
   total: number;
   pageIndex: number;
+  library: SceneLibrary;
   disabled: boolean;
   onChange: (p: DraftPanel) => void;
   onMove: (delta: number) => void;
@@ -543,8 +627,37 @@ function PanelEditor({
               disabled={disabled}
             />
           </div>
+          <div className="space-y-1">
+            <label htmlFor={`${id}-decor`} className="text-xs text-zinc-400">
+              Décor
+            </label>
+            <Select
+              id={`${id}-decor`}
+              className="py-1.5"
+              value={panel.decor ?? ""}
+              onChange={(e) => set("decor", e.target.value ? Number(e.target.value) : null)}
+              disabled={disabled}
+            >
+              <option value="">Aucun décor récurrent</option>
+              {library.decors.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                </option>
+              ))}
+              {panel.decor !== null && !library.decors.some((d) => d.id === panel.decor) && (
+                <option value={panel.decor}>Décor n° {panel.decor}</option>
+              )}
+            </Select>
+          </div>
         </div>
       </div>
+      <ObjectPicker
+        id={`${id}-objets`}
+        library={library}
+        value={panel.objets}
+        onChange={(objets) => set("objets", objets)}
+        disabled={disabled}
+      />
       <div className="mt-3 space-y-2">
         <p className="text-xs text-zinc-400">Dialogues</p>
         {panel.dialogues.length === 0 && <p className="text-xs text-zinc-600">Case muette.</p>}

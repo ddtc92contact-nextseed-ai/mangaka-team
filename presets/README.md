@@ -226,6 +226,17 @@ Gabarits `$variable` (écrire `$$` pour un dollar). `script.yaml` liste ses vari
 le nombre de résumés de chapitres précédents envoyés. Le bloc `<contexte>…</contexte>` transmet le
 même contexte en JSON (le LLM factice du mode mock s'en sert pour produire un découpage).
 
+**Bibliothèque de la série.** Le scénariste (`script.yaml`) et le directeur artistique
+(`direction-artistique.yaml`) reçoivent les décors et objets récurrents de la série (`$decors`,
+`$objets` : « - id N · nom : description courte », et `decors` / `objets` dans le contexte JSON). Par
+case, le scénario donne `decor` (id ou `null`) et `objets` (liste d'ids) à côté de `characters` ; la
+direction artistique peut les proposer aussi (`null` = garder ceux du scénario). Un id absent de la
+bibliothèque (ou d'une autre sorte) rend la réponse invalide : nouvel essai avec l'erreur (« page 1 ›
+case 2 › decor : id 9 inconnu (ids possibles : 3, 4, ou null) »), puis erreur lisible après
+`max_retries`. L'auteur corrige le décor et les objets d'une case dans l'écran Scénario. Les décors et
+objets figurent aussi dans la bible injectée aux agents. Mode mock : `[mock:id-invalide:N]` dans le
+synopsis fait citer un décor inexistant aux N premiers essais.
+
 ## Workflow ComfyUI
 
 1. Dans ComfyUI, construis le workflow puis exporte-le au format API (**Workflow → Export (API)**,
@@ -367,8 +378,8 @@ Avec `COMFYUI_PROVIDER=mock`, il répond « ComfyUI simulé ».
 
 Les six presets acceptent des LoRA ; les trois presets « avec images de référence » ont 3 emplacements
 (Qwen-Image 2.1 : l'édition / la référence est intégrée au modèle, pas de modèle « edit » séparé). Ils sont
-choisis automatiquement (selon le palier de la série) quand un personnage de la case a une planche de
-référence.
+choisis automatiquement (selon le palier de la série) quand un personnage, le décor ou un objet de la
+case a une image de référence (bibliothèque de la série : onglets Personnages / Objets / Décors).
 
 ### Emplacements de référence (`reference_images`)
 
@@ -382,10 +393,15 @@ reference_images:
   # avec un redimensionnement propre à l'emplacement : { node: "20", input: image, remove: ["30"] }
 ```
 
-- Le moteur envoie les images de référence des personnages de la case à ComfyUI
-  (`POST /upload/image`, sous-dossier `input/mangaka/`) et écrit le nom obtenu dans
-  `workflow[node].inputs[input]`. Ordre : 1re image de chaque personnage (dans l'ordre de la
-  case), puis 2e image de chacun, etc., jusqu'à remplir les emplacements.
+- Le moteur envoie les images de référence de la case à ComfyUI (`POST /upload/image`,
+  sous-dossier `input/mangaka/`) et écrit le nom obtenu dans `workflow[node].inputs[input]`.
+  **Priorité** : les personnages de la case (dans l'ordre de la case), puis son décor, puis ses
+  objets. Les emplacements se remplissent par tours : 1re image de chaque fiche dans cet ordre, puis
+  2e image de chacune, etc. Exemple à 3 emplacements avec Aiko (2 images), le labo (2 images) et le
+  robot (1 image) : Aiko n° 1, labo n° 1, robot n° 1 ; sans le robot : Aiko n° 1, labo n° 1, Aiko n° 2.
+  Les emplacements retenus sont notés sur le job (`params.references` : emplacement, sorte, fiche,
+  image) et sur la version produite (`params.reference_images`) : l'atelier les affiche
+  (« Références utilisées »).
 - Un emplacement **inutilisé est retiré** : son nœud et ceux listés dans `remove` (ex. son
   redimensionnement) sont supprimés, puis toute entrée d'un autre nœud qui pointait vers un nœud
   retiré est effacée. Exemple : avec une seule référence, `images.image_2`/`images.image_3` disparaissent
@@ -413,8 +429,9 @@ lora_chain:
   # extra_inputs: {}                       # entrées constantes du chargeur
 ```
 
-LoRA appliqués, dans l'ordre : **LoRA de style de la série** puis **LoRA d'identité de chaque
-personnage** de la case (nom de fichier + poids saisis dans la série / la fiche). Chaque LoRA
+LoRA appliqués, dans l'ordre : **LoRA de style de la série**, puis **LoRA d'identité de chaque
+personnage** de la case, puis le LoRA de son **décor** et de chacun de ses **objets** (nom de fichier +
+poids saisis dans la série / la fiche ; un même fichier n'est chargé qu'une fois). Chaque LoRA
 devient un nœud `class_type` (identifiant numérique après le plus grand du JSON) :
 `model_from → LoRA 1 → LoRA 2 → …`, et tous les nœuds qui consommaient `model_from` (ici le nœud
 `4`, `QwenImage21Cache`) reçoivent la sortie du dernier LoRA. Sans LoRA, le workflow est
@@ -451,7 +468,8 @@ référence de la GX10, puis validés contre le ComfyUI 0.37 de la machine. Pour
 `parts` est une liste de morceaux `string.Template` assemblés dans l'ordre (`$plan` = plan de la
 direction artistique appliquée, sinon celui du scénario, `$angle` et `$ambiance` de la direction
 artistique, `$shot` = plan du scénario,
-`$description`, `$characters`, `$style`, `$bible` = notes de la bible sur les personnages de la
+`$description`, `$characters`, `$decor` et `$objects` = décor et objets de la bibliothèque cités par la
+case (présentés comme les personnages), `$style`, `$bible` = notes de la bible sur les personnages de la
 case, `$savoir_faire` = passages du savoir-faire de l'agent `image_prompt`) ; un morceau dont une
 variable est vide est omis.
 `character` met en forme un personnage (`$name`, `$details` = description visuelle + mots-clés).

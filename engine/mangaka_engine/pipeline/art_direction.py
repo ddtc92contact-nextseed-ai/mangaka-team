@@ -5,11 +5,13 @@ des options structurées — jamais de géométrie :
 
 - page : rythme (calme / montée / climax / respiration), style de mise en page suggéré, gabarit
   suggéré, « page choc » (pleine page ou splash) et une justification en français ;
-- case : intensité, type de plan, angle de caméra, cadre, note d'ambiance, onomatopées.
+- case : intensité, type de plan, angle de caméra, cadre, note d'ambiance, onomatopées ; et, s'il le
+  juge utile, le décor et les objets de la bibliothèque de la série (ids existants seulement).
 
 Entrées : scénario validé, bible et personnages de la série, style de mise en page de la série, choix
 de direction artistique du chapitre précédent (pour éviter les répétitions), savoir-faire de l'agent.
-Sortie JSON validée par Pydantic puis contre le chapitre (pages, nombre de cases, gabarits) ;
+Sortie JSON validée par Pydantic puis contre le chapitre (pages, nombre de cases, gabarits, ids de
+la bibliothèque) ;
 invalide → nouvel essai avec l'erreur (`max_retries`, 2 au maximum) → sinon `ArtDirectionError`.
 
 Les choix sont stockés par page (`PageDirection`). Un champ modifié par l'auteur est verrouillé : une
@@ -18,7 +20,9 @@ ce que lit la grammaire de mise en page (rythme et style de la page, intensité 
 suggéré et page choc) et dans le prompt image (plan, angle, ambiance), puis ne recalcule que les
 pages dont la mise en page change. Le cadre devient une option de cadre de la case (`Panel.frame` :
 sans bord, fond perdu, incrustation) et les onomatopées des bulles `sfx` du lettrage — sans toucher
-à une option ou une onomatopée réglée par l'auteur.
+à une option ou une onomatopée réglée par l'auteur. Un décor ou des objets proposés remplacent ceux
+de la case seulement s'ils ont changé depuis la dernière application (une correction de l'auteur
+dans l'écran Scénario reste).
 """
 
 from __future__ import annotations
@@ -42,6 +46,7 @@ from ..store.models import Bubble, BubbleKind, Chapter, Character, LLMRun, Page,
 from ..validation import format_errors
 from .knowledge import AgentKnowledge, KnowledgeBase
 from .layout import LayoutError
+from .library import SeriesLibrary
 from .pages import applied_values, is_stale, layout_page
 from .script import DIRECTION_LABELS, _render
 
@@ -134,8 +139,16 @@ class DirectionPanel(_LLMModel):
     cadre: CadreName = "normal"
     ambiance: Annotated[str, StringConstraints(strip_whitespace=True, max_length=300)] = ""
     sfx: list[DirectionSfx] = Field(default_factory=list, max_length=MAX_SFX)
+    # Bibliothèque (facultatif) : null ou absent = garder le décor / les objets du scénario.
+    decor: int | None = None
+    objets: list[int] | None = Field(default=None, max_length=8)
 
     _n = field_validator("intensity", "plan", "angle", "cadre", mode="before")(_norm)
+
+    @field_validator("objets")
+    @classmethod
+    def _unique_objects(cls, v: list[int] | None) -> list[int] | None:
+        return None if v is None else list(dict.fromkeys(v))
 
     @field_validator("ambiance", mode="before")
     @classmethod
@@ -164,7 +177,7 @@ class DirectionOutput(_LLMModel):
     pages: list[DirectionPage] = Field(min_length=1, max_length=200)
 
 
-ERROR_LABELS = {"pages": "page", "panels": "case", "sfx": "onomatopée"}
+ERROR_LABELS = {"pages": "page", "panels": "case", "sfx": "onomatopée", "objets": "objet"}
 
 
 class ArtDirectionError(Exception):
@@ -204,11 +217,13 @@ class DirectionContext:
     variant: int = 0
     single_page: bool = False
     knowledge: AgentKnowledge | None = None
+    library: SeriesLibrary = field(default_factory=SeriesLibrary)
 
     def as_json(self) -> dict[str, Any]:
         return {
             "task": "art_direction",
             "series": self.series,
+            **self.library.as_json(),
             "chapter": self.chapter,
             "variety": self.variety,
             "variant": self.variant,
@@ -224,6 +239,8 @@ class DirectionContext:
                             "panel": i + 1,
                             "description": pa["description"],
                             "characters": pa["characters"],
+                            "decor": pa.get("decor"),
+                            "objets": pa.get("objets") or [],
                             "shot_type": pa["shot_type"],
                             "importance": pa["importance"],
                             "intensity": pa["intensity"],
@@ -260,6 +277,8 @@ def _panel_brief(panel: Panel) -> dict[str, Any]:
         "panel_id": panel.id,
         "description": panel.description,
         "characters": list(panel.character_names or []),
+        "decor": panel.decor_id,
+        "objets": list(panel.object_ids or []),
         "shot_type": panel.shot_type,
         "importance": panel.importance,
         "intensity": panel.intensity,
@@ -369,10 +388,12 @@ def build_context(
         variant=variant,
         single_page=single,
         knowledge=knowledge.for_agent(session, AGENT, series.id, knowledge_query(chapter)) if knowledge else None,
+        library=SeriesLibrary.load(session, series.id),
     )
 
 
 def _pages_text(ctx: DirectionContext) -> str:
+    names = {e["id"]: e["name"] for e in (*ctx.library.decors, *ctx.library.objets)}
     blocks = []
     for p in ctx.pages:
         lines = [f"Page {p.number} ({len(p.panels)} case{'s' if len(p.panels) > 1 else ''})"]
@@ -381,6 +402,11 @@ def _pages_text(ctx: DirectionContext) -> str:
         lines.append(f"  gabarits possibles : {', '.join(p.templates) or '(aucun : grille automatique)'}")
         for i, pa in enumerate(p.panels, start=1):
             who = f" — personnages : {', '.join(pa['characters'])}" if pa["characters"] else ""
+            if pa.get("decor") in names:
+                who += f" — décor : {names[pa['decor']]} (id {pa['decor']})"
+            things = [f"{names[i]} (id {i})" for i in pa.get("objets") or [] if i in names]
+            if things:
+                who += f" — objets : {', '.join(things)}"
             hint = f" — plan du scénario : {pa['shot_type']}" if pa["shot_type"] else ""
             lines.append(f"  Case {i} (importance {pa['importance']}){hint}{who} : {pa['description']}")
             for d in pa["dialogues"]:
@@ -437,6 +463,8 @@ def render_messages(prompt: PromptPreset, ctx: DirectionContext) -> list[ChatMes
         + (f" : {s['layout_style_description']}" if s["layout_style_description"] else ""),
         "layout_styles": styles or "(aucun)",
         "characters": chars or "(aucun personnage enregistré)",
+        "decors": ctx.library.text("decors") or "(aucun décor enregistré)",
+        "objets": ctx.library.text("objets") or "(aucun objet enregistré)",
         "chapter_number": str(ctx.chapter["number"]),
         "chapter_title": ctx.chapter["title"] or "sans titre",
         "synopsis": ctx.chapter["synopsis"] or "(pas de synopsis)",
@@ -511,6 +539,9 @@ def check_against(out: DirectionOutput, ctx: DirectionContext) -> list[str]:
             problems.append(
                 f"page {dp.page} › template : « {dp.template} » impossible ici (choix : {choices}, ou null)"
             )
+        for pa in dp.panels:
+            for problem in ctx.library.check_refs(pa.decor, pa.objets or []):
+                problems.append(f"page {dp.page} › case {pa.panel} › {problem}")
     missing = [n for n in expected if n not in seen]
     if missing:
         problems.append(f"pages manquantes : {', '.join(map(str, missing))}")
@@ -573,6 +604,8 @@ def to_values(dp: DirectionPage, page: Page) -> dict[str, Any]:
                 "cadre": pa.cadre,
                 "ambiance": pa.ambiance,
                 "sfx": [s.model_dump() for s in pa.sfx],
+                **({"decor": pa.decor} if pa.decor is not None else {}),
+                **({"objets": pa.objets} if pa.objets is not None else {}),
             }
         )
     return {
@@ -757,7 +790,9 @@ class ApplyResult:
     skipped: list[dict[str, Any]] = field(default_factory=list)  # {number, reason}
 
 
-def apply_direction(presets: PresetRegistry, pages: Sequence[Page]) -> ApplyResult:
+def apply_direction(
+    presets: PresetRegistry, pages: Sequence[Page], library: SeriesLibrary | None = None
+) -> ApplyResult:
     """Recopie la direction artistique dans les champs lus par la mise en page, puis recalcule
     uniquement les pages dont la mise en page change."""
     result = ApplyResult()
@@ -788,6 +823,8 @@ def apply_direction(presets: PresetRegistry, pages: Sequence[Page]) -> ApplyResu
             if choice is not None:
                 _apply_cadre(panel, choice.get("cadre"), (before.get(panel.id) or {}).get("cadre"))
                 _apply_sfx(panel, choice.get("sfx") or [])
+                if library is not None:
+                    _apply_library(panel, choice, before.get(panel.id) or {}, library)
         d.applied = copy.deepcopy(v)
         d.applied_at = utcnow()
         result.applied.append(page.number)
@@ -821,6 +858,18 @@ def _apply_cadre(panel: Panel, cadre: str | None, before: str | None) -> None:
     for key, value in CADRE_TO_FRAME.get(cadre or "normal", {}).items():
         current.setdefault(key, value)
     panel.frame = current or None
+
+
+def _apply_library(panel: Panel, choice: dict[str, Any], before: dict[str, Any], library: SeriesLibrary) -> None:
+    """Décor et objets proposés : appliqués s'ils existent encore et ont changé depuis l'application
+    précédente (sinon l'auteur a pu les corriger dans l'écran Scénario : on garde sa version)."""
+    decor = choice.get("decor")
+    if decor is not None and decor != before.get("decor") and not library.check_refs(decor, []):
+        panel.decor_id = decor
+    objets = choice.get("objets")
+    if objets is not None and objets != before.get("objets"):
+        known = {e["id"] for e in library.objets}
+        panel.object_ids = [i for i in objets if i in known]
 
 
 def _apply_sfx(panel: Panel, sfx: Sequence[dict[str, Any]]) -> None:

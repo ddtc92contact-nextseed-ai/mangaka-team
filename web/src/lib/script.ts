@@ -46,9 +46,12 @@ export interface DraftDialogue {
   kind: BubbleKind;
 }
 
-export interface DraftPanel extends Omit<PanelInput, "characters" | "dialogues"> {
+export interface DraftPanel extends Omit<PanelInput, "characters" | "dialogues" | "decor" | "objets"> {
   key: string;
   charactersText: string;
+  /** Bibliothèque de la série : décor (id) et objets (ids) de la case. */
+  decor: number | null;
+  objets: number[];
   dialogues: DraftDialogue[];
 }
 
@@ -71,6 +74,8 @@ export function toDraft(pages: PageData[]): DraftPage[] {
       id: pa.id,
       description: pa.description,
       charactersText: pa.characters.join(", "),
+      decor: pa.decor ?? null,
+      objets: pa.objets ?? [],
       shot_type: pa.shot_type,
       importance: pa.importance,
       intensity: pa.intensity,
@@ -91,6 +96,8 @@ export function fromDraft(pages: DraftPage[]): PageInput[] {
         .split(",")
         .map((c) => c.trim())
         .filter(Boolean),
+      decor: pa.decor,
+      objets: pa.objets,
       shot_type: pa.shot_type || null,
       importance: pa.importance,
       intensity: pa.intensity ?? null,
@@ -105,6 +112,8 @@ export const newPanel = (): DraftPanel => ({
   key: key(),
   description: "",
   charactersText: "",
+  decor: null,
+  objets: [],
   shot_type: "plan moyen",
   importance: 2,
   dialogues: [],

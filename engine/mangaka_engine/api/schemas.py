@@ -141,6 +141,9 @@ class SfxIn(_In):
     intensity: IntensityName | None = None
 
 
+MAX_PANEL_OBJECTS = 8
+
+
 class PanelIn(_In):
     id: int | None = None
     description: LongText = ""
@@ -151,6 +154,9 @@ class PanelIn(_In):
     dialogues: Annotated[list[BubbleIn], Field(max_length=12)] = Field(default_factory=list)
     # Onomatopées : absent = celles de la case sont gardées telles quelles.
     sfx: Annotated[list[SfxIn], Field(max_length=8)] | None = None
+    # Bibliothèque de la série (ids) : absent = gardés tels quels ; decor null = pas de décor.
+    decor: int | None = None
+    objets: Annotated[list[int], Field(max_length=MAX_PANEL_OBJECTS)] | None = None
 
 
 class PageIn(_In):
@@ -190,6 +196,8 @@ class PanelOut(BaseModel):
     index: int
     description: str
     characters: list[str]
+    decor: int | None = None  # décor de la bibliothèque (id)
+    objets: list[int] = Field(default_factory=list)  # objets de la bibliothèque (ids)
     shot_type: str | None
     importance: int
     intensity: IntensityName | None = None
@@ -393,6 +401,14 @@ class PanelUpdate(_In):
     generation_preset: PresetId | None = None
 
 
+class LibraryRef(BaseModel):
+    """Élément de la bibliothèque cité par une case (personnage, objet ou décor)."""
+
+    id: int
+    kind: Literal["character", "object", "decor"]
+    name: str
+
+
 class PanelDetailOut(BaseModel):
     id: int
     page_id: int
@@ -404,6 +420,8 @@ class PanelDetailOut(BaseModel):
     description: str
     characters: list[str]
     character_ids: list[int]
+    decor: LibraryRef | None = None
+    objets: list[LibraryRef] = Field(default_factory=list)
     shot_type: str | None
     state: str
     bbox: dict[str, int] | None
@@ -596,6 +614,16 @@ class CharacterOut(BaseModel):
     reference_images: list[ReferenceImageOut]
     created_at: datetime
     updated_at: datetime
+
+
+# --- Objets et décors de la bibliothèque (mêmes champs qu'un personnage) ------
+AssetKindName = Literal["object", "decor"]
+AssetCreate = CharacterCreate
+AssetUpdate = CharacterUpdate
+
+
+class AssetOut(CharacterOut):
+    kind: AssetKindName
 
 
 # --- Banc d'essai du QC -----------------------------------------------------------
@@ -798,6 +826,14 @@ class BibleCharacter(BaseModel):
     note: str
 
 
+class BibleAsset(BaseModel):
+    """Objet ou décor de la bibliothèque, repris dans la bible injectée aux agents."""
+
+    id: int
+    name: str
+    visual_description: str
+
+
 class ChapterSummaryEntry(BaseModel):
     chapter_id: int | None = None
     number: int | None = None
@@ -822,6 +858,8 @@ class BibleOut(BaseModel):
     rules: str
     motifs: str
     characters: list[BibleCharacter]
+    decors: list[BibleAsset] = Field(default_factory=list)
+    objets: list[BibleAsset] = Field(default_factory=list)
     chapter_summaries: list[ChapterSummaryEntry]
     rendered: BibleSummary | None
     updated_at: datetime | None

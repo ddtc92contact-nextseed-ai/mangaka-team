@@ -1,6 +1,7 @@
 """Modèle de données SQLite (SQLAlchemy 2).
 
 Série (`Project`) → Character (+ images de référence)
+Série → SeriesAsset : objets et décors récurrents de la bibliothèque (+ images de référence)
 Série → Chapter → Page → Panel (+ versions d'image → annotation humaine) → Bubble · Job.
 Banc d'essai du QC : `QCBenchRun` (historique des mesures du QC sur les cases annotées).
 Savoir-faire : `KnowledgeCollection` (globale ou d'une série) → `KnowledgeDocument` → `KnowledgeChunk`
@@ -134,6 +135,9 @@ class Project(TimestampMixin, Base):
     chapters: Mapped[list[Chapter]] = relationship(
         back_populates="project", cascade="all, delete-orphan", order_by="Chapter.number"
     )
+    assets: Mapped[list[SeriesAsset]] = relationship(
+        back_populates="project", cascade="all, delete-orphan", order_by="SeriesAsset.name"
+    )
 
 
 class Character(TimestampMixin, Base):
@@ -167,6 +171,47 @@ class CharacterImage(Base):
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
     character: Mapped[Character] = relationship(back_populates="reference_images")
+
+
+class AssetKind(enum.StrEnum):
+    object = "object"  # objet récurrent : un robot, une épée, une voiture…
+    decor = "decor"  # décor récurrent : la salle de classe, le labo, la rue…
+
+
+class SeriesAsset(TimestampMixin, Base):
+    """Objet ou décor récurrent de la bibliothèque d'une série (mêmes champs qu'un personnage)."""
+
+    __tablename__ = "series_assets"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[AssetKind] = mapped_column(_enum(AssetKind))
+    name: Mapped[str] = mapped_column(String(120))
+    visual_description: Mapped[str] = mapped_column(Text, default="")
+    prompt_keywords: Mapped[list[str]] = mapped_column(JSON, default=list)
+    lora_name: Mapped[str | None] = mapped_column(String(255), default=None)
+    lora_weight: Mapped[float] = mapped_column(Float, default=0.8)
+    lora_trigger_words: Mapped[str] = mapped_column(Text, default="")  # ajoutés au prompt avec le LoRA
+
+    project: Mapped[Project] = relationship(back_populates="assets")
+    reference_images: Mapped[list[SeriesAssetImage]] = relationship(
+        back_populates="asset", cascade="all, delete-orphan", order_by="SeriesAssetImage.id"
+    )
+
+
+class SeriesAssetImage(Base):
+    __tablename__ = "series_asset_images"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    asset_id: Mapped[int] = mapped_column(ForeignKey("series_assets.id", ondelete="CASCADE"), index=True)
+    path: Mapped[str] = mapped_column(String(500))  # relatif à data/
+    original_name: Mapped[str] = mapped_column(String(255))
+    content_type: Mapped[str] = mapped_column(String(50))
+    width: Mapped[int] = mapped_column(Integer)
+    height: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+    asset: Mapped[SeriesAsset] = relationship(back_populates="reference_images")
 
 
 class Chapter(TimestampMixin, Base):
@@ -230,6 +275,10 @@ class Panel(TimestampMixin, Base):
     character_ids: Mapped[list[int]] = mapped_column(JSON, default=list)
     # Noms tels qu'écrits par le scénario (personnages secondaires compris).
     character_names: Mapped[list[str]] = mapped_column(JSON, default=list)
+    # Bibliothèque de la série : décor de la case et objets visibles (ids de `series_assets`, sans clé
+    # étrangère : un objet ou un décor supprimé est retiré des cases par l'API, ignoré sinon).
+    decor_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    object_ids: Mapped[list[int]] = mapped_column(JSON, default=list)
     shot_type: Mapped[str | None] = mapped_column(String(50), default=None)
     dialogues: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)  # inutilisé : voir Bubble
     importance: Mapped[int] = mapped_column(Integer, default=1)

@@ -17,8 +17,10 @@ from ..pipeline.generation import (
     QC_STEP,
     STEP,
     GenerationError,
+    LibraryEntry,
     enqueue_panel,
-    panel_characters,
+    entry_kind,
+    panel_cast,
     panel_label,
     panel_target,
     panels_to_generate,
@@ -42,6 +44,7 @@ from .schemas import (
     EstimateOut,
     GenerateIn,
     JobOut,
+    LibraryRef,
     PanelDetailOut,
     PanelImageOut,
     PanelUpdate,
@@ -128,9 +131,9 @@ def _active_jobs(session: Session, panel_id: int) -> list[Job]:
 
 def panel_detail(session: Session, ctx: AppContext, panel: Panel) -> PanelDetailOut:
     page = panel.page
-    characters = panel_characters(session, panel)
+    cast = panel_cast(session, panel)
     presets = _presets(ctx, panel)
-    resolved = resolve_preset_id(presets, panel, characters)
+    resolved = resolve_preset_id(presets, panel, cast.entries)
     return PanelDetailOut(
         id=panel.id,
         page_id=page.id,
@@ -142,6 +145,8 @@ def panel_detail(session: Session, ctx: AppContext, panel: Panel) -> PanelDetail
         description=panel.description,
         characters=list(panel.character_names or []),
         character_ids=list(panel.character_ids or []),
+        decor=_ref(cast.decor) if cast.decor is not None else None,
+        objets=[_ref(o) for o in cast.objects],
         shot_type=panel.shot_type,
         state=panel.state.value,
         bbox=panel.bbox,
@@ -153,6 +158,10 @@ def panel_detail(session: Session, ctx: AppContext, panel: Panel) -> PanelDetail
         images=[panel_image_out(i, presets) for i in panel.images],
         active_jobs=[job_out(j) for j in _active_jobs(session, panel.id)],
     )
+
+
+def _ref(entry: LibraryEntry) -> LibraryRef:
+    return LibraryRef(id=entry.id, kind=entry_kind(entry), name=entry.name)  # type: ignore[arg-type]
 
 
 def _presets(ctx: AppContext, panel: Panel) -> PresetRegistry:
@@ -226,7 +235,7 @@ def regenerate_panel_quality(
     _require_comfyui(ctx)
     panel = get_panel_or_404(session, panel_id)
     try:
-        preset = quality_preset_id(_presets(ctx, panel), panel_characters(session, panel))
+        preset = quality_preset_id(_presets(ctx, panel), panel_cast(session, panel).entries)
     except GenerationError as exc:
         raise FieldError("preset", str(exc)) from None
     jobs = _enqueue(session, ctx, panel, count=1, preset=preset, extra_params={"regenerate": "quality"})

@@ -35,6 +35,14 @@ export default function DirectionPage() {
   const { chapter } = useChapter();
   const direction = useEngineData(() => api.getDirection(chapter.id), [chapter.id]);
   const pages = useEngineData(() => api.listPages(chapter.id), [chapter.id]);
+  // Noms des décors et objets de la bibliothèque (propositions de l'agent, affichées par case).
+  const library = useEngineData(
+    () =>
+      Promise.all([api.listLibrary("decor", chapter.project_id), api.listLibrary("object", chapter.project_id)]).then(
+        ([decors, objets]) => Object.fromEntries([...decors, ...objets].map((e) => [e.id, e.name])) as Record<number, string>,
+      ),
+    [chapter.project_id],
+  );
   const lastJob = useEngineData(() => api.chapterJobs(chapter.id, STEP).then((j) => j[0] ?? null), [chapter.id]);
   const [started, setStarted] = useState<Job | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -199,6 +207,7 @@ export default function DirectionPage() {
             page={pageData}
             options={data.options}
             seriesStyle={data.series_layout_style}
+            libraryNames={library.data ?? {}}
             busy={busy || running}
             highlight={highlight}
             onHighlight={setHighlight}
@@ -241,6 +250,7 @@ function PageEditor({
   page,
   options,
   seriesStyle,
+  libraryNames,
   busy,
   highlight,
   onHighlight,
@@ -252,6 +262,7 @@ function PageEditor({
   page: PageData | null;
   options: ChapterDirection["options"];
   seriesStyle: string;
+  libraryNames: Record<number, string>;
   busy: boolean;
   highlight: number | null;
   onHighlight: (id: number | null) => void;
@@ -409,6 +420,7 @@ function PageEditor({
                     description={page?.panels.find((p) => p.id === pa.panel_id)?.description ?? ""}
                     scriptShot={page?.panels.find((p) => p.id === pa.panel_id)?.shot_type ?? null}
                     options={options}
+                    libraryNames={libraryNames}
                     busy={busy}
                     active={highlight === pa.panel_id}
                     onFocus={() => onHighlight(pa.panel_id)}
@@ -473,6 +485,7 @@ function PanelRow({
   description,
   scriptShot,
   options,
+  libraryNames,
   busy,
   active,
   onFocus,
@@ -484,6 +497,7 @@ function PanelRow({
   description: string;
   scriptShot: string | null;
   options: ChapterDirection["options"];
+  libraryNames: Record<number, string>;
   busy: boolean;
   active: boolean;
   onFocus: () => void;
@@ -529,6 +543,15 @@ function PanelRow({
         <span className="font-semibold text-zinc-100">Case {n}</span>
         {scriptShot && <span className="text-zinc-500"> · scénario : {scriptShot}</span>}
         {description && <span className="block text-xs text-zinc-500">{description}</span>}
+        {(pa.decor != null || pa.objets != null) && (
+          <span className="block text-xs text-amber-200/80" data-testid="direction-library">
+            Proposé par l&apos;agent (appliqué avec la direction artistique) :
+            {pa.decor != null && ` décor « ${libraryNames[pa.decor] ?? `n° ${pa.decor}`} »`}
+            {pa.decor != null && pa.objets != null && " ·"}
+            {pa.objets != null &&
+              ` objets : ${pa.objets.length ? pa.objets.map((o) => libraryNames[o] ?? `n° ${o}`).join(", ") : "aucun"}`}
+          </span>
+        )}
       </p>
       <div className="grid gap-3 sm:grid-cols-2">
         {field("intensity", "Intensité", options.intensities, DA_INTENSITIES)}

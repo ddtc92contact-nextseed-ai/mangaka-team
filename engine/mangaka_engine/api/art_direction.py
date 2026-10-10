@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from ..pipeline import art_direction as da
+from ..pipeline.library import SeriesLibrary
 from ..presets import PresetError
 from ..store.models import Job, JobStatus, Page, PageDirection, Panel
 from .chapters import _load_pages, _page_out, get_chapter_or_404, get_page_or_404
@@ -32,6 +33,9 @@ class DirectionPanelOut(BaseModel):
     cadre: str | None = None
     ambiance: str = ""
     sfx: list[dict[str, str]] = Field(default_factory=list)
+    # Bibliothèque proposée par l'agent (null : garder le décor / les objets du scénario).
+    decor: int | None = None
+    objets: list[int] | None = None
 
 
 class PageDirectionOut(BaseModel):
@@ -133,6 +137,8 @@ def direction_out(page: Page) -> PageDirectionOut:
                     **{k: pa.get(k) for k in ("intensity", "plan", "angle", "cadre")},
                     ambiance=pa.get("ambiance") or "",
                     sfx=list(pa.get("sfx") or []),
+                    decor=pa.get("decor"),
+                    objets=pa.get("objets"),
                 )
                 for pa in v.get("panels") or []
             ],
@@ -284,7 +290,8 @@ def apply_direction(
     targets = [p for p in targets if session.scalar(select(PageDirection.id).where(PageDirection.page_id == p.id))]
     if not targets:
         raise FieldError("direction", "aucune direction artistique à appliquer : lance d'abord l'agent")
-    result = da.apply_direction(ctx.agents.presets_for(chapter.project_id), targets)
+    library = SeriesLibrary.load(session, chapter.project_id)
+    result = da.apply_direction(ctx.agents.presets_for(chapter.project_id), targets, library)
     session.commit()
     parts = []
     if result.applied:

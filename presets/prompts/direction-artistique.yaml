@@ -3,6 +3,7 @@
 #
 # Variables disponibles ($nom ; écrire $$ pour un « $ » littéral) :
 #   $series_title $series_style $reading_direction $characters
+#   $decors $objets      (bibliothèque de la série : « - id N · nom : description courte », un par ligne)
 #   $layout_style        (style de mise en page de la série) · $layout_styles (styles disponibles)
 #   $chapter_number $chapter_title $synopsis $summary
 #   $pages               (scénario validé des pages à diriger, avec les gabarits possibles par page)
@@ -39,6 +40,12 @@ user: |
   Personnages :
   $characters
 
+  Décors récurrents (bibliothèque) :
+  $decors
+
+  Objets récurrents (bibliothèque) :
+  $objets
+
   Bible de la série (à respecter strictement) :
   $bible
 
@@ -72,13 +79,17 @@ user: |
   - « angle » : $angles ;
   - « cadre » : $cadres ;
   - « ambiance » : une courte note de lumière et d'atmosphère, en français ;
-  - « sfx » : onomatopées suggérées (0 à 4), chacune {"text": "…", "intensity": l'une de $sfx_intensities}.
+  - « sfx » : onomatopées suggérées (0 à 4), chacune {"text": "…", "intensity": l'une de $sfx_intensities} ;
+  - « decor » (facultatif) : null pour garder le décor du scénario, sinon l'id d'un décor de la
+    bibliothèque ci-dessus — jamais un id absent de la liste ;
+  - « objets » (facultatif) : null pour garder les objets du scénario, sinon la liste des ids d'objets
+    de la bibliothèque visibles dans la case — jamais un id absent de la liste.
 
   Format de réponse :
   {"pages": [{"page": 1, "rythme": "montée", "layout_style": null, "template": null, "page_choc": null,
      "rationale": "…",
      "panels": [{"panel": 1, "intensity": "normal", "plan": "plan moyen", "angle": "de trois quarts",
-       "cadre": "normal", "ambiance": "…", "sfx": []}]}]}
+       "cadre": "normal", "ambiance": "…", "sfx": [], "decor": null, "objets": null}]}]}
 
   <contexte>
   $context_json

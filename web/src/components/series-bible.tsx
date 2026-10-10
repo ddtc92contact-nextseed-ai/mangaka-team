@@ -6,6 +6,7 @@ import { formatTokens } from "@/components/knowledge";
 import { Alert, Button, Card, Field, Loading, Textarea } from "@/components/ui";
 import { api, EngineError, errorMessage, type Bible, type ChapterSummaryEntry } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
+import { LIBRARY_KINDS, entryHref, libraryHref } from "@/lib/library";
 
 const SECTIONS = [
   { key: "world", label: "Univers", placeholder: "Kyoto, 1864. Les rônins errent sous la pluie…" },
@@ -122,6 +123,8 @@ function BibleForm({ projectId, initial, onSaved }: { projectId: number; initial
         )}
       </fieldset>
 
+      <BibleLibrary projectId={projectId} bible={initial} />
+
       <div>
         <p className="mb-2 text-sm font-medium text-zinc-300">Résumés des chapitres validés</p>
         {summaries.length === 0 ? (
@@ -166,5 +169,49 @@ function BibleForm({ projectId, initial, onSaved }: { projectId: number; initial
         )}
       </div>
     </form>
+  );
+}
+
+/** Décors et objets de la bibliothèque : repris tels quels dans la bible (à modifier depuis leur fiche). */
+function BibleLibrary({ projectId, bible }: { projectId: number; bible: Bible }) {
+  const groups = [
+    { kind: "decor" as const, label: "Décors récurrents", items: bible.decors ?? [] },
+    { kind: "object" as const, label: "Objets récurrents", items: bible.objets ?? [] },
+  ];
+  return (
+    <div data-testid="bible-library">
+      <p className="mb-1 text-sm font-medium text-zinc-300">Décors et objets récurrents</p>
+      <p className="mb-2 text-xs text-zinc-500">
+        Repris automatiquement de la{" "}
+        <Link href={libraryHref(projectId, "decor")} className="underline-offset-2 hover:text-zinc-300 hover:underline">
+          bibliothèque de la série
+        </Link>{" "}
+        : les agents ne peuvent citer que ceux-là.
+      </p>
+      <div className="grid gap-3 md:grid-cols-2">
+        {groups.map((g) => (
+          <div key={g.kind}>
+            <p className="mb-1 text-xs text-zinc-400">{g.label}</p>
+            {g.items.length === 0 ? (
+              <p className="text-xs text-zinc-600">Aucun.</p>
+            ) : (
+              <ul className="flex flex-wrap gap-1.5">
+                {g.items.map((item) => (
+                  <li key={item.id}>
+                    <Link
+                      href={entryHref(g.kind, item.id)}
+                      title={item.visual_description || undefined}
+                      className={`inline-block rounded px-2 py-0.5 text-xs hover:opacity-80 ${LIBRARY_KINDS[g.kind].badge}`}
+                    >
+                      {item.name}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from ..pipeline.knowledge import record_chapter_summary
 from ..pipeline.layout import LayoutError
+from ..pipeline.library import SeriesLibrary
 from ..pipeline.pages import (
     FRAME_KEYS,
     apply_frame_change,
@@ -115,6 +116,8 @@ def page_out(page: Page, regen_threshold: float | None = None) -> PageOut:
                 index=p.index,
                 description=p.description,
                 characters=list(p.character_names or []),
+                decor=p.decor_id,
+                objets=list(p.object_ids or []),
                 shot_type=p.shot_type,
                 importance=p.importance,
                 intensity=p.intensity,  # type: ignore[arg-type]
@@ -352,6 +355,9 @@ def replace_pages(
         c.name.casefold(): c.id
         for c in session.scalars(select(Character).where(Character.project_id == chapter.project_id))
     }
+    library = SeriesLibrary.load(session, chapter.project_id)
+    decor_ids = {e["id"] for e in library.decors}
+    object_ids = {e["id"] for e in library.objets}
 
     seen_pages: set[int] = set()
     seen_panels: set[int] = set()
@@ -365,6 +371,14 @@ def replace_pages(
                 if cin.id not in panels_by_id or cin.id in seen_panels:
                     raise FieldError(f"pages.{pi}.panels.{ci}.id", "case inconnue dans ce chapitre")
                 seen_panels.add(cin.id)
+            if cin.decor is not None and cin.decor not in decor_ids:
+                raise FieldError(f"pages.{pi}.panels.{ci}.decor", "décor inconnu dans cette série")
+            unknown = [i for i in cin.objets or [] if i not in object_ids]
+            if unknown:
+                raise FieldError(
+                    f"pages.{pi}.panels.{ci}.objets",
+                    f"objet(s) inconnu(s) dans cette série : {', '.join(map(str, unknown))}",
+                )
 
     # Numéros temporaires négatifs : évite les conflits d'unicité pendant le réordonnancement.
     for p in pages:
@@ -395,6 +409,11 @@ def replace_pages(
             panel.shot_type = normalize_shot_type(cin.shot_type) or None
             panel.importance = cin.importance
             panel.intensity = cin.intensity
+            # Bibliothèque : un champ absent garde le décor / les objets de la case.
+            if "decor" in cin.model_fields_set:
+                panel.decor_id = cin.decor
+            if cin.objets is not None:
+                panel.object_ids = list(dict.fromkeys(cin.objets))
             # Les bulles sont recréées ; un cadre ou une queue ajustés à la main au lettrage suivent leur `id`.
             previous = {b.id: b for b in panel.bubbles} if panel.id is not None else {}
             bubbles = [
