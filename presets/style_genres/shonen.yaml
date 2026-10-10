@@ -3,7 +3,8 @@ id: shonen
 name: Shōnen
 description: Action et aventure pour adolescents — combats, rivalités, dépassement de soi.
 order: 10
-prompt_keywords: [shonen manga style, dynamic action poses, energetic expressive faces, speed lines]
+lang: en
+prompt_keywords: [shonen manga, dynamic energetic style, determined young hero]
 layout_style: dynamique
 reading_direction: rtl
 fonts: { dialogue: baloo2, shout: bowlby-one }

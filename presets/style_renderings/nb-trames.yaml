@@ -5,4 +5,5 @@ description: Noir et blanc encré, ombres et volumes en trames, comme un manga i
 order: 10
 default: true
 monochrome: true
-prompt_keywords: [black and white manga, inked linework, screentone shading]
+lang: fr
+prompt_keywords: [manga noir et blanc, ombres en points de trame réguliers (halftone), screentone, motifs de points gris, pas de hachures]

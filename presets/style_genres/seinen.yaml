@@ -3,7 +3,8 @@ id: seinen
 name: Seinen
 description: Pour adultes, dessin réaliste — intrigues mûres, violence et psychologie assumées.
 order: 20
-prompt_keywords: [seinen manga style, realistic anatomy, mature cinematic framing, detailed realistic backgrounds]
+lang: fr
+prompt_keywords: [manga seinen, style réaliste et mature]
 layout_style: nerveuse
 reading_direction: rtl
 fonts: { dialogue: comic-neue, shout: titan-one }

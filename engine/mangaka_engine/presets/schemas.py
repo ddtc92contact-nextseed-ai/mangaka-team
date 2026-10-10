@@ -650,17 +650,21 @@ class LayoutStyle(_Strict):
 # pipeline/style.py en compose le $style des prompts image et les consignes des LLM.
 STYLE_ID = r"^[a-z0-9][a-z0-9-]*$"
 # Palier Turbo (cfg 1) : le prompt négatif est quasiment sans effet, les mots-clés disent ce qu'on veut voir.
+# Calibrage (presets/README.md) : une exclusion explicite dans le prompt positif (« pas de hachures ») aide
+# seulement en renfort de mots-clés positifs ; un pack fait uniquement d'exclusions est refusé.
 _NEGATIVE_KEYWORD = re.compile(r"\b(no|not|without|never|sans|pas|aucun|aucune|jamais|ni)\b", re.IGNORECASE)
+# Langue des mots-clés, mesurée pack par pack (informatif : rien n'est traduit).
+StyleLang = Literal["fr", "en"]
 
 
 def _check_keywords(value: list[str]) -> list[str]:
     out = [" ".join(k.split()) for k in value]
     if any(not k for k in out):
         raise ValueError("mot-clé vide")
-    negative = [k for k in out if _NEGATIVE_KEYWORD.search(k)]
-    if negative:
+    if out and all(_NEGATIVE_KEYWORD.search(k) for k in out):
         raise ValueError(
-            f"formulations positives uniquement (le prompt négatif est sans effet en Turbo) : « {negative[0]} »"
+            "formulations positives uniquement (le prompt négatif est sans effet en Turbo ; une exclusion ne "
+            f"vient qu'en renfort de mots-clés positifs) : « {out[0]} »"
         )
     return list(dict.fromkeys(out))
 
@@ -671,7 +675,8 @@ class StylePack(_Strict):
     id: str = Field(pattern=STYLE_ID)
     name: str = Field(min_length=1, description="Nom affiché (français)")
     description: str = Field(min_length=1, description="Description affichée sous la liste (français)")
-    prompt_keywords: list[str] = Field(min_length=1, description="Mots-clés du prompt image, positifs uniquement")
+    prompt_keywords: list[str] = Field(min_length=1, description="Mots-clés du prompt image (prompt positif)")
+    lang: StyleLang = Field(description="Langue des mots-clés, choisie au calibrage (informatif)")
     order: int = Field(default=100, description="Ordre dans la liste déroulante")
 
     @field_validator("prompt_keywords")
@@ -714,6 +719,7 @@ class StyleTone(StylePack):
 class StyleOptionChoice(_Strict):
     name: str = Field(min_length=1)
     prompt_keywords: list[str] = Field(min_length=1)
+    lang: StyleLang = Field(description="Langue des mots-clés, choisie au calibrage (informatif)")
 
     @field_validator("prompt_keywords")
     @classmethod

@@ -1,9 +1,10 @@
 # Genre « franco-belge » (BD) — champs : voir presets/README.md (« Packs de style »).
 id: franco-belge
 name: Franco-belge
-description: BD européenne, ligne claire — aventure lisible, lecture de gauche à droite.
+description: BD européenne, ligne claire — aventure lisible, lecture de gauche à droite. Dominante — ligne claire et aplats priment sur le rendu.
 order: 70
-prompt_keywords: [franco-belgian comic style, ligne claire, clean uniform outlines, clearly drawn detailed backgrounds]
+lang: fr
+prompt_keywords: [bande dessinée européenne classique, ligne claire, aplats de couleur, trait de contour uniforme, style franco-belge, PAS de style anime japonais]
 layout_style: sage
 reading_direction: ltr
 fonts: { dialogue: comic-neue, shout: bowlby-one }

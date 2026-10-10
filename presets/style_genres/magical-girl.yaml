@@ -3,7 +3,8 @@ id: magical-girl
 name: Magical girl
 description: Héroïnes aux pouvoirs magiques — transformations, costumes, amitié.
 order: 50
-prompt_keywords: [magical girl manga style, ornate frilly costumes, sparkling magic effects, glowing particles]
+lang: en
+prompt_keywords: [magical girl manga, sparkly magical costume, stars]
 layout_style: dynamique
 reading_direction: rtl
 fonts: { dialogue: fredoka, shout: lilita-one }

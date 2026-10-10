@@ -4,4 +4,5 @@ name: Couleur cel-shading
 description: Couleurs franches en aplats et ombres nettes, comme un anime.
 order: 30
 monochrome: false
-prompt_keywords: [full color, cel shading, clean flat colors, crisp ink outlines]
+lang: en
+prompt_keywords: [color manga, cel shading, clean outlines]
