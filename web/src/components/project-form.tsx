@@ -45,6 +45,8 @@ export function ProjectForm({
     style_lora_weight: initial?.style_lora_weight ?? 0.8,
     style_lora_trigger_words: initial?.style_lora_trigger_words ?? "",
     layout_style: initial?.layout_style,
+    sketch_enabled: initial?.sketch_enabled,
+    sketch_denoise: initial?.sketch_denoise ?? null,
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
@@ -64,6 +66,10 @@ export function ProjectForm({
     .filter((w) => w.tier_choice)
     .sort((a, b) => (a.tier_order ?? 0) - (b.tier_order ?? 0));
   const currentWorkflow = presets.data?.workflows.find((w) => w.id === workflow);
+  const sketchEnabled = form.sketch_enabled ?? defaults?.sketch_enabled ?? true;
+  // Débruitage livré : celui du preset « propre depuis croquis » du palier choisi.
+  const cleanPreset = presets.data?.workflows.find((w) => w.id === currentWorkflow?.from_sketch);
+  const presetDenoise = cleanPreset?.denoise ?? null;
 
   const set = <K extends keyof ProjectInput>(key: K, value: ProjectInput[K]) => {
     setForm((f) => ({ ...f, [key]: value }));
@@ -93,6 +99,8 @@ export function ProjectForm({
       page_format: pageFormat || undefined,
       workflow_preset: workflow || undefined,
       layout_style: layoutStyle || undefined,
+      sketch_enabled: sketchEnabled,
+      sketch_denoise: form.sketch_denoise ?? null,
       style_lora_name: form.style_lora_name?.trim() || null,
       style_lora_trigger_words: form.style_lora_trigger_words?.trim() ?? "",
     };
@@ -240,6 +248,47 @@ export function ProjectForm({
           <WorkflowHint presets={presets.data?.workflows} workflow={workflow} />
         </Field>
       </div>
+      <fieldset className="space-y-3 rounded-lg border border-zinc-800 p-4" data-testid="sketch-settings">
+        <legend className="px-1 text-sm font-medium text-zinc-200">Palier croquis</legend>
+        <label className="flex items-start gap-2 text-sm text-zinc-300">
+          <input
+            type="checkbox"
+            className="mt-0.5 accent-rose-500"
+            checked={sketchEnabled}
+            onChange={(e) => set("sketch_enabled", e.target.checked)}
+            data-testid="sketch-enabled"
+          />
+          <span>
+            Croquer les pages avant de les produire
+            <span className="block text-xs text-zinc-500">
+              Brouillon de chaque case en quelques secondes, tri au clavier, puis « Passer au propre » des seules
+              compositions validées.
+            </span>
+          </span>
+        </label>
+        <Field
+          label="Débruitage du passage au propre"
+          htmlFor="sketch_denoise"
+          error={errors.sketch_denoise}
+          hint={`Part du croquis redessinée : plus bas = composition plus fidèle, plus haut = plus de détails neufs. Vide : valeur du preset${
+            presetDenoise !== null ? ` (${String(presetDenoise).replace(".", ",")})` : ""
+          }. Chaque case peut avoir la sienne (atelier).`}
+        >
+          <Input
+            id="sketch_denoise"
+            type="number"
+            min={0.05}
+            max={1}
+            step={0.05}
+            className="!w-32"
+            value={form.sketch_denoise ?? ""}
+            placeholder={presetDenoise !== null ? String(presetDenoise) : ""}
+            disabled={!sketchEnabled}
+            onChange={(e) => set("sketch_denoise", e.target.value === "" ? null : Number(e.target.value))}
+            aria-invalid={Boolean(errors.sketch_denoise)}
+          />
+        </Field>
+      </fieldset>
       <div className="flex justify-end">
         <Button type="submit" disabled={saving}>
           {saving ? "Enregistrement…" : submitLabel}

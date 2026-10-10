@@ -11,7 +11,7 @@ Après modification d'un preset, redémarre le moteur (`npm run dev`).
 
 | Fichier | Rôle |
 | --- | --- |
-| `defaults.yaml` | Format de page, workflow (palier **Turbo**) et style de mise en page (`layout_style`) appliqués aux nouvelles séries ; workflow « avec références » de repli pour un preset qui ne déclare pas `with_references` (`workflow_with_references`) ; palier de « Régénérer en Qualité » (`workflow_quality`) |
+| `defaults.yaml` | Format de page, workflow (palier **Turbo**) et style de mise en page (`layout_style`) appliqués aux nouvelles séries ; workflow « avec références » de repli pour un preset qui ne déclare pas `with_references` (`workflow_with_references`) ; palier de « Régénérer en Qualité » (`workflow_quality`) ; palier croquis (`sketch_enabled`, `workflow_sketch`) |
 | `providers.yaml` | Paramètres des fournisseurs (URL, modèle LLM, timeouts). **Aucune clé d'API ici** : elles vont dans `.env` |
 | `page_formats/*.yaml` | Formats de page (dimensions en mm, DPI, marges, gouttières) : A4 (défaut) et B4 JIS à 300 DPI |
 | `layout.yaml` | Découpage : taille mini d'une case, taille cible de génération, zones de bulles, seuil de régénération conseillée |
@@ -359,6 +359,69 @@ Une case dont un personnage a une planche de référence prend donc `qwen-image-
 série Rapide, `qwen-image-edit-ref` dans une série Qualité. `defaults.yaml → workflow_with_references`
 ne sert plus qu'aux presets sans `with_references`. La taille de génération reste celle de la mise en page
 (≈ 1 Mpx, `layout.yaml`) pour tous les paliers, cases avec références comprises.
+
+### Palier croquis et passage au propre
+
+Montrer **toute la page en brouillon en quelques secondes**, laisser l'auteur trier, et ne payer la
+version propre que pour les compositions retenues — sans que le passage au propre change la composition.
+
+| Preset | Rôle | Usage | Taille | Étapes | `estimated_s` |
+| --- | --- | --- | --- | --- | --- |
+| `qwen-image-croquis` | `croquis` | brouillon texte → image (modèle Turbo) | `long_side: 512` | 6 | 6 |
+| `qwen-image-edit-ref-croquis` | `croquis` | brouillon avec images de référence | `long_side: 512` | 6 | 10 |
+| `qwen-image-turbo-from-sketch` | `propre` | Turbo depuis le croquis validé | mise en page | 8 | 15 |
+| `qwen-image-edit-ref-turbo-from-sketch` | `propre` | idem, avec références | mise en page | 8 | 55 |
+| `qwen-image-base-rapide-from-sketch` (+ `qwen-image-edit-ref-rapide-from-sketch`) | `propre` | Rapide depuis le croquis | mise en page | 25 | 40 / 160 |
+| `qwen-image-base-from-sketch` (+ `qwen-image-edit-ref-from-sketch`) | `propre` | Qualité depuis le croquis | mise en page | 50 | 50 / 190 |
+
+Champs propres à ce palier (vérifiés au chargement, erreurs dans `GET /presets`) :
+
+```yaml
+role: croquis                  # generation (défaut, palier de série) | croquis | propre
+long_side: 512                 # croquis : grand côté en px ; l'autre suit le ratio de la case (multiple de layout.yaml)
+from_sketch: qwen-image-turbo-from-sketch   # palier de série → son « propre depuis croquis » (même palier)
+source_image: { node: "30", input: image }  # propre : LoadImage qui reçoit le croquis validé
+mapping:
+  denoise: { node: "9", input: denoise }    # propre : obligatoire (débruitage partiel)
+defaults:
+  denoise: 0.65                # propre : 0 = croquis inchangé, 1 = image neuve (composition perdue)
+```
+
+- **Croquer** (onglet **Croquis** du chapitre, ou `POST /pages/{id}/sketch`, `/chapters/{id}/sketch`,
+  `/panels/{id}/sketch`) : un croquis par case **non encore validée** (ni version propre choisie, ni
+  croquis validé), avec `defaults.workflow_sketch` — ou son `with_references` si un personnage, le décor
+  ou un objet de la case a une image de référence. Mêmes LoRA (série, fiches) et mêmes références que la
+  version propre. File ComfyUI habituelle (une génération à la fois), progression en direct.
+- Un croquis est une version de case (`PanelImage`) marquée **`kind: croquis`** : jamais choisie (pas
+  même la 1re version d'une case), jamais assemblée, lettrée, exportée, ni contrôlée par le QC
+  automatique. Une case qui n'a que des croquis reste « à générer ».
+- **Trier** (écran Croquis, entièrement au clavier) : `V`/`Entrée` valide la composition et passe à la
+  case suivante, `R` re-croque (nouvelle graine ; retire la validation), `E` modifie la description puis
+  re-croque (`Ctrl+Entrée`), `U` retire la validation, `←`/`→` changent de case, `C` croque la page.
+  API : `POST /panels/{id}/sketch/validate` (`image_id` facultatif), `DELETE` pour retirer.
+- **Passer au propre** (case, page, chapitre : `POST /panels|pages|chapters/{id}/clean`) : version
+  finale au palier de la série (`from_sketch` du preset de la case ou de la série, puis son
+  `with_references` si besoin) en **image → image** : le croquis validé est envoyé à ComfyUI, agrandi à
+  la taille finale (`ImageScale`), encodé (`VAEEncode`) et débruité partiellement, **même graine et même
+  prompt** que le croquis. La version produite garde sa source dans `params.composition`
+  (`source`, `image_id`, `version`, `method: img2img`, `denoise`) : un futur passage au propre par
+  ControlNet ne sera qu'un autre preset `propre`. Une composition n'est passée au propre qu'une fois
+  (re-croquer et valider à nouveau pour recommencer). La 1re version propre est choisie d'office ;
+  « Régénérer en Qualité » est inchangé.
+- **Débruitage** : demande > case (atelier, `PATCH /panels/{id}` `sketch_denoise`) > série (fiche
+  série, `sketch_denoise`) > `defaults.denoise` du preset `propre`. Plus bas = plus fidèle au croquis.
+- **Activation** : `defaults.yaml → sketch_enabled` (vrai) pour les nouvelles séries ; case « Croquer
+  les pages avant de les produire » de la fiche série pour le désactiver (l'onglet Croquis disparaît).
+- **Estimation** : l'écran affiche « croquis de la page » et « passage au propre des cases validées »
+  (`GET /pages/{id}/sketch-estimate`, `/chapters/{id}/sketch-estimate`), même calcul que le temps
+  estimé (médiane réelle dès 3 générations du preset, sinon `estimated_s`).
+- Le réglage « Étapes » du dessinateur (écran « L'équipe ») ne s'applique **pas** aux presets croquis :
+  ils gardent leurs quelques étapes.
+- Graphes provisoires construits avec des nœuds natifs (nœuds `30` LoadImage → `31` ImageScale → `32`
+  VAEEncode → latent du KSampler `9`, `8 EmptyLatentImage` retiré) : **à remplacer** par les exports
+  réels de Morigane (`~/mangaka-comfy-exports/`) — seuls les JSON et le mapping changent, puis
+  `UPDATE_GOLDEN=1 npm run test:engine`. Le ComfyUI factice simule les deux : crayonné gris pour un
+  croquis, croquis « encré » à la taille finale pour un passage au propre.
 
 ### Case d'essai (`trial`)
 
