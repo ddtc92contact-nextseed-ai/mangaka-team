@@ -2,15 +2,22 @@ from __future__ import annotations
 
 import io
 import json
+import shutil
 from collections.abc import Callable
+from functools import partial
+from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
+import yaml
 from PIL import Image
+from pydantic import ValidationError
 
 from mangaka_engine.config import Settings
 from mangaka_engine.presets import PresetRegistry, build_workflow
+from mangaka_engine.presets.schemas import OllamaPreset, ProvidersPreset
+from mangaka_engine.providers import factory
 from mangaka_engine.providers.comfyui import (
     ComfyUIError,
     ComfyUIExecutionError,
@@ -22,10 +29,12 @@ from mangaka_engine.providers.comfyui import (
     ImageRef,
     MockComfyUIClient,
 )
+from mangaka_engine.providers.embedding import OllamaEmbeddingProvider
 from mangaka_engine.providers.factory import (
     ProviderSelectionError,
     build_comfyui,
     build_detectors,
+    build_embedding,
     build_identity,
     build_llm,
     build_providers,
@@ -243,6 +252,68 @@ def test_mock_vision() -> None:
 def test_ollama_vision_selected_from_preset(make_settings: Callable[..., Settings]) -> None:
     v = build_vision(make_settings(vision_provider="ollama"), PRESETS)
     assert isinstance(v, OllamaVisionProvider) and v.model == "qwen3-vl:4b" and v.keep_alive == 0
+    assert v.num_ctx == 4096
+
+
+def _presets_with_ollama(tmp_path: Path, **overrides: Any) -> tuple[PresetRegistry, dict[str, Any]]:
+    """Copie des presets du dépôt avec des valeurs `ollama.*` modifiées dans providers.yaml."""
+    dest = tmp_path / "presets"
+    shutil.copytree(PRESETS_DIR, dest)
+    data = yaml.safe_load((dest / "providers.yaml").read_text())
+    data["ollama"].update(overrides)
+    (dest / "providers.yaml").write_text(yaml.safe_dump(data, allow_unicode=True))
+    return PresetRegistry.load(dest), data
+
+
+def _capture(seen: list[dict[str, Any]], response: dict[str, Any]) -> httpx.MockTransport:
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append({"path": req.url.path, **json.loads(req.content)})
+        return httpx.Response(200, json=response)
+
+    return httpx.MockTransport(handler)
+
+
+@pytest.mark.parametrize("num_ctx", [None, 8192])
+def test_ollama_vision_sends_num_ctx_from_preset(
+    make_settings: Callable[..., Settings], monkeypatch: pytest.MonkeyPatch, tmp_path: Path, num_ctx: int | None
+) -> None:
+    presets = _presets_with_ollama(tmp_path, vision_num_ctx=num_ctx)[0] if num_ctx else PRESETS
+    seen: list[dict[str, Any]] = []
+    transport = _capture(seen, {"message": {"content": '{"score": 50}'}})
+    monkeypatch.setattr(factory, "OllamaVisionProvider", partial(OllamaVisionProvider, transport=transport))
+    build_vision(make_settings(vision_provider="ollama"), presets).ask(b"img", "Décris")
+    [body] = seen
+    assert body["path"] == "/api/chat" and body["keep_alive"] == 0
+    assert body["options"] == {"temperature": 0, "num_ctx": num_ctx or 4096}
+
+
+@pytest.mark.parametrize("num_ctx", [None, 2048])
+def test_ollama_embedding_sends_num_ctx_from_preset(
+    make_settings: Callable[..., Settings], monkeypatch: pytest.MonkeyPatch, tmp_path: Path, num_ctx: int | None
+) -> None:
+    presets = _presets_with_ollama(tmp_path, embedding_num_ctx=num_ctx)[0] if num_ctx else PRESETS
+    seen: list[dict[str, Any]] = []
+    transport = _capture(seen, {"embeddings": [[1.0, 0.0]]})
+    monkeypatch.setattr(factory, "OllamaEmbeddingProvider", partial(OllamaEmbeddingProvider, transport=transport))
+    build_embedding(make_settings(embedding_provider="ollama"), presets).embed(["a"])
+    [body] = seen
+    assert body["path"] == "/api/embed" and body["options"] == {"num_ctx": num_ctx or 8192}
+
+
+def test_ollama_num_ctx_defaults_when_absent_from_preset() -> None:
+    cfg = OllamaPreset(base_url="http://x", vision_model="m")
+    assert (cfg.vision_num_ctx, cfg.embedding_num_ctx) == (4096, 8192)
+
+
+@pytest.mark.parametrize("field", ["vision_num_ctx", "embedding_num_ctx"])
+@pytest.mark.parametrize("value", [0, -1, "4096", "beaucoup"])
+def test_invalid_ollama_num_ctx_fails_preset_validation(tmp_path: Path, field: str, value: Any) -> None:
+    reg, data = _presets_with_ollama(tmp_path, **{field: value})
+    assert reg.providers is None
+    issue = next(i for i in reg.issues if i.file == "providers.yaml")
+    assert f"ollama.{field}" in issue.message, issue.message
+    with pytest.raises(ValidationError):
+        ProvidersPreset.model_validate(data)
 
 
 def test_dghs_without_extra_is_reported_not_fatal(
@@ -258,7 +329,11 @@ def test_dghs_without_extra_is_reported_not_fatal(
 
 def ollama(handler: Callable[[httpx.Request], httpx.Response]) -> OllamaVisionProvider:
     return OllamaVisionProvider(
-        base_url="http://ollama.test/", model="qwen3-vl:4b", keep_alive=0, transport=httpx.MockTransport(handler)
+        base_url="http://ollama.test/",
+        model="qwen3-vl:4b",
+        keep_alive=0,
+        num_ctx=4096,
+        transport=httpx.MockTransport(handler),
     )
 
 
@@ -273,6 +348,7 @@ def test_ollama_vision_request_and_errors() -> None:
     body = seen[0]
     assert body["model"] == "qwen3-vl:4b" and body["keep_alive"] == 0 and body["stream"] is False
     assert body["messages"][0]["images"] == ["aW1n"] and body["format"] == {"type": "object"}
+    assert body["options"] == {"temperature": 0, "num_ctx": 4096}
 
     with pytest.raises(VisionUnavailableError, match="ollama pull qwen3-vl:4b"):
         ollama(lambda r: httpx.Response(404, json={"error": "model not found"})).ask(b"x", "p")

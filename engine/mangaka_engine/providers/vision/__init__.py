@@ -72,12 +72,14 @@ class OllamaVisionProvider:
         base_url: str,
         model: str,
         keep_alive: int | str = 0,
+        num_ctx: int | None = None,
         timeout_s: float = 120,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.keep_alive = keep_alive
+        self.num_ctx = num_ctx
         self._client = httpx.Client(
             base_url=self.base_url,
             timeout=httpx.Timeout(timeout_s, connect=min(timeout_s, 5)),
@@ -93,6 +95,8 @@ class OllamaVisionProvider:
             "format": schema or "json",
             "options": {"temperature": 0},
         }
+        if self.num_ctx is not None:
+            payload["options"]["num_ctx"] = self.num_ctx
         try:
             resp = self._client.post("/api/chat", json=payload)
         except httpx.TimeoutException as exc:

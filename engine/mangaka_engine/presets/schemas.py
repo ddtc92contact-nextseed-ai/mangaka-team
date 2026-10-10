@@ -363,6 +363,9 @@ class OllamaPreset(_Strict):
     # Modèle d'embeddings du savoir-faire (EMBEDDING_PROVIDER=ollama), ex. bge-m3 (multilingue, bon en français).
     embedding_model: str | None = None
     keep_alive: int | str = 0
+    # Contexte envoyé à Ollama (options.num_ctx) : sans lui, Ollama charge le modèle à son contexte maximal.
+    vision_num_ctx: int = Field(default=4096, gt=0, strict=True)
+    embedding_num_ctx: int = Field(default=8192, gt=0, strict=True)
     timeout_s: float = Field(default=120, gt=0)
 
 

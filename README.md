@@ -136,7 +136,8 @@ ollama pull qwen3-vl:4b
 
 Puis dans `.env` : `QC_DETECTORS_PROVIDER=dghs`, `QC_IDENTITY_PROVIDER=dghs`,
 `VISION_PROVIDER=ollama` (URL et modèle dans `presets/providers.yaml`, `keep_alive: 0` : le modèle
-est déchargé aussitôt pour rendre la mémoire à ComfyUI). Sans l'extra `qc`, le moteur démarre quand
+est déchargé aussitôt pour rendre la mémoire à ComfyUI ; `vision_num_ctx: 4096` : sans contexte
+explicite, Ollama charge qwen3-vl à 262 144 jetons, ≈ 45 Go et ~20 s par case, contre ≈ 4,7 Go et ~3 s). Sans l'extra `qc`, le moteur démarre quand
 même : l'atelier affiche « détecteurs non installés » et le QC continue avec les couches restantes.
 Seuils, poids et règles : [`presets/qc.yaml`](presets/README.md#contrôle-qualité-qcyaml).
 
