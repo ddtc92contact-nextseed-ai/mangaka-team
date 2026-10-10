@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import dataclasses
+import itertools
 import json
 import re
 import shutil
@@ -14,7 +16,8 @@ from fastapi.testclient import TestClient
 
 from mangaka_engine.pipeline import art_direction as da
 from mangaka_engine.pipeline import script as sc
-from mangaka_engine.pipeline.style import StyleError, check_style, series_style, style_brief
+from mangaka_engine.pipeline.prompt import build_prompt
+from mangaka_engine.pipeline.style import StyleError, check_style, series_style, style_brief, style_groups
 from mangaka_engine.presets import PresetRegistry
 from mangaka_engine.presets.schemas import StyleOptionChoice, StylePack
 from mangaka_engine.providers.llm import MockLLMProvider
@@ -144,12 +147,17 @@ def test_a_new_pack_is_a_file_and_invalid_packs_fail_with_a_clear_message(tmp_pa
 
 
 # --- composition de $style -----------------------------------------------------------------------
+def _uncapped() -> PresetRegistry:
+    return dataclasses.replace(REG, image_prompt=REG.image_prompt.model_copy(update={"style_max_chars": None}))
+
+
 def test_style_is_lora_then_genre_rendering_tone_and_fine_settings_in_a_fixed_order() -> None:
     series = _series(
         style_options={"detail": "riche", "trait": "epais", "trames": "denses"},
         style_lora_name="encre-seinen_v2.safetensors",
     )
-    words = series_style(REG, series).split(", ")
+    # Sans plafond : tous les mots-clés des packs, dans l'ordre fixe.
+    words = series_style(_uncapped(), series).split(", ")
     g, r, t = REG.style_genres["seinen"], REG.style_renderings["nb-trames"], REG.style_tones["dark"]
     opts = REG.style_options.options
     assert words == [
@@ -162,8 +170,67 @@ def test_style_is_lora_then_genre_rendering_tone_and_fine_settings_in_a_fixed_or
         *opts["detail"].choices["riche"].prompt_keywords,
     ]
     # Rendu « N&B à trames » : mots-clés anglais (A/B à référence figée du 10/10/2026).
-    style = series_style(REG, series)
+    style = series_style(_uncapped(), series)
     assert "black and white manga, halftone screentone dots, regular grey dot pattern, no cross-hatching" in style
+    # Plafond du dépôt : même ordre (sous-suite), LoRA en tête, chaque pack représenté, rendu prioritaire.
+    short = series_style(REG, series).split(", ")
+    assert len(", ".join(short)) <= REG.image_prompt.style_max_chars < len(style)
+    assert short == [w for w in words if w in short] and short[0] == "ink seinen style"
+    for kind, group in style_groups(REG, series):
+        assert group[0] in short, kind
+    assert "halftone screentone dots" in short  # 2e mot-clé du rendu : les points de trame, pas des hachures
+
+
+def test_style_block_respects_the_cap_without_duplicates_for_every_combination() -> None:
+    cap = REG.image_prompt.style_max_chars
+    assert cap == 240
+    longest = {
+        key: max(option.choices, key=lambda c: len(", ".join(option.choices[c].prompt_keywords)))
+        for key, option in REG.style_options.options.items()
+    }
+    for genre, rendering, tone in itertools.product(REG.style_genres, REG.style_renderings, REG.style_tones):
+        for options in ({}, longest, {"trait": "moyen", "trames": "moyennes", "detail": "simple"}):
+            series = _series(
+                style_genre=genre,
+                style_rendering=rendering,
+                style_tone=tone,
+                style_options=options,
+                style_lora_name="trame-shojo.safetensors",
+            )
+            style = series_style(REG, series)
+            words = style.split(", ")
+            assert len(style) <= cap, (genre, rendering, tone, options)
+            assert len({w.casefold() for w in words}) == len(words), style
+            # « manga » d'un réglage fin s'efface derrière le « manga … » d'un autre pack
+            assert "manga" not in words, style
+            assert words[0] == "shojo screentone"
+
+
+def test_style_block_cap_is_configurable(tmp_path: Path) -> None:
+    root = tmp_path / "presets"
+    shutil.copytree(PRESETS_DIR, root)
+    path = root / "image_prompt.yaml"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace("style_max_chars: 240", "style_max_chars: 80"), encoding="utf-8"
+    )
+    reg = PresetRegistry.load(root)
+    assert reg.image_prompt.style_max_chars == 80
+    style = series_style(reg, _series(style_options={"detail": "riche"}))
+    assert len(style) <= 80 and style.startswith("manga seinen, black and white manga")
+
+
+def test_simple_backgrounds_keep_the_described_place() -> None:
+    """Réglage « décors simples » : plus de « plain » ni de « minimal », qui effaçaient le lieu décrit."""
+    series = _series(style_options={"detail": "simple"})
+    prompt = build_prompt(
+        description="Aiko court sous la pluie",
+        setting="une ruelle de Kyoto la nuit, lanternes",
+        style=series_style(REG, series),
+        settings=REG.image_prompt,
+    )
+    assert "Lieu : une ruelle de Kyoto la nuit, lanternes." in prompt
+    assert "uncluttered background" in prompt
+    assert not re.search(r"\b(plain|minimal)\b", prompt, re.IGNORECASE)
 
 
 def test_style_combinations_lora_out_of_catalog_and_color() -> None:
