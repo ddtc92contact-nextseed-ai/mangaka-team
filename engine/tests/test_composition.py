@@ -351,8 +351,9 @@ def test_preview_url_follows_the_served_map(make_client: Callable[..., TestClien
     _wait(c)
     after = _ok(c.get(f"/panels/{p2['id']}"))["composition_lock"]["preview"]
     assert after["status"] == "ready" and (after["type"], after["type_name"]) == ("pose", "Pose")
-    assert after["url"] != before["url"] and after["url"].endswith(f"?v={after['job_id']}")
-    assert c.get(after["url"]).content != old_map.content
+    assert after["url"] != before["url"]
+    served = c.get(after["url"])
+    assert served.content != old_map.content and "immutable" in served.headers["cache-control"]
 
 
 def test_lock_from_version_update_and_delete_source(make_client: Callable[..., TestClient]) -> None:  # noqa: F811

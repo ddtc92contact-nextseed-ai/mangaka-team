@@ -253,7 +253,7 @@ def test_finish_page_end_to_end(client: TestClient) -> None:
             img = next(i for i in next(p for p in db_page.panels if p.id == art.id).images if i.selected)
             assert art.image == ctx.files.absolute(img.finish["path"])
             assert art.image_size == (img.finish["width"], img.finish["height"])
-            assert inputs.image_urls[art.id] == f"/panel-images/{img.id}/file"
+            assert inputs.image_urls[art.id] == f"/panel-images/{img.id}/file?v={Path(img.path).stem}"
     assert _export_warnings(c, chapter_id) == []
     render = _ok(c.post(f"/pages/{page['id']}/render"))
     assert render["warnings"] == [] or all(w["code"] != "low_dpi" for w in render["warnings"])

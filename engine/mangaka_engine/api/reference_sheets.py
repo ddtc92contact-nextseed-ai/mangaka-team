@@ -31,6 +31,7 @@ from ..pipeline.reference_sheets import (
     sheet_for,
 )
 from ..presets import PresetError, PresetRegistry
+from ..store.files import cache_headers, versioned_url
 from ..store.models import Character, Project, ReferenceVariant
 from .assets import asset_out
 from .characters import character_out
@@ -83,7 +84,7 @@ def variant_out(variant: ReferenceVariant, entry: LibraryEntry | None) -> Refere
         id=variant.id,
         entry_kind=variant.entry_kind,  # type: ignore[arg-type]
         entry_id=variant.entry_id,
-        url=f"/reference-variants/{variant.id}/file",
+        url=versioned_url(f"/reference-variants/{variant.id}/file", variant.path),
         sheet=variant.sheet,
         sheet_name=str(params.get("sheet_name") or variant.sheet),
         preset=params.get("preset"),
@@ -230,15 +231,13 @@ for _kind in ENTRY_KINDS:
 
 @router.get("/reference-variants/{variant_id}/file")
 def get_variant_file(
-    variant_id: int, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
+    variant_id: int, v: str | None = None, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
 ) -> FileResponse:
     variant = _variant_or_404(session, variant_id)
     path = ctx.files.absolute(variant.path)
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Fichier image manquant dans data/")
-    return FileResponse(
-        path, media_type=variant.content_type, headers={"Cache-Control": "private, max-age=31536000, immutable"}
-    )
+    return FileResponse(path, media_type=variant.content_type, headers=cache_headers(variant.path, v))
 
 
 @router.post("/reference-variants/{variant_id}/refine", response_model=list[JobOut], status_code=202)

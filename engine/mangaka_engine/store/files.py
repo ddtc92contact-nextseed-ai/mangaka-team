@@ -6,7 +6,7 @@ import io
 import shutil
 import uuid
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from PIL import Image, UnidentifiedImageError
 
@@ -15,6 +15,28 @@ ALLOWED_IMAGE_FORMATS = {"PNG": ("png", "image/png"), "JPEG": ("jpg", "image/jpe
 
 class InvalidImageError(ValueError):
     pass
+
+
+# Cache des images servies : une URL versionnée (`?v=<nom du fichier>`, unique : voir `save_image`) ne
+# change jamais de contenu et peut être gardée « immutable » ; sans version (ou avec une version qui
+# n'est plus la bonne), le navigateur revalide à chaque affichage (ETag / Last-Modified → 304).
+IMMUTABLE = "private, max-age=31536000, immutable"
+REVALIDATE = "no-cache"
+
+
+def file_version(rel: str) -> str:
+    """Version d'un fichier de data/ : son nom sans extension (uuid tiré à l'enregistrement)."""
+    return PurePosixPath(rel).stem
+
+
+def versioned_url(url: str, rel: str) -> str:
+    """`url` + `?v=<version du fichier>` : l'URL change dès qu'un autre fichier prend la place."""
+    return f"{url}{'&' if '?' in url else '?'}v={file_version(rel)}"
+
+
+def cache_headers(rel: str, v: str | None) -> dict[str, str]:
+    """En-têtes de cache d'un fichier demandé avec la version `v` (paramètre `?v=` de son URL)."""
+    return {"Cache-Control": IMMUTABLE if v is not None and v == file_version(rel) else REVALIDATE}
 
 
 @dataclass

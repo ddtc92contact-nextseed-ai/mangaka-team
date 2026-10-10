@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from ..pipeline.comfy_check import LoraUse, offline_report, run_check
 from ..pipeline.comfy_loras import unavailable
 from ..pipeline.comfy_trial import STEP as TRIAL_STEP
+from ..store.files import cache_headers
 from ..store.models import Character, Job, JobStatus, Project
 from .deps import AppContext, get_ctx, get_session
 from .errors import FieldError
@@ -110,7 +111,7 @@ def start_trial(
 
 @router.get("/comfyui/trial/{job_id}/image")
 def trial_image(
-    job_id: int, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
+    job_id: int, v: str | None = None, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
 ) -> FileResponse:
     job = session.get(Job, job_id)
     rel = (job.params or {}).get("image_path") if job is not None and job.step == TRIAL_STEP else None
@@ -119,4 +120,4 @@ def trial_image(
     path = ctx.files.absolute(rel)
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Fichier image manquant dans data/")
-    return FileResponse(path, headers={"Cache-Control": "private, max-age=31536000, immutable"})
+    return FileResponse(path, headers=cache_headers(rel, v))

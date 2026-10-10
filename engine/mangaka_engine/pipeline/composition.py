@@ -383,7 +383,7 @@ class ControlMapExecutor:
                 **lock,
                 "preview": {
                     "job_id": job_id,
-                    "map_job_id": job_id,  # job qui a produit `path` : version de l'URL d'aperçu
+                    "map_job_id": job_id,  # job qui a produit `path`
                     "type": type_id,
                     "path": stored.path,
                     "width": stored.width,

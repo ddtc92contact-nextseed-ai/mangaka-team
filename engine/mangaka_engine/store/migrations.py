@@ -27,6 +27,10 @@
 - 16 : packs de style (genre, rendu, ton, réglages fins). L'ancien texte libre `style` devient
   `legacy_style` (lecture seule, utilisé tant qu'aucun pack n'est choisi) ; les mots déclencheurs saisis
   du LoRA de style disparaissent (ils viennent du catalogue presets/style_loras.yaml).
+- 17 : planche de style (référence de style active ou en historique).
+- 18 : ids jamais réutilisés (AUTOINCREMENT) sur les tables dont l'id entre dans l'URL d'un fichier
+  (personnages, objets, décors et leurs images, cases, versions de case, jobs) : tables reconstruites,
+  données et ids gardés.
 
 Une base neuve est créée directement à la dernière version. Chaque migration tourne dans une
 transaction unique, clés étrangères désactivées (recette « 12 étapes » de SQLite pour reconstruire
@@ -40,7 +44,7 @@ import logging
 import sqlite3
 from collections.abc import Callable
 
-from sqlalchemy import Engine, inspect
+from sqlalchemy import Engine, Table, inspect
 from sqlalchemy.dialects import sqlite
 from sqlalchemy.schema import CreateIndex, CreateTable
 
@@ -49,10 +53,15 @@ from .models import (
     AgentProfileVersion,
     Base,
     Chapter,
+    Character,
+    CharacterImage,
+    Job,
     KnowledgeChunk,
     KnowledgeCollection,
     KnowledgeDocument,
     LLMRun,
+    Panel,
+    PanelImage,
     PanelImageAnnotation,
     QCBenchRun,
     ReferenceVariant,
@@ -63,7 +72,7 @@ from .models import (
 
 log = logging.getLogger("mangaka_engine")
 
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 
 
 class MigrationError(RuntimeError):
@@ -269,6 +278,25 @@ def _v16_to_v17(cur: sqlite3.Cursor) -> None:
         cur.execute("ALTER TABLE series_assets ADD COLUMN active BOOLEAN NOT NULL DEFAULT 1")
 
 
+def _rebuild(cur: sqlite3.Cursor, table: Table) -> None:
+    """Reconstruit `table` selon le modèle (recette « 12 étapes ») en gardant ses lignes et leurs ids."""
+    name = table.name
+    old = {row[1] for row in cur.execute(f'PRAGMA table_info("{name}")')}
+    cols = ", ".join(f'"{c.name}"' for c in table.columns if c.name in old)
+    create, *indexes = _ddl(table)
+    cur.execute(create.replace(f"CREATE TABLE {name} (", f"CREATE TABLE {name}__new (", 1))
+    cur.execute(f'INSERT INTO "{name}__new" ({cols}) SELECT {cols} FROM "{name}"')
+    cur.execute(f'DROP TABLE "{name}"')
+    cur.execute(f'ALTER TABLE "{name}__new" RENAME TO "{name}"')
+    for stmt in indexes:
+        cur.execute(stmt)
+
+
+def _v17_to_v18(cur: sqlite3.Cursor) -> None:
+    for model in (Character, CharacterImage, SeriesAsset, SeriesAssetImage, Panel, PanelImage, Job):
+        _rebuild(cur, model.__table__)  # type: ignore[arg-type]
+
+
 MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     # version de départ → (version d'arrivée, fonction)
     0: (2, _v0_to_v2),
@@ -288,6 +316,7 @@ MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     14: (15, _v14_to_v15),
     15: (16, _v15_to_v16),
     16: (17, _v16_to_v17),
+    17: (18, _v17_to_v18),
 }
 
 

@@ -12,7 +12,7 @@ from mangaka_engine.config import Settings
 from mangaka_engine.main import create_app
 from mangaka_engine.store.db import create_db_engine
 from mangaka_engine.store.migrations import SCHEMA_VERSION, MigrationError
-from tests.conftest import STYLE
+from tests.conftest import STYLE, png_bytes
 
 V1_SCHEMA = (Path(__file__).parent / "fixtures" / "schema_v1.sql").read_text()
 NOW = "2026-10-01 10:00:00.000000"
@@ -537,3 +537,91 @@ def test_v16_database_gets_style_references(make_settings: Callable[..., Setting
     fresh = settings.database_path.parent / "fresh.db"
     create_db_engine(fresh).dispose()
     assert _columns(settings.database_path) == _columns(fresh)
+
+
+NEVER_REUSED_TABLES = (
+    "characters",
+    "character_images",
+    "series_assets",
+    "series_asset_images",
+    "panels",
+    "panel_images",
+    "jobs",
+    "reference_variants",
+)
+
+
+def _drop_v18_autoincrement(con: sqlite3.Connection) -> None:
+    """Remet les tables d'avant la v18 : même schéma, sans AUTOINCREMENT (ids recyclés par SQLite)."""
+    con.execute("PRAGMA foreign_keys=OFF")
+    for table in NEVER_REUSED_TABLES[:-1]:
+        [(sql,)] = con.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchall()
+        indexes = [
+            r[0]
+            for r in con.execute(
+                "SELECT sql FROM sqlite_master WHERE type='index' AND tbl_name=? AND sql IS NOT NULL", (table,)
+            )
+        ]
+        con.execute(f'ALTER TABLE "{table}" RENAME TO "{table}__v18"')
+        con.execute(sql.replace(" AUTOINCREMENT", ""))
+        con.execute(f'INSERT INTO "{table}" SELECT * FROM "{table}__v18"')
+        con.execute(f'DROP TABLE "{table}__v18"')
+        for stmt in indexes:
+            con.execute(stmt)
+        con.execute("DELETE FROM sqlite_sequence WHERE name = ?", (table,))
+
+
+def _create_sql(path: Path) -> dict[str, str]:
+    con = sqlite3.connect(path)
+    out = {
+        name: sql
+        for name, sql in con.execute("SELECT name, sql FROM sqlite_master WHERE type='table'")
+        if name in NEVER_REUSED_TABLES
+    }
+    con.close()
+    return out
+
+
+def test_v17_database_never_reuses_ids(make_settings: Callable[..., Settings]) -> None:
+    """v17 → v18 : AUTOINCREMENT sur les tables dont l'id entre dans l'URL d'un fichier ; données gardées."""
+    settings = make_settings()
+    with TestClient(create_app(settings)) as c:
+        project = c.post("/projects", json={**STYLE, "title": "Série v17"}).json()
+        aiko = c.post(f"/projects/{project['id']}/characters", json={"name": "Aiko"}).json()
+        files = [("files", (f"{i}.png", png_bytes((20 + i, 20)), "image/png")) for i in range(2)]
+        images = c.post(f"/characters/{aiko['id']}/images", files=files).json()["reference_images"]
+        decor = c.post(f"/projects/{project['id']}/decors", json={"name": "Le labo"}).json()
+        c.post(f"/decors/{decor['id']}/images", files=[("files", ("d.png", png_bytes(), "image/png"))])
+        content = [c.get(i["url"]).content for i in images]
+    con = sqlite3.connect(settings.database_path)
+    _drop_v18_autoincrement(con)
+    con.execute("PRAGMA user_version = 17")
+    con.commit()
+    before = _create_sql(settings.database_path)
+    assert not any("AUTOINCREMENT" in before[t] for t in NEVER_REUSED_TABLES[:-1])
+    con.close()
+
+    with TestClient(create_app(settings)) as c:
+        # Données et ids intacts ; les images existantes s'affichent toujours.
+        kept = c.get(f"/characters/{aiko['id']}").json()["reference_images"]
+        assert [i["id"] for i in kept] == [i["id"] for i in images]
+        assert [c.get(i["url"]).content for i in kept] == content
+        [decor_image] = c.get(f"/decors/{decor['id']}").json()["reference_images"]
+        assert c.get(decor_image["url"]).status_code == 200
+        # Un id supprimé n'est plus jamais redonné.
+        ken = c.post(f"/projects/{project['id']}/characters", json={"name": "Ken"}).json()
+        assert c.delete(f"/characters/{ken['id']}").status_code == 204
+        again = c.post(f"/projects/{project['id']}/characters", json={"name": "Ken"}).json()
+        assert again["id"] > ken["id"]
+    assert _version(settings.database_path) == SCHEMA_VERSION
+    fresh = settings.database_path.parent / "fresh.db"
+    create_db_engine(fresh).dispose()
+    assert _columns(settings.database_path) == _columns(fresh)
+    migrated, new = _create_sql(settings.database_path), _create_sql(fresh)
+    assert set(migrated) == set(new) == set(NEVER_REUSED_TABLES)
+    for table in NEVER_REUSED_TABLES:
+        assert "AUTOINCREMENT" in migrated[table] and "AUTOINCREMENT" in new[table], table
+    con = sqlite3.connect(settings.database_path)
+    assert con.execute("PRAGMA foreign_key_check").fetchall() == []
+    assert con.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+    con.close()

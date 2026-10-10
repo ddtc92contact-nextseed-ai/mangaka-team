@@ -116,6 +116,11 @@ def _enum(e: type[enum.Enum]) -> Enum:
     return Enum(e, native_enum=False, validate_strings=True, length=20)
 
 
+# Ids jamais réutilisés (AUTOINCREMENT) pour les tables dont l'id finit dans l'URL d'un fichier servi : sans
+# cela SQLite reprend max(id) + 1 après une suppression, et une URL recyclée montrerait l'image supprimée.
+NEVER_REUSED = {"sqlite_autoincrement": True}
+
+
 class Project(TimestampMixin, Base):
     """Une série (table historique `projects`)."""
 
@@ -165,6 +170,7 @@ class Project(TimestampMixin, Base):
 
 class Character(TimestampMixin, Base):
     __tablename__ = "characters"
+    __table_args__ = NEVER_REUSED
 
     id: Mapped[int] = mapped_column(primary_key=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
@@ -185,6 +191,7 @@ class Character(TimestampMixin, Base):
 
 class CharacterImage(Base):
     __tablename__ = "character_images"
+    __table_args__ = NEVER_REUSED
 
     id: Mapped[int] = mapped_column(primary_key=True)
     character_id: Mapped[int] = mapped_column(ForeignKey("characters.id", ondelete="CASCADE"), index=True)
@@ -215,6 +222,7 @@ class SeriesAsset(TimestampMixin, Base):
     """
 
     __tablename__ = "series_assets"
+    __table_args__ = NEVER_REUSED
 
     id: Mapped[int] = mapped_column(primary_key=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
@@ -238,6 +246,7 @@ class SeriesAsset(TimestampMixin, Base):
 
 class SeriesAssetImage(Base):
     __tablename__ = "series_asset_images"
+    __table_args__ = NEVER_REUSED
 
     id: Mapped[int] = mapped_column(primary_key=True)
     asset_id: Mapped[int] = mapped_column(ForeignKey("series_assets.id", ondelete="CASCADE"), index=True)
@@ -262,9 +271,7 @@ class ReferenceVariant(Base):
     """
 
     __tablename__ = "reference_variants"
-    # Ids jamais réutilisés : /reference-variants/{id}/file est mis en cache « immutable », un id
-    # recyclé après suppression afficherait l'image supprimée.
-    __table_args__ = {"sqlite_autoincrement": True}
+    __table_args__ = NEVER_REUSED
 
     id: Mapped[int] = mapped_column(primary_key=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
@@ -340,7 +347,7 @@ class Page(TimestampMixin, Base):
 
 class Panel(TimestampMixin, Base):
     __tablename__ = "panels"
-    __table_args__ = (UniqueConstraint("page_id", "index"),)
+    __table_args__ = (UniqueConstraint("page_id", "index"), NEVER_REUSED)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     page_id: Mapped[int] = mapped_column(ForeignKey("pages.id", ondelete="CASCADE"), index=True)
@@ -393,7 +400,7 @@ class PanelImage(Base):
     """Une version générée d'une case (tout résultat est versionné)."""
 
     __tablename__ = "panel_images"
-    __table_args__ = (UniqueConstraint("panel_id", "version"),)
+    __table_args__ = (UniqueConstraint("panel_id", "version"), NEVER_REUSED)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     panel_id: Mapped[int] = mapped_column(ForeignKey("panels.id", ondelete="CASCADE"), index=True)
@@ -490,6 +497,7 @@ class Bubble(TimestampMixin, Base):
 
 class Job(Base):
     __tablename__ = "jobs"
+    __table_args__ = NEVER_REUSED
 
     id: Mapped[int] = mapped_column(primary_key=True)
     project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)

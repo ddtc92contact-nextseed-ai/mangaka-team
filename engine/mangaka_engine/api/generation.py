@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import statistics
 from datetime import UTC, datetime
-from pathlib import PurePosixPath
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import FileResponse
@@ -43,6 +42,7 @@ from ..pipeline.repair import concerned_character, default_repair_prompt, enqueu
 from ..pipeline.sketch import validated_sketch
 from ..pipeline.style_board import STEP as STYLE_BOARD_STEP
 from ..presets import PresetError, PresetRegistry
+from ..store.files import cache_headers, versioned_url
 from ..store.models import (
     Chapter,
     ImageKind,
@@ -88,7 +88,7 @@ MEDIAN_SAMPLE = 20
 
 # --- sorties --------------------------------------------------------------------------
 def image_url(img: PanelImage) -> str:
-    return f"/panel-images/{img.id}/file"
+    return versioned_url(f"/panel-images/{img.id}/file", img.path)
 
 
 def panel_image_out(img: PanelImage, presets: PresetRegistry | None = None) -> PanelImageOut:
@@ -222,22 +222,25 @@ def lock_out(session: Session, presets: PresetRegistry, panel: Panel) -> Composi
     if source in ("croquis", "version") and version is not None:
         label = f"croquis v{version}" if source == "croquis" else f"version {version}"
     image_id = lock.get("image_id")
-    source_url = (
-        f"/panel-images/{image_id}/file" if source != "import" else f"/panels/{panel.id}/composition-lock/source"
-    )
+    if source == "import":
+        imported = lock.get("path")
+        source_url = f"/panels/{panel.id}/composition-lock/source"
+        source_url = versioned_url(source_url, imported) if isinstance(imported, str) else source_url
+    else:
+        held = next((i for i in panel.images if i.id == image_id), None)
+        source_url = image_url(held) if held is not None else f"/panel-images/{image_id}/file"
     raw = lock.get("preview") if isinstance(lock.get("preview"), dict) else {}
     job = session.get(Job, raw["job_id"]) if isinstance(raw.get("job_id"), int) else None
     status = "ready" if raw.get("path") else "none"
     if job is not None and job.status != JobStatus.succeeded:
         status = job.status.value if job.status != JobStatus.pending else "pending"
-    # L'URL est servie « immutable » : elle se versionne par la carte réellement servie (le job qui l'a
-    # produite), jamais par le dernier job demandé, sinon le navigateur garderait l'ancienne carte.
+    # L'URL est servie « immutable » : elle se versionne par la carte réellement servie (son fichier),
+    # jamais par le dernier job demandé, sinon le navigateur garderait l'ancienne carte.
     shown = raw.get("path") if isinstance(raw.get("path"), str) else None
     shown_type = str(raw.get("type")) if shown and raw.get("type") else None
-    version_tag = raw.get("map_job_id") or (PurePosixPath(shown).stem if shown else None)
     preview = ControlPreviewOut(
         status=status,  # type: ignore[arg-type]
-        url=f"/panels/{panel.id}/composition-lock/preview?v={version_tag}" if shown else None,
+        url=versioned_url(f"/panels/{panel.id}/composition-lock/preview", shown) if shown else None,
         type=shown_type,
         type_name=type_names.get(shown_type, shown_type) if shown_type else None,
         job_id=raw.get("job_id"),
@@ -540,7 +543,7 @@ def list_panel_images(
 
 @router.get("/panel-images/{image_id}/file")
 def get_panel_image_file(
-    image_id: int, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
+    image_id: int, v: str | None = None, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
 ) -> FileResponse:
     img = _get_image_or_404(session, image_id)
     path = ctx.files.absolute(img.path)
@@ -551,7 +554,7 @@ def get_panel_image_file(
         ".jpg": "image/jpeg",
         ".webp": "image/webp",
     }.get(path.suffix.lower(), "application/octet-stream")
-    return FileResponse(path, media_type=media_type, headers={"Cache-Control": "private, max-age=31536000, immutable"})
+    return FileResponse(path, media_type=media_type, headers=cache_headers(img.path, v))
 
 
 @router.post("/panel-images/{image_id}/select", response_model=list[PanelImageOut])
