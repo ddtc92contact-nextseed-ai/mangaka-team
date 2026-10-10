@@ -5,6 +5,7 @@ import { useMemo, useState, type ComponentProps } from "react";
 import { HelpLabel, InfoTip } from "@/components/info-tip";
 import { PassageList, formatTokens } from "@/components/knowledge";
 import { useToast } from "@/components/toast";
+import { UnmatchedNames } from "@/components/unmatched-names";
 import { Alert, Button, ButtonLink, Card, EmptyState, Field, Input, Loading, Select, Textarea } from "@/components/ui";
 import {
   api,
@@ -31,6 +32,7 @@ import {
   newPage,
   newPanel,
   toDraft,
+  unmatchedNames,
   type DraftDialogue,
   type DraftPage,
   type DraftPanel,
@@ -126,6 +128,8 @@ export default function ScenarioPage() {
 
   const names = characters.data?.map((c) => c.name) ?? [];
   const panelCount = draft?.reduce((n, p) => n + p.panels.length, 0) ?? 0;
+  // Noms sans fiche dans tout le chapitre (un rattachement vaut pour toutes les cases).
+  const unmatched = [...new Set(draft?.flatMap((p) => p.panels.flatMap(unmatchedNames)) ?? [])];
 
   return (
     <div className="space-y-6">
@@ -215,6 +219,18 @@ export default function ScenarioPage() {
           </EmptyState>
         ) : (
           <div className="space-y-5">
+            <UnmatchedNames
+              chapterId={chapter.id}
+              projectId={chapter.project_id}
+              names={unmatched}
+              characters={characters.data ?? []}
+              onLinked={() => {
+                pages.reload();
+                characters.reload();
+              }}
+              disabled={dirty || running}
+              disabledReason={dirty ? "Enregistre d'abord le découpage : le rattachement relit les cases enregistrées." : undefined}
+            />
             <datalist id="character-names">
               {names.map((n) => (
                 <option key={n} value={n} />
@@ -555,6 +571,7 @@ function PanelEditor({
   onRemove: () => void;
 }) {
   const id = `p${pageIndex}-c${index}`;
+  const missing = unmatchedNames(panel);
   const set = <K extends keyof DraftPanel>(k: K, v: DraftPanel[K]) => onChange({ ...panel, [k]: v });
   const setDialogues = (update: (d: DraftDialogue[]) => DraftDialogue[]) =>
     onChange({ ...panel, dialogues: update(panel.dialogues) });
@@ -587,6 +604,36 @@ function PanelEditor({
             className="min-h-20 text-sm"
             value={panel.description}
             onChange={(e) => set("description", e.target.value)}
+            disabled={disabled}
+          />
+          <div className="flex items-center gap-1.5 pt-1">
+            <label htmlFor={`${id}-setting`} className="text-xs text-zinc-400">
+              Lieu
+            </label>
+            <InfoTip help="scenario.setting" label="Lieu" />
+          </div>
+          <Textarea
+            id={`${id}-setting`}
+            className="min-h-12 text-sm"
+            value={panel.setting}
+            onChange={(e) => set("setting", e.target.value)}
+            placeholder="Clairière au bord d'un lac, fin d'après-midi, herbes hautes, montagnes au loin"
+            maxLength={1500}
+            disabled={disabled}
+          />
+          <div className="flex items-center gap-1.5 pt-1">
+            <label htmlFor={`${id}-staging`} className="text-xs text-zinc-400">
+              Mise en scène
+            </label>
+            <InfoTip help="scenario.staging" label="Mise en scène" />
+          </div>
+          <Textarea
+            id={`${id}-staging`}
+            className="min-h-12 text-sm"
+            value={panel.staging}
+            onChange={(e) => set("staging", e.target.value)}
+            placeholder="Urus au premier plan à gauche, ailes déployées ; Kael sur un rocher à droite, le regarde"
+            maxLength={1500}
             disabled={disabled}
           />
         </div>
@@ -660,16 +707,25 @@ function PanelEditor({
             </Select>
           </div>
           <div className="space-y-1">
-            <label htmlFor={`${id}-chars`} className="text-xs text-zinc-400">
-              Personnages (séparés par des virgules)
-            </label>
+            <div className="flex items-center gap-1.5">
+              <label htmlFor={`${id}-chars`} className="text-xs text-zinc-400">
+                Personnages (séparés par des virgules)
+              </label>
+              <InfoTip help="scenario.characters" label="Personnages" />
+            </div>
             <Input
               id={`${id}-chars`}
               className="py-1.5"
               value={panel.charactersText}
               onChange={(e) => set("charactersText", e.target.value)}
+              aria-describedby={missing.length ? `${id}-missing` : undefined}
               disabled={disabled}
             />
+            {missing.length > 0 && (
+              <p id={`${id}-missing`} className="text-xs text-amber-300" data-testid="panel-unmatched">
+                ⚠ Sans fiche : {missing.map((n) => `« ${n} »`).join(", ")} — à rattacher en haut du découpage.
+              </p>
+            )}
           </div>
           <div className="space-y-1">
             <label htmlFor={`${id}-decor`} className="text-xs text-zinc-400">

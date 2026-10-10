@@ -8,6 +8,7 @@ import { DpiBadge } from "@/components/print-dpi";
 import { ProductionLink } from "@/components/production-link";
 import { useQueue } from "@/components/queue";
 import { useToast } from "@/components/toast";
+import { UnmatchedNames } from "@/components/unmatched-names";
 import { Alert, Button, Field, Input, Loading, ProgressBar, Select, Textarea } from "@/components/ui";
 import {
   api,
@@ -62,7 +63,9 @@ export function PanelInspector({
   // Verrouillage de composition disponible dans ComfyUI ? (nœud et fichier du patch ControlNet)
   const control = useEngineData(() => api.controlStatus());
   const { refresh, cancel } = useQueue();
-  const { series } = useChapter();
+  const { series, chapter } = useChapter();
+  // Fiches de la série : rattacher un nom de personnage sans fiche.
+  const characters = useEngineData(() => api.listCharacters(chapter.project_id), [chapter.project_id]);
   const toast = useToast();
   // Prompt en cours d'édition (null = pas touché), rattaché à la case pour repartir à zéro en changeant de case.
   const [draftState, setDraft] = useState<{ panelId: number; text: string } | null>(null);
@@ -271,11 +274,21 @@ export function PanelInspector({
             <div className="flex flex-wrap gap-1.5 text-xs">
               {d.shot_type && <span className="rounded bg-zinc-800 px-2 py-0.5 text-zinc-300">Plan : {d.shot_type}</span>}
               {d.characters.length ? (
-                d.characters.map((c) => (
-                  <span key={c} className="rounded bg-violet-500/15 px-2 py-0.5 text-violet-200">
-                    {c}
-                  </span>
-                ))
+                d.characters.map((c) =>
+                  d.unmatched_characters.includes(c) ? (
+                    <span
+                      key={c}
+                      className="rounded bg-amber-500/20 px-2 py-0.5 text-amber-200"
+                      title="Aucune fiche personnage : ni référence, ni description, ni LoRA"
+                    >
+                      ⚠ {c}
+                    </span>
+                  ) : (
+                    <span key={c} className="rounded bg-violet-500/15 px-2 py-0.5 text-violet-200">
+                      {c}
+                    </span>
+                  ),
+                )
               ) : (
                 <span className="text-zinc-500">Aucun personnage</span>
               )}
@@ -290,6 +303,33 @@ export function PanelInspector({
                 </span>
               ))}
             </div>
+            {(d.setting || d.staging) && (
+              <dl className="space-y-1 text-xs" data-testid="panel-scene">
+                {d.setting && (
+                  <div>
+                    <dt className="inline text-zinc-500">Lieu : </dt>
+                    <dd className="inline text-zinc-300">{d.setting}</dd>
+                  </div>
+                )}
+                {d.staging && (
+                  <div>
+                    <dt className="inline text-zinc-500">Mise en scène : </dt>
+                    <dd className="inline text-zinc-300">{d.staging}</dd>
+                  </div>
+                )}
+              </dl>
+            )}
+            <UnmatchedNames
+              chapterId={d.chapter_id}
+              projectId={d.project_id}
+              names={d.unmatched_characters}
+              characters={characters.data ?? []}
+              onLinked={() => {
+                detail.reload();
+                characters.reload();
+                onChanged();
+              }}
+            />
             {refsImage && <UsedReferences image={refsImage} />}
           </div>
 

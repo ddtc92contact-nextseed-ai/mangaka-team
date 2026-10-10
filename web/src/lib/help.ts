@@ -81,6 +81,14 @@ export const HELP = {
     "Chaque réplique devient une bulle au lettrage. Le type change sa forme : parole, pensée, cri, hors champ (personnage hors de la case) ou récitatif (narration dans un cartouche).",
   "scenario.objets":
     "Les objets récurrents de la bibliothèque visibles dans la case : leur description et leurs références sont jointes à la génération pour qu'ils restent identiques.",
+  "scenario.setting":
+    "Où et quand se passe la case : lieu, moment (heure, météo) et éléments visibles du décor. Il devient « Lieu : … » dans le prompt image, même sans décor récurrent : sans lui, le modèle dessine souvent un fond blanc.",
+  "scenario.staging":
+    "Qui fait quoi et où dans le cadre : premier plan, arrière-plan, gauche, droite, regards et gestes entre personnages. Il devient « Mise en scène : … » dans le prompt image.",
+  "scenario.characters":
+    "Tous les personnages visibles dans la case, séparés par des virgules. Chaque nom est rapproché d'une fiche (majuscules, accents et alias ignorés, « Urus le dragon » → Urus) : ses références, sa description et son LoRA servent à la génération.",
+  "scenario.unmatched":
+    "Ces noms ne correspondent à aucune fiche personnage : la case serait générée sans leurs références ni leur description. Rattache chaque nom à la bonne fiche (il devient un alias, reconnu partout dans la série) ou écarte-le si c'est un figurant.",
 
   // --- chapitre : mise en page, croquis, atelier, lettrage, production, QC --------------------------------------
   // lettrage

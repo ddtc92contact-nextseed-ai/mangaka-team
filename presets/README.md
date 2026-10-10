@@ -368,7 +368,7 @@ style_board:
     - "Style : $style."
   negative_prompt: "texte, bulles"   # ajouté au négatif du workflow
   reference_sheets: with_subject  # with_subject | always | never : voir ci-dessous
-  panels: free_slot         # free_slot | never : jointe à une case s'il reste un emplacement libre
+  panels: with_subject      # with_subject | free_slot | never : voir « Cases » ci-dessous
 ```
 
 - **Fiches de référence** (`reference_sheets`) :
@@ -386,9 +386,12 @@ style_board:
   Quand elle est jointe, le morceau `$style_ref` des types de fiche dit son rôle : référence de
   style uniquement (trait, trames, encrage), sans reprendre son personnage, sa scène ni sa
   composition.
-- **Cases** (`free_slot`) : priorité inchangée — personnages > décor > objets > **style**. La
-  référence de style ne prend qu'un emplacement resté libre une fois toutes les images des fiches
-  servies ; une case sans aucune référence passe donc au workflow « avec références » de son palier.
+- **Cases** : priorité inchangée — personnages > décor > objets > **style**. La référence de style ne
+  prend qu'un emplacement resté libre une fois toutes les images des fiches servies.
+  `with_subject` (livré) : **jamais seule** — une case sans image de personnage, de décor ni d'objet
+  passe par le workflow texte de son palier, sans référence de style (avec une seule image, le modèle
+  d'édition la redessinait telle quelle). `free_slot` : jointe même seule (la case passe alors au
+  workflow « avec références »). `never` : jamais.
 - Sans planche de style (ou sans bloc `style_board`), les graphes envoyés à ComfyUI sont exactement
   ceux d'avant.
 
@@ -740,6 +743,11 @@ reference_images:
   objets. Les emplacements se remplissent par tours : 1re image de chaque fiche dans cet ordre, puis
   2e image de chacune, etc. Exemple à 3 emplacements avec Aiko (2 images), le labo (2 images) et le
   robot (1 image) : Aiko n° 1, labo n° 1, robot n° 1 ; sans le robot : Aiko n° 1, labo n° 1, Aiko n° 2.
+  `panel_references` de `defaults.yaml` : `principale` (livré) = un seul tour, l'**image principale**
+  de chaque fiche (la 1re de sa galerie, à choisir parmi ses vues simples : une planche multi-poses
+  est recopiée telle quelle par le modèle) ; `toutes` = tours successifs comme ci-dessus.
+  Le prompt envoyé nomme chaque image dans l'ordre des emplacements (`references` de
+  `image_prompt.yaml`, voir « Prompt final des cases »).
   Les emplacements retenus sont notés sur le job (`params.references` : emplacement, sorte, fiche,
   image) et sur la version produite (`params.reference_images`) : l'atelier les affiche
   (« Références utilisées »).
@@ -995,7 +1003,9 @@ negative_prompt: "personnage"    # ajouté au négatif du workflow (les termes �
 `parts` est une liste de morceaux `string.Template` assemblés dans l'ordre (`$plan` = plan de la
 direction artistique appliquée, sinon celui du scénario, `$angle` et `$ambiance` de la direction
 artistique, `$shot` = plan du scénario,
-`$description`, `$characters`, `$decor` et `$objects` = décor et objets de la bibliothèque cités par la
+`$description`, `$setting` (lieu de la case donné par le scénario : lieu, moment, éléments du décor —
+présent même sans décor de la bibliothèque), `$staging` (mise en scène : qui fait quoi, où dans le
+cadre), `$character_count` (« Un personnage », « Deux personnages »…), `$characters`, `$decor` et `$objects` = décor et objets de la bibliothèque cités par la
 case (présentés comme les personnages), `$style` (packs de style, voir « Packs de style »), `$bible` = notes de la bible sur les personnages de la
 case, `$savoir_faire` = passages du savoir-faire de l'agent `image_prompt`) ; un morceau dont une
 variable est vide est omis.
@@ -1004,6 +1014,25 @@ variable est vide est omis.
 lettrage, jamais dessiné par le modèle) et `strip_quotes` retire les répliques entre guillemets
 de la description. Le prompt est stocké sur la case ; une édition manuelle est conservée jusqu'à
 « reconstruire le prompt ».
+
+`references` cadre les images de référence dans le prompt **envoyé** à un workflow avec références
+(au moment de la génération, le prompt stocké sur la case ne change pas ; la version garde les deux :
+`params.prompt` envoyé, `params.panel_prompt` de la case) :
+
+```yaml
+references:
+  character: "Image $slot : référence d'identité de $name"   # une ligne par image, dans l'ordre des emplacements
+  decor: "Image $slot : référence du lieu $name"
+  object: "Image $slot : référence de l'objet $name"
+  style: "Image $slot : référence de style seulement (…)"
+  separator: " ; "
+  before: ["$images."]          # avant le prompt de la case ($images : les lignes, $count : nombre d'images)
+  after: ["Les images de référence ne servent qu'à l'identité et au design (…) : dessiner une scène nouvelle (…)"]
+```
+
+Exemple (deux personnages, une image principale chacun) : « Image 1 : référence d'identité de Urus ;
+Image 2 : référence d'identité de Kaël. Plan large. … Lieu : … Mise en scène : … Deux personnages : Urus
+(…) ; Kaël (…). Style : … Les images de référence ne servent qu'à l'identité … ni leur fond blanc. »
 
 ## Lettrage (étape 5)
 

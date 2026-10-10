@@ -293,7 +293,12 @@ function ActiveReference({ reference: ref, board }: { reference: StyleReference;
       : board.use_reference_sheets === "with_subject"
         ? "aux fiches de référence après leur image de départ ou la variante à affiner (pour le trait seulement)"
         : null;
-  const panels = board.use_panels === "free_slot" ? "aux cases s’il reste une place parmi leurs images de référence" : null;
+  const panels =
+    board.use_panels === "free_slot"
+      ? "aux cases s’il reste une place parmi leurs images de référence"
+      : board.use_panels === "with_subject"
+        ? "aux cases qui ont déjà une image de référence (personnage, décor ou objet), s’il reste une place — jamais seule"
+        : null;
   const uses = [sheets, panels].filter(Boolean).join(", ");
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-emerald-700/50 bg-emerald-950/20 p-3 sm:flex-row" data-testid="style-reference-active">
