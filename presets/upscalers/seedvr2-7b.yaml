@@ -1,0 +1,20 @@
+# Finition d'impression — option « haute fidélité » : SeedVR2 7B (nœuds SeedVR2 natifs de ComfyUI).
+# Graphe repris du workflow de la GX10 « Upscale planche - SeedVR2 7B » : l'image est d'abord portée à
+# la taille finale (lanczos), puis restaurée par SeedVR2 en une étape. Bien plus lent que les ESRGAN :
+# jamais par défaut, à choisir par série. Fichiers : diffusion_models/seedvr2_7b_int8_convrot.safetensors,
+# vae/seedvr2_ema_vae_fp16.safetensors (déjà sur la GX10).
+id: seedvr2-7b
+name: SeedVR2 7B — haute fidélité
+description: >-
+  Haute fidélité : restauration par diffusion (une étape) à la taille finale. Plus fin que les ESRGAN mais
+  nettement plus lent et gourmand en mémoire.
+workflow_file: seedvr2-7b.json
+output_node: "12"
+high_fidelity: true
+timeout_s: 1200
+estimated_s: 90
+mapping:
+  image: { node: "1", input: image }
+  width: { node: "3", input: width }
+  height: { node: "3", input: height }
+  filename_prefix: { node: "12", input: filename_prefix }

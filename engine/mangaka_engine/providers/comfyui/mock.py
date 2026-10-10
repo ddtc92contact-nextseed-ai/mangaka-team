@@ -3,6 +3,10 @@
 Renvoie une image à la taille demandée, avec le libellé de la case (dernier segment du
 `filename_prefix` du nœud SaveImage, ex. « case 3 ») et la seed dessinés dessus ; simule une
 progression par étapes ; vérifie que les images de référence des `LoadImage` ont été envoyées.
+
+Agrandissement (finition d'impression) : un workflow sans latent vide (`Empty…`) qui charge une image
+envoyée renvoie cette image redimensionnée (Pillow, lanczos) à la taille demandée — celle du nœud de
+taille finale — sans GPU ni modèle.
 """
 
 from __future__ import annotations
@@ -66,6 +70,27 @@ def _label(workflow: dict[str, Any]) -> str:
             last = prefix.rstrip("/").rsplit("/", 1)[-1]
             return last.replace("-", " ").replace("_", " ").strip()
     return ""
+
+
+def source_upload(workflow: dict[str, Any], uploads: dict[str, bytes]) -> bytes | None:
+    """Image envoyée d'un workflow image → image (agrandissement) ; None pour une génération."""
+    nodes = [n for n in workflow.values() if isinstance(n, dict)]
+    if any(str(n.get("class_type") or "").startswith("Empty") for n in nodes):
+        return None
+    for node in nodes:
+        if node.get("class_type") == "LoadImage":
+            image = node.get("inputs", {}).get("image")
+            if image in uploads:
+                return uploads[image]
+    return None
+
+
+def resize_image(data: bytes, width: int, height: int) -> bytes:
+    with Image.open(io.BytesIO(data)) as src:
+        out = src.convert("RGB").resize((width, height), Image.Resampling.LANCZOS)
+    buf = io.BytesIO()
+    out.save(buf, format="PNG")
+    return buf.getvalue()
 
 
 def _font(size: int) -> ImageFont.ImageFont | ImageFont.FreeTypeFont:
@@ -170,7 +195,12 @@ class MockComfyUIClient:
         self.prompts[prompt_id] = workflow
         width, height = requested_size(workflow)
         filename = f"mock_{prompt_id}.png"
-        self._images[filename] = render_mock_image(width, height, _first_int(workflow, "seed") or 0, _label(workflow))
+        source = source_upload(workflow, self.uploads)
+        self._images[filename] = (
+            resize_image(source, width, height)
+            if source is not None
+            else render_mock_image(width, height, _first_int(workflow, "seed") or 0, _label(workflow))
+        )
         output_nodes = [k for k, n in workflow.items() if isinstance(n, dict) and n.get("class_type") == "SaveImage"]
         outputs = {
             node: {"images": [{"filename": filename, "subfolder": "", "type": "output"}]}

@@ -16,6 +16,7 @@
 - 10 : mots déclencheurs des LoRA (style de la série, identité des personnages).
 - 11 : bibliothèque de la série (objets et décors récurrents + images de référence ; décor et objets
   de chaque case). Les données existantes ne changent pas : les cases n'ont ni décor ni objet.
+- 12 : finition d'impression (image agrandie dérivée d'une version, agrandisseur choisi par série).
 
 Une base neuve est créée directement à la dernière version. Chaque migration tourne dans une
 transaction unique, clés étrangères désactivées (recette « 12 étapes » de SQLite pour reconstruire
@@ -51,7 +52,7 @@ from .models import (
 
 log = logging.getLogger("mangaka_engine")
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 
 class MigrationError(RuntimeError):
@@ -213,6 +214,11 @@ def _v10_to_v11(cur: sqlite3.Cursor) -> None:
     cur.execute("ALTER TABLE panels ADD COLUMN object_ids JSON NOT NULL DEFAULT '[]'")
 
 
+def _v11_to_v12(cur: sqlite3.Cursor) -> None:
+    cur.execute("ALTER TABLE panel_images ADD COLUMN finish JSON")
+    cur.execute("ALTER TABLE projects ADD COLUMN upscaler VARCHAR(100)")
+
+
 MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     # version de départ → (version d'arrivée, fonction)
     0: (2, _v0_to_v2),
@@ -226,6 +232,7 @@ MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     8: (9, _v8_to_v9),
     9: (10, _v9_to_v10),
     10: (11, _v10_to_v11),
+    11: (12, _v11_to_v12),
 }
 
 
