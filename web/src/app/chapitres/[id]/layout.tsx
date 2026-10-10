@@ -33,6 +33,7 @@ export default function ChapterLayout({ children }: { children: ReactNode }) {
     { href: `/chapitres/${id}/mise-en-page`, label: "Mise en page" },
     { href: `/chapitres/${id}/atelier`, label: "Atelier" },
     { href: `/chapitres/${id}/lettrage`, label: "Lettrage" },
+    { href: `/chapitres/${id}/production`, label: "Production" },
   ];
 
   return (
@@ -52,7 +53,7 @@ export default function ChapterLayout({ children }: { children: ReactNode }) {
           </span>
         }
       />
-      <nav className="mb-6 flex gap-1 border-b border-zinc-800" aria-label="Étapes du chapitre">
+      <nav className="mb-6 flex flex-wrap gap-1 border-b border-zinc-800" aria-label="Étapes du chapitre">
         {tabs.map((t) => {
           const active = pathname === t.href;
           return (

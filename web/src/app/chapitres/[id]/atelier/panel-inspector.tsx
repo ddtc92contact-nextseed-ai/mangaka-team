@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { AnnotationBar } from "@/components/annotation";
+import { ProductionLink } from "@/components/production-link";
 import { useQueue } from "@/components/queue";
 import { Alert, Button, Field, Input, Loading, ProgressBar, Select, Textarea } from "@/components/ui";
 import {
@@ -53,6 +54,8 @@ export function PanelInspector({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // La dernière action a mis une génération en file : lien « Voir la production ».
+  const [generated, setGenerated] = useState(false);
 
   const running = view?.running ?? null;
   const live = useJob(running?.job ?? null);
@@ -69,6 +72,7 @@ export function PanelInspector({
     setBusy(true);
     setError(null);
     setNotice(null);
+    setGenerated(false);
     try {
       await action();
     } catch (e) {
@@ -88,6 +92,7 @@ export function PanelInspector({
       refresh();
       onChanged();
       detail.reload();
+      setGenerated(true);
       setNotice(
         jobs.length > 1 ? `${jobs.length} variantes mises en file.` : "Génération mise en file.",
       );
@@ -101,6 +106,7 @@ export function PanelInspector({
       refresh();
       onChanged();
       detail.reload();
+      setGenerated(true);
       setNotice("Nouvelle version en Qualité mise en file (même prompt, nouvelle seed) : les autres versions ne bougent pas.");
     });
 
@@ -342,7 +348,17 @@ export function PanelInspector({
           </div>
 
           {error && <Alert>{error}</Alert>}
-          {notice && !error && <Alert tone="info">{notice}</Alert>}
+          {notice && !error && (
+            <Alert tone="info">
+              {notice}
+              {generated && (
+                <>
+                  {" "}
+                  <ProductionLink chapterId={d.chapter_id} pageId={d.page_id} />
+                </>
+              )}
+            </Alert>
+          )}
 
           <div className="flex flex-wrap gap-2">
             <Button onClick={() => generate()} disabled={busy || Boolean(seedError)} data-testid="generate-panel">

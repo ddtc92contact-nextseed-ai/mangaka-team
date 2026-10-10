@@ -545,6 +545,8 @@ export interface QueueItem {
   project_id: number | null;
   series_title: string | null;
   preset: string | null;
+  /** Palier du preset (« Turbo », « Rapide », « Qualité »). */
+  tier?: string | null;
   variant: number | null;
   count: number | null;
   estimated_duration_s: number | null;
@@ -671,9 +673,26 @@ export interface Health {
     "llm" | "vision" | "comfyui" | "detectors" | "identity" | "embedding",
     { name: string | null; ok: boolean; detail: string | null }
   >;
+  /** Fournisseurs actifs (badge de l'en-tête) ; absent d'un moteur plus ancien. */
+  active?: ActiveProviders;
   mock: boolean;
   presets: { page_formats: number; workflows: number; issues: number };
 }
+
+/** Un fournisseur actif : nom, mode simulé et variable `.env` qui le choisit (jamais la clé). */
+export interface ActiveProvider {
+  name: string;
+  label: string;
+  mock: boolean;
+  ok: boolean;
+  detail: string | null;
+  env: string;
+  key_env: string | null;
+  key_set: boolean | null;
+  url?: string;
+}
+
+export type ActiveProviders = Record<"llm" | "vision" | "comfyui", ActiveProvider>;
 
 export interface Presets {
   defaults: {
