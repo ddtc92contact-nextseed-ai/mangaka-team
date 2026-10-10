@@ -26,6 +26,7 @@ def project_out(project: Project, character_count: int, chapter_count: int, laid
         workflow_preset=project.workflow_preset,
         style_lora_name=project.style_lora_name,
         style_lora_weight=project.style_lora_weight,
+        style_lora_trigger_words=project.style_lora_trigger_words or "",
         layout_style=project.layout_style,
         character_count=character_count,
         chapter_count=chapter_count,
@@ -101,6 +102,7 @@ def create_project(
         workflow_preset=workflow,
         style_lora_name=body.style_lora_name or None,
         style_lora_weight=body.style_lora_weight,
+        style_lora_trigger_words=body.style_lora_trigger_words,
         layout_style=layout_style,
     )
     session.add(project)
@@ -141,6 +143,8 @@ def update_project(
         changes["status"] = SeriesStatus(changes["status"])
     if "style_lora_name" in changes:
         changes["style_lora_name"] = changes["style_lora_name"] or None
+    if "style_lora_trigger_words" in changes:
+        changes["style_lora_trigger_words"] = changes["style_lora_trigger_words"] or ""
     for key, value in changes.items():
         setattr(project, key, value)
     if direction is not None:

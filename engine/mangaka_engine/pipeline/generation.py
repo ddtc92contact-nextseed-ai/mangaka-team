@@ -98,6 +98,19 @@ def panel_knowledge(
         return "", ""
 
 
+def split_trigger_words(raw: str | None) -> tuple[str, ...]:
+    """Mots déclencheurs d'un LoRA (« aiko_v1, red kimono ») → mots-clés de prompt."""
+    return tuple(w.strip() for w in (raw or "").split(",") if w.strip())
+
+
+def style_with_triggers(style: str, triggers: str | None) -> str:
+    """Mots déclencheurs du LoRA de style en tête du style de la série."""
+    words = split_trigger_words(triggers)
+    if not words:
+        return style
+    return ", ".join([*words, style.strip()]) if style.strip() else ", ".join(words)
+
+
 def build_panel_prompt(
     presets: PresetRegistry,
     panel: Panel,
@@ -113,8 +126,15 @@ def build_panel_prompt(
         plan=da.get("plan"),
         angle=da.get("angle"),
         ambiance=da.get("ambiance"),
-        characters=[PromptCharacter(c.name, c.visual_description, tuple(c.prompt_keywords or [])) for c in characters],
-        style=series.style,
+        characters=[
+            PromptCharacter(
+                c.name,
+                c.visual_description,
+                (*(c.prompt_keywords or []), *(split_trigger_words(c.lora_trigger_words) if c.lora_name else ())),
+            )
+            for c in characters
+        ],
+        style=style_with_triggers(series.style, series.style_lora_trigger_words if series.style_lora_name else ""),
         savoir_faire=savoir_faire,
         bible=bible,
         settings=presets.image_prompt,

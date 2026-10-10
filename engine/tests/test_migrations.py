@@ -62,7 +62,13 @@ def _version(path: Path) -> int:
     return v
 
 
+def _drop_v10_columns(con: sqlite3.Connection) -> None:
+    con.execute("ALTER TABLE projects DROP COLUMN style_lora_trigger_words")
+    con.execute("ALTER TABLE characters DROP COLUMN lora_trigger_words")
+
+
 def _drop_v9_columns(con: sqlite3.Connection) -> None:
+    _drop_v10_columns(con)
     con.execute("ALTER TABLE panels DROP COLUMN frame")
     con.execute("ALTER TABLE bubbles DROP COLUMN sfx")
 
