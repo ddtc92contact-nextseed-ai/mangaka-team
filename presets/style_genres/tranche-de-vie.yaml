@@ -7,6 +7,9 @@ prompt_keywords: [slice of life manga style, everyday settings, natural relaxed 
 layout_style: sage
 reading_direction: rtl
 fonts: { dialogue: baloo2, shout: lilita-one }
+# Planche de style : scène test des essais (français, aucun personnage de la série).
+scene_test: >-
+  une jeune femme anonyme prépare un thé dans une petite cuisine baignée de soleil, plantes vertes et vaisselle dépareillée
 llm_guidelines: >-
   Tranche de vie, tout public : rythme lent et contemplatif, 5 à 7 cases par page, cases de décor et
   de détails du quotidien entre les dialogues. Dialogues naturels du quotidien, vocabulaire courant ;

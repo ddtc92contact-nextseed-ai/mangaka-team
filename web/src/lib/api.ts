@@ -1057,6 +1057,57 @@ export interface ReferenceStudio {
   reference_slots: number;
 }
 
+/** Essai de la planche de style (palier croquis). */
+export interface StyleTrial {
+  id: number;
+  url: string;
+  /** Numéro de la série d'essais (« Relancer » en crée une nouvelle). */
+  batch: number | null;
+  variant: number | null;
+  count: number | null;
+  seed: Seed | null;
+  width: number;
+  height: number;
+  prompt: string;
+  preset: string | null;
+  /** Passé au propre : devenu une référence de style. */
+  chosen: boolean;
+  created_at: string;
+}
+
+/** Référence de style de la série (essai retenu passé au propre). */
+export interface StyleReference {
+  id: number;
+  name: string;
+  url: string;
+  width: number;
+  height: number;
+  active: boolean;
+  /** `$style` de la série au moment des essais. */
+  style: string;
+  /** Le style de la série a changé depuis. */
+  outdated: boolean;
+  trial_id: number | null;
+  created_at: string;
+}
+
+export interface StyleBoard {
+  configured: boolean;
+  /** Pourquoi les essais sont impossibles (genre non choisi…), sinon null. */
+  problem: string | null;
+  scene_test: string | null;
+  style: string;
+  style_names: string;
+  trials_per_batch: number;
+  use_reference_sheets: "always" | "never" | null;
+  use_panels: "free_slot" | "never" | null;
+  active: StyleReference | null;
+  history: StyleReference[];
+  /** Plus récents d'abord. */
+  trials: StyleTrial[];
+  active_jobs: Job[];
+}
+
 export interface ReferenceGenerateInput {
   sheet: string;
   count?: number;
@@ -1749,6 +1800,12 @@ export const api = {
     request<LibraryEntry>(`/reference-variants/${variantId}/keep`, { method: "POST" }),
   deleteReferenceVariant: (variantId: number) =>
     request<void>(`/reference-variants/${variantId}`, { method: "DELETE" }),
+  styleBoard: (projectId: number) => request<StyleBoard>(`/projects/${projectId}/style-board`),
+  generateStyleTrials: (projectId: number) =>
+    request<Job[]>(`/projects/${projectId}/style-board/trials`, { method: "POST" }),
+  chooseStyleTrial: (trialId: number) => request<Job>(`/style-trials/${trialId}/choose`, { method: "POST" }),
+  activateStyleReference: (assetId: number) =>
+    request<StyleBoard>(`/style-references/${assetId}/activate`, { method: "POST" }),
   listCharacters: (projectId: number) => request<Character[]>(`/projects/${projectId}/characters`),
 
   listChapters: (projectId: number) => request<Chapter[]>(`/projects/${projectId}/chapters`),

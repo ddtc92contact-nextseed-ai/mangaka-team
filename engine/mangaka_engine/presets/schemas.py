@@ -404,6 +404,45 @@ class Defaults(_Strict):
     finishing_tolerance: float = Field(default=0.9, gt=0, le=1)
     # Preset de réparation ciblée pour un workflow qui ne déclare pas `inpaint_with`.
     workflow_inpaint: str | None = None
+    # Planche de style de la série (essais, référence de style) ; absent = pas de planche de style.
+    style_board: StyleBoardSettings | None = None
+
+
+STYLE_BOARD_VARIABLES = {"scene", "style"}
+
+
+class StyleBoardSettings(_Strict):
+    """Planche de style (`style_board` de defaults.yaml) : essais au palier croquis d'une scène test du
+    genre, puis l'essai retenu passe au propre et devient la référence de style de la série.
+
+    `prompt` : morceaux assemblés dans l'ordre ($scene : `scene_test` du genre, $style : `$style` de la
+    série) ; un morceau dont une variable est vide est omis. `width`/`height` : taille du propre (le
+    croquis garde ce ratio, au `long_side` du palier croquis).
+    """
+
+    trials: int = Field(ge=1, le=4, description="Essais par demande")
+    width: int = Field(ge=256, le=2048, multiple_of=16)
+    height: int = Field(ge=256, le=2048, multiple_of=16)
+    prompt: list[str] = Field(min_length=1)
+    negative_prompt: str = Field(default="", description="Ajouté au prompt négatif du workflow")
+    # Fiches de référence (personnages, objets, décors) : `always` = la référence de style est jointe.
+    reference_sheets: Literal["always", "never"]
+    # Cases : `free_slot` = jointe s'il reste un emplacement après les personnages, le décor et les objets.
+    panels: Literal["free_slot", "never"]
+
+    @field_validator("prompt")
+    @classmethod
+    def _check_prompt(cls, value: list[str]) -> list[str]:
+        for part in value:
+            tpl = string.Template(part)
+            if not tpl.is_valid():
+                raise ValueError("gabarit invalide : un « $ » isolé doit s'écrire « $$ »")
+            unknown = set(tpl.get_identifiers()) - STYLE_BOARD_VARIABLES
+            if unknown:
+                raise ValueError(f"variables inconnues : {', '.join(sorted(unknown))}")
+        if not any("scene" in string.Template(p).get_identifiers() for p in value):
+            raise ValueError("le prompt doit contenir $scene (scène test du genre)")
+        return value
 
 
 # --- Découpage (étape 2) ------------------------------------------------------
@@ -695,6 +734,9 @@ class StyleGenre(StylePack):
     # Absent : tous les tons. Sinon, seuls ceux-ci (ex. « jeunesse » exclut « dark »).
     allowed_tones: list[str] | None = None
     style_lora: str | None = Field(default=None, description="LoRA conseillé (fichier du catalogue style_loras.yaml)")
+    scene_test: str = Field(
+        min_length=1, description="Scène test de la planche de style (français, sans personnage de la série)"
+    )
 
 
 class StyleRendering(StylePack):

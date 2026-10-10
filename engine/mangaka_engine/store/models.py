@@ -1,7 +1,8 @@
 """Modèle de données SQLite (SQLAlchemy 2).
 
 Série (`Project`) → Character (+ images de référence)
-Série → SeriesAsset : objets et décors récurrents de la bibliothèque (+ images de référence)
+Série → SeriesAsset : objets et décors récurrents de la bibliothèque (+ images de référence), et
+références de style de la planche de style (`kind = style` : une seule active, les autres en historique)
 Série → ReferenceVariant : images générées par « Créer des références » d'une fiche, gardées ou non
 Série → Chapter → Page → Panel (+ versions d'image → annotation humaine) → Bubble · Job.
 Banc d'essai du QC : `QCBenchRun` (historique des mesures du QC sur les cases annotées).
@@ -203,10 +204,15 @@ class CharacterImage(Base):
 class AssetKind(enum.StrEnum):
     object = "object"  # objet récurrent : un robot, une épée, une voiture…
     decor = "decor"  # décor récurrent : la salle de classe, le labo, la rue…
+    style = "style"  # référence de style de la planche de style (une seule active par série)
 
 
 class SeriesAsset(TimestampMixin, Base):
-    """Objet ou décor récurrent de la bibliothèque d'une série (mêmes champs qu'un personnage)."""
+    """Objet ou décor récurrent de la bibliothèque d'une série (mêmes champs qu'un personnage).
+
+    Une référence de style (`kind = style`) a une seule image : l'essai de la planche de style passé au
+    propre ; `visual_description` garde le `$style` de la série au moment des essais.
+    """
 
     __tablename__ = "series_assets"
 
@@ -219,6 +225,8 @@ class SeriesAsset(TimestampMixin, Base):
     lora_name: Mapped[str | None] = mapped_column(String(255), default=None)
     lora_weight: Mapped[float] = mapped_column(Float, default=0.8)
     lora_trigger_words: Mapped[str] = mapped_column(Text, default="")  # ajoutés au prompt avec le LoRA
+    # Référence de style : la référence active de la série (les autres restent dans l'historique).
+    active: Mapped[bool] = mapped_column(default=True)
 
     project: Mapped[Project] = relationship(back_populates="assets")
     reference_images: Mapped[list[SeriesAssetImage]] = relationship(
@@ -260,7 +268,8 @@ class ReferenceVariant(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
-    entry_kind: Mapped[str] = mapped_column(String(20))  # character | object | decor
+    # character | object | decor ; `style` : essai de la planche de style (entry_id = id de la série).
+    entry_kind: Mapped[str] = mapped_column(String(20))
     entry_id: Mapped[int] = mapped_column(Integer, index=True)
     job_id: Mapped[int | None] = mapped_column(ForeignKey("jobs.id", ondelete="SET NULL"), default=None)
     sheet: Mapped[str] = mapped_column(String(100))  # presets/reference_sheets/

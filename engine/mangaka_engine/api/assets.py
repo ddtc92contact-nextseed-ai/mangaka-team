@@ -190,5 +190,5 @@ def _router(kind: AssetKind) -> APIRouter:
 
 
 router = APIRouter()
-for _kind in AssetKind:
+for _kind in ROUTES:  # références de style : api/style_board.py
     router.include_router(_router(_kind))

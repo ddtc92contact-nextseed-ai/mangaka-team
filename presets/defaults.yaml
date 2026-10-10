@@ -22,3 +22,23 @@ upscaler: realesrgan-x4plus-anime-6b
 finishing_tolerance: 0.9
 # Réparation ciblée (atelier) pour un workflow qui ne déclare pas `inpaint_with` (preset avec bloc `inpaint`).
 workflow_inpaint: qwen-image-inpaint-turbo
+# Planche de style (fiche série) : essais au palier croquis (`workflow_sketch`) de la scène test du genre
+# (`scene_test` de presets/style_genres/), avec le `$style` de la série et une graine par essai.
+# L'essai retenu passe au propre (`from_sketch` du palier de la série) et devient la référence de style.
+style_board:
+  trials: 4
+  # Taille du propre ; le croquis garde ce ratio (grand côté : `long_side` du palier croquis).
+  width: 1024
+  height: 1024
+  # Morceaux assemblés dans l'ordre ; un morceau dont une variable est vide est omis.
+  # Variables : $scene (scène test du genre), $style (style de la série).
+  prompt:
+    - "Planche de style, scène test : $scene."
+    - "Style : $style."
+    - "Une seule illustration pleine page, aucun texte, aucune bulle."
+  negative_prompt: "texte, lettres, bulles, cases multiples"
+  # Référence de style validée — fiches de référence (personnages, objets, décors) : always | never.
+  reference_sheets: always
+  # Cases : free_slot = jointe s'il reste un emplacement libre parmi les images de référence du
+  # workflow (priorité : personnages > décor > objets > style) ; never = jamais.
+  panels: free_slot

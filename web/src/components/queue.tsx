@@ -132,10 +132,11 @@ function itemTitle(item: QueueItem): string {
   return variant ? `${item.label} · ${variant}` : item.label;
 }
 
-/** « Créer des références » : lien vers la fiche de la bibliothèque concernée. */
+/** « Créer des références » : lien vers la fiche de la bibliothèque ; planche de style : vers la fiche série. */
 function referenceHref(item: QueueItem): string | null {
   const params = item.job.params ?? {};
   const kind = params.entry_kind;
+  if (item.job.step === "style_board" && item.project_id !== null) return `/projets/${item.project_id}#planche-de-style`;
   if (item.job.step !== "reference" || typeof params.entry_id !== "number") return null;
   return kind === "character" || kind === "object" || kind === "decor" ? entryHref(kind, params.entry_id) : null;
 }

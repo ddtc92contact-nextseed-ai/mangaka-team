@@ -7,6 +7,9 @@ prompt_keywords: [shojo manga style, delicate linework, large expressive sparkli
 layout_style: sage
 reading_direction: rtl
 fonts: { dialogue: fredoka, shout: lilita-one }
+# Planche de style : scène test des essais (français, aucun personnage de la série).
+scene_test: >-
+  une lycéenne anonyme regarde par la fenêtre d'une salle de classe, pétales de cerisier qui volent, lumière douce de fin d'après-midi
 llm_guidelines: >-
   Shōjo, public adolescent : rythme centré sur les émotions, 4 à 6 cases par page, gros plans sur les
   visages et les regards, monologues intérieurs en récitatif ou en pensée. Dialogues sensibles,

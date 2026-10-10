@@ -63,7 +63,7 @@ from .models import (
 
 log = logging.getLogger("mangaka_engine")
 
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17
 
 
 class MigrationError(RuntimeError):
@@ -263,6 +263,12 @@ def _v15_to_v16(cur: sqlite3.Cursor) -> None:
     cur.execute("ALTER TABLE projects DROP COLUMN style_lora_trigger_words")
 
 
+def _v16_to_v17(cur: sqlite3.Cursor) -> None:
+    # series_assets créée par la v11 depuis le modèle courant a déjà la colonne.
+    if "active" not in {row[1] for row in cur.execute("PRAGMA table_info(series_assets)")}:
+        cur.execute("ALTER TABLE series_assets ADD COLUMN active BOOLEAN NOT NULL DEFAULT 1")
+
+
 MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     # version de départ → (version d'arrivée, fonction)
     0: (2, _v0_to_v2),
@@ -281,6 +287,7 @@ MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     13: (14, _v13_to_v14),
     14: (15, _v14_to_v15),
     15: (16, _v15_to_v16),
+    16: (17, _v16_to_v17),
 }
 
 

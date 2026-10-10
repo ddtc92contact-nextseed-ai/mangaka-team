@@ -4,7 +4,8 @@
   descriptions courtes — et la vérification des ids qu'ils citent (`check_refs`) : un id inconnu
   rend la réponse invalide, donc relancée comme une erreur de schéma ;
 - `panel_assets` : décor et objets d'une case, relus en base (ids d'une autre série ou supprimés
-  ignorés).
+  ignorés) ;
+- `active_style` : référence de style active de la série (planche de style), avec son image.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from ..presets import PresetRegistry
 from ..store.models import AssetKind, Panel, SeriesAsset
 
 SHORT_DESCRIPTION = 160  # caractères de description envoyés aux agents
@@ -91,3 +93,23 @@ def panel_assets(session: Session, panel: Panel, project_id: int) -> tuple[Serie
         decor = None
     objects = [found[i] for i in dict.fromkeys(object_ids) if i in found and found[i].kind == AssetKind.object]
     return decor, objects
+
+
+def active_style(session: Session, project_id: int) -> SeriesAsset | None:
+    """Référence de style active de la série (planche de style) qui a une image, sinon None."""
+    asset = session.scalars(
+        select(SeriesAsset)
+        .where(SeriesAsset.project_id == project_id, SeriesAsset.kind == AssetKind.style, SeriesAsset.active)
+        .options(selectinload(SeriesAsset.reference_images))
+        .order_by(SeriesAsset.id.desc())
+    ).first()
+    return asset if asset is not None and asset.reference_images else None
+
+
+def style_for(session: Session, presets: PresetRegistry, project_id: int, use: str) -> SeriesAsset | None:
+    """Référence de style à joindre, selon `style_board` de defaults.yaml (`use` : `reference_sheets`
+    ou `panels`) : None sans planche de style, sans réglage, ou si le réglage dit « jamais »."""
+    settings = presets.defaults.style_board if presets.defaults else None
+    if settings is None or getattr(settings, use) == "never":
+        return None
+    return active_style(session, project_id)

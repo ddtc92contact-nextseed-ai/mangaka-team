@@ -162,7 +162,7 @@ def enqueue_sketch(
 ) -> Job:
     """Un croquis de la case (graine tirée au hasard sauf `seed`). Re-croquer annule la validation."""
     require_sketch_enabled(panel)
-    preset = sketch_preset_id(presets, panel_cast(session, panel).entries)
+    preset = sketch_preset_id(presets, panel_cast(session, panel, presets).entries)
     panel.sketch_image_id = None
     return enqueue_panel(
         session,
@@ -189,7 +189,7 @@ def enqueue_clean(
     sketch = validated_sketch(panel)
     if sketch is None:
         raise GenerationError("aucun croquis validé : valide d'abord une composition au tri")
-    preset = clean_preset_id(presets, panel, panel_cast(session, panel).entries)
+    preset = clean_preset_id(presets, panel, panel_cast(session, panel, presets).entries)
     extra: dict[str, Any] = {
         "kind": ImageKind.final.value,
         "source_image_id": sketch.id,

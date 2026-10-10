@@ -128,7 +128,7 @@ def type_problem(availability: dict[str, Any], type_id: str) -> str | None:
 # --- verrou -----------------------------------------------------------------------------------
 def lock_preset_id(session: Session, presets: PresetRegistry, panel: Panel) -> str:
     """Preset ControlNet qu'utilisera la case : pendant `with_control` de son palier résolu."""
-    entries = panel_cast(session, panel).entries
+    entries = panel_cast(session, panel, presets).entries
     return control_variant(presets, resolve_preset_id(presets, panel, entries), entries)
 
 
