@@ -36,6 +36,8 @@ export function StyleBoardBanner({ board }: { board: BoardData }) {
   );
 }
 
+const QUEUED_NOTICE = "essais en file : ils apparaissent ci-dessous un à un.";
+
 /**
  * « Planche de style » : N essais au palier croquis d'une scène test du genre, avec le style de la série.
  * Le manager en choisit un (clic ou touches 1-4) ou en relance N autres ; l'essai retenu passe au propre
@@ -81,7 +83,7 @@ export function StyleBoardCard({ projectId, board }: { projectId: number; board:
     try {
       const newJobs = await api.generateStyleTrials(projectId);
       setLaunched((l) => [...l, ...newJobs]);
-      setNotice(`${newJobs.length} essais en file : ils apparaissent ci-dessous un à un.`);
+      setNotice(`${newJobs.length} ${QUEUED_NOTICE}`);
     } catch (err) {
       setError(fullErrorMessage(err));
     } finally {
@@ -116,6 +118,10 @@ export function StyleBoardCard({ projectId, board }: { projectId: number; board:
 
   function onJobFinished(job: Job) {
     setFinished((f) => new Set(f).add(job.id));
+    // Dernier essai de la série terminé : le message « N essais en file… » n'a plus lieu d'être.
+    if (job.params?.mode !== "clean" && trialJobs.every((j) => j.id === job.id)) {
+      setNotice((n) => (n?.endsWith(QUEUED_NOTICE) ? null : n));
+    }
     if (job.status === "failed") {
       const what = job.params?.mode === "clean" ? "Passage au propre" : `Essai ${String(job.params?.variant ?? "")}`;
       setError(`${what} : ${job.error ?? "échec"}`);
@@ -129,11 +135,19 @@ export function StyleBoardCard({ projectId, board }: { projectId: number; board:
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || modalOpen() || isTyping(e.target)) return;
-      if (busy || choosing || !canGenerate) return;
+      if (!canGenerate) return;
       const key = e.key.toLowerCase();
       const n = Number(key);
-      if (Number.isInteger(n) && n >= 1 && n <= latest.length && trialJobs.length === 0) void choose(latest[n - 1]);
-      else if (key === "r" && latest.length > 0 && trialJobs.length === 0) void generate();
+      if (busy || choosing || trialJobs.length > 0) {
+        // Touche ignorée pendant une génération : le dire plutôt que ne rien faire.
+        if ((Number.isInteger(n) && n >= 1 && n <= 4) || key === "r") {
+          setNotice(choosing ? "Passage au propre en cours : attends sa fin avant de choisir ou de relancer." : "Essais en cours : attends la fin de la série pour choisir (1-4) ou relancer (R).");
+          e.preventDefault();
+        }
+        return;
+      }
+      if (Number.isInteger(n) && n >= 1 && n <= latest.length) void choose(latest[n - 1]);
+      else if (key === "r" && latest.length > 0) void generate();
       else return;
       e.preventDefault();
     };
