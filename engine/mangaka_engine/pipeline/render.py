@@ -35,7 +35,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from ..presets import PresetError, PresetRegistry
 from ..store.db import Database
-from ..store.files import FileStore
+from ..store.files import FileStore, versioned_url
 from ..store.models import Bubble, BubbleKind, Chapter, ImageKind, Job, Page, Panel, PanelImage
 from .assembly import Canvas, PageArt, PanelArt, canvas_geometry, cover_transform, png_bytes, render_png, render_svg
 from .finishing import finished_art, panel_print_info
@@ -238,7 +238,7 @@ def page_inputs(presets: PresetRegistry, files: FileStore, page: Page, fonts: Fo
         else:
             assert img is not None
             # Aperçu écran : l'image légère ; visages en px de la version (même cadrage que sa finition).
-            urls[panel.id] = f"/panel-images/{img.id}/file"
+            urls[panel.id] = versioned_url(f"/panel-images/{img.id}/file", img.path)
             faces = faces_on_page(face_boxes(img, size), size, box)
             # Finition d'impression : l'assemblage prend l'image agrandie quand elle existe.
             finished = finished_art(img, files)

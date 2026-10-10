@@ -98,9 +98,10 @@ def test_crud_with_reference_images(c: TestClient, segment: str, kind: str) -> N
     )
     assert [i["original_name"] for i in up["reference_images"]] == ["a.png", "b.jpg"]
     img = up["reference_images"][0]
-    assert img["url"] == f"/{segment}/{aid}/images/{img['id']}/file"
+    assert img["url"].startswith(f"/{segment}/{aid}/images/{img['id']}/file?v=")
     file = c.get(img["url"])
     assert file.status_code == 200 and file.headers["content-type"] == "image/png"
+    assert "immutable" in file.headers["cache-control"]  # URL versionnée : gardée en cache sans risque
     bad = c.post(f"/{segment}/{aid}/images", files=[("files", ("x.png", b"pas une image", "image/png"))])
     assert bad.status_code == 422 and "x.png" in bad.text
 
