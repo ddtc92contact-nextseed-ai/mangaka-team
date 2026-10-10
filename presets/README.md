@@ -22,7 +22,7 @@ Après modification d'un preset, redémarre le moteur (`npm run dev`).
 | `style_tones/*.yaml` | Packs de style : **ton** (lumineux, neutre par défaut, dark, humour) |
 | `style_options.yaml` | Réglages fins bornés du style : trait, trames (N&B seulement), détail des décors |
 | `style_loras.yaml` | Catalogue des LoRA de style : mots déclencheurs et poids conseillé |
-| `prompts/*.yaml` | Prompts des étapes LLM (`script` : découpage d'un chapitre) |
+| `prompts/*.yaml` | Prompts des étapes LLM (`script` : découpage d'un chapitre ; `direction-artistique` ; `redacteur-image` : prompt image de chaque case rédigé en un paragraphe) |
 | `image_prompt.yaml` | Construction du prompt final des cases (étape 3) et termes « pas de texte » du prompt négatif |
 | `qc.yaml` | Contrôle qualité des cases (étape 4) : poids, seuils de verdict, règles des détecteurs, seuil CCIP, zone de doute de la vision, nouveaux essais automatiques |
 | `workflows/*.yaml` + `*.json` | Workflows ComfyUI : le JSON API exporté + le mapping des paramètres |
@@ -1074,6 +1074,43 @@ references:
 Exemple (deux personnages, une image principale chacun) : « Image 1 : référence d'identité de Urus ;
 Image 2 : référence d'identité de Kaël. Plan large. … Lieu : … Mise en scène : … Deux personnages : Urus
 (…) ; Kaël (…). Style : … Les images de référence ne servent qu'à l'identité … ni leur fond blanc. »
+
+### Rédacteur de prompt (`prompts/redacteur-image.yaml`)
+
+Qwen-Image 2.1 (encodeur Qwen3-VL) suit mieux **un paragraphe descriptif cohérent** que des fragments
+étiquetés. Pour une série en « Prompt rédigé par l'IA » (fiche série ; **oui** pour les nouvelles
+séries, `enabled` de ce fichier, réglable dans « L'équipe » › Dessinateur ; les séries d'avant la
+migration v21 restent en fragments), le LLM texte de l'agent Dessinateur (DeepSeek par défaut, factice
+en mode mock) écrit le prompt de chaque case :
+
+- il reçoit les données structurées de la case : plan, angle, description, lieu, mise en scène,
+  ambiance, personnages et leurs traits (description visuelle + mots-clés + déclencheurs LoRA),
+  figurants sans fiche, personnages de la série **absents** (à ne jamais nommer), décor, objets,
+  images de référence et leur rôle (« - image 1 : identité de Aiko »), `$style` (bloc court), repères
+  de la bible et savoir-faire — les répliques entre guillemets en sont retirées ;
+- il rend un objet JSON `{"prompt", "language", "notes"}` validé par Pydantic puis contre la case :
+  chaque personnage de la case nommé, aucun personnage absent nommé, langue du preset, longueur
+  plausible (entre 60 % de `min_words` et 150 % de `max_words`). Invalide → un nouvel essai avec
+  l'erreur (`max_retries: 1`, donc 2 tentatives au plus), puis **repli par fragments** avec un
+  avertissement visible sur la case (« Prompt rédigé par l'IA indisponible (…) ») ;
+- le paragraphe est nettoyé (guillemets et répliques retirés, une seule ligne) ; les mots-clés de
+  style y sont ajoutés tels quels, dans leur langue mesurée, s'il ne les contient pas déjà.
+
+`language` (`fr` par défaut, les A/B mesurés favorisant le français sur la plupart des packs, ou `en`)
+et `min_words` / `max_words` (80 à 160) sont des réglages du preset. Le prompt rédigé est stocké sur la
+case (`prompt_source: ia`) **une fois par case** : une nouvelle génération (variantes, « Régénérer en
+Qualité ») le reprend tel quel. Il n'est redemandé que sur « Reconstruire le prompt » ou quand les
+données de la case changent (description, lieu, mise en scène, personnages, direction artistique,
+style, images de référence ; la bible et le savoir-faire n'y comptent pas). Une édition manuelle est
+conservée jusqu'à « Reconstruire le prompt ». Le cadrage des références (`references` ci-dessus) et les
+termes « pas de texte » du prompt négatif sont ajoutés à l'envoi à ComfyUI, comme pour les fragments.
+La rédaction a lieu dans le job de génération (message « Rédaction du prompt par l'IA… »), hors de
+toute transaction ; « Reconstruire le prompt » l'attend (le proxy web laisse 3 min à cette route).
+
+Repasser une série à « non » remet ses prompts rédigés (non retouchés) en fragments. Mode mock :
+`[mock:prompt-invalide:N]` dans la description d'une case rend les N premiers essais invalides,
+`[mock:prompt-intrus:N]` leur fait nommer un personnage absent. L'essai du Dessinateur montre le
+prompt rédigé à côté du prompt par fragments.
 
 ## Lettrage (étape 5)
 

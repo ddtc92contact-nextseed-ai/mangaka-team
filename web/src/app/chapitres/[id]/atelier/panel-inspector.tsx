@@ -72,6 +72,8 @@ export function PanelInspector({
   const [seed, setSeed] = useState("");
   const [count, setCount] = useState(1);
   const [busy, setBusy] = useState(false);
+  // « Reconstruire le prompt » en cours (rédaction par l'IA : quelques secondes, 2 essais au plus).
+  const [rebuilding, setRebuilding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   // La dernière action a mis une génération en file : lien « Voir la production ».
@@ -144,9 +146,16 @@ export function PanelInspector({
     }, "Prompt enregistré");
   const rebuild = () =>
     run(async () => {
-      detail.setData(await api.rebuildPrompt(panelId));
-      setDraft(null);
-    }, "Prompt reconstruit");
+      setRebuilding(true);
+      try {
+        const rebuilt = await api.rebuildPrompt(panelId);
+        detail.setData(rebuilt);
+        setDraft(null);
+        if (!rebuilt.prompt_warning) toast(rebuilt.prompt_source === "ia" ? "Prompt rédigé par l'IA" : "Prompt reconstruit");
+      } finally {
+        setRebuilding(false);
+      }
+    });
   const setPreset = (value: string) =>
     run(async () => {
       detail.setData(await api.updatePanel(panelId, { generation_preset: value || null }));
@@ -380,6 +389,22 @@ export function PanelInspector({
                       édité à la main
                     </span>
                   )}
+                  {!d.final_prompt_manual && !promptDirty && d.prompt_source === "ia" && (
+                    <span
+                      className="ml-2 rounded bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-medium text-sky-300"
+                      data-testid="prompt-source"
+                    >
+                      rédigé par l&apos;IA
+                    </span>
+                  )}
+                  {!d.final_prompt_manual && !promptDirty && d.prompt_source === "fragments" && d.ai_prompt && (
+                    <span
+                      className="ml-2 rounded bg-zinc-500/15 px-1.5 py-0.5 text-[10px] font-medium text-zinc-300"
+                      data-testid="prompt-source"
+                    >
+                      par fragments
+                    </span>
+                  )}
                 </label>
                 <InfoTip help="atelier.prompt" label="Prompt final" />
               </span>
@@ -389,7 +414,7 @@ export function PanelInspector({
                 disabled={busy}
                 className="text-xs text-zinc-400 underline-offset-2 hover:text-zinc-100 hover:underline focus-visible:outline-2 focus-visible:outline-rose-400 disabled:opacity-50"
               >
-                Reconstruire le prompt
+                {rebuilding && d.ai_prompt ? "Rédaction…" : "Reconstruire le prompt"}
               </button>
             </div>
             <Textarea
@@ -399,7 +424,27 @@ export function PanelInspector({
               rows={6}
               className="text-xs leading-relaxed"
               placeholder="Construit automatiquement (case, personnages, style de la série) à la première génération — ou clique « Reconstruire le prompt » pour le voir et le retoucher."
+              disabled={rebuilding}
             />
+            {rebuilding && d.ai_prompt && (
+              <p className="text-[11px] text-sky-300" role="status" data-testid="prompt-writing">
+                Rédaction du prompt par l&apos;IA… (2 essais au plus, puis repli par fragments)
+              </p>
+            )}
+            {!rebuilding && d.prompt_warning && !d.final_prompt_manual && (
+              <p
+                className="rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[11px] text-amber-200"
+                role="alert"
+                data-testid="prompt-warning"
+              >
+                {d.prompt_warning}
+              </p>
+            )}
+            {!rebuilding && d.prompt_pending && !promptDirty && (
+              <p className="text-[11px] text-zinc-500" data-testid="prompt-pending">
+                Sera rédigé par l&apos;IA à la prochaine génération — ou « Reconstruire le prompt » pour le voir maintenant.
+              </p>
+            )}
             {promptDirty && (
               <div className="flex items-center justify-between gap-2">
                 <p className="text-[11px] text-zinc-500">Modifié : sera utilisé à la prochaine génération.</p>

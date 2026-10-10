@@ -84,6 +84,7 @@ export function ProjectForm({
     clean_mode: initial?.clean_mode ?? "img2img",
     clean_control: initial?.clean_control ?? null,
     upscaler: initial?.upscaler ?? null,
+    ai_prompt: initial?.ai_prompt,
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
@@ -111,6 +112,8 @@ export function ProjectForm({
     currentWorkflow?.tier_order != null &&
     currentWorkflow.tier_order < (recommendedTier.tier_order ?? 0);
   const sketchEnabled = form.sketch_enabled ?? defaults?.sketch_enabled ?? true;
+  // Prompt rédigé par l'IA : réglage global du dessinateur (« L'équipe ») pour une nouvelle série.
+  const aiPrompt = form.ai_prompt ?? presets.data?.ai_prompt_default ?? true;
   // Débruitage livré : celui du preset « propre depuis croquis » du palier choisi.
   const cleanPreset = presets.data?.workflows.find((w) => w.id === currentWorkflow?.from_sketch);
   const presetDenoise = cleanPreset?.denoise ?? null;
@@ -218,6 +221,7 @@ export function ProjectForm({
       layout_style: layoutStyle || undefined,
       sketch_enabled: sketchEnabled,
       sketch_denoise: form.sketch_denoise ?? null,
+      ai_prompt: aiPrompt,
       style_lora_name: loraName || null,
     };
     try {
@@ -562,6 +566,29 @@ export function ProjectForm({
           )}
         </Field>
       </div>
+      <fieldset className="min-w-0 space-y-2 rounded-lg border border-zinc-800 p-4" data-testid="ai-prompt-settings">
+        <legend className="flex items-center gap-1.5 px-1 text-sm font-medium text-zinc-200">
+          Prompt des cases
+          <InfoTip help="serie.ai_prompt" label="Prompt rédigé par l'IA" />
+        </legend>
+        <label className="flex items-start gap-2 text-sm text-zinc-300">
+          <input
+            type="checkbox"
+            className="mt-0.5 accent-rose-500"
+            checked={aiPrompt}
+            onChange={(e) => set("ai_prompt", e.target.checked)}
+            data-testid="ai-prompt"
+          />
+          <span>
+            Prompt rédigé par l&apos;IA
+            <span className="block text-xs text-zinc-500">
+              {aiPrompt
+                ? "Le LLM écrit le prompt de chaque case en un paragraphe (sujet, action, cadrage, décor, lumière, style), une fois par case. En cas d'échec, la case retombe sur l'assemblage par fragments."
+                : "Prompt assemblé par fragments (« Lieu : … », « Mise en scène : … », « Style : … »), sans appel au LLM."}
+            </span>
+          </span>
+        </label>
+      </fieldset>
       <fieldset className="min-w-0 space-y-3 rounded-lg border border-zinc-800 p-4" data-testid="sketch-settings">
         <legend className="flex items-center gap-1.5 px-1 text-sm font-medium text-zinc-200">
           Palier croquis

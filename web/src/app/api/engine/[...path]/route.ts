@@ -18,6 +18,8 @@ async function proxy(req: NextRequest, ctx: RouteContext<"/api/engine/[...path]"
     if (value) headers.set(name, value);
   }
   const hasBody = req.method !== "GET" && req.method !== "HEAD";
+  // « Reconstruire le prompt » attend le LLM (2 essais au plus) : délai plus long que les autres routes.
+  const slow = path.at(-2) === "prompt" && path.at(-1) === "rebuild";
 
   let res: Response;
   try {
@@ -27,7 +29,7 @@ async function proxy(req: NextRequest, ctx: RouteContext<"/api/engine/[...path]"
       body: hasBody ? req.body : undefined,
       cache: "no-store",
       redirect: "manual",
-      signal: AbortSignal.timeout(60_000),
+      signal: AbortSignal.timeout(slow ? 180_000 : 60_000),
       // Requis par undici pour transmettre un corps en flux (upload d'images).
       ...(hasBody ? { duplex: "half" } : {}),
     } as RequestInit);

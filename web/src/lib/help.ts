@@ -29,6 +29,8 @@ export const HELP = {
     "La taille des pages à l'impression (B4 manga, A4…) en 300 dpi. Il fixe le ratio de la mise en page et la résolution visée à l'export.",
   "serie.tier":
     "Rapide (par défaut) est recommandé pour la qualité : 25 pas, ~1 min par case, des cases plus fidèles à la scène et aux références. Turbo génère plus vite (~35 s) pour avancer en volume. Qualité est plus lent mais plus fin : régénère en Qualité les cases importantes depuis l'atelier. Les croquis restent au palier rapide du croquis.",
+  "serie.ai_prompt":
+    "Oui : le LLM du dessinateur rédige le prompt image de chaque case en un vrai paragraphe (sujet, action, cadrage, décor, lumière, style), comme l'attend Qwen-Image. Il est écrit une fois par case, visible et modifiable dans l'atelier. Non : l'assemblage par fragments, sans LLM. Consignes, langue et longueur : écran « L'équipe », Dessinateur.",
   "serie.sketch":
     "Avec le palier croquis, chaque case est d'abord esquissée en quelques secondes : tu tries les compositions au clavier, puis seules celles validées passent au propre. Pratique pour ne pas gaspiller de longues générations.",
   "serie.sketch_denoise":
@@ -172,7 +174,7 @@ export const HELP = {
   "atelier.dpi":
     "La résolution réelle de la case une fois imprimée au format de la série. Sous le seuil, elle sera floue à l'impression : lance « Finaliser ».",
   "atelier.prompt":
-    "Le texte envoyé au modèle d'image, construit d'après la case, les personnages et le style de la série. Retouché à la main, il est gardé tel quel ; « Reconstruire le prompt » repart de zéro.",
+    "Le texte envoyé au modèle d'image, rédigé par l'IA (série en « Prompt rédigé par l'IA ») ou assemblé par fragments d'après la case, les personnages et le style de la série. Rédigé une fois par case, pas à chaque génération. Retouché à la main, il est gardé tel quel ; « Reconstruire le prompt » repart de zéro (et le redemande à l'IA).",
   "atelier.workflow":
     "Le workflow ComfyUI de la case. Automatique : celui de la série, ou sa variante avec références quand un personnage, un décor ou un objet a des images de référence.",
   "atelier.seed":
