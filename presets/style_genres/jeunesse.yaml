@@ -1,0 +1,15 @@
+# Genre « jeunesse » (kodomo) — champs : voir presets/README.md (« Packs de style »).
+id: jeunesse
+name: Jeunesse
+description: Enfantin (kodomo) — histoires simples, personnages ronds et attachants.
+order: 40
+prompt_keywords: [kodomo manga style for children, simple rounded character designs, cute friendly expressions, clear readable compositions]
+layout_style: sage
+reading_direction: rtl
+fonts: { dialogue: fredoka, shout: titan-one }
+llm_guidelines: >-
+  Jeunesse, enfants de 6 à 10 ans : rythme simple et lisible, 3 à 5 cases par page, une action par
+  case. Phrases courtes, vocabulaire adapté à l'âge, aucune violence graphique ni peur durable ;
+  humour bienveillant et fin rassurante.
+# Pas de ton « dark » pour les enfants.
+allowed_tones: [lumineux, neutre, humour]

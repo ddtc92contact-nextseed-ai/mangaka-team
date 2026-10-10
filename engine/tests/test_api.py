@@ -6,11 +6,11 @@ from fastapi.testclient import TestClient
 
 from mangaka_engine.config import Settings
 from mangaka_engine.main import create_app
-from tests.conftest import png_bytes
+from tests.conftest import STYLE, png_bytes
 
 
 def _project(client: TestClient, **body) -> dict:
-    resp = client.post("/projects", json={"title": "Les Lames de Kyoto", **body})
+    resp = client.post("/projects", json={**STYLE, "title": "Les Lames de Kyoto", **body})
     assert resp.status_code == 201, resp.text
     return resp.json()
 
@@ -67,7 +67,7 @@ def test_presets_endpoint(client: TestClient) -> None:
 
 # --- projets -------------------------------------------------------------------
 def test_project_crud(client: TestClient) -> None:
-    created = _project(client, style="encre, trames", reading_direction="ltr")
+    created = _project(client, style_genre="seinen", style_tone="dark", reading_direction="ltr")
     assert created["page_format"] == "a4-300dpi"
     assert created["workflow_preset"] == "qwen-image-turbo"  # Turbo par défaut pour les nouvelles séries
     assert created["reading_direction"] == "ltr"
@@ -77,7 +77,8 @@ def test_project_crud(client: TestClient) -> None:
     resp = client.patch(f"/projects/{pid}", json={"title": "  Nouveau titre ", "reading_direction": "rtl"})
     assert resp.status_code == 200
     assert resp.json()["title"] == "Nouveau titre" and resp.json()["reading_direction"] == "rtl"
-    assert client.get(f"/projects/{pid}").json()["style"] == "encre, trames"
+    got = client.get(f"/projects/{pid}").json()
+    assert (got["style_genre"], got["style_rendering"], got["style_tone"]) == ("seinen", "nb-trames", "dark")
 
     assert client.delete(f"/projects/{pid}").status_code == 204
     resp = client.get(f"/projects/{pid}")
@@ -89,7 +90,7 @@ def test_project_default_reading_direction_is_rtl(client: TestClient) -> None:
 
 
 def test_project_validation_errors_are_readable(client: TestClient) -> None:
-    resp = client.post("/projects", json={"title": "   ", "reading_direction": "ttb", "extra": 1})
+    resp = client.post("/projects", json={**STYLE, "title": "   ", "reading_direction": "ttb", "extra": 1})
     assert resp.status_code == 422
     data = resp.json()
     assert data["detail"] == "Données invalides"
@@ -103,13 +104,13 @@ def test_project_validation_errors_are_readable(client: TestClient) -> None:
 def test_project_missing_title_and_bad_json(client: TestClient) -> None:
     resp = client.post("/projects", json={})
     assert resp.status_code == 422
-    assert resp.json()["errors"] == [{"field": "title", "message": "champ obligatoire"}]
+    assert {e["field"] for e in resp.json()["errors"]} == {"title", "style_genre", "style_rendering", "style_tone"}
     resp = client.post("/projects", content=b"{oops", headers={"content-type": "application/json"})
     assert resp.status_code == 422 and resp.json()["detail"] == "Données invalides"
 
 
 def test_project_unknown_presets_are_422(client: TestClient) -> None:
-    resp = client.post("/projects", json={"title": "x", "page_format": "b9-12dpi"})
+    resp = client.post("/projects", json={**STYLE, "title": "x", "page_format": "b9-12dpi"})
     assert resp.status_code == 422
     assert resp.json()["errors"][0]["field"] == "page_format"
     pid = _project(client)["id"]

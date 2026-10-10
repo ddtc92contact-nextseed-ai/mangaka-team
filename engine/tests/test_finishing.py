@@ -19,7 +19,7 @@ from mangaka_engine.pipeline.layout import target_size
 from mangaka_engine.pipeline.render import load_chapter_pages, page_inputs
 from mangaka_engine.presets import PresetRegistry, build_upscale_workflow
 from mangaka_engine.store.models import PanelImage
-from tests.conftest import PRESETS_DIR
+from tests.conftest import PRESETS_DIR, STYLE
 
 REG = PresetRegistry.load(PRESETS_DIR)
 A4 = REG.page_format("a4-300dpi")
@@ -181,7 +181,7 @@ def _wait(c: TestClient) -> None:
 
 
 def _setup(c: TestClient, upscaler: str | None = None) -> dict[str, Any]:
-    body: dict[str, Any] = {"title": "Les Lames", "layout_style": "sage"}
+    body: dict[str, Any] = {**STYLE, "title": "Les Lames", "layout_style": "sage"}
     if upscaler:
         body["upscaler"] = upscaler
     s = _ok(c.post("/projects", json=body), 201)
@@ -327,7 +327,7 @@ def test_series_upscaler_override_and_queue_label(client: TestClient) -> None:
 
 def test_finish_errors_are_readable(client: TestClient) -> None:
     c = client
-    s = _ok(c.post("/projects", json={"title": "Vide"}), 201)
+    s = _ok(c.post("/projects", json={**STYLE, "title": "Vide"}), 201)
     ch = _ok(c.post(f"/projects/{s['id']}/chapters", json={"title": "Un"}), 201)
     page = _ok(c.put(f"/chapters/{ch['id']}/pages", json={"pages": [{"panels": [{"description": "a"}]}]}))[0]
     res = c.post(f"/panels/{page['panels'][0]['id']}/finish")

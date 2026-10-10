@@ -38,18 +38,30 @@ class _In(BaseModel):
 
 
 # --- Séries (table « projects ») ---------------------------------------------
+# Réglages fins du style (presets/style_options.yaml) : réglage → choix ; aucun texte libre.
+StyleOptionsIn = Annotated[dict[PresetId, PresetId], Field(max_length=20)]
+
+
 class ProjectCreate(_In):
     title: Title
-    style: LongText = ""
+    # Packs de style (listes fermées des presets), obligatoires : plus aucun style en texte libre.
+    style_genre: PresetId
+    style_rendering: PresetId
+    style_tone: PresetId
+    style_options: StyleOptionsIn = Field(default_factory=dict)
     status: SeriesStatusName = "ongoing"
-    reading_direction: Direction = "rtl"
+    # Absent : sens de lecture du genre.
+    reading_direction: Direction | None = None
     page_format: PresetId | None = None
     workflow_preset: PresetId | None = None
     style_lora_name: LoraName | None = None
-    style_lora_weight: LoraWeight = 0.8
-    style_lora_trigger_words: LoraTriggers = ""
-    # Absent : style par défaut des presets (« dynamique »).
+    # Absent : poids conseillé du catalogue style_loras.yaml (0,8 hors catalogue).
+    style_lora_weight: LoraWeight | None = None
+    # Absent : style de mise en page du genre.
     layout_style: PresetId | None = None
+    # Polices des bulles de parole et des cris (fonts.yaml) ; absentes : celles du genre.
+    dialogue_font: PresetId | None = None
+    shout_font: PresetId | None = None
     # Absent : `sketch_enabled` de presets/defaults.yaml (activé).
     sketch_enabled: bool | None = None
     sketch_denoise: Denoise | None = None
@@ -61,15 +73,19 @@ class ProjectCreate(_In):
 
 class ProjectUpdate(_In):
     title: Title | None = None
-    style: LongText | None = None
+    style_genre: PresetId | None = None
+    style_rendering: PresetId | None = None
+    style_tone: PresetId | None = None
+    style_options: StyleOptionsIn | None = None
     status: SeriesStatusName | None = None
     reading_direction: Direction | None = None
     page_format: PresetId | None = None
     workflow_preset: PresetId | None = None
     style_lora_name: LoraName | None = None
     style_lora_weight: LoraWeight | None = None
-    style_lora_trigger_words: LoraTriggers | None = None
     layout_style: PresetId | None = None
+    dialogue_font: PresetId | None = None
+    shout_font: PresetId | None = None
     sketch_enabled: bool | None = None
     sketch_denoise: Denoise | None = None  # null : `denoise` du preset « propre »
     clean_mode: CleanModeName | None = None
@@ -80,15 +96,27 @@ class ProjectUpdate(_In):
 class ProjectOut(BaseModel):
     id: int
     title: str
-    style: str
+    # Ancien style libre (lecture seule) ; ignoré dès qu'un pack est choisi.
+    legacy_style: str
+    style_genre: str | None
+    style_rendering: str | None
+    style_tone: str | None
+    style_options: dict[str, str]
+    # Noms des packs (« Seinen · N&B à trames · Dark ») et `$style` composé pour les prompts image.
+    style_label: str
+    style_prompt: str
     status: SeriesStatusName
     reading_direction: Direction
     page_format: str
     workflow_preset: str
     style_lora_name: str | None
     style_lora_weight: float
-    style_lora_trigger_words: str
+    # Mots déclencheurs du catalogue (style_loras.yaml) ; `style_lora_in_catalog` faux : appliqué sans.
+    style_lora_trigger_words: list[str]
+    style_lora_in_catalog: bool
     layout_style: str
+    dialogue_font: str | None = None
+    shout_font: str | None = None
     sketch_enabled: bool = True
     sketch_denoise: float | None = None
     clean_mode: CleanModeName = "img2img"

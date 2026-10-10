@@ -12,6 +12,7 @@ from mangaka_engine.config import Settings
 from mangaka_engine.main import create_app
 from mangaka_engine.store.db import create_db_engine
 from mangaka_engine.store.migrations import SCHEMA_VERSION, MigrationError
+from tests.conftest import STYLE
 
 V1_SCHEMA = (Path(__file__).parent / "fixtures" / "schema_v1.sql").read_text()
 NOW = "2026-10-01 10:00:00.000000"
@@ -62,7 +63,15 @@ def _version(path: Path) -> int:
     return v
 
 
+def _drop_v16_style(con: sqlite3.Connection) -> None:
+    for column in ("style_genre", "style_rendering", "style_tone", "style_options"):
+        con.execute(f"ALTER TABLE projects DROP COLUMN {column}")
+    con.execute("ALTER TABLE projects RENAME COLUMN legacy_style TO style")
+    con.execute("ALTER TABLE projects ADD COLUMN style_lora_trigger_words TEXT NOT NULL DEFAULT ''")
+
+
 def _drop_v15_composition(con: sqlite3.Connection) -> None:
+    _drop_v16_style(con)
     con.execute("ALTER TABLE panels DROP COLUMN composition_lock")
     con.execute("ALTER TABLE projects DROP COLUMN clean_mode")
     con.execute("ALTER TABLE projects DROP COLUMN clean_control")
@@ -325,7 +334,7 @@ def test_v7_database_keeps_its_layouts_straight_and_fresh(make_settings: Callabl
     """v7 → v8 : la série existante passe en style « sage », ses mises en page restent à jour et identiques."""
     settings = make_settings()
     with TestClient(create_app(settings)) as c:
-        project = c.post("/projects", json={"title": "Série v7", "layout_style": "sage"}).json()
+        project = c.post("/projects", json={**STYLE, "title": "Série v7", "layout_style": "sage"}).json()
         chapter = c.post(f"/projects/{project['id']}/chapters", json={"title": "Un", "synopsis": "x"}).json()
         pages = c.put(
             f"/chapters/{chapter['id']}/pages",
@@ -362,7 +371,7 @@ def test_v8_database_gets_frame_and_sfx_columns(make_settings: Callable[..., Set
     """v8 → v9 : options de cadre par case et réglages d'onomatopée ; les mises en page restent à jour."""
     settings = make_settings()
     with TestClient(create_app(settings)) as c:
-        project = c.post("/projects", json={"title": "Série v8", "layout_style": "sage"}).json()
+        project = c.post("/projects", json={**STYLE, "title": "Série v8", "layout_style": "sage"}).json()
         chapter = c.post(f"/projects/{project['id']}/chapters", json={"title": "Un", "synopsis": "x"}).json()
         pages = c.put(
             f"/chapters/{chapter['id']}/pages",
@@ -394,7 +403,7 @@ def test_v12_database_gets_finishing_columns(make_settings: Callable[..., Settin
     """v12 → v13 : finition d'impression (dérivé agrandi d'une version, agrandisseur de la série)."""
     settings = make_settings()
     with TestClient(create_app(settings)) as c:
-        project = c.post("/projects", json={"title": "Série v12"}).json()
+        project = c.post("/projects", json={**STYLE, "title": "Série v12"}).json()
     con = sqlite3.connect(settings.database_path)
     _drop_v13_finishing(con)
     con.execute("PRAGMA user_version = 12")
@@ -416,7 +425,7 @@ def test_v13_database_gets_sketch_columns(make_settings: Callable[..., Settings]
     """v13 → v14 : palier croquis. Les versions existantes sont « final », le croquis est activé."""
     settings = make_settings()
     with TestClient(create_app(settings)) as c:
-        project = c.post("/projects", json={"title": "Série v13"}).json()
+        project = c.post("/projects", json={**STYLE, "title": "Série v13"}).json()
     con = sqlite3.connect(settings.database_path)
     _drop_v14_sketch(con)
     con.execute("PRAGMA user_version = 13")
@@ -436,7 +445,7 @@ def test_v14_database_gets_composition_lock_columns(make_settings: Callable[...,
     """v14 → v15 : verrouillage de composition. Aucune case verrouillée, passage au propre en img2img."""
     settings = make_settings()
     with TestClient(create_app(settings)) as c:
-        project = c.post("/projects", json={"title": "Série v14"}).json()
+        project = c.post("/projects", json={**STYLE, "title": "Série v14"}).json()
     con = sqlite3.connect(settings.database_path)
     _drop_v15_composition(con)
     con.execute("PRAGMA user_version = 14")
@@ -446,6 +455,54 @@ def test_v14_database_gets_composition_lock_columns(make_settings: Callable[...,
     with TestClient(create_app(settings)) as c:
         got = c.get(f"/projects/{project['id']}").json()
         assert got["clean_mode"] == "img2img" and got["clean_control"] is None
+    assert _version(settings.database_path) == SCHEMA_VERSION
+    fresh = settings.database_path.parent / "fresh.db"
+    create_db_engine(fresh).dispose()
+    assert _columns(settings.database_path) == _columns(fresh)
+
+
+def test_v15_database_keeps_its_old_style_read_only(make_settings: Callable[..., Settings]) -> None:
+    """v15 → v16 : packs de style. L'ancien texte libre est conservé en lecture seule et sert tant
+    qu'aucun pack n'est choisi ; il est ignoré dès qu'on en choisit un."""
+    settings = make_settings()
+    with TestClient(create_app(settings)) as c:
+        project = c.post("/projects", json={**STYLE, "title": "Série v15"}).json()
+    con = sqlite3.connect(settings.database_path)
+    _drop_v16_style(con)
+    con.execute(
+        "UPDATE projects SET style = 'Seinen sombre, encrage épais', style_lora_trigger_words = 'inkstyle' WHERE id = ?",
+        (project["id"],),
+    )
+    con.execute("PRAGMA user_version = 15")
+    con.commit()
+    con.close()
+
+    with TestClient(create_app(settings)) as c:
+        got = c.get(f"/projects/{project['id']}").json()
+        assert got["legacy_style"] == "Seinen sombre, encrage épais"
+        assert (got["style_genre"], got["style_rendering"], got["style_tone"], got["style_options"]) == (
+            None,
+            None,
+            None,
+            {},
+        )
+        # Aucun pack : l'ancien texte tient lieu de genre, avec le rendu par défaut.
+        assert (
+            got["style_prompt"]
+            == "Seinen sombre, encrage épais, black and white manga, inked linework, screentone shading"
+        )
+        # Un pack seul ne suffit pas : genre, rendu et ton vont ensemble.
+        bad = c.patch(f"/projects/{project['id']}", json={"style_genre": "seinen"})
+        assert bad.status_code == 422 and bad.json()["errors"][0]["field"] == "style_rendering"
+        res = c.patch(
+            f"/projects/{project['id']}",
+            json={"style_genre": "seinen", "style_rendering": "nb-encre", "style_tone": "dark"},
+        )
+        assert res.status_code == 200, res.text
+        chosen = res.json()
+        assert chosen["legacy_style"] == "Seinen sombre, encrage épais"  # conservé, en lecture seule
+        assert "Seinen sombre" not in chosen["style_prompt"] and "seinen manga style" in chosen["style_prompt"]
+        assert c.patch(f"/projects/{project['id']}", json={"legacy_style": "x"}).status_code == 422
     assert _version(settings.database_path) == SCHEMA_VERSION
     fresh = settings.database_path.parent / "fresh.db"
     create_db_engine(fresh).dispose()

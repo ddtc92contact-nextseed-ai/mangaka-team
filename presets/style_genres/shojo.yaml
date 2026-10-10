@@ -1,0 +1,13 @@
+# Genre « shōjo » — champs : voir presets/README.md (« Packs de style »).
+id: shojo
+name: Shōjo
+description: Romance et émotions — sentiments intérieurs, relations, regards.
+order: 30
+prompt_keywords: [shojo manga style, delicate linework, large expressive sparkling eyes, decorative flowers and sparkles]
+layout_style: sage
+reading_direction: rtl
+fonts: { dialogue: fredoka, shout: lilita-one }
+llm_guidelines: >-
+  Shōjo, public adolescent : rythme centré sur les émotions, 4 à 6 cases par page, gros plans sur les
+  visages et les regards, monologues intérieurs en récitatif ou en pensée. Dialogues sensibles,
+  vocabulaire courant ; la relation entre les personnages porte le chapitre.

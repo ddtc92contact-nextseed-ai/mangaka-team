@@ -12,6 +12,8 @@ import httpx
 from fastapi.testclient import TestClient
 from PIL import Image
 
+from tests.conftest import STYLE
+
 
 def _ok(resp: httpx.Response, status: int = 200) -> Any:
     assert resp.status_code == status, resp.text
@@ -19,7 +21,7 @@ def _ok(resp: httpx.Response, status: int = 200) -> Any:
 
 
 def _setup(c: TestClient, *, generate: int = 2) -> dict[str, Any]:
-    s = _ok(c.post("/projects", json={"title": "Les Lames", "reading_direction": "rtl"}), 201)
+    s = _ok(c.post("/projects", json={**STYLE, "title": "Les Lames", "reading_direction": "rtl"}), 201)
     ch = _ok(c.post(f"/projects/{s['id']}/chapters", json={"title": "Pluie"}), 201)
     pages = _ok(
         c.put(
@@ -212,7 +214,7 @@ def test_export_chapter_zip_with_numbered_pages(client: TestClient) -> None:
 
 
 def test_export_refuses_chapter_without_layout(client: TestClient) -> None:
-    s = _ok(client.post("/projects", json={"title": "Vide"}), 201)
+    s = _ok(client.post("/projects", json={**STYLE, "title": "Vide"}), 201)
     ch = _ok(client.post(f"/projects/{s['id']}/chapters", json={}), 201)
     res = client.post(f"/chapters/{ch['id']}/export")
     assert res.status_code == 422

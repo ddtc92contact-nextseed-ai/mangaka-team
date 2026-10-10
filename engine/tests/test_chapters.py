@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from mangaka_engine.config import Settings
 from mangaka_engine.main import create_app
 from mangaka_engine.providers.llm import MockLLMProvider
+from tests.conftest import STYLE
 
 
 @pytest.fixture
@@ -20,7 +21,7 @@ def app_client(make_settings: Callable[..., Settings]) -> Iterator[TestClient]:
 
 
 def _series(c: TestClient, **body: Any) -> dict:
-    resp = c.post("/projects", json={"title": "Les Lames de Kyoto", **body})
+    resp = c.post("/projects", json={**STYLE, "title": "Les Lames de Kyoto", **body})
     assert resp.status_code == 201, resp.text
     return resp.json()
 

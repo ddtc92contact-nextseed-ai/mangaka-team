@@ -1,0 +1,18 @@
+# Catalogue des LoRA de style : les mots déclencheurs ne se tapent plus dans la fiche série, ils
+# viennent d'ici. `file` : nom du fichier tel que ComfyUI le liste (sous-dossier de models/loras
+# compris) ; `weight` : poids conseillé, pré-rempli quand on choisit ce LoRA.
+# Un LoRA choisi hors catalogue s'applique quand même, sans mots déclencheurs (indice dans la fiche).
+# Les entrées ci-dessous correspondent aux LoRA d'exemple du mode mock : remplace-les par les tiens.
+loras:
+  - file: encre-seinen_v2.safetensors
+    name: Encre seinen v2
+    trigger_words: [ink seinen style]
+    weight: 0.8
+  - file: trame-shojo.safetensors
+    name: Trames shōjo
+    trigger_words: [shojo screentone]
+    weight: 0.7
+  - file: styles/aquarelle/lavis-doux.safetensors
+    name: Lavis doux
+    trigger_words: [soft wash painting]
+    weight: 0.6

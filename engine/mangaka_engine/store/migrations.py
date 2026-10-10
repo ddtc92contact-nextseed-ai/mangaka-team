@@ -24,6 +24,9 @@
   le palier croquis est activé sur les séries existantes (il n'ajoute que des boutons).
 - 15 : verrouillage de composition (ControlNet) par case, mode du passage au propre par série. Aucune
   case n'est verrouillée ; les séries existantes gardent le passage au propre en img2img.
+- 16 : packs de style (genre, rendu, ton, réglages fins). L'ancien texte libre `style` devient
+  `legacy_style` (lecture seule, utilisé tant qu'aucun pack n'est choisi) ; les mots déclencheurs saisis
+  du LoRA de style disparaissent (ils viennent du catalogue presets/style_loras.yaml).
 
 Une base neuve est créée directement à la dernière version. Chaque migration tourne dans une
 transaction unique, clés étrangères désactivées (recette « 12 étapes » de SQLite pour reconstruire
@@ -60,7 +63,7 @@ from .models import (
 
 log = logging.getLogger("mangaka_engine")
 
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 
 
 class MigrationError(RuntimeError):
@@ -251,6 +254,15 @@ def _v14_to_v15(cur: sqlite3.Cursor) -> None:
     cur.execute("ALTER TABLE projects ADD COLUMN clean_control VARCHAR(40)")
 
 
+def _v15_to_v16(cur: sqlite3.Cursor) -> None:
+    cur.execute("ALTER TABLE projects RENAME COLUMN style TO legacy_style")
+    cur.execute("ALTER TABLE projects ADD COLUMN style_genre VARCHAR(100)")
+    cur.execute("ALTER TABLE projects ADD COLUMN style_rendering VARCHAR(100)")
+    cur.execute("ALTER TABLE projects ADD COLUMN style_tone VARCHAR(100)")
+    cur.execute("ALTER TABLE projects ADD COLUMN style_options JSON NOT NULL DEFAULT '{}'")
+    cur.execute("ALTER TABLE projects DROP COLUMN style_lora_trigger_words")
+
+
 MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     # version de départ → (version d'arrivée, fonction)
     0: (2, _v0_to_v2),
@@ -268,6 +280,7 @@ MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     12: (13, _v12_to_v13),
     13: (14, _v13_to_v14),
     14: (15, _v14_to_v15),
+    15: (16, _v15_to_v16),
 }
 
 

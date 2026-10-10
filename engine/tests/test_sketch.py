@@ -15,7 +15,7 @@ from mangaka_engine.pipeline.generation import sketch_size
 from mangaka_engine.presets import LoraSpec, PresetError, PresetRegistry, build_workflow
 from mangaka_engine.providers.comfyui import MockComfyUIClient
 from mangaka_engine.store.models import ImageKind, PanelImage
-from tests.conftest import PRESETS_DIR
+from tests.conftest import PRESETS_DIR, STYLE
 from tests.test_generation import _ok, _wait, make_client, setup_chapter  # noqa: F401 — fixture
 
 REG = PresetRegistry.load(PRESETS_DIR)
@@ -301,9 +301,9 @@ def test_validate_and_clean_errors(make_client: Callable[..., TestClient]) -> No
 
 
 def test_new_series_gets_sketch_enabled_by_default(client: TestClient) -> None:
-    s = _ok(client.post("/projects", json={"title": "Neuve"}), 201)
+    s = _ok(client.post("/projects", json={**STYLE, "title": "Neuve"}), 201)
     assert s["sketch_enabled"] is True and s["sketch_denoise"] is None
-    s = _ok(client.post("/projects", json={"title": "Sans", "sketch_enabled": False}), 201)
+    s = _ok(client.post("/projects", json={**STYLE, "title": "Sans", "sketch_enabled": False}), 201)
     assert s["sketch_enabled"] is False
 
 

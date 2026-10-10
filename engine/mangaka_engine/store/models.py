@@ -122,16 +122,22 @@ class Project(TimestampMixin, Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     title: Mapped[str] = mapped_column(String(200))
-    style: Mapped[str] = mapped_column(Text, default="")
+    # Ancien style en texte libre : lecture seule (fiche série), ignoré dès qu'un pack est choisi.
+    legacy_style: Mapped[str] = mapped_column(Text, default="")
+    # Packs de style (presets/style_genres, style_renderings, style_tones) ; None = pas encore choisi.
+    style_genre: Mapped[str | None] = mapped_column(String(100), default=None)
+    style_rendering: Mapped[str | None] = mapped_column(String(100), default=None)
+    style_tone: Mapped[str | None] = mapped_column(String(100), default=None)
+    # Réglages fins (presets/style_options.yaml) : {"trait": "epais", "trames": "denses", "detail": "riche"}.
+    style_options: Mapped[dict[str, str]] = mapped_column(JSON, default=dict)
     status: Mapped[SeriesStatus] = mapped_column(_enum(SeriesStatus), default=SeriesStatus.ongoing)
     reading_direction: Mapped[ReadingDirection] = mapped_column(_enum(ReadingDirection), default=ReadingDirection.rtl)
     # Presets par défaut de la série
     page_format: Mapped[str] = mapped_column(String(100))
     workflow_preset: Mapped[str] = mapped_column(String(100))
     style_lora_name: Mapped[str | None] = mapped_column(String(255), default=None)
+    # Mots déclencheurs du LoRA de style : catalogue presets/style_loras.yaml (plus de saisie libre).
     style_lora_weight: Mapped[float] = mapped_column(Float, default=0.8)
-    # Mots déclencheurs du LoRA de style, ajoutés au prompt quand le LoRA est appliqué.
-    style_lora_trigger_words: Mapped[str] = mapped_column(Text, default="")
     # Grammaire de mise en page de la série (presets/layout_styles/) : sage, dynamique, nerveuse…
     layout_style: Mapped[str] = mapped_column(String(100), default="dynamique")
     # Palier croquis (brouillon de page, tri, passage au propre) ; `sketch_denoise` : débruitage du

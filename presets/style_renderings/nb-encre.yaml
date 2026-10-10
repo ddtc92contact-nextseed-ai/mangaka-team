@@ -1,0 +1,7 @@
+# Rendu « N&B encre » — champs : voir presets/README.md (« Packs de style »).
+id: nb-encre
+name: N&B encre pure
+description: Encre seule, aplats noirs francs et fort contraste.
+order: 20
+monochrome: true
+prompt_keywords: [black and white ink drawing, solid black fills, high contrast inking]

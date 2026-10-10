@@ -30,6 +30,9 @@ from mangaka_engine.providers.llm import MockLLMProvider
 from mangaka_engine.store.models import Job, JobStatus, Panel, PanelState
 from tests.conftest import COMFY_FIXTURES, PRESETS_DIR, png_bytes
 
+# Packs de la série de test : seinen, N&B à trames, dark.
+SEINEN = {"style_genre": "seinen", "style_rendering": "nb-trames", "style_tone": "dark"}
+
 
 # --- outillage ------------------------------------------------------------------------
 class GatedComfy(MockComfyUIClient):
@@ -100,7 +103,7 @@ def setup_chapter(c: TestClient) -> dict[str, Any]:
     s = _ok(
         c.post(
             "/projects",
-            json={"title": "Les Lames", "style": "Seinen sombre", "style_lora_name": "encre.safetensors"},
+            json={"title": "Les Lames", **SEINEN, "style_lora_name": "encre.safetensors"},
         ),
         201,
     )
@@ -217,7 +220,9 @@ def test_generate_panel_mock_end_to_end(make_client: Callable[..., TestClient]) 
     assert [lo["name"] for lo in params["loras"]] == ["encre.safetensors", "aiko-v3.safetensors"]
     assert params["loras"][1]["weight"] == 0.9
     assert len(params["reference_images"]) == 1 and params["reference_images"][0]["comfyui_name"] in comfy.uploads
-    assert "Aiko" in params["prompt"] and "kimono rouge" in params["prompt"] and "Seinen sombre" in params["prompt"]
+    assert (
+        "Aiko" in params["prompt"] and "kimono rouge" in params["prompt"] and "seinen manga style" in params["prompt"]
+    )
     assert "bulles" in params["negative_prompt"] and "texte" in params["negative_prompt"]
     assert params["duration_ms"] >= 0 and params["workflow_params"]["width"] == w
 

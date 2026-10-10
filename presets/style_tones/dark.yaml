@@ -1,0 +1,9 @@
+# Ton « dark » — champs : voir presets/README.md (« Packs de style »).
+id: dark
+name: Dark
+description: Ambiance sombre et oppressante, ombres profondes.
+order: 30
+prompt_keywords: [dark brooding atmosphere, deep shadows, dramatic chiaroscuro lighting]
+llm_guidelines: >-
+  Ton sombre : tension constante, menace qui pèse, victoires coûteuses ; décors nocturnes ou
+  confinés privilégiés.

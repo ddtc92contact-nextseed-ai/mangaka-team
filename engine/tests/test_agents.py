@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from mangaka_engine.config import Settings
 from mangaka_engine.main import create_app
 from mangaka_engine.providers.llm import MockLLMProvider
+from tests.conftest import STYLE
 
 SECRET = "sk-test-ne-jamais-afficher-42"
 
@@ -27,7 +28,7 @@ def _ctx(c: TestClient) -> Any:
 
 
 def _series(c: TestClient, title: str = "Série") -> int:
-    r = c.post("/projects", json={"title": title})
+    r = c.post("/projects", json={**STYLE, "title": title})
     assert r.status_code == 201, r.text
     return r.json()["id"]
 
@@ -145,7 +146,7 @@ def test_global_only_setting_cannot_be_overridden_per_series(c: TestClient) -> N
         {"field": "page_format", "message": "réglage commun à toutes les séries : modifie le profil global"}
     ]
     assert _save(c, "metteur-en-page", {"page_format": "b4-300dpi"}).status_code == 200
-    assert c.post("/projects", json={"title": "Nouvelle"}).json()["page_format"] == "b4-300dpi"
+    assert c.post("/projects", json={**STYLE, "title": "Nouvelle"}).json()["page_format"] == "b4-300dpi"
 
 
 # --- versions --------------------------------------------------------------------------------

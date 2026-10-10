@@ -20,13 +20,13 @@ def test_prompt_combines_shot_description_characters_and_style() -> None:
         in prompt
     )
     assert "Style : Seinen sombre, trames lourdes." in prompt
-    assert prompt.endswith("sans aucun texte ni bulle.")
+    assert prompt.endswith("Aucun texte ni bulle dans l'image.")
     assert ".." not in prompt
 
 
 def test_prompt_omits_empty_parts() -> None:
     prompt = build_prompt(description="Une ruelle vide", shot_type=None, characters=[], style="  ")
-    assert prompt == "Une ruelle vide. Case de manga, dessin encré, sans aucun texte ni bulle."
+    assert prompt == "Une ruelle vide. Aucun texte ni bulle dans l'image."
 
 
 def test_prompt_never_carries_dialogue_text() -> None:

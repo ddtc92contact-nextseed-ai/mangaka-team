@@ -33,7 +33,7 @@ from mangaka_engine.pipeline.qc_bench import (
 from mangaka_engine.presets import PresetError, PresetRegistry
 from mangaka_engine.providers.qc import Box, Detections
 from mangaka_engine.store.models import QCVerdict
-from tests.conftest import PRESETS_DIR
+from tests.conftest import PRESETS_DIR, STYLE
 from tests.test_generation import GatedComfy, _job, _ok, _wait, setup_chapter
 from tests.test_qc import (  # fixtures make_client, presets_copy comprises
     QC,
@@ -326,7 +326,7 @@ def test_bench_run_errors_and_states(make_client: Callable[..., TestClient], pre
     assert _ok(c.post("/qc/bench/runs", json={}), 422)["errors"][0]["field"] == "dataset"
     data = _annotated_chapter(c)
     assert _ok(c.post("/qc/bench/runs", json={"project_id": 999}), 422)["errors"][0]["field"] == "project_id"
-    other = _ok(c.post("/projects", json={"title": "Autre"}), 201)
+    other = _ok(c.post("/projects", json={**STYLE, "title": "Autre"}), 201)
     body = {"project_id": other["id"], "chapter_id": data["chapter"]["id"]}
     assert _ok(c.post("/qc/bench/runs", json=body), 422)["errors"][0]["field"] == "chapter_id"
     assert _ok(c.get(f"/qc/bench/dataset?project_id={other['id']}"))["total"] == 0

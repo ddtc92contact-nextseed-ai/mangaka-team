@@ -5,7 +5,8 @@
 # Morceaux assemblés dans l'ordre, séparés par une espace. Un morceau dont une variable
 # est vide est omis. Variables : $shot (type de plan du scénario), $description (description de la
 # case), $characters (personnages, voir `character`), $decor (décor récurrent de la case) et
-# $objects (objets récurrents), décrits comme les personnages, $style (style de la série),
+# $objects (objets récurrents), décrits comme les personnages, $style (packs de style de la série :
+# mots déclencheurs du LoRA, genre, rendu, ton, réglages fins — pipeline/style.py),
 # $bible (notes de la bible sur les personnages de la case), $savoir_faire (passages des
 # collections de l'agent « image_prompt », voir knowledge.yaml ; budget de jetons serré).
 # Direction artistique appliquée (onglet « Direction artistique » du chapitre) : $plan (son type de
@@ -21,7 +22,8 @@ parts:
   - "Repères de la bible : $bible."
   - "Style : $style."
   - "Notes de style : $savoir_faire."
-  - "Case de manga, dessin encré, sans aucun texte ni bulle."
+  # Aucune mention de rendu ici (« encré », « couleur »…) : le pack de rendu de la série la donne dans $style.
+  - "Aucun texte ni bulle dans l'image."
 
 # Un personnage (et de même un décor ou un objet de la bibliothèque) : $name, $details (description visuelle + mots-clés de prompt).
 character: "$name ($details)"

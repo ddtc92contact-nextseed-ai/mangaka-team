@@ -49,6 +49,7 @@ from .layout import LayoutError
 from .library import SeriesLibrary
 from .pages import applied_values, is_stale, layout_page
 from .script import DIRECTION_LABELS, _render
+from .style import NO_GUIDELINES, style_brief, style_names
 
 AGENT = "art_direction"  # rôle de l'agent dans presets/knowledge.yaml
 STEP = "art_direction"  # étape des jobs
@@ -262,10 +263,9 @@ class DirectionContext:
         }
 
 
-def knowledge_query(chapter: Chapter) -> str:
-    return "\n".join(
-        p for p in ("mise en scène, cadrage, rythme", chapter.title, chapter.synopsis, chapter.project.style) if p
-    )
+def knowledge_query(presets: PresetRegistry, chapter: Chapter) -> str:
+    style = style_names(presets, chapter.project)
+    return "\n".join(p for p in ("mise en scène, cadrage, rythme", chapter.title, chapter.synopsis, style) if p)
 
 
 def story_pages(chapter: Chapter) -> list[Page]:
@@ -365,10 +365,12 @@ def build_context(
             )
         )
     style = presets.layout_styles.get(series.layout_style)
+    brief = style_brief(presets, series)
     return DirectionContext(
         series={
             "title": series.title,
-            "style": series.style,
+            "style": brief.packs,
+            "style_guidelines": brief.guidelines,
             "reading_direction": series.reading_direction.value,
             "layout_style": series.layout_style,
             "layout_style_name": style.name if style else series.layout_style,
@@ -387,7 +389,9 @@ def build_context(
         variety=prompt.variety or "equilibree",
         variant=variant,
         single_page=single,
-        knowledge=knowledge.for_agent(session, AGENT, series.id, knowledge_query(chapter)) if knowledge else None,
+        knowledge=knowledge.for_agent(session, AGENT, series.id, knowledge_query(presets, chapter))
+        if knowledge
+        else None,
         library=SeriesLibrary.load(session, series.id),
     )
 
@@ -457,7 +461,10 @@ def render_messages(prompt: PromptPreset, ctx: DirectionContext) -> list[ChatMes
     s = ctx.series
     values = {
         "series_title": s["title"],
-        "series_style": s["style"] or "(non précisé)",
+        # Packs de style de la série (genre, rendu, ton, réglages) et consignes du genre et du ton.
+        "style_packs": s["style"] or "(non précisé)",
+        "style_guidelines": s.get("style_guidelines") or NO_GUIDELINES,
+        "series_style": s["style"] or "(non précisé)",  # ancien nom de $style_packs
         "reading_direction": DIRECTION_LABELS.get(s["reading_direction"], s["reading_direction"]),
         "layout_style": f"{s['layout_style_name']} ({s['layout_style']})"
         + (f" : {s['layout_style_description']}" if s["layout_style_description"] else ""),

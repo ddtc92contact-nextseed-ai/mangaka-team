@@ -67,6 +67,8 @@ settings:
     source: prompts/direction-artistique.yaml#system
     variables: &da_vars
       - series_title
+      - style_packs
+      - style_guidelines
       - series_style
       - reading_direction
       - layout_style

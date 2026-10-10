@@ -1,0 +1,7 @@
+# Ton « lumineux » — champs : voir presets/README.md (« Packs de style »).
+id: lumineux
+name: Lumineux
+description: Ambiance claire et joyeuse, lumière de jour.
+order: 10
+prompt_keywords: [bright cheerful atmosphere, soft daylight, light airy mood]
+llm_guidelines: Ton lumineux et optimiste ; les conflits se résolvent, l'espoir domine.

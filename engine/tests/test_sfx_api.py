@@ -9,6 +9,7 @@ import httpx
 from fastapi.testclient import TestClient
 
 from mangaka_engine.store.models import Bubble, BubbleKind
+from tests.conftest import STYLE
 
 
 def _ok(resp: httpx.Response, status: int = 200) -> Any:
@@ -17,7 +18,9 @@ def _ok(resp: httpx.Response, status: int = 200) -> Any:
 
 
 def _setup(c: TestClient, style: str = "sage") -> dict[str, Any]:
-    s = _ok(c.post("/projects", json={"title": "Moto", "reading_direction": "ltr", "layout_style": style}), 201)
+    s = _ok(
+        c.post("/projects", json={**STYLE, "title": "Moto", "reading_direction": "ltr", "layout_style": style}), 201
+    )
     ch = _ok(c.post(f"/projects/{s['id']}/chapters", json={"title": "Départ"}), 201)
     pages = _ok(
         c.put(
@@ -144,7 +147,7 @@ def test_image_prompt_never_asks_to_draw_sfx(client: TestClient) -> None:
     detail = _ok(client.post(f"/panels/{panel['id']}/prompt/rebuild"))
     prompt = detail["final_prompt"]
     assert "VROUM" not in prompt.upper()
-    assert "sans aucun texte" in prompt
+    assert "Aucun texte ni bulle" in prompt
     negative = client.app.state.ctx.presets.image_prompt.forbidden_text_terms  # type: ignore[attr-defined]
     assert "onomatopées" in negative
     with client.app.state.ctx.db.session_scope() as session:  # type: ignore[attr-defined]

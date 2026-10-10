@@ -50,7 +50,7 @@ inpaint:
     - "Personnage : $character."
     - "Case : $description."
     - "Style : $style."
-    - "Dessin encré de manga, sans aucun texte."
+    - "Aucun texte dans l'image."
   targets:
     face: "Gros plan sur un visage net et expressif, yeux symétriques, traits fins"
     hand: "Main bien dessinée, cinq doigts, anatomie correcte, articulations nettes"

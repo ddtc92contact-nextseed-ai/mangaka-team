@@ -1,0 +1,13 @@
+# Genre « seinen » — champs : voir presets/README.md (« Packs de style »).
+id: seinen
+name: Seinen
+description: Pour adultes, dessin réaliste — intrigues mûres, violence et psychologie assumées.
+order: 20
+prompt_keywords: [seinen manga style, realistic anatomy, mature cinematic framing, detailed realistic backgrounds]
+layout_style: nerveuse
+reading_direction: rtl
+fonts: { dialogue: comic-neue, shout: titan-one }
+llm_guidelines: >-
+  Seinen, public adulte : rythme posé qui accélère dans les scènes de tension, 5 à 7 cases par page,
+  silences et cases muettes bienvenus. Dialogues naturels et nuancés, vocabulaire adulte ; personnages
+  ambigus, conséquences réalistes, thèmes durs traités sans complaisance.

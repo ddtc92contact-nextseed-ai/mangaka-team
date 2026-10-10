@@ -1,0 +1,13 @@
+# Genre « franco-belge » (BD) — champs : voir presets/README.md (« Packs de style »).
+id: franco-belge
+name: Franco-belge
+description: BD européenne, ligne claire — aventure lisible, lecture de gauche à droite.
+order: 70
+prompt_keywords: [franco-belgian comic style, ligne claire, clean uniform outlines, clearly drawn detailed backgrounds]
+layout_style: sage
+reading_direction: ltr
+fonts: { dialogue: comic-neue, shout: bowlby-one }
+llm_guidelines: >-
+  Bande dessinée franco-belge, tout public : planches denses de 6 à 9 cases en gaufrier régulier,
+  narration claire, récitatifs pour les ellipses. Dialogues plus fournis qu'en manga, vocabulaire
+  riche mais accessible ; humour et aventure.
