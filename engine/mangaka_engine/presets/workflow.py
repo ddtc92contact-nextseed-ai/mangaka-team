@@ -58,6 +58,7 @@ def build_workflow(
     reference_images: Sequence[str] = (),
     loras: Sequence[LoraSpec] = (),
     source_image: str | None = None,
+    inpaint_images: tuple[str, str] | None = None,
 ) -> BuiltWorkflow:
     """Applique `defaults` puis `params` sur une copie du JSON API.
 
@@ -68,6 +69,8 @@ def build_workflow(
     - `loras` sont chaînés au point d'insertion `lora_chain`, dans l'ordre ;
     - `source_image` (nom côté ComfyUI de l'image de composition, ex. le croquis validé) est écrite
       dans le nœud `source_image` du preset : obligatoire pour un workflow qui en déclare un.
+    - preset de réparation (bloc `inpaint`) : `inpaint_images` = (image source, masque), noms côté
+      ComfyUI ; pas de taille à fournir (celle de l'image source).
     """
     preset = loaded.preset
     unknown = sorted(set(params) - set(preset.mapping))
@@ -81,7 +84,12 @@ def build_workflow(
         raise PresetError("positive_prompt est obligatoire")
     resolved.setdefault("negative_prompt", "")
 
-    missing = [p for p in ("width", "height") if p not in resolved]
+    inpaint = preset.inpaint
+    if inpaint is not None and inpaint_images is None:
+        raise PresetError(f"le workflow de réparation {preset.id} demande une image source et un masque")
+    if inpaint is None and inpaint_images is not None:
+        raise PresetError(f"le workflow {preset.id} n'est pas un preset de réparation (bloc inpaint absent)")
+    missing = [p for p in ("width", "height") if p not in resolved] if inpaint is None else []
     if missing:
         raise PresetError(f"paramètres manquants : {', '.join(missing)}")
 
@@ -102,6 +110,10 @@ def build_workflow(
     for name, value in resolved.items():
         target = preset.mapping[name]
         workflow[target.node]["inputs"][target.input] = value
+    if inpaint is not None and inpaint_images is not None:
+        source, mask = inpaint_images
+        workflow[inpaint.source_image.node]["inputs"][inpaint.source_image.input] = source
+        workflow[inpaint.mask_image.node]["inputs"][inpaint.mask_image.input] = mask
 
     if preset.source_image is not None:
         workflow[preset.source_image.node]["inputs"][preset.source_image.input] = source_image

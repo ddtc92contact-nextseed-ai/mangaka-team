@@ -81,6 +81,9 @@ def test_check_ok_with_recorded_object_info() -> None:
         "qwen-image-edit-ref-turbo",
         "qwen-image-croquis",
         "qwen-image-turbo-from-sketch",
+        "qwen-image-inpaint",
+        "qwen-image-inpaint-rapide",
+        "qwen-image-inpaint-turbo",
     }
     assert all(p["ok"] and p["problems"] == [] for p in report["presets"])
     assert report["loras"] == {"checked": 1, "problems": []}

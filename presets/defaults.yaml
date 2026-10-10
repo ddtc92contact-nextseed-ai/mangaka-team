@@ -15,3 +15,5 @@ layout_style: dynamique
 sketch_enabled: true
 # Workflow des croquis (son `with_references` sert aux cases avec références).
 workflow_sketch: qwen-image-croquis
+# Réparation ciblée (atelier) pour un workflow qui ne déclare pas `inpaint_with` (preset avec bloc `inpaint`).
+workflow_inpaint: qwen-image-inpaint-turbo

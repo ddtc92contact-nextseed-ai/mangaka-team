@@ -108,6 +108,48 @@ class LoraChain(_Strict):
 
 REQUIRED_WORKFLOW_PARAMS = ("positive_prompt", "negative_prompt", "seed", "width", "height")
 WorkflowRole = Literal["generation", "croquis", "propre"]
+# Un preset de réparation (inpainting) part de l'image source : pas de taille, mais un débruitage partiel.
+REQUIRED_INPAINT_PARAMS = ("positive_prompt", "negative_prompt", "seed", "denoise")
+REPAIR_TARGETS = ("face", "hand", "zone")
+REPAIR_PROMPT_VARIABLES = frozenset({"target", "character", "description", "style"})
+
+
+class InpaintSettings(_Strict):
+    """Réparation ciblée (inpainting) : ce bloc fait d'un workflow un preset de réparation.
+
+    `source_image` reçoit l'image de la version à réparer, `mask_image` le masque (blanc = zone à
+    repeindre, déjà agrandi et adouci par le moteur). Le résultat est recollé sur l'original hors
+    ComfyUI : hors du masque adouci, les pixels ne bougent pas.
+    """
+
+    source_image: NodeInput
+    mask_image: NodeInput
+    grow_px: int = Field(default=24, ge=0, le=256, description="Marge ajoutée autour de la zone (px)")
+    feather_px: int = Field(default=16, ge=0, le=128, description="Largeur des bords fondus (px)")
+    # Prompt de réparation prérempli : morceaux assemblés comme `image_prompt.yaml` (un morceau dont
+    # une variable est vide est omis). Variables : $target, $character, $description, $style.
+    prompt_parts: list[str] = Field(
+        default_factory=lambda: ["$target.", "$character.", "$description.", "Style : $style."]
+    )
+    # Texte de $target selon la zone : visage, main, zone dessinée à la main.
+    targets: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("prompt_parts")
+    @classmethod
+    def _check_parts(cls, parts: list[str]) -> list[str]:
+        for part in parts:
+            unknown = set(string.Template(part).get_identifiers()) - REPAIR_PROMPT_VARIABLES
+            if unknown:
+                raise ValueError(f"variable inconnue dans prompt_parts : ${', $'.join(sorted(unknown))}")
+        return parts
+
+    @field_validator("targets")
+    @classmethod
+    def _check_targets(cls, targets: dict[str, str]) -> dict[str, str]:
+        unknown = [k for k in targets if k not in REPAIR_TARGETS]
+        if unknown:
+            raise ValueError(f"zone inconnue : {', '.join(unknown)} (possibles : {', '.join(REPAIR_TARGETS)})")
+        return targets
 
 
 class WorkflowTier(_Strict):
@@ -151,10 +193,19 @@ class WorkflowPreset(_Strict):
     source_image: NodeInput | None = None
     # Palier de série : workflow « propre depuis croquis » du même palier (« Passer au propre »).
     from_sketch: str | None = None
+    # Preset de réparation ciblée (inpainting) du même palier, pour les versions produites par ce workflow.
+    inpaint_with: str | None = Field(default=None, description="Id du preset de réparation (bloc `inpaint`)")
+    # Présent = ce workflow est un preset de réparation (jamais proposé pour générer une case).
+    inpaint: InpaintSettings | None = None
+
+    @property
+    def is_inpaint(self) -> bool:
+        return self.inpaint is not None
 
     @model_validator(mode="after")
     def _check_mapping(self) -> WorkflowPreset:
-        missing = [p for p in REQUIRED_WORKFLOW_PARAMS if p not in self.mapping]
+        required = REQUIRED_INPAINT_PARAMS if self.inpaint is not None else REQUIRED_WORKFLOW_PARAMS
+        missing = [p for p in required if p not in self.mapping]
         if missing:
             raise ValueError(f"paramètres obligatoires absents du mapping : {', '.join(missing)}")
         unknown = [k for k in self.defaults if k not in self.mapping]
@@ -178,6 +229,10 @@ class WorkflowPreset(_Strict):
             raise ValueError("source_image est réservé aux workflows « propre »")
         if self.long_side is not None and self.role != "croquis":
             raise ValueError("long_side est réservé aux workflows « croquis »")
+        if self.inpaint is not None and (self.trial or self.with_references or self.inpaint_with):
+            raise ValueError("un preset de réparation (inpaint) n'a ni trial, ni with_references, ni inpaint_with")
+        if self.inpaint is not None and self.tier is not None and self.tier.choice:
+            raise ValueError("un preset de réparation (inpaint) ne peut pas être proposé comme palier (tier.choice)")
         nodes = [s.node for s in self.reference_images]
         if len(set(nodes)) != len(nodes):
             raise ValueError("reference_images : un même nœud est déclaré deux fois")
@@ -218,6 +273,8 @@ class Defaults(_Strict):
     # Palier croquis : activé pour les nouvelles séries, et workflow des croquis (rôle `croquis`).
     sketch_enabled: bool = True
     workflow_sketch: str | None = None
+    # Preset de réparation ciblée pour un workflow qui ne déclare pas `inpaint_with`.
+    workflow_inpaint: str | None = None
 
 
 # --- Découpage (étape 2) ------------------------------------------------------

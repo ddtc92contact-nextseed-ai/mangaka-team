@@ -303,6 +303,15 @@ class PresetRegistry:
                     reg.defaults = defaults.model_copy(update={"layout_style": None})
                 else:
                     reg.defaults = defaults
+                inpaint_id = reg.defaults.workflow_inpaint if reg.defaults else None
+                if inpaint_id and not reg._is_inpaint(inpaint_id):
+                    reg.issues.append(
+                        PresetIssue(
+                            reg._rel(defaults_path),
+                            f"workflow_inpaint : workflow inconnu ou sans bloc inpaint : {inpaint_id}",
+                        )
+                    )
+                    reg.defaults = reg.defaults.model_copy(update={"workflow_inpaint": None})
         else:
             reg.issues.append(PresetIssue(reg._rel(defaults_path), "fichier absent"))
 
@@ -340,6 +349,19 @@ class PresetRegistry:
             else:
                 continue
             self.issues.append(PresetIssue(self._rel(wf.preset_path or wf.source), problem))
+        for wf in self.workflows.values():
+            target = wf.preset.inpaint_with
+            if target is not None and not self._is_inpaint(target):
+                self.issues.append(
+                    PresetIssue(
+                        self._rel(wf.preset_path or wf.source),
+                        f"inpaint_with : workflow inconnu ou sans bloc inpaint : {target}",
+                    )
+                )
+
+    def _is_inpaint(self, preset_id: str) -> bool:
+        wf = self.workflows.get(preset_id)
+        return wf is not None and wf.preset.is_inpaint
 
     def _check_sketch_pairs(self) -> None:
         """`from_sketch` doit désigner un workflow « propre » chargé ; le `with_references` d'un workflow
@@ -441,6 +463,15 @@ def check_workflow_mapping(preset: WorkflowPreset, workflow: Any) -> list[str]:
             errors.append(f"source_image : nœud {source.node} absent du workflow")
         elif source.input not in node.get("inputs", {}):
             errors.append(f"source_image : entrée « {source.input} » absente du nœud {source.node}")
+    if preset.inpaint is not None:
+        for label, target in (("source_image", preset.inpaint.source_image), ("mask_image", preset.inpaint.mask_image)):
+            node = workflow.get(target.node)
+            if not isinstance(node, dict):
+                errors.append(f"inpaint.{label} : nœud {target.node} absent du workflow")
+            elif target.input not in node.get("inputs", {}):
+                errors.append(f"inpaint.{label} : entrée « {target.input} » absente du nœud {target.node}")
+            if any(target.node in (slot.node, *slot.remove) for slot in preset.reference_images):
+                errors.append(f"inpaint.{label} : le nœud {target.node} est un emplacement de référence")
     chain = preset.lora_chain
     if chain is not None:
         for label, src in (("model_from", chain.model_from), ("clip_from", chain.clip_from)):

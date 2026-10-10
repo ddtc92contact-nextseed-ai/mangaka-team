@@ -11,7 +11,7 @@ Après modification d'un preset, redémarre le moteur (`npm run dev`).
 
 | Fichier | Rôle |
 | --- | --- |
-| `defaults.yaml` | Format de page, workflow (palier **Turbo**) et style de mise en page (`layout_style`) appliqués aux nouvelles séries ; workflow « avec références » de repli pour un preset qui ne déclare pas `with_references` (`workflow_with_references`) ; palier de « Régénérer en Qualité » (`workflow_quality`) ; palier croquis (`sketch_enabled`, `workflow_sketch`) |
+| `defaults.yaml` | Format de page, workflow (palier **Turbo**) et style de mise en page (`layout_style`) appliqués aux nouvelles séries ; workflow « avec références » de repli pour un preset qui ne déclare pas `with_references` (`workflow_with_references`) ; palier de « Régénérer en Qualité » (`workflow_quality`) ; preset de réparation ciblée de repli (`workflow_inpaint`) ; palier croquis (`sketch_enabled`, `workflow_sketch`) |
 | `providers.yaml` | Paramètres des fournisseurs (URL, modèle LLM, timeouts). **Aucune clé d'API ici** : elles vont dans `.env` |
 | `page_formats/*.yaml` | Formats de page (dimensions en mm, DPI, marges, gouttières) : A4 (défaut) et B4 JIS à 300 DPI |
 | `layout.yaml` | Découpage : taille mini d'une case, taille cible de génération, zones de bulles, seuil de régénération conseillée |
@@ -20,7 +20,7 @@ Après modification d'un preset, redémarre le moteur (`npm run dev`).
 | `prompts/*.yaml` | Prompts des étapes LLM (`script` : découpage d'un chapitre) |
 | `image_prompt.yaml` | Construction du prompt final des cases (étape 3) et termes « pas de texte » du prompt négatif |
 | `qc.yaml` | Contrôle qualité des cases (étape 4) : poids, seuils de verdict, règles des détecteurs, seuil CCIP, zone de doute de la vision, nouveaux essais automatiques |
-| `workflows/*.yaml` + `*.json` | Workflows ComfyUI : le JSON API exporté + le mapping des paramètres |
+| `workflows/*.yaml` + `*.json` | Workflows ComfyUI : le JSON API exporté + le mapping des paramètres (dont les presets de réparation ciblée, bloc `inpaint`) |
 | `fonts.yaml` + `fonts/` | Polices de lettrage (OFL, licences dans `fonts/OFL*.txt`) et style de texte par type de bulle |
 | `lettering.yaml` | Formes et placement des bulles, queues, bordures de case, repères de coupe |
 | `agents/*.yaml` | Agents du pipeline (écran « L'équipe ») : nom, rôle, étape et réglages éditables depuis l'UI |
@@ -526,6 +526,78 @@ référence de la GX10, puis validés contre le ComfyUI 0.37 de la machine. Pour
 4. Redémarre le moteur : `GET /presets` affiche les erreurs de mapping éventuelles ; puis « Tester la
    connexion » et « Générer une case d'essai » sur le tableau de bord.
 5. Régénère les JSON de référence des tests : `UPDATE_GOLDEN=1 npm run test:engine`, relis le diff.
+
+## Réparation ciblée (inpainting)
+
+Une case réussie à 90 % avec une main ou un visage raté ne se régénère plus entièrement : dans
+l'atelier, « Réparer cette main / ce visage » (panneau Contrôle qualité, depuis les boîtes du QC
+stockées dans `PanelImage.detections`) ou « Réparer une zone… » (fenêtre d'une version : rectangle,
+pinceau, gomme) ouvre la fenêtre de réparation. Échap annule, Ctrl + Entrée lance.
+
+**Presets.** Un workflow qui a un bloc `inpaint` est un preset de réparation : il n'est jamais
+proposé pour générer une case (ni dans la liste « Workflow » de l'atelier, ni comme palier). Un par
+palier, avec les mêmes fichiers de modèle que le palier :
+
+| Preset | Palier | Étapes | `estimated_s` |
+| --- | --- | --- | --- |
+| `qwen-image-inpaint-turbo` | Turbo (`workflow_inpaint` de `defaults.yaml`) | 8 | 40 |
+| `qwen-image-inpaint-rapide` | Rapide | 25 | 120 |
+| `qwen-image-inpaint` | Qualité | 50 | 140 |
+
+Chaque workflow de génération désigne le sien (`inpaint_with: qwen-image-inpaint-rapide`) ; le
+moteur prend celui du workflow **de la version réparée**, sinon celui du workflow de la série, sinon
+`defaults.workflow_inpaint`. Vérifié au chargement : `inpaint_with` / `workflow_inpaint` doivent
+désigner un preset chargé qui a un bloc `inpaint` (sinon avertissement dans `GET /presets`).
+
+Graphe (nœuds natifs, mêmes numéros que les autres presets) : `30 LoadImage` (version source) →
+`32 VAEEncode` → `33 SetLatentNoiseMask` (← `31 LoadImageMask`, canal rouge, blanc = à repeindre) →
+`9 KSampler` (`denoise` partiel) → `10 VAEDecode` → `11 SaveImage`. Pas d'`EmptyLatentImage` : la
+taille est celle de la version. Références (`20`–`22`) et chaîne LoRA comme le preset « avec
+références » du palier. **À confirmer** sur la GX10 avec un vrai essai (comme l'échantillonnage Turbo).
+
+```yaml
+mapping:                      # positive_prompt, negative_prompt, seed et denoise obligatoires
+  denoise: { node: "9", input: denoise }      # pas de width / height
+defaults:
+  denoise: 0.45               # 0,3 = retouche légère ; 0,6 = zone redessinée franchement
+inpaint:
+  source_image: { node: "30", input: image }  # LoadImage : la version à réparer
+  mask_image: { node: "31", input: image }    # LoadImageMask : masque agrandi et adouci par le moteur
+  grow_px: 24                 # marge ajoutée autour de la zone (réglable dans l'atelier)
+  feather_px: 16              # bords fondus (réglable)
+  prompt_parts:               # prompt prérempli ; un morceau dont une variable est vide est omis
+    - "$target."              # texte de `targets` selon la zone choisie
+    - "Personnage : $character."   # personnage concerné : description, mots-clés, mots déclencheurs du LoRA
+    - "Case : $description."
+    - "Style : $style."
+  targets: { face: "…", hand: "…", zone: "…" }
+```
+
+Un preset de réparation n'a ni `trial`, ni `with_references`, ni `inpaint_with`, ni `tier.choice`.
+
+**Masque et recollage.** Le masque brut (rectangles + masque peint) est gardé dans `data/`
+(`params.repair.mask_path`), agrandi de `grow_px` puis adouci sur `feather_px` (flou gaussien borné :
+au-delà de zone + marge + adoucissement, il vaut exactement 0). ComfyUI repeint ; le moteur **recolle
+ensuite seulement la zone masquée** sur l'original (`pipeline/inpaint.py`) : hors de cette limite, les
+pixels sont ceux de l'original au pixel près, même si l'aller-retour VAE a légèrement changé toute
+l'image. Une image renvoyée un peu plus petite (côtés arrondis au multiple du VAE) est replacée au
+centre.
+
+**Résultat.** Une nouvelle version de la case, liée à sa source (`params.repair` : `source_image_id`,
+`source_version`, zone, personnage, réglages), qui passe par la file unique (progression en direct) et
+par le QC ; elle n'est pas choisie d'office (sauf si la case n'a aucune version choisie) et un rejet du
+QC ne relance rien automatiquement (« à revoir ») : l'auteur la retient ou non. LoRA : style de la
+série puis LoRA d'identité du personnage concerné ; images de référence du personnage concerné (sinon
+celles de la case). Les versions du palier croquis (`params.kind: croquis`) ne se réparent pas.
+
+API : `GET /panel-images/{id}/repair?target=hand&character_id=…` (préremplissage : preset, marge,
+adoucissement, denoise, prompt) et `POST /panel-images/{id}/repair` (`regions` en px de l'image — une
+boîte de `detections` peut être renvoyée telle quelle —, `mask_png` en data URL, `target`,
+`character_id`, `prompt`, `grow_px`, `feather_px`, `denoise`, `seed`). ComfyUI factice : renvoie la
+source légèrement modifiée partout et la zone masquée remplie d'une couleur hachurée.
+
+**Plus tard (pas en v1)** : FaceDetailer (Impact Pack) + SAM `sam_vit_b_01ec64`, déjà installés sur la
+GX10, pour un détourage plus fin qu'un rectangle — ce sera un autre preset `inpaint`, sans changer le moteur.
 
 ## Fiches de référence (`reference_sheets/*.yaml`)
 

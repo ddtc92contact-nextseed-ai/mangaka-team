@@ -2,11 +2,15 @@
 
 Renvoie une image à la taille demandée, avec le libellé de la case (dernier segment du
 `filename_prefix` du nœud SaveImage, ex. « case 3 ») et la seed dessinés dessus ; simule une
-progression par étapes ; vérifie que les images de référence des `LoadImage` ont été envoyées.
+progression par étapes ; vérifie que les images des `LoadImage` / `LoadImageMask` ont été envoyées.
 
 Palier croquis : un croquis (libellé « croquis case N ») est un crayonné gris sur papier dont la
-composition (formes) dépend de la graine ; un workflow image → image (`VAEEncode` d'une image
-chargée) repart de l'image envoyée, agrandie à la taille demandée et « encrée » : même composition.
+composition (formes) dépend de la graine ; un workflow image → image sans masque (`VAEEncode` d'une
+image chargée) repart de l'image envoyée, agrandie à la taille demandée et « encrée » : même composition.
+
+Inpainting (un `VAEEncode` part d'une `LoadImage` et un `LoadImageMask` est présent) : renvoie l'image
+source, légèrement modifiée partout (comme le ferait l'aller-retour VAE) et remplie d'une couleur tirée
+de la seed dans la zone masquée — le moteur doit recoller seulement la zone pour garder le reste intact.
 """
 
 from __future__ import annotations
@@ -183,6 +187,23 @@ def _first_float(workflow: dict[str, Any], key: str) -> float | None:
     return None
 
 
+def render_mock_inpaint(source: bytes, mask: bytes, seed: int) -> bytes:
+    """Inpainting simulé : dérive légère partout (aller-retour VAE), zone masquée remplie d'une couleur."""
+    with Image.open(io.BytesIO(source)) as src, Image.open(io.BytesIO(mask)) as msk:
+        base = src.convert("RGB").point(lambda v: min(255, v + 3))
+        color = (seed * 53 % 200 + 40, seed * 37 % 200 + 40, seed * 91 % 200 + 40)
+        fill = Image.new("RGB", base.size, color)
+        draw = ImageDraw.Draw(fill)
+        side = min(base.size)
+        for x in range(0, base.width, max(8, side // 24)):  # hachures : la zone repeinte se voit
+            draw.line((x, 0, x - base.height, base.height), fill=(255, 255, 255), width=max(1, side // 200))
+        alpha = msk.convert("L").resize(base.size)
+        out = Image.composite(fill, base, alpha)
+    buf = io.BytesIO()
+    out.save(buf, format="PNG")
+    return buf.getvalue()
+
+
 class MockComfyUIClient:
     name = "mock"
 
@@ -238,11 +259,11 @@ class MockComfyUIClient:
         self._check_online()
         node_errors: dict[str, Any] = {}
         for node_id, node in workflow.items():
-            if isinstance(node, dict) and node.get("class_type") == "LoadImage":
+            if isinstance(node, dict) and node.get("class_type") in ("LoadImage", "LoadImageMask"):
                 image = node.get("inputs", {}).get("image")
                 if image not in self.uploads:
                     node_errors[node_id] = {
-                        "class_type": "LoadImage",
+                        "class_type": node["class_type"],
                         "errors": [{"message": "Invalid image file", "details": f"image: {image}"}],
                     }
         if node_errors:
@@ -250,16 +271,19 @@ class MockComfyUIClient:
         self._interrupted.clear()
         prompt_id = uuid.uuid4().hex
         self.prompts[prompt_id] = workflow
-        width, height = requested_size(workflow)
         filename = f"mock_{prompt_id}.png"
         seed, label = _first_int(workflow, "seed") or 0, _label(workflow)
+        inpaint = self._inpaint_inputs(workflow)
         source = source_image_name(workflow)
-        if source is not None:
+        if inpaint is not None:
+            data = render_mock_inpaint(*inpaint, seed)
+        elif source is not None:
+            width, height = requested_size(workflow)
             data = render_mock_from_image(self.uploads[source], width, height, seed, _first_float(workflow, "denoise"))
         elif label.startswith("croquis"):
-            data = render_mock_sketch(width, height, seed, label)
+            data = render_mock_sketch(*requested_size(workflow), seed, label)
         else:
-            data = render_mock_image(width, height, seed, label)
+            data = render_mock_image(*requested_size(workflow), seed, label)
         self._images[filename] = data
         output_nodes = [k for k, n in workflow.items() if isinstance(n, dict) and n.get("class_type") == "SaveImage"]
         outputs = {
@@ -268,6 +292,18 @@ class MockComfyUIClient:
         }
         self._history[prompt_id] = {"outputs": outputs, "status": {"status_str": "success", "completed": True}}
         return prompt_id
+
+    def _inpaint_inputs(self, workflow: dict[str, Any]) -> tuple[bytes, bytes] | None:
+        """(image source, masque) envoyés, si le workflow est un inpainting."""
+        masks = [n for n in workflow.values() if isinstance(n, dict) and n.get("class_type") == "LoadImageMask"]
+        for node in workflow.values():
+            if not isinstance(node, dict) or node.get("class_type") != "VAEEncode":
+                continue
+            link = node.get("inputs", {}).get("pixels")
+            source = workflow.get(link[0]) if isinstance(link, list) and link else None
+            if isinstance(source, dict) and source.get("class_type") == "LoadImage" and masks:
+                return self.uploads[source["inputs"]["image"]], self.uploads[masks[0]["inputs"]["image"]]
+        return None
 
     def get_history(self, prompt_id: str) -> dict[str, Any] | None:
         return self._history.get(prompt_id)

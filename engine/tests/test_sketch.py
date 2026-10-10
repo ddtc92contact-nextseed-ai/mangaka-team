@@ -329,3 +329,20 @@ def test_chapter_sketch_and_clean_keep_regenerate_quality(make_client: Callable[
     imgs = _images(c, p3["id"])
     assert [i["kind"] for i in imgs] == ["croquis", "final", "final"]
     assert [i["selected"] for i in imgs] == [False, True, False]
+
+
+def test_sketch_cannot_be_repaired(make_client: Callable[..., TestClient]) -> None:  # noqa: F811
+    """La réparation ciblée (#50) s'applique aux versions propres, jamais aux croquis."""
+    from mangaka_engine.pipeline.generation import GenerationError
+    from mangaka_engine.pipeline.repair import enqueue_repair
+
+    c = make_client()
+    data = setup_chapter(c)
+    p3 = data["panels"][2]
+    _ok(c.post(f"/panels/{p3['id']}/sketch"), 202)
+    _wait(c)
+    ctx = c.app.state.ctx  # type: ignore[attr-defined]
+    with ctx.db.session_scope() as session:
+        img = session.query(PanelImage).filter(PanelImage.panel_id == p3["id"]).one()
+        with pytest.raises(GenerationError, match="croquis"):
+            enqueue_repair(session, ctx.presets, ctx.files, img, target="zone")
