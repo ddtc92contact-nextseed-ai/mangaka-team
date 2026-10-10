@@ -342,7 +342,7 @@ def test_workflow_graph_has_library_keywords_loras_and_references_in_order() -> 
     )
     assert "Décor : Le labo (labo encombré, néons)." in prompt
     assert "Objets : Robot R-2 (antenne rouge)." in prompt
-    assert prompt.index("Décor :") < prompt.index("Personnages :") < prompt.index("Objets :")
+    assert prompt.index("Décor :") < prompt.index("Un personnage :") < prompt.index("Objets :")
 
     class _Series:
         style_lora_name, style_lora_weight = "style.safetensors", 0.8

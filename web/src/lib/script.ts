@@ -46,9 +46,14 @@ export interface DraftDialogue {
   kind: BubbleKind;
 }
 
-export interface DraftPanel extends Omit<PanelInput, "characters" | "dialogues" | "decor" | "objets"> {
+export interface DraftPanel extends Omit<PanelInput, "characters" | "dialogues" | "decor" | "objets" | "setting" | "staging"> {
   key: string;
   charactersText: string;
+  /** Lieu et mise en scène (prompt image : « Lieu : … », « Mise en scène : … »). */
+  setting: string;
+  staging: string;
+  /** Noms sans fiche personnage, d'après le moteur (dernier enregistrement). */
+  unmatched: string[];
   /** Bibliothèque de la série : décor (id) et objets (ids) de la case. */
   decor: number | null;
   objets: number[];
@@ -73,6 +78,9 @@ export function toDraft(pages: PageData[]): DraftPage[] {
       key: key(),
       id: pa.id,
       description: pa.description,
+      setting: pa.setting ?? "",
+      staging: pa.staging ?? "",
+      unmatched: pa.unmatched_characters ?? [],
       charactersText: pa.characters.join(", "),
       decor: pa.decor ?? null,
       objets: pa.objets ?? [],
@@ -92,6 +100,8 @@ export function fromDraft(pages: DraftPage[]): PageInput[] {
     panels: p.panels.map((pa) => ({
       id: pa.id,
       description: pa.description,
+      setting: pa.setting,
+      staging: pa.staging,
       characters: pa.charactersText
         .split(",")
         .map((c) => c.trim())
@@ -111,6 +121,9 @@ export function fromDraft(pages: DraftPage[]): PageInput[] {
 export const newPanel = (): DraftPanel => ({
   key: key(),
   description: "",
+  setting: "",
+  staging: "",
+  unmatched: [],
   charactersText: "",
   decor: null,
   objets: [],
@@ -134,4 +147,15 @@ export function moveItem<T>(list: T[], index: number, delta: number): T[] {
   const out = [...list];
   [out[index], out[target]] = [out[target], out[index]];
   return out;
+}
+
+/** Noms sans fiche encore cités par la case (le brouillon a pu en retirer depuis l'enregistrement). */
+export function unmatchedNames(panel: DraftPanel): string[] {
+  const cited = new Set(
+    panel.charactersText
+      .split(",")
+      .map((c) => c.trim())
+      .filter(Boolean),
+  );
+  return panel.unmatched.filter((n) => cited.has(n));
 }

@@ -11,13 +11,18 @@
 # collections de l'agent « image_prompt », voir knowledge.yaml ; budget de jetons serré).
 # Direction artistique appliquée (onglet « Direction artistique » du chapitre) : $plan (son type de
 # plan, sinon celui du scénario), $angle (angle de caméra), $ambiance (lumière, atmosphère).
+# Scénario : $setting (lieu de la case : lieu, moment, éléments du décor — présent même sans décor de la
+# bibliothèque), $staging (mise en scène : qui fait quoi, où dans le cadre, interactions),
+# $character_count (nombre de personnages en toutes lettres : « Un personnage », « Deux personnages »).
 parts:
   - "$plan."
   - "Angle de caméra : $angle."
   - "$description."
+  - "Lieu : $setting."
+  - "Mise en scène : $staging."
   - "Ambiance : $ambiance."
   - "Décor : $decor."
-  - "Personnages : $characters."
+  - "$character_count : $characters."
   - "Objets : $objects."
   - "Repères de la bible : $bible."
   - "Style : $style."
@@ -36,3 +41,19 @@ forbidden_text_terms: [texte, lettres, bulles, phylactères, onomatopées, filig
 # Retire de la description les répliques entre guillemets (« … », "…") pour ne pas
 # inciter le modèle à les écrire.
 strip_quotes: true
+
+# Cadrage des images de référence (workflows avec références : edit-ref…), ajouté au prompt envoyé à
+# ComfyUI au moment de la génération (le prompt final de la case ne change pas). Sans ce cadrage, le
+# modèle d'édition reprend l'image telle quelle : planche de poses, portrait sur fond blanc.
+references:
+  # Une ligne par image envoyée, dans l'ordre des emplacements : $slot (1, 2, 3), $name (nom de la fiche).
+  character: "Image $slot : référence d'identité de $name"
+  decor: "Image $slot : référence du lieu $name"
+  object: "Image $slot : référence de l'objet $name"
+  style: "Image $slot : référence de style seulement (trait, encrage, trames, couleurs), ne pas reprendre ses personnages ni sa scène"
+  separator: " ; "
+  # Morceaux avant / après le prompt de la case : $images (les lignes ci-dessus), $count (nombre d'images).
+  before:
+    - "$images."
+  after:
+    - "Les images de référence ne servent qu'à l'identité et au design (visage, silhouette, couleurs, costume, matières) : dessiner une scène nouvelle, avec de nouvelles poses et tout l'arrière-plan décrit ; ne pas reproduire la mise en page des fiches de référence, leurs poses multiples, leurs vues côte à côte ni leur fond blanc."

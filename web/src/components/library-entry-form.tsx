@@ -42,6 +42,8 @@ export function LibraryEntryForm({
   const [name, setName] = useState(initial?.name ?? "");
   const [description, setDescription] = useState(initial?.visual_description ?? "");
   const [keywords, setKeywords] = useState((initial?.prompt_keywords ?? []).join(", "));
+  // Personnages : autres noms reconnus par le scénario (« le petit dragon »).
+  const [aliases, setAliases] = useState((initial?.aliases ?? []).join(", "));
   const [loraName, setLoraName] = useState(initial?.lora_name ?? "");
   const [loraWeight, setLoraWeight] = useState(String(initial?.lora_weight ?? 0.8));
   const [loraTriggers, setLoraTriggers] = useState(initial?.lora_trigger_words ?? "");
@@ -68,6 +70,7 @@ export function LibraryEntryForm({
       lora_name: loraName.trim() || null,
       lora_weight: weight,
       lora_trigger_words: loraTriggers.trim(),
+      ...(kind === "character" ? { aliases: parseKeywords(aliases) } : {}),
     };
     try {
       let saved = initial
@@ -106,6 +109,21 @@ export function LibraryEntryForm({
           required
         />
       </Field>
+      {kind === "character" && (
+        <Field
+          label="Autres noms (alias)"
+          htmlFor="aliases"
+          error={errors.aliases ?? Object.entries(errors).find(([f]) => f.startsWith("aliases."))?.[1]}
+          hint="Séparés par des virgules. Le scénario qui écrit l’un de ces noms (« le petit dragon ») désigne cette fiche : ses références, sa description et son LoRA servent à la case."
+        >
+          <Input
+            id="aliases"
+            value={aliases}
+            onChange={(e) => setAliases(e.target.value)}
+            placeholder="le petit dragon, Urus le Bleu"
+          />
+        </Field>
+      )}
       <Field
         label="Description visuelle"
         htmlFor="visual_description"

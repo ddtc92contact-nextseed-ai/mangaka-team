@@ -1,10 +1,15 @@
 """Étape 3 — prompt final d'une case (fonctions pures, sans base ni réseau).
 
-description + type de plan (+ plan, angle et ambiance de la direction artistique) + fiches des personnages (description visuelle, mots-clés)
+description + type de plan (+ plan, angle et ambiance de la direction artistique) + lieu et mise en scène
+donnés par le scénario + nombre et fiches des personnages (description visuelle, mots-clés)
 + fiches du décor et des objets de la bibliothèque de la série (même forme que les personnages)
 + style de la série (+ notes de la bible sur les personnages et passages du savoir-faire) → prompt positif ; le prompt négatif contient toujours les termes qui
 interdisent au modèle de dessiner du texte (bulles et lettrage sont vectoriels).
 Le gabarit vit dans `presets/image_prompt.yaml`.
+
+`frame_references` ajoute au prompt envoyé à un workflow avec références le cadrage des images (« Image 1 :
+référence d'identité de Urus ; … » et la consigne « identité seulement, scène nouvelle ») : il dépend des
+emplacements retenus au moment de la génération, il n'est donc pas stocké dans le prompt final de la case.
 """
 
 from __future__ import annotations
@@ -61,9 +66,23 @@ def describe_character(character: PromptCharacter, settings: ImagePromptSettings
     return string.Template(settings.character).safe_substitute(name=name, details=", ".join(details))
 
 
+# Nombre de personnages en toutes lettres ($character_count).
+_COUNTS = ("", "Un", "Deux", "Trois", "Quatre", "Cinq", "Six", "Sept", "Huit", "Neuf", "Dix")
+
+
+def character_count(n: int) -> str:
+    """« Un personnage », « Deux personnages »… (« 12 personnages » au-delà de dix) ; "" pour zéro."""
+    if n <= 0:
+        return ""
+    word = _COUNTS[n] if n < len(_COUNTS) else str(n)
+    return f"{word} personnage{'s' if n > 1 else ''}"
+
+
 def build_prompt(
     *,
     description: str,
+    setting: str = "",
+    staging: str = "",
     shot_type: str | None = None,
     plan: str | None = None,
     angle: str | None = None,
@@ -84,11 +103,12 @@ def build_prompt(
     """
     settings = settings or ImagePromptSettings()
     desc, savoir_faire, bible = description or "", savoir_faire or "", bible or ""
-    ambiance = ambiance or ""
+    ambiance, setting, staging = ambiance or "", setting or "", staging or ""
     if settings.strip_quotes:
         # Notes de la bible et savoir-faire aussi : le texte n'est jamais dessiné par le modèle.
         desc, savoir_faire, bible = strip_quoted(desc), strip_quoted(savoir_faire), strip_quoted(bible)
-        ambiance = strip_quoted(ambiance)
+        ambiance, setting, staging = strip_quoted(ambiance), strip_quoted(setting), strip_quoted(staging)
+    described = [d for d in (describe_character(c, settings) for c in characters) if d]
     shot = _clean(shot_type)
     chosen = _clean(plan) or shot
     values = {
@@ -97,9 +117,10 @@ def build_prompt(
         "angle": _clean(angle),
         "ambiance": _clean(ambiance),
         "description": _clean(desc),
-        "characters": settings.character_separator.join(
-            d for d in (describe_character(c, settings) for c in characters) if d
-        ),
+        "setting": _clean(setting),
+        "staging": _clean(staging),
+        "character_count": character_count(len(described)),
+        "characters": settings.character_separator.join(described),
         "decor": describe_character(decor, settings) if decor is not None else "",
         "objects": settings.character_separator.join(
             d for d in (describe_character(o, settings) for o in objects) if d
@@ -127,3 +148,36 @@ def build_negative_prompt(base: str, settings: ImagePromptSettings | None = None
             terms.append(term)
             present.add(term.casefold())
     return ", ".join(terms)
+
+
+@dataclass(frozen=True)
+class ReferenceSlot:
+    """Une image de référence envoyée au workflow : sorte de fiche (`character`, `decor`, `object`,
+    `style`) et nom de la fiche, dans l'ordre des emplacements."""
+
+    kind: str
+    name: str
+
+
+def _join(templates: Sequence[str], values: dict[str, str]) -> str:
+    return " ".join(p for p in (string.Template(t).substitute(values).strip() for t in templates) if p)
+
+
+def frame_references(prompt: str, slots: Sequence[ReferenceSlot], settings: ImagePromptSettings | None = None) -> str:
+    """Prompt envoyé à un workflow avec références : une ligne par image (« Image 1 : référence
+    d'identité de Urus ») avant le prompt de la case, la consigne « identité seulement » après.
+
+    Sans image de référence, le prompt est renvoyé tel quel.
+    """
+    if not slots:
+        return prompt
+    refs = (settings or ImagePromptSettings()).references
+    lines = [
+        string.Template(getattr(refs, slot.kind, refs.character)).substitute(slot=str(i), name=_clean(slot.name))
+        for i, slot in enumerate(slots, start=1)
+    ]
+    values = {"images": refs.separator.join(line.strip() for line in lines if line.strip()), "count": str(len(slots))}
+    body = prompt.strip()
+    if body and body[-1] not in ".!?…":
+        body += "."  # prompt édité à la main sans point final : la consigne suit en phrase distincte
+    return " ".join(p for p in (_join(refs.before, values), body, _join(refs.after, values)) if p)

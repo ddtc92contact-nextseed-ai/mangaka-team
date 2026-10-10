@@ -63,7 +63,14 @@ def _version(path: Path) -> int:
     return v
 
 
+def _drop_v20_scene(con: sqlite3.Connection) -> None:
+    con.execute("ALTER TABLE panels DROP COLUMN setting")
+    con.execute("ALTER TABLE panels DROP COLUMN staging")
+    con.execute("ALTER TABLE characters DROP COLUMN aliases")
+
+
 def _drop_v19_layout_notice(con: sqlite3.Connection) -> None:
+    _drop_v20_scene(con)
     con.execute("ALTER TABLE projects DROP COLUMN layout_style_notice")
 
 
@@ -654,6 +661,31 @@ def test_v18_database_flags_series_left_on_sage(make_settings: Callable[..., Set
         assert (kept["layout_style"], kept["layout_style_notice"]) == ("sage", False)
         r = c.patch(f"/projects/{sage['id']}", json={"layout_style_notice": True})
         assert r.status_code == 422
+
+
+def test_v19_database_gets_panel_scene_and_aliases(make_settings: Callable[..., Settings]) -> None:
+    """v19 → v20 : lieu et mise en scène des cases (vides), alias des personnages (aucun)."""
+    settings = make_settings()
+    with TestClient(create_app(settings)) as c:
+        project = c.post("/projects", json={**STYLE, "title": "Série v19"}).json()
+        urus = c.post(f"/projects/{project['id']}/characters", json={"name": "Urus"}).json()
+        chapter = c.post(f"/projects/{project['id']}/chapters", json={"title": "Un"}).json()
+        saved = c.put(
+            f"/chapters/{chapter['id']}/pages",
+            json={"pages": [{"panels": [{"description": "Urus vole", "characters": ["Urus"]}]}]},
+        )
+        assert saved.status_code == 200, saved.text
+    con = sqlite3.connect(settings.database_path)
+    _drop_v20_scene(con)
+    con.execute("PRAGMA user_version = 19")
+    con.commit()
+    con.close()
+
+    with TestClient(create_app(settings)) as c:
+        assert c.get(f"/characters/{urus['id']}").json()["aliases"] == []
+        panel = c.get(f"/chapters/{chapter['id']}/pages").json()[0]["panels"][0]
+        assert panel["setting"] == "" and panel["staging"] == ""
+        assert panel["characters"] == ["Urus"] and panel["unmatched_characters"] == []
     assert _version(settings.database_path) == SCHEMA_VERSION
     fresh = settings.database_path.parent / "fresh.db"
     create_db_engine(fresh).dispose()

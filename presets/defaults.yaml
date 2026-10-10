@@ -2,6 +2,10 @@
 page_format: a4-300dpi
 # Palier des nouvelles séries : Turbo (production en volume). Les séries existantes gardent le leur.
 workflow: qwen-image-turbo
+# Images de référence d'une case, par fiche (personnage, décor, objet) : principale = la seule image
+# principale de la fiche (la 1re de sa galerie — une vue simple, pas une planche multi-poses que le
+# modèle recopierait) ; toutes = la principale d'abord, puis les suivantes s'il reste des emplacements.
+panel_references: principale
 # Workflow choisi automatiquement pour une case dont un personnage a des images de référence
 # (sinon : le workflow de la série). Une case peut imposer le sien (`generation_preset`).
 workflow_with_references: qwen-image-edit-ref-turbo
@@ -43,6 +47,9 @@ style_board:
   # se crée à partir de la description seule (texte → image) ;
   # always = jointe à chaque fiche (seule image envoyée sans image de départ) ; never = jamais.
   reference_sheets: with_subject
-  # Cases : free_slot = jointe s'il reste un emplacement libre parmi les images de référence du
-  # workflow (priorité : personnages > décor > objets > style) ; never = jamais.
-  panels: free_slot
+  # Cases : with_subject = jointe s'il reste un emplacement libre parmi les images de référence du
+  # workflow (priorité : personnages > décor > objets > style), et seulement si la case a déjà une image
+  # d'un personnage, de son décor ou d'un objet : jamais seule (le modèle d'édition la redessinerait
+  # telle quelle) — une case sans autre référence passe par le workflow texte ;
+  # free_slot = jointe s'il reste un emplacement, même seule ; never = jamais.
+  panels: with_subject

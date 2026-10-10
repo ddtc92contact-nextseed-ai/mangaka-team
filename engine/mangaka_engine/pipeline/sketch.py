@@ -35,6 +35,7 @@ from .generation import (
     control_variant,
     enqueue_panel,
     panel_cast,
+    scene_prompt,
 )
 from .knowledge import KnowledgeBase
 
@@ -193,7 +194,7 @@ def enqueue_clean(
     extra: dict[str, Any] = {
         "kind": ImageKind.final.value,
         "source_image_id": sketch.id,
-        "sketch_prompt": (sketch.params or {}).get("prompt"),
+        "sketch_prompt": scene_prompt(sketch),
     }
     settings = presets.workflow(preset).preset.control
     if settings is not None:

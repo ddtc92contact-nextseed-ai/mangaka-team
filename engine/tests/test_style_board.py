@@ -102,7 +102,7 @@ def test_every_genre_has_a_french_scene_test() -> None:
         assert len(genre.scene_test) > 30, genre.id
     settings = REG.defaults.style_board  # type: ignore[union-attr]
     assert settings is not None and settings.trials == 4
-    assert (settings.reference_sheets, settings.panels) == ("with_subject", "free_slot")
+    assert (settings.reference_sheets, settings.panels) == ("with_subject", "with_subject")
 
 
 def test_a_genre_without_scene_test_is_refused_at_load(tmp_path: Path) -> None:
@@ -392,27 +392,30 @@ def test_reference_sheets_setting_never_and_always(
         assert [r["kind"] for r in started["params"]["reference_images"]] == with_start
 
 
-# --- cases : seulement s'il reste un emplacement libre -------------------------------------
-@pytest.mark.parametrize(("taken", "joined"), [(0, True), (2, True), (3, False)])
-def test_style_reference_takes_a_free_panel_slot_only(c: TestClient, taken: int, joined: bool) -> None:
+# --- cases : seulement s'il reste un emplacement libre, jamais seule ------------------------
+@pytest.mark.parametrize(("images", "taken"), [(0, 0), (1, 1), (3, 1)])
+def test_style_reference_takes_a_free_panel_slot_only(c: TestClient, images: int, taken: int) -> None:
+    """with_subject : jamais la seule image (case sans référence → workflow texte, sans style) ;
+    principale : une image par fiche, même si la fiche en a trois."""
     s = _series(c)
     style = _make_style_reference(c, s["id"])
     panel_body: dict[str, Any] = {"description": "Une case"}
-    if taken:
+    if images:
         char = _ok(c.post(f"/projects/{s['id']}/characters", json={"name": "Aiko"}), 201)
-        files = [("files", (f"{i}.png", png_bytes(), "image/png")) for i in range(taken)]
+        files = [("files", (f"{i}.png", png_bytes(), "image/png")) for i in range(images)]
         _ok(c.post(f"/characters/{char['id']}/images", files=files), 201)
         panel_body["characters"] = ["Aiko"]
     ch = _ok(c.post(f"/projects/{s['id']}/chapters", json={"title": "Un"}), 201)
     [page] = _ok(c.put(f"/chapters/{ch['id']}/pages", json={"pages": [{"panels": [panel_body]}]}))
     [job] = _ok(c.post(f"/panels/{page['panels'][0]['id']}/generate"), 202)
-    assert job["params"]["preset"] == "qwen-image-edit-ref-turbo"  # workflow à références existant
     _idle(c)
     used = _ok(c.get(f"/jobs/{job['id']}"))["params"]["references"]
-    kinds = [r["kind"] for r in used]
-    assert kinds == ["character"] * taken + (["style"] if joined else [])
-    if joined:
-        assert used[-1]["id"] == style["id"] and used[-1]["slot"] == taken + 1
+    if not images:
+        assert job["params"]["preset"] == s["workflow_preset"] and used == []  # texte → image, sans style
+        return
+    assert job["params"]["preset"] == "qwen-image-edit-ref-turbo"  # workflow à références existant
+    assert [r["kind"] for r in used] == ["character"] * taken + ["style"]
+    assert used[-1]["id"] == style["id"] and used[-1]["slot"] == taken + 1
 
 
 def test_pick_references_puts_style_last_after_every_other_image() -> None:
@@ -428,6 +431,9 @@ def test_pick_references_puts_style_last_after_every_other_image() -> None:
     assert [img.id for _, img in picked] == [10, 50, 11]
     assert [img.id for _, img in pick_references([style], 3)] == [990]
     assert pick_references([style], 0) == []
+    # `principale` : une seule image par fiche (la 1re), le style prend la place libre.
+    picked = pick_references([char(1, 3), char(2, 2), style], 3, "principale")
+    assert [img.id for _, img in picked] == [10, 20, 990]
 
 
 # --- série sans planche : graphes identiques à aujourd'hui ----------------------------------

@@ -135,7 +135,13 @@ export interface PanelData {
   id: number;
   index: number;
   description: string;
+  /** Lieu de la case (lieu, moment, éléments du décor) — « Lieu : … » du prompt image. */
+  setting?: string;
+  /** Mise en scène (qui fait quoi, où dans le cadre) — « Mise en scène : … » du prompt image. */
+  staging?: string;
   characters: string[];
+  /** Noms de `characters` qui ne désignent aucune fiche personnage (à rattacher ou écarter). */
+  unmatched_characters?: string[];
   /** Décor de la bibliothèque de la série (id), null : aucun. */
   decor?: number | null;
   /** Objets de la bibliothèque de la série (ids). */
@@ -420,6 +426,9 @@ export interface PageData {
 export interface PanelInput {
   id?: number;
   description: string;
+  /** Absent : gardé tel quel. */
+  setting?: string;
+  staging?: string;
   characters: string[];
   /** Absent : décor gardé ; null : aucun décor. */
   decor?: number | null;
@@ -705,8 +714,12 @@ export interface PanelDetail {
   index: number;
   label: string;
   description: string;
+  setting: string;
+  staging: string;
   characters: string[];
   character_ids: number[];
+  /** Noms sans fiche personnage : ni références, ni description, ni LoRA à la génération. */
+  unmatched_characters: string[];
   decor: LibraryRef | null;
   objets: LibraryRef[];
   shot_type: string | null;
@@ -1023,6 +1036,16 @@ export interface Character {
   reference_images: ReferenceImage[];
   created_at: string;
   updated_at: string;
+  /** Autres noms reconnus par le scénario (personnages seulement). */
+  aliases?: string[];
+}
+
+/** Rattachement d'un nom écrit par le scénario à une fiche (ou mise à l'écart : `character_id` null). */
+export interface CharacterLink {
+  name: string;
+  character_id: number | null;
+  panels: number;
+  alias_added: boolean;
 }
 
 /** Sortes de fiches de la bibliothèque d'une série. */
@@ -1038,7 +1061,7 @@ export type LibraryEntry = Character | SeriesAsset;
 export type LibraryEntryInput = Pick<
   Character,
   "name" | "visual_description" | "prompt_keywords" | "lora_name" | "lora_weight" | "lora_trigger_words"
->;
+> & { aliases?: string[] };
 
 /** Élément de la bibliothèque cité par une case. */
 export interface LibraryRef {
@@ -1136,7 +1159,7 @@ export interface StyleBoard {
   style_names: string;
   trials_per_batch: number;
   use_reference_sheets: "with_subject" | "always" | "never" | null;
-  use_panels: "free_slot" | "never" | null;
+  use_panels: "with_subject" | "free_slot" | "never" | null;
   active: StyleReference | null;
   history: StyleReference[];
   /** Plus récents d'abord. */
@@ -1859,6 +1882,11 @@ export const api = {
     request<Chapter[]>(`/projects/${projectId}/chapters/reorder`, json("POST", { chapter_ids: chapterIds })),
 
   startScript: (chapterId: number) => request<Job>(`/chapters/${chapterId}/script`, { method: "POST" }),
+  linkCharacterName: (chapterId: number, name: string, characterId: number | null) =>
+    request<CharacterLink>(
+      `/chapters/${chapterId}/character-links`,
+      json("POST", { name, character_id: characterId }),
+    ),
   chapterJobs: (chapterId: number, step?: string) =>
     request<Job[]>(`/chapters/${chapterId}/jobs${step ? `?step=${encodeURIComponent(step)}` : ""}`),
   getJob: (id: number) => request<Job>(`/jobs/${id}`),
@@ -1902,6 +1930,8 @@ export const api = {
       final_prompt?: string | null;
       generation_preset?: string | null;
       description?: string;
+      setting?: string;
+      staging?: string;
       sketch_denoise?: number | null;
     },
   ) =>

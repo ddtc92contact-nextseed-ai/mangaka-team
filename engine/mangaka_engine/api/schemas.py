@@ -208,9 +208,15 @@ class SfxIn(_In):
 MAX_PANEL_OBJECTS = 8
 
 
+SceneText = Annotated[str, StringConstraints(strip_whitespace=True, max_length=1500)]
+
+
 class PanelIn(_In):
     id: int | None = None
     description: LongText = ""
+    # Lieu et mise en scène (scénario) : absents = gardés tels quels.
+    setting: SceneText | None = None
+    staging: SceneText | None = None
     characters: Annotated[list[Short], Field(max_length=20)] = Field(default_factory=list)
     shot_type: str | None = None
     importance: Annotated[int, Field(ge=1, le=3)] = 2
@@ -284,7 +290,12 @@ class PanelOut(BaseModel):
     id: int
     index: int
     description: str
+    setting: str = ""  # lieu : lieu, moment, éléments du décor
+    staging: str = ""  # mise en scène : qui fait quoi, où dans le cadre
     characters: list[str]
+    # Noms de `characters` qui ne désignent aucune fiche personnage (ni nom, ni alias, ni nom partiel) :
+    # sans référence, sans description ni LoRA pour la génération — à rattacher à une fiche.
+    unmatched_characters: list[str] = Field(default_factory=list)
     decor: int | None = None  # décor de la bibliothèque (id)
     objets: list[int] = Field(default_factory=list)  # objets de la bibliothèque (ids)
     shot_type: str | None
@@ -608,6 +619,9 @@ class PanelUpdate(_In):
     generation_preset: PresetId | None = None
     # Description de la case (tri des croquis : « modifier la description puis re-croquer »).
     description: LongText | None = None
+    # Lieu et mise en scène de la case (prompt image : « Lieu : … », « Mise en scène : … »).
+    setting: SceneText | None = None
+    staging: SceneText | None = None
     # Débruitage du passage au propre de cette case ; null = celui de la série (sinon du preset).
     sketch_denoise: Denoise | None = None
 
@@ -670,8 +684,11 @@ class PanelDetailOut(BaseModel):
     index: int
     label: str
     description: str
+    setting: str = ""
+    staging: str = ""
     characters: list[str]
     character_ids: list[int]
+    unmatched_characters: list[str] = Field(default_factory=list)  # voir PanelOut
     decor: LibraryRef | None = None
     objets: list[LibraryRef] = Field(default_factory=list)
     shot_type: str | None
@@ -848,7 +865,22 @@ def _clean_keywords(value: list[str] | None) -> list[str] | None:
 Keywords = Annotated[list[Annotated[str, StringConstraints(max_length=100)]], Field(max_length=50)]
 
 
-class CharacterCreate(_In):
+Aliases = Annotated[list[Name], Field(max_length=20)]
+
+
+def _clean_aliases(value: list[str] | None) -> list[str] | None:
+    if value is None:
+        return None
+    out: list[str] = []
+    for alias in value:
+        if alias and alias.casefold() not in {a.casefold() for a in out}:
+            out.append(alias)
+    return out
+
+
+class EntryCreate(_In):
+    """Fiche de la bibliothèque (objet, décor) ; un personnage a en plus ses autres noms (`CharacterCreate`)."""
+
     name: Name
     visual_description: LongText = ""
     prompt_keywords: Keywords = Field(default_factory=list)
@@ -864,7 +896,14 @@ class CharacterCreate(_In):
         return v or None
 
 
-class CharacterUpdate(_In):
+class CharacterCreate(EntryCreate):
+    # Autres noms reconnus par le scénario (« le petit dragon ») : voir pipeline/names.py.
+    aliases: Aliases = Field(default_factory=list)
+
+    _aliases = field_validator("aliases")(_clean_aliases)
+
+
+class EntryUpdate(_In):
     name: Name | None = None
     visual_description: LongText | None = None
     prompt_keywords: Keywords | None = None
@@ -873,6 +912,27 @@ class CharacterUpdate(_In):
     lora_trigger_words: LoraTriggers | None = None
 
     _kw = field_validator("prompt_keywords")(_clean_keywords)
+
+
+class CharacterUpdate(EntryUpdate):
+    aliases: Aliases | None = None
+
+    _aliases = field_validator("aliases")(_clean_aliases)
+
+
+class CharacterLinkIn(_In):
+    """Rattache un nom écrit par le scénario à une fiche (il devient un de ses alias), ou l'écarte
+    (`character_id` null : figurant sans fiche, retiré des personnages des cases du chapitre)."""
+
+    name: Name
+    character_id: int | None
+
+
+class CharacterLinkOut(BaseModel):
+    name: str
+    character_id: int | None
+    panels: int  # cases du chapitre concernées
+    alias_added: bool
 
 
 class ReferenceImageOut(BaseModel):
@@ -897,12 +957,13 @@ class CharacterOut(BaseModel):
     reference_images: list[ReferenceImageOut]
     created_at: datetime
     updated_at: datetime
+    aliases: list[str] = Field(default_factory=list)  # personnages seulement
 
 
 # --- Objets et décors de la bibliothèque (mêmes champs qu'un personnage) ------
 AssetKindName = Literal["object", "decor"]
-AssetCreate = CharacterCreate
-AssetUpdate = CharacterUpdate
+AssetCreate = EntryCreate
+AssetUpdate = EntryUpdate
 
 
 class AssetOut(CharacterOut):
@@ -1022,7 +1083,7 @@ class StyleBoardOut(BaseModel):
     style_names: str
     trials_per_batch: int
     use_reference_sheets: Literal["with_subject", "always", "never"] | None
-    use_panels: Literal["free_slot", "never"] | None
+    use_panels: Literal["with_subject", "free_slot", "never"] | None
     active: StyleReferenceOut | None
     history: list[StyleReferenceOut]
     trials: list[StyleTrialOut]

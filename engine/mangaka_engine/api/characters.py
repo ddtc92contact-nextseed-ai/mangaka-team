@@ -9,13 +9,14 @@ from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from ..pipeline.names import relink_project
 from ..pipeline.reference_sheets import MAX_KEPT, delete_entry_variants, next_position
 from ..store.files import InvalidImageError, StoredImage, cache_headers, versioned_url
 from ..store.models import Character, CharacterImage, SeriesAsset, SeriesAssetImage
 from .deps import AppContext, get_ctx, get_session
 from .errors import FieldError
 from .projects import get_project_or_404
-from .schemas import CharacterCreate, CharacterOut, CharacterUpdate, ReferenceImageOut
+from .schemas import CharacterCreate, CharacterOut, CharacterUpdate, EntryUpdate, ReferenceImageOut
 
 router = APIRouter(tags=["personnages"])
 
@@ -51,10 +52,11 @@ def character_out(c: Character) -> CharacterOut:
         reference_images=[reference_image_out(img, image_url(img)) for img in c.reference_images],
         created_at=c.created_at,
         updated_at=c.updated_at,
+        aliases=list(c.aliases or []),
     )
 
 
-def apply_changes(entry: Character | SeriesAsset, body: CharacterUpdate) -> None:
+def apply_changes(entry: Character | SeriesAsset, body: EntryUpdate) -> None:
     """PATCH d'une fiche de la bibliothèque (personnage, objet ou décor)."""
     changes = body.model_dump(exclude_unset=True)
     for key in ("name", "visual_description", "prompt_keywords", "lora_weight"):
@@ -64,6 +66,8 @@ def apply_changes(entry: Character | SeriesAsset, body: CharacterUpdate) -> None
         changes["lora_name"] = changes["lora_name"] or None
     if "lora_trigger_words" in changes:
         changes["lora_trigger_words"] = changes["lora_trigger_words"] or ""
+    if "aliases" in changes:
+        changes["aliases"] = changes["aliases"] or []
     for key, value in changes.items():
         setattr(entry, key, value)
 
@@ -142,6 +146,8 @@ def create_character(project_id: int, body: CharacterCreate, session: Session = 
     get_project_or_404(session, project_id)
     character = Character(project_id=project_id, **body.model_dump())
     session.add(character)
+    session.flush()
+    relink_project(session, project_id)  # les cases qui citaient déjà ce nom le retrouvent
     session.commit()
     return character_out(get_character_or_404(session, character.id))
 
@@ -155,6 +161,9 @@ def get_character(character_id: int, session: Session = Depends(get_session)) ->
 def update_character(character_id: int, body: CharacterUpdate, session: Session = Depends(get_session)) -> CharacterOut:
     character = get_character_or_404(session, character_id)
     apply_changes(character, body)
+    if {"name", "aliases"} & body.model_fields_set:
+        session.flush()
+        relink_project(session, character.project_id)
     session.commit()
     return character_out(character)
 
@@ -166,7 +175,10 @@ def delete_character(
     character = get_character_or_404(session, character_id)
     paths = [img.path for img in character.reference_images]
     paths += delete_entry_variants(session, "character", character.id)
+    project_id = character.project_id
     session.delete(character)
+    session.flush()
+    relink_project(session, project_id)  # ses noms redeviennent « sans fiche » dans les cases
     session.commit()
     for path in paths:
         ctx.files.delete(path)

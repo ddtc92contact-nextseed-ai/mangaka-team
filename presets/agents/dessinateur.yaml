@@ -72,7 +72,8 @@ settings:
     group: Prompt
     type: prompt_list
     source: image_prompt.yaml#parts
-    variables: [plan, angle, ambiance, shot, description, characters, decor, objects, style, savoir_faire, bible]
+    variables:
+      [plan, angle, ambiance, shot, description, setting, staging, character_count, characters, decor, objects, style, savoir_faire, bible]
     help: Un morceau dont une variable est vide est omis.
   - key: character
     label: Présentation d'un personnage
@@ -80,6 +81,20 @@ settings:
     type: prompt
     source: image_prompt.yaml#character
     variables: [name, details]
+  - key: reference_line
+    label: Image de référence d'un personnage
+    group: Prompt
+    type: prompt
+    source: image_prompt.yaml#references.character
+    variables: [slot, name]
+    help: Une ligne par image envoyée au workflow avec références, dans l'ordre des emplacements.
+  - key: reference_rule
+    label: Consigne sur les images de référence (après le prompt)
+    group: Prompt
+    type: prompt_list
+    source: image_prompt.yaml#references.after
+    variables: [images, count]
+    help: Rappelle au modèle d'édition que les références ne donnent que l'identité.
   - key: forbidden_text_terms
     label: Termes « pas de texte » du prompt négatif
     group: Prompt
