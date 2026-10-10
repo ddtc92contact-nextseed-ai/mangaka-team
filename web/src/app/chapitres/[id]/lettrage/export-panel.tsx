@@ -60,6 +60,26 @@ export function ExportPanel({ chapterId, pageId, bleedMm }: { chapterId: number;
     }
   }
 
+  const [finishNotice, setFinishNotice] = useState<string | null>(null);
+  async function finishChapter() {
+    setBusy(true);
+    setError(null);
+    setFinishNotice(null);
+    try {
+      const res = await api.finishChapter(chapterId);
+      const n = res.panel_ids.length;
+      setFinishNotice(
+        n
+          ? `Finition d'impression de ${n} case${n > 1 ? "s" : ""} mise en file : suis-la dans la file d'attente, puis exporte.`
+          : "Toutes les cases retenues du chapitre sont déjà au dpi d'impression (ou en file).",
+      );
+    } catch (e) {
+      setError(fullErrorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function exportChapter() {
     setBusy(true);
     setError(null);
@@ -94,6 +114,7 @@ export function ExportPanel({ chapterId, pageId, bleedMm }: { chapterId: number;
         />
       </div>
       {error && <Alert>{error}</Alert>}
+      {finishNotice && !error && <Alert tone="info">{finishNotice}</Alert>}
       <div className="flex flex-wrap gap-2">
         <Button variant="secondary" onClick={renderPage} disabled={busy} data-testid="render-page">
           Rendre cette page
@@ -101,6 +122,15 @@ export function ExportPanel({ chapterId, pageId, bleedMm }: { chapterId: number;
         <Button onClick={exportChapter} disabled={busy || Boolean(running)} data-testid="export-chapter">
           Exporter le chapitre
         </Button>
+      </div>
+      <div className="space-y-1">
+        <Button variant="secondary" onClick={finishChapter} disabled={busy} data-testid="finish-chapter">
+          Finaliser le chapitre pour l&apos;impression
+        </Button>
+        <p className="text-xs text-zinc-500">
+          Avant l&apos;export d&apos;impression : agrandit les cases retenues sous le seuil de dpi (l&apos;export utilise
+          les images finalisées ; les cases sous le seuil y sont signalées).
+        </p>
       </div>
       {shownRender && (
         <div className="space-y-1 text-sm" data-testid="render-result">

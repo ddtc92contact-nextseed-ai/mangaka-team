@@ -34,6 +34,7 @@ function Workshop() {
 
   const pages = useEngineData(() => api.listPages(chapter.id), [chapter.id, finished]);
   const jobs = useEngineData(() => api.chapterJobs(chapter.id, "generation"), [chapter.id, finished]);
+  const finishJobs = useEngineData(() => api.chapterJobs(chapter.id, "finishing"), [chapter.id, finished]);
   const presets = useEngineData(() => api.workflowPresets());
   const qcStatus = useEngineData(() => api.qcStatus());
   const [onlyReview, setOnlyReview] = useState(false);
@@ -63,7 +64,10 @@ function Workshop() {
     router.replace(`${pathname}?${q.toString()}`, { scroll: false });
   }
 
-  const views = useMemo(() => buildPanelViews(list, queueItems(queue), jobs.data ?? []), [list, queue, jobs.data]);
+  const views = useMemo(
+    () => buildPanelViews(list, queueItems(queue), jobs.data ?? [], finishJobs.data ?? []),
+    [list, queue, jobs.data, finishJobs.data],
+  );
 
   // Échap ferme le panneau latéral (sauf si une fenêtre modale est ouverte) et rend le focus à la case.
   useEffect(() => {
@@ -111,6 +115,28 @@ function Workshop() {
     }
   }
 
+  async function finishPage(p: PageData) {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await api.finishPage(p.id);
+      refresh();
+      pages.reload();
+      finishJobs.reload();
+      const n = res.panel_ids.length;
+      setNotice(
+        n
+          ? `Finition d'impression de ${n} case${n > 1 ? "s" : ""} mise en file (agrandissement jusqu'au dpi du format).`
+          : "Toutes les cases retenues de cette page sont déjà au dpi d'impression (ou en file).",
+      );
+    } catch (e) {
+      setError(fullErrorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (pages.loading && !pages.data) return <Loading />;
   if (pages.error && !pages.data) return <Alert>Impossible de charger les pages : {pages.error}</Alert>;
   if (!list.length || !page)
@@ -135,6 +161,8 @@ function Workshop() {
   const prevPanel = at2 > 0 ? annotatable[at2 - 1] : null;
   const nextPanel = at2 >= 0 && at2 < annotatable.length - 1 ? annotatable[at2 + 1] : null;
   const missing = missingPanels([page]).length;
+  const finishingNow = page.panels.filter((p) => views.get(p.id)?.finishing).length;
+  const toFinish = page.panels.filter((p) => p.print_info?.status === "low" && !views.get(p.id)?.finishing).length;
   const done = page.panels.filter((p) => p.selected_image_id !== null).length;
 
   return (
@@ -185,6 +213,19 @@ function Workshop() {
               Générer les cases manquantes{missing ? ` (${missing})` : ""}
             </Button>
           )}
+          {page.layout && page.panels.length > 0 && (
+            <Button
+              variant="secondary"
+              onClick={() => finishPage(page)}
+              disabled={busy || toFinish === 0}
+              title="Agrandit la version retenue des cases sous le seuil de dpi avant l'assemblage (quelques secondes par case, composition gardée)"
+              data-testid="finish-page"
+            >
+              {finishingNow
+                ? `Finition en cours (${finishingNow})`
+                : `Finaliser la page${toFinish ? ` (${toFinish})` : ""}`}
+            </Button>
+          )}
           <GenerateChapterButton
             chapterId={chapter.id}
             onQueued={(m) => {
@@ -204,6 +245,7 @@ function Workshop() {
         </Alert>
       )}
       {jobs.error && <Alert>Historique des générations indisponible : {jobs.error}</Alert>}
+      {finishJobs.error && <Alert>Historique des finitions indisponible : {finishJobs.error}</Alert>}
 
       <QCToolbar
         chapterId={chapter.id}
@@ -291,6 +333,7 @@ function Workshop() {
               onChanged={() => {
                 pages.reload();
                 jobs.reload();
+                finishJobs.reload();
               }}
               onPrev={prevPanel ? () => navigate(prevPanel.pageId, prevPanel.panelId) : undefined}
               onNext={nextPanel ? () => navigate(nextPanel.pageId, nextPanel.panelId) : undefined}

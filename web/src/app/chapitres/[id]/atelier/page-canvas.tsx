@@ -2,7 +2,9 @@
 
 import { useImperativeHandle, useRef, type KeyboardEvent, type Ref } from "react";
 import { engineUrl, type Job, type LayoutPanel, type PageData, type PanelData, type QueueItem } from "@/lib/api";
+import { DpiBadge } from "@/components/print-dpi";
 import { DetectionOverlay, QCBadge } from "@/components/qc";
+import { dpiLabel } from "@/lib/finishing";
 import { generationStep, PANEL_STATE } from "@/lib/generation";
 import { needsReview } from "@/lib/qc";
 import { cssClipPath, panelPolygon, svgPoints } from "@/lib/layout";
@@ -15,25 +17,42 @@ export interface PanelView {
   failure: Job | null;
   /** Contrôle qualité en cours ou en attente pour cette case. */
   qc: QueueItem | null;
+  /** Finition d'impression en cours ou en attente pour cette case. */
+  finishing: QueueItem | null;
+  /** Dernière finition en échec (null : la dernière a réussi, ou aucune). */
+  finishFailure: Job | null;
 }
 
 /** État vivant de chaque case : job en cours / en file (d'après la file), dernier échec (d'après les jobs). */
-export function buildPanelViews(pages: PageData[], items: QueueItem[], jobs: Job[]): Map<number, PanelView> {
-  const latest = new Map<number, Job>();
-  for (const j of jobs) {
-    if (j.panel_id != null && !latest.has(j.panel_id)) latest.set(j.panel_id, j);
-  }
+export function buildPanelViews(
+  pages: PageData[],
+  items: QueueItem[],
+  jobs: Job[],
+  finishJobs: Job[] = [],
+): Map<number, PanelView> {
+  const latestOf = (list: Job[]) => {
+    const out = new Map<number, Job>();
+    for (const j of list) {
+      if (j.panel_id != null && !out.has(j.panel_id)) out.set(j.panel_id, j);
+    }
+    return out;
+  };
+  const latest = latestOf(jobs);
+  const latestFinish = latestOf(finishJobs);
   const map = new Map<number, PanelView>();
   for (const p of pages) {
     for (const panel of p.panels) {
-      const mine = items.filter((i) => i.panel_id === panel.id && i.job.step !== "qc");
+      const mine = items.filter((i) => i.panel_id === panel.id && i.job.step === "generation");
       const last = latest.get(panel.id);
+      const lastFinish = latestFinish.get(panel.id);
       map.set(panel.id, {
         panel,
         running: mine.find((i) => i.job.status === "running") ?? null,
         pending: mine.filter((i) => i.job.status === "pending"),
         failure: last?.status === "failed" ? last : null,
         qc: items.find((i) => i.panel_id === panel.id && i.job.step === "qc") ?? null,
+        finishing: items.find((i) => i.panel_id === panel.id && i.job.step === "finishing") ?? null,
+        finishFailure: lastFinish?.status === "failed" ? lastFinish : null,
       });
     }
   }
@@ -160,7 +179,7 @@ export function PageCanvas({
             onClick={() => onOpen(panel.id)}
             onKeyDown={(e) => onKeyDown(e, lp)}
             aria-pressed={selected}
-            aria-label={`Case ${panel.index + 1} — ${stateLabel}${qcLabel}${panel.shot_type ? ` — ${panel.shot_type}` : ""}`}
+            aria-label={`Case ${panel.index + 1} — ${stateLabel}${qcLabel}${panel.print_info ? ` — ${dpiLabel(panel.print_info)}` : ""}${panel.shot_type ? ` — ${panel.shot_type}` : ""}`}
             data-testid="workshop-panel"
             data-state={running ? "generating" : queued ? "queued" : failure ? "failed" : panel.state}
             data-qc={panel.qc_verdict ?? "none"}
@@ -195,8 +214,15 @@ export function PageCanvas({
               <DetectionOverlay detections={panel.detections} fit="cover" />
             ) : null}
             {panel.selected_image_url ? (
-              <span className="absolute right-1 top-1">
+              <span className="absolute right-1 top-1 flex flex-col items-end gap-1">
                 <QCBadge verdict={panel.qc_verdict} score={panel.qc_score} override={panel.qc_override} />
+                {view?.finishing ? (
+                  <span className="rounded bg-sky-900/90 px-1.5 py-0.5 text-[10px] font-semibold text-sky-100" data-testid="finishing-badge">
+                    {view.finishing.job.status === "running" ? `Finition ${view.finishing.job.progress} %` : "Finition en file"}
+                  </span>
+                ) : panel.print_info ? (
+                  <DpiBadge info={panel.print_info} />
+                ) : null}
               </span>
             ) : (
               <span
