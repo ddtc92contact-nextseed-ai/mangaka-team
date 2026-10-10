@@ -15,15 +15,31 @@ export type Rythme = "lent" | "normal" | "rapide";
 export interface Project {
   id: number;
   title: string;
-  style: string;
+  /** Ancien style en texte libre : lecture seule, ignoré dès qu'un pack est choisi. */
+  legacy_style: string;
+  /** Packs de style (presets/style_*) ; null : série d'avant les packs, style à choisir. */
+  style_genre: string | null;
+  style_rendering: string | null;
+  style_tone: string | null;
+  /** Réglages fins : réglage → choix (trait, trames, détail). */
+  style_options: Record<string, string>;
+  /** Noms des packs (« Seinen · N&B à trames · Dark »). */
+  style_label: string;
+  /** `$style` composé pour les prompts image. */
+  style_prompt: string;
   status: SeriesStatus;
   reading_direction: ReadingDirection;
   page_format: string;
   workflow_preset: string;
   style_lora_name: string | null;
   style_lora_weight: number;
-  /** Mots déclencheurs du LoRA de style, ajoutés au prompt quand il est appliqué. */
-  style_lora_trigger_words: string;
+  /** Mots déclencheurs du LoRA de style, tirés du catalogue presets/style_loras.yaml. */
+  style_lora_trigger_words: string[];
+  /** Faux : LoRA hors catalogue, appliqué sans mots déclencheurs. */
+  style_lora_in_catalog: boolean;
+  /** Polices des bulles de parole et des cris (réglages de série du lettreur). */
+  dialogue_font: string | null;
+  shout_font: string | null;
   /** Style de mise en page de la série (presets/layout_styles/). */
   layout_style: string;
   /** Palier croquis : brouillon de page, tri, passage au propre (désactivable). */
@@ -47,14 +63,18 @@ export interface Project {
 export type ProjectInput = Pick<
   Project,
   | "title"
-  | "style"
+  | "style_genre"
+  | "style_rendering"
+  | "style_tone"
+  | "style_options"
   | "status"
   | "reading_direction"
   | "page_format"
   | "workflow_preset"
   | "style_lora_name"
   | "style_lora_weight"
-  | "style_lora_trigger_words"
+  | "dialogue_font"
+  | "shout_font"
   | "layout_style"
   | "sketch_enabled"
   | "sketch_denoise"
@@ -900,6 +920,50 @@ export interface LayoutStyle {
   is_default: boolean;
 }
 
+/** Packs de style (listes fermées de la fiche série). */
+export interface StyleGenre {
+  id: string;
+  name: string;
+  description: string;
+  layout_style: string;
+  reading_direction: ReadingDirection;
+  fonts: { dialogue: string; shout: string };
+  /** null : tous les tons. */
+  allowed_tones: string[] | null;
+  style_lora: string | null;
+}
+
+export interface StyleRendering {
+  id: string;
+  name: string;
+  description: string;
+  monochrome: boolean;
+  is_default: boolean;
+}
+
+export interface StyleTone {
+  id: string;
+  name: string;
+  description: string;
+  is_default: boolean;
+}
+
+export interface StyleOption {
+  id: string;
+  name: string;
+  description: string;
+  /** Réservé aux rendus noir et blanc (trames). */
+  monochrome_only: boolean;
+  choices: { id: string; name: string }[];
+}
+
+export interface StyleLora {
+  file: string;
+  name: string;
+  trigger_words: string[];
+  weight: number;
+}
+
 export interface ReferenceImage {
   id: number;
   url: string;
@@ -1093,6 +1157,11 @@ export interface Presets {
   fonts: { id: string; name: string; bold: boolean; italic: boolean }[];
   layout_templates: LayoutTemplate[];
   layout_styles: LayoutStyle[];
+  style_genres: StyleGenre[];
+  style_renderings: StyleRendering[];
+  style_tones: StyleTone[];
+  style_options: StyleOption[];
+  style_loras: StyleLora[];
   prompts: string[];
   issues: { file: string; message: string }[];
 }

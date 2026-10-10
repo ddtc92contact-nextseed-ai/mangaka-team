@@ -1,15 +1,33 @@
 "use client";
 
 import { useRef, useState, type FormEvent } from "react";
-import { api, EngineError, errorMessage, type CleanMode, type Presets, type Project, type ProjectInput } from "@/lib/api";
+import {
+  api,
+  EngineError,
+  errorMessage,
+  type CleanMode,
+  type Presets,
+  type Project,
+  type ProjectInput,
+  type StyleGenre,
+} from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
 import { Modal } from "./modal";
 import { LoraPicker } from "./lora-picker";
 import { DIRECTIONS, DirectionPicker } from "./reading-direction";
 import { SERIES_STATUS } from "./status";
-import { Alert, Button, Field, Input, Select, Textarea } from "./ui";
+import { Alert, Button, Field, Input, Select } from "./ui";
 
 const DIRECTION_REQUIRED = "Choisis le sens de lecture : manga (droite → gauche) ou BD (gauche → droite).";
+const STYLE_REQUIRED: Record<"style_genre" | "style_rendering" | "style_tone", string> = {
+  style_genre: "Choisis le genre de la série dans la liste.",
+  style_rendering: "Choisis le rendu dans la liste.",
+  style_tone: "Choisis le ton dans la liste.",
+};
+
+function toneAllowed(genre: StyleGenre | undefined, tone: string): boolean {
+  return !genre?.allowed_tones || genre.allowed_tones.includes(tone);
+}
 
 /** Rappelle quel workflow du même palier sert aux cases avec images de référence. */
 function WorkflowHint({ presets, workflow }: { presets?: Presets["workflows"]; workflow: string }) {
@@ -37,7 +55,11 @@ export function ProjectForm({
   const control = useEngineData(() => api.controlStatus());
   const [form, setForm] = useState<Partial<ProjectInput>>({
     title: initial?.title ?? "",
-    style: initial?.style ?? "",
+    // Genre : choix explicite. Rendu et ton : ceux de la série, sinon ceux par défaut des presets.
+    style_genre: initial?.style_genre ?? undefined,
+    style_rendering: initial?.style_rendering ?? undefined,
+    style_tone: initial?.style_tone ?? undefined,
+    style_options: initial?.style_options ?? {},
     status: initial?.status ?? "ongoing",
     // À la création rien n'est présélectionné : le sens de lecture est un choix explicite.
     reading_direction: initial?.reading_direction,
@@ -45,7 +67,8 @@ export function ProjectForm({
     workflow_preset: initial?.workflow_preset,
     style_lora_name: initial?.style_lora_name ?? "",
     style_lora_weight: initial?.style_lora_weight ?? 0.8,
-    style_lora_trigger_words: initial?.style_lora_trigger_words ?? "",
+    dialogue_font: initial?.dialogue_font ?? undefined,
+    shout_font: initial?.shout_font ?? undefined,
     layout_style: initial?.layout_style,
     sketch_enabled: initial?.sketch_enabled,
     sketch_denoise: initial?.sketch_denoise ?? null,
@@ -82,14 +105,64 @@ export function ProjectForm({
   const upscalers = presets.data?.upscalers ?? [];
   const defaultUpscaler = upscalers.find((u) => u.is_default);
   const upscalerInfo = upscalers.find((u) => u.id === form.upscaler) ?? defaultUpscaler;
+  // Packs de style : listes fermées des presets.
+  const genres = presets.data?.style_genres ?? [];
+  const renderings = presets.data?.style_renderings ?? [];
+  const tones = presets.data?.style_tones ?? [];
+  const styleOptions = presets.data?.style_options ?? [];
+  const genre = genres.find((g) => g.id === form.style_genre);
+  const renderingId = form.style_rendering ?? renderings.find((r) => r.is_default)?.id ?? "";
+  const rendering = renderings.find((r) => r.id === renderingId);
+  const toneId = form.style_tone ?? tones.find((t) => t.is_default)?.id ?? "";
+  const tone = tones.find((t) => t.id === toneId);
+  const toneRefused = Boolean(genre && toneId && !toneAllowed(genre, toneId));
+  // Trames & co : réservés aux rendus noir et blanc, masqués en couleur.
+  const visibleOptions = styleOptions.filter((o) => !o.monochrome_only || rendering?.monochrome !== false);
+  const fonts = presets.data?.fonts ?? [];
+  const dialogueFont = form.dialogue_font ?? genre?.fonts.dialogue ?? "";
+  const shoutFont = form.shout_font ?? genre?.fonts.shout ?? "";
+  const loraName = form.style_lora_name?.trim() ?? "";
+  const catalogLora = presets.data?.style_loras.find((l) => l.file === loraName);
+  const suggestedLora = presets.data?.style_loras.find((l) => l.file === genre?.style_lora);
 
   const set = <K extends keyof ProjectInput>(key: K, value: ProjectInput[K]) => {
     setForm((f) => ({ ...f, [key]: value }));
     setErrors((e) => ({ ...e, [key]: "" }));
   };
 
+  /** Le genre pré-remplit la mise en page, le sens de lecture et les polices (modifiables ensuite). */
+  function chooseGenre(id: string) {
+    const g = genres.find((x) => x.id === id);
+    setForm((f) => ({
+      ...f,
+      style_genre: id || undefined,
+      ...(g && {
+        layout_style: g.layout_style,
+        reading_direction: g.reading_direction,
+        dialogue_font: g.fonts.dialogue,
+        shout_font: g.fonts.shout,
+      }),
+    }));
+    setErrors((e) => ({ ...e, style_genre: "", style_tone: "", reading_direction: "", layout_style: "" }));
+  }
+
+  function chooseLora(name: string) {
+    const entry = presets.data?.style_loras.find((l) => l.file === name.trim());
+    setForm((f) => ({ ...f, style_lora_name: name, ...(entry && { style_lora_weight: entry.weight }) }));
+    setErrors((e) => ({ ...e, style_lora_name: "" }));
+  }
+
   function submit(e: FormEvent) {
     e.preventDefault();
+    const missing = (["style_genre", "style_rendering", "style_tone"] as const).filter(
+      (k) => !(k === "style_genre" ? form.style_genre : k === "style_rendering" ? renderingId : toneId),
+    );
+    if (missing.length) {
+      setErrors(Object.fromEntries(missing.map((k) => [k, STYLE_REQUIRED[k]])));
+      setFormError(null);
+      formRef.current?.querySelector<HTMLSelectElement>(`#${missing[0]}`)?.focus();
+      return;
+    }
     if (!form.reading_direction) {
       setErrors({ reading_direction: DIRECTION_REQUIRED });
       setFormError(null);
@@ -106,15 +179,23 @@ export function ProjectForm({
     setSaving(true);
     setFormError(null);
     setErrors({});
+    // Réglages fins masqués (trames d'un rendu couleur) : retirés, l'API les refuserait.
+    const options = Object.fromEntries(
+      Object.entries(form.style_options ?? {}).filter(([k, v]) => v && visibleOptions.some((o) => o.id === k)),
+    );
     const body = {
       ...form,
+      style_rendering: renderingId,
+      style_tone: toneId,
+      style_options: options,
+      dialogue_font: dialogueFont || undefined,
+      shout_font: shoutFont || undefined,
       page_format: pageFormat || undefined,
       workflow_preset: workflow || undefined,
       layout_style: layoutStyle || undefined,
       sketch_enabled: sketchEnabled,
       sketch_denoise: form.sketch_denoise ?? null,
-      style_lora_name: form.style_lora_name?.trim() || null,
-      style_lora_trigger_words: form.style_lora_trigger_words?.trim() ?? "",
+      style_lora_name: loraName || null,
     };
     try {
       const saved = initial ? await api.updateProject(initial.id, body) : await api.createProject(body);
@@ -130,6 +211,194 @@ export function ProjectForm({
   return (
     <form ref={formRef} onSubmit={submit} className="space-y-5" noValidate>
       {formError && <Alert>{formError}</Alert>}
+      <Field label="Titre" htmlFor="title" error={errors.title}>
+        <Input
+          id="title"
+          value={form.title ?? ""}
+          onChange={(e) => set("title", e.target.value)}
+          placeholder="Les Lames de Kyoto"
+          aria-invalid={Boolean(errors.title)}
+          required
+          maxLength={200}
+        />
+      </Field>
+      {initial && !initial.style_genre && (
+        <div
+          role="status"
+          className="rounded-md border border-amber-800/60 bg-amber-950/30 px-4 py-3 text-sm text-amber-200"
+          data-testid="legacy-style-banner"
+        >
+          <p className="font-medium">Style à choisir dans les listes</p>
+          <p className="mt-1 text-amber-200/80">
+            Le style se choisit désormais par genre, rendu et ton. En attendant, l&apos;ancien texte reste utilisé
+            dans les prompts.
+          </p>
+          {initial.legacy_style && (
+            <p className="mt-2 text-xs text-amber-100/70">
+              Ancien style (lecture seule) : « {initial.legacy_style} »
+            </p>
+          )}
+        </div>
+      )}
+      <fieldset className="space-y-4 rounded-lg border border-zinc-800 p-4" data-testid="style-packs">
+        <legend className="px-1 text-sm font-medium text-zinc-200">Style de la série</legend>
+        <div className="grid gap-5 md:grid-cols-3">
+          <Field
+            label="Genre"
+            htmlFor="style_genre"
+            error={errors.style_genre}
+            hint={genre?.description ?? "Pré-remplit la mise en page, le sens de lecture et les polices."}
+          >
+            <Select
+              id="style_genre"
+              value={form.style_genre ?? ""}
+              onChange={(e) => chooseGenre(e.target.value)}
+              aria-invalid={Boolean(errors.style_genre)}
+              disabled={!presets.data}
+              required
+            >
+              <option value="">Choisir un genre…</option>
+              {genres.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.name}
+                </option>
+              ))}
+              {form.style_genre && presets.data && !genre && (
+                <option value={form.style_genre}>{form.style_genre} (preset introuvable)</option>
+              )}
+            </Select>
+          </Field>
+          <Field label="Rendu" htmlFor="style_rendering" error={errors.style_rendering} hint={rendering?.description}>
+            <Select
+              id="style_rendering"
+              value={renderingId}
+              onChange={(e) => set("style_rendering", e.target.value)}
+              aria-invalid={Boolean(errors.style_rendering)}
+              disabled={!presets.data}
+              required
+            >
+              {!renderingId && <option value="">Choisir un rendu…</option>}
+              {renderings.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name}
+                </option>
+              ))}
+              {renderingId && presets.data && !rendering && (
+                <option value={renderingId}>{renderingId} (preset introuvable)</option>
+              )}
+            </Select>
+          </Field>
+          <Field
+            label="Ton"
+            htmlFor="style_tone"
+            error={
+              errors.style_tone ||
+              (toneRefused && genre && tone ? `Le ton « ${tone.name} » n'est pas proposé pour le genre « ${genre.name} ».` : undefined)
+            }
+            hint={tone?.description}
+          >
+            <Select
+              id="style_tone"
+              value={toneId}
+              onChange={(e) => set("style_tone", e.target.value)}
+              aria-invalid={Boolean(errors.style_tone) || toneRefused}
+              disabled={!presets.data}
+              required
+            >
+              {!toneId && <option value="">Choisir un ton…</option>}
+              {tones.map((t) => {
+                const allowed = toneAllowed(genre, t.id);
+                return (
+                  <option key={t.id} value={t.id} disabled={!allowed}>
+                    {t.name}
+                    {allowed ? "" : " (non proposé pour ce genre)"}
+                  </option>
+                );
+              })}
+              {toneId && presets.data && !tone && <option value={toneId}>{toneId} (preset introuvable)</option>}
+            </Select>
+          </Field>
+        </div>
+        {visibleOptions.length > 0 && (
+          <div className="grid gap-5 md:grid-cols-3" data-testid="style-options">
+            {visibleOptions.map((o) => (
+              <Field
+                key={o.id}
+                label={o.name}
+                htmlFor={`style_option_${o.id}`}
+                hint={o.description}
+                error={errors.style_options && o.id === visibleOptions[0].id ? errors.style_options : undefined}
+              >
+                <Select
+                  id={`style_option_${o.id}`}
+                  value={form.style_options?.[o.id] ?? ""}
+                  onChange={(e) => {
+                    const next = { ...(form.style_options ?? {}) };
+                    if (e.target.value) next[o.id] = e.target.value;
+                    else delete next[o.id];
+                    set("style_options", next);
+                  }}
+                  disabled={!presets.data}
+                >
+                  <option value="">Par défaut</option>
+                  {o.choices.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            ))}
+          </div>
+        )}
+        <LoraPicker
+          id="style_lora_name"
+          label="LoRA de style (optionnel)"
+          hint="Appliqué à toutes les cases de la série."
+          placeholder="encre-seinen-v2.safetensors"
+          value={form.style_lora_name ?? ""}
+          onChange={chooseLora}
+          savedValue={initial?.style_lora_name}
+          error={errors.style_lora_name}
+          weight={String(form.style_lora_weight ?? 0.8)}
+          onWeightChange={(v) => set("style_lora_weight", Number(v))}
+          weightLabel="Poids du LoRA de style"
+          weightError={errors.style_lora_weight}
+        />
+        {loraName ? (
+          catalogLora ? (
+            <p className="text-xs text-zinc-500" data-testid="style-lora-catalog">
+              Mots déclencheurs (catalogue) : {catalogLora.trigger_words.join(", ") || "aucun"} · poids conseillé{" "}
+              {String(catalogLora.weight).replace(".", ",")}
+            </p>
+          ) : (
+            <p className="text-xs text-amber-300" data-testid="style-lora-catalog">
+              LoRA hors catalogue (presets/style_loras.yaml) : appliqué sans mots déclencheurs.
+            </p>
+          )
+        ) : (
+          suggestedLora && (
+            <p className="flex items-center gap-2 text-xs text-zinc-400">
+              LoRA conseillé pour ce genre : {suggestedLora.name || suggestedLora.file}
+              <button
+                type="button"
+                className="rounded border border-zinc-700 px-2 py-0.5 text-zinc-300 hover:bg-zinc-800"
+                onClick={() => chooseLora(suggestedLora.file)}
+              >
+                Utiliser
+              </button>
+            </p>
+          )
+        )}
+        {initial?.style_genre && (
+          <p className="text-xs break-words text-zinc-500" data-testid="style-prompt">
+            Style envoyé au dessinateur (enregistré) : {initial.style_prompt}
+          </p>
+        )}
+        {initial?.style_genre && initial.legacy_style && (
+          <p className="text-xs text-zinc-600">Ancien style libre (lecture seule, plus utilisé) : « {initial.legacy_style} »</p>
+        )}
+      </fieldset>
       <DirectionPicker
         value={form.reading_direction}
         onChange={(v) => set("reading_direction", v)}
@@ -158,31 +427,34 @@ export function ProjectForm({
           )}
         </Select>
       </Field>
-      <Field label="Titre" htmlFor="title" error={errors.title}>
-        <Input
-          id="title"
-          value={form.title ?? ""}
-          onChange={(e) => set("title", e.target.value)}
-          placeholder="Les Lames de Kyoto"
-          aria-invalid={Boolean(errors.title)}
-          required
-          maxLength={200}
-        />
-      </Field>
-      <Field
-        label="Style graphique"
-        htmlFor="style"
-        error={errors.style}
-        hint="Repris dans chaque prompt : encrage, trames, ambiance, références…"
-      >
-        <Textarea
-          id="style"
-          value={form.style ?? ""}
-          onChange={(e) => set("style", e.target.value)}
-          placeholder="Manga seinen noir et blanc, encrage épais, trames, décors détaillés"
-          aria-invalid={Boolean(errors.style)}
-        />
-      </Field>
+      <div className="grid gap-5 md:grid-cols-2">
+        {(
+          [
+            ["dialogue_font", "Police des dialogues", dialogueFont],
+            ["shout_font", "Police des cris", shoutFont],
+          ] as const
+        ).map(([key, label, value]) => (
+          <Field key={key} label={label} htmlFor={key} error={errors[key]} hint="Pré-remplie par le genre.">
+            <Select
+              id={key}
+              value={value}
+              onChange={(e) => set(key, e.target.value)}
+              aria-invalid={Boolean(errors[key])}
+              disabled={!presets.data}
+            >
+              {!value && <option value="">Police du lettreur</option>}
+              {fonts.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.name}
+                </option>
+              ))}
+              {value && presets.data && !fonts.some((f) => f.id === value) && (
+                <option value={value}>{value} (police introuvable)</option>
+              )}
+            </Select>
+          </Field>
+        ))}
+      </div>
       <div className="grid gap-5 md:grid-cols-3">
         <Field label="Statut de la série" htmlFor="status" error={errors.status}>
           <Select
@@ -198,23 +470,6 @@ export function ProjectForm({
           </Select>
         </Field>
       </div>
-      <LoraPicker
-        id="style_lora_name"
-        label="LoRA de style (optionnel)"
-        hint="Appliqué à toutes les cases de la série."
-        placeholder="encre-seinen-v2.safetensors"
-        value={form.style_lora_name ?? ""}
-        onChange={(v) => set("style_lora_name", v)}
-        savedValue={initial?.style_lora_name}
-        error={errors.style_lora_name}
-        weight={String(form.style_lora_weight ?? 0.8)}
-        onWeightChange={(v) => set("style_lora_weight", Number(v))}
-        weightLabel="Poids du LoRA de style"
-        weightError={errors.style_lora_weight}
-        triggerWords={form.style_lora_trigger_words ?? ""}
-        onTriggerWordsChange={(v) => set("style_lora_trigger_words", v)}
-        triggerWordsError={errors.style_lora_trigger_words}
-      />
       <div className="grid gap-5 md:grid-cols-2">
         <Field label="Format de page" htmlFor="page_format" error={errors.page_format}>
           <Select
