@@ -284,6 +284,10 @@ class PanelOut(BaseModel):
     regeneration_advised: bool = False
     # Dpi de la version retenue à l'impression (None : pas de version retenue ou pas de mise en page).
     print_info: PrintInfoOut | None = None
+    # Dernière génération de la case (tous jobs confondus, sans limite) : pour afficher un échec et son erreur.
+    last_job_id: int | None = None
+    last_job_status: str | None = None
+    last_job_error: str | None = None
 
 
 class PageOut(BaseModel):

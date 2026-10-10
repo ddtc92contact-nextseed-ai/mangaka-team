@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { GenerateChapterButton } from "@/components/generate-chapter";
 import { hasLettering, LetteredPreview } from "@/components/lettered-preview";
 import { queueItems, useQueue } from "@/components/queue";
@@ -40,7 +40,8 @@ function useAgentJobs(chapterId: number) {
   useEffect(() => {
     let stopped = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    let wasActive = false;
+    // Fins d'agent déjà vues (id, statut, fin) : la première lecture sert de référence.
+    let seen: Set<string> | null = null;
     const poll = async () => {
       let active = false;
       try {
@@ -50,10 +51,13 @@ function useAgentJobs(chapterId: number) {
         ]);
         if (stopped) return;
         const next = { script: script[0] ?? null, direction: direction[0] ?? null };
-        active = [next.script, next.direction].some((j) => j !== null && ACTIVE.has(j.status));
-        // Un agent vient de finir : pages, cases et mise en page ont changé.
-        if (wasActive && !active) setFinished((n) => n + 1);
-        wasActive = active;
+        const latest = [next.script, next.direction].filter((j): j is Job => j !== null);
+        active = latest.some((j) => ACTIVE.has(j.status));
+        // Un agent a fini depuis la dernière lecture (même entre deux lectures espacées, ou lancé depuis
+        // un autre onglet) : pages, cases et mise en page ont changé.
+        const ends = latest.filter((j) => !ACTIVE.has(j.status)).map((j) => `${j.id}:${j.status}:${j.finished_at ?? ""}`);
+        if (seen && ends.some((k) => !seen!.has(k))) setFinished((n) => n + 1);
+        seen = new Set([...(seen ?? []), ...ends]);
         setJobs(next);
         setError(null);
       } catch (e) {
@@ -91,13 +95,14 @@ function Production() {
   const agents = useAgentJobs(chapter.id);
 
   const pages = useEngineData(() => api.listPages(chapter.id), [chapter.id, finished, agents.finished]);
-  const jobs = useEngineData(() => api.chapterJobs(chapter.id, "generation"), [chapter.id, finished]);
   const estimate = useEngineData(() => api.chapterEstimate(chapter.id), [chapter.id, finished, agents.finished]);
   const [notice, setNotice] = useState<string | null>(null);
+  // Gardé d'une page à l'autre (l'aperçu suit la case en cours).
+  const [lettered, setLettered] = useState(false);
 
   const list = useMemo(() => pages.data ?? [], [pages.data]);
   const items = useMemo(() => queueItems(queue), [queue]);
-  const views = useMemo(() => buildPanelViews(list, items, jobs.data ?? []), [list, items, jobs.data]);
+  const views = useMemo(() => buildPanelViews(list, items), [list, items]);
   const mine = items.filter((i) => i.chapter_id === chapter.id && i.job.step === "generation");
   const running = queue?.running ?? null;
   const runningHere = running && running.chapter_id === chapter.id ? running : null;
@@ -125,6 +130,7 @@ function Production() {
         mine={mine}
         queueError={queueError}
         remaining={estimate.data}
+        hasPanels={list.some((p) => p.panels.length > 0)}
         onQueued={(m) => {
           setNotice(m);
           pages.reload();
@@ -146,7 +152,6 @@ function Production() {
         </EmptyState>
       ) : (
         <>
-          {jobs.error && <Alert>Historique des générations indisponible : {jobs.error}</Alert>}
           <section aria-labelledby="planches-titre" className="space-y-3">
             <h2 id="planches-titre" className="text-sm font-semibold text-zinc-200">
               Planches du chapitre
@@ -165,6 +170,8 @@ function Production() {
             views={views}
             chapterId={chapter.id}
             refreshKey={finished}
+            lettered={lettered}
+            onLettered={setLettered}
             onOpen={(panelId) => router.push(workshopHref(chapter.id, page.id, panelId))}
           />
         </>
@@ -314,6 +321,7 @@ function CurrentJob({
   mine,
   queueError,
   remaining,
+  hasPanels,
   onQueued,
 }: {
   chapterId: number;
@@ -321,6 +329,7 @@ function CurrentJob({
   mine: QueueItem[];
   queueError: string | null;
   remaining: { remaining_panels: number; total_s: number | null; measured: boolean } | null;
+  hasPanels: boolean;
   onQueued: (message: string) => void;
 }) {
   const { cancel } = useQueue();
@@ -412,7 +421,7 @@ function CurrentJob({
           {waiting.length} case{waiting.length > 1 ? "s" : ""} en attente
           {mine.length > 0 && lastEta !== null && <> · file du chapitre vide dans ≈ {formatDuration(lastEta)}</>}
         </span>
-        {remaining && (
+        {remaining && hasPanels && (
           <span>
             {remaining.remaining_panels === 0 ? (
               "Toutes les cases ont une version choisie"
@@ -508,8 +517,14 @@ function PageThumb({
   const failed = states.filter((s) => s === "failed").length;
   const layout = page.layout;
   const byId = new Map(page.panels.map((p) => [p.id, p]));
+  const ref = useRef<HTMLButtonElement>(null);
+  // La page suivie (case en cours) reste visible dans la bande.
+  useEffect(() => {
+    if (active) ref.current?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+  }, [active]);
   return (
     <button
+      ref={ref}
       type="button"
       onClick={onClick}
       aria-pressed={active}
@@ -549,15 +564,18 @@ function PagePreview({
   views,
   chapterId,
   refreshKey,
+  lettered,
+  onLettered,
   onOpen,
 }: {
   page: PageData;
   views: Map<number, PanelView>;
   chapterId: number;
   refreshKey: number;
+  lettered: boolean;
+  onLettered: (on: boolean) => void;
   onOpen: (panelId: number) => void;
 }) {
-  const [lettered, setLettered] = useState(false);
   const canLetter = hasLettering(page);
   const ready = page.panels.filter((p) => p.selected_image_id !== null).length;
   const failures = page.panels.map((p) => views.get(p.id)).filter((v) => v && !v.running && !v.pending.length && v.failure);
@@ -575,7 +593,7 @@ function PagePreview({
             <input
               type="checkbox"
               checked={lettered}
-              onChange={(e) => setLettered(e.target.checked)}
+              onChange={(e) => onLettered(e.target.checked)}
               className="accent-rose-500"
               data-testid="toggle-lettering"
             />

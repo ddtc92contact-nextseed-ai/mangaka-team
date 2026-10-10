@@ -9,12 +9,18 @@ import { generationStep, PANEL_STATE } from "@/lib/generation";
 import { needsReview } from "@/lib/qc";
 import { cssClipPath, panelPolygon, svgPoints } from "@/lib/layout";
 
-/** Ce que montre une case de l'atelier, d'après la page, la file d'attente et le dernier job. */
+/** Dernière génération d'une case en échec (statut porté par la case dans GET /chapters/{id}/pages). */
+export interface PanelFailure {
+  job_id: number | null;
+  error: string | null;
+}
+
+/** Ce que montre une case de l'atelier, d'après la page, la file d'attente et sa dernière génération. */
 export interface PanelView {
   panel: PanelData;
   running: QueueItem | null;
   pending: QueueItem[];
-  failure: Job | null;
+  failure: PanelFailure | null;
   /** Contrôle qualité en cours ou en attente pour cette case. */
   qc: QueueItem | null;
   /** Finition d'impression en cours ou en attente pour cette case. */
@@ -23,33 +29,22 @@ export interface PanelView {
   finishFailure: Job | null;
 }
 
-/** État vivant de chaque case : job en cours / en file (d'après la file), dernier échec (d'après les jobs). */
-export function buildPanelViews(
-  pages: PageData[],
-  items: QueueItem[],
-  jobs: Job[],
-  finishJobs: Job[] = [],
-): Map<number, PanelView> {
-  const latestOf = (list: Job[]) => {
-    const out = new Map<number, Job>();
-    for (const j of list) {
-      if (j.panel_id != null && !out.has(j.panel_id)) out.set(j.panel_id, j);
-    }
-    return out;
-  };
-  const latest = latestOf(jobs);
-  const latestFinish = latestOf(finishJobs);
+/** État vivant de chaque case : job en cours / en file (d'après la file), dernier échec de génération (porté par la case), dernière finition (d'après les jobs). */
+export function buildPanelViews(pages: PageData[], items: QueueItem[], finishJobs: Job[] = []): Map<number, PanelView> {
+  const latestFinish = new Map<number, Job>();
+  for (const j of finishJobs) {
+    if (j.panel_id != null && !latestFinish.has(j.panel_id)) latestFinish.set(j.panel_id, j);
+  }
   const map = new Map<number, PanelView>();
   for (const p of pages) {
     for (const panel of p.panels) {
       const mine = items.filter((i) => i.panel_id === panel.id && i.job.step === "generation");
-      const last = latest.get(panel.id);
       const lastFinish = latestFinish.get(panel.id);
       map.set(panel.id, {
         panel,
         running: mine.find((i) => i.job.status === "running") ?? null,
         pending: mine.filter((i) => i.job.status === "pending"),
-        failure: last?.status === "failed" ? last : null,
+        failure: panel.last_job_status === "failed" ? { job_id: panel.last_job_id, error: panel.last_job_error } : null,
         qc: items.find((i) => i.panel_id === panel.id && i.job.step === "qc") ?? null,
         finishing: items.find((i) => i.panel_id === panel.id && i.job.step === "finishing") ?? null,
         finishFailure: lastFinish?.status === "failed" ? lastFinish : null,

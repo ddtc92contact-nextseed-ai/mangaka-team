@@ -87,7 +87,6 @@ function SketchTriage() {
   const [version, setVersion] = useState(0);
 
   const pages = useEngineData(() => api.listPages(chapter.id), [chapter.id, finished, version]);
-  const jobs = useEngineData(() => api.chapterJobs(chapter.id, "generation"), [chapter.id, finished, version]);
   const chapterEst = useEngineData(() => api.chapterSketchEstimate(chapter.id), [chapter.id, finished, version]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -96,7 +95,7 @@ function SketchTriage() {
   const editRef = useRef<HTMLTextAreaElement>(null);
 
   const list = useMemo(() => pages.data ?? [], [pages.data]);
-  const views = useMemo(() => buildPanelViews(list, queueItems(queue), jobs.data ?? []), [list, queue, jobs.data]);
+  const views = useMemo(() => buildPanelViews(list, queueItems(queue)), [list, queue]);
   const sortable = list.filter((p) => p.layout && p.panels.length);
   const pageParam = Number(params.get("page")) || null;
   const panelParam = Number(params.get("case")) || null;
@@ -334,7 +333,6 @@ function SketchTriage() {
           {notice.text} {notice.queued && <ProductionLink chapterId={chapter.id} pageId={page.id} />}
         </Alert>
       )}
-      {jobs.error && <Alert>Historique des générations indisponible : {jobs.error}</Alert>}
 
       {!page.panels.length ? (
         <EmptyState title="Page sans case">Cette page n&apos;a rien à croquer.</EmptyState>

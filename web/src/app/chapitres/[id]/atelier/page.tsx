@@ -33,7 +33,6 @@ function Workshop() {
   const { queue, finished, refresh } = useQueue();
 
   const pages = useEngineData(() => api.listPages(chapter.id), [chapter.id, finished]);
-  const jobs = useEngineData(() => api.chapterJobs(chapter.id, "generation"), [chapter.id, finished]);
   const finishJobs = useEngineData(() => api.chapterJobs(chapter.id, "finishing"), [chapter.id, finished]);
   const presets = useEngineData(() => api.workflowPresets());
   const qcStatus = useEngineData(() => api.qcStatus());
@@ -65,8 +64,8 @@ function Workshop() {
   }
 
   const views = useMemo(
-    () => buildPanelViews(list, queueItems(queue), jobs.data ?? [], finishJobs.data ?? []),
-    [list, queue, jobs.data, finishJobs.data],
+    () => buildPanelViews(list, queueItems(queue), finishJobs.data ?? []),
+    [list, queue, finishJobs.data],
   );
 
   // Échap ferme le panneau latéral (sauf si une fenêtre modale est ouverte) et rend le focus à la case.
@@ -244,7 +243,6 @@ function Workshop() {
           {notice} <ProductionLink chapterId={chapter.id} pageId={page.id} />
         </Alert>
       )}
-      {jobs.error && <Alert>Historique des générations indisponible : {jobs.error}</Alert>}
       {finishJobs.error && <Alert>Historique des finitions indisponible : {finishJobs.error}</Alert>}
 
       <QCToolbar
@@ -256,10 +254,7 @@ function Workshop() {
         showBoxes={showBoxes}
         onShowBoxes={setShowBoxes}
         onOpenPanel={(pageId, panelId) => navigate(pageId, panelId)}
-        onChanged={() => {
-          pages.reload();
-          jobs.reload();
-        }}
+        onChanged={() => pages.reload()}
       />
 
       <div className={`grid gap-6 ${openPanelId ? "lg:grid-cols-[minmax(0,1fr)_24rem]" : ""}`}>
@@ -332,7 +327,6 @@ function Workshop() {
               onClose={close}
               onChanged={() => {
                 pages.reload();
-                jobs.reload();
                 finishJobs.reload();
               }}
               onPrev={prevPanel ? () => navigate(prevPanel.pageId, prevPanel.panelId) : undefined}
