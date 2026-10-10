@@ -19,6 +19,9 @@
 - 12 : « Créer des références » (variantes générées par fiche) et ordre des images de référence ; les
   images existantes gardent leur ordre (celui de leur ajout).
 - 13 : finition d'impression (image agrandie dérivée d'une version, agrandisseur choisi par série).
+- 14 : palier croquis (sorte des versions : `final` / `croquis`, croquis validé et débruitage du
+  passage au propre par case, réglages croquis de la série). Les versions existantes sont `final` ;
+  le palier croquis est activé sur les séries existantes (il n'ajoute que des boutons).
 
 Une base neuve est créée directement à la dernière version. Chaque migration tourne dans une
 transaction unique, clés étrangères désactivées (recette « 12 étapes » de SQLite pour reconstruire
@@ -55,7 +58,7 @@ from .models import (
 
 log = logging.getLogger("mangaka_engine")
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 
 
 class MigrationError(RuntimeError):
@@ -232,6 +235,14 @@ def _v12_to_v13(cur: sqlite3.Cursor) -> None:
     cur.execute("ALTER TABLE projects ADD COLUMN upscaler VARCHAR(100)")
 
 
+def _v13_to_v14(cur: sqlite3.Cursor) -> None:
+    cur.execute("ALTER TABLE panel_images ADD COLUMN kind VARCHAR(20) NOT NULL DEFAULT 'final'")
+    cur.execute("ALTER TABLE panels ADD COLUMN sketch_image_id INTEGER")
+    cur.execute("ALTER TABLE panels ADD COLUMN sketch_denoise FLOAT")
+    cur.execute("ALTER TABLE projects ADD COLUMN sketch_enabled BOOLEAN NOT NULL DEFAULT 1")
+    cur.execute("ALTER TABLE projects ADD COLUMN sketch_denoise FLOAT")
+
+
 MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     # version de départ → (version d'arrivée, fonction)
     0: (2, _v0_to_v2),
@@ -247,6 +258,7 @@ MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     10: (11, _v10_to_v11),
     11: (12, _v11_to_v12),
     12: (13, _v12_to_v13),
+    13: (14, _v13_to_v14),
 }
 
 

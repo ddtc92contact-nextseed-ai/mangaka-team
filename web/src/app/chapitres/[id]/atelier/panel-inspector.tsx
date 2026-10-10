@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { AnnotationBar } from "@/components/annotation";
 import { DpiBadge } from "@/components/print-dpi";
@@ -24,6 +25,7 @@ import { MAX_VARIANTS, PANEL_STATE, formatDuration, isValidSeed } from "@/lib/ge
 import { dpiLabel, dpiTitle } from "@/lib/finishing";
 import { useJob } from "@/lib/jobs";
 import { LIBRARY_KINDS } from "@/lib/library";
+import { useChapter } from "../chapter-context";
 import type { PanelView } from "./page-canvas";
 import { PanelQC } from "./panel-qc";
 import { RepairDialog, type RepairPreset } from "./repair-dialog";
@@ -54,6 +56,7 @@ export function PanelInspector({
 }) {
   const detail = useEngineData(() => api.getPanel(panelId), [panelId, refreshKey]);
   const { refresh, cancel } = useQueue();
+  const { series } = useChapter();
   // Prompt en cours d'édition (null = pas touché), rattaché à la case pour repartir à zéro en changeant de case.
   const [draftState, setDraft] = useState<{ panelId: number; text: string } | null>(null);
   const [seed, setSeed] = useState("");
@@ -190,12 +193,15 @@ export function PanelInspector({
     );
   }
 
-  const qcImage = chosen ?? (d?.images.length ? d.images[d.images.length - 1] : null);
+  // Versions propres seulement : un croquis n'est ni contrôlé ni choisi.
+  const finals = d?.images.filter((i) => i.kind !== "croquis") ?? [];
+  const sketches = d?.images.filter((i) => i.kind === "croquis") ?? [];
+  const qcImage = chosen ?? (finals.length ? finals[finals.length - 1] : null);
   // « Références utilisées » : celles de la version choisie, sinon de la plus récente.
   const refsImage = qcImage;
 
   const resolvedName = presets?.find((p) => p.id === d?.resolved_preset)?.name ?? d?.resolved_preset ?? "—";
-  const hasImages = (d?.images.length ?? 0) > 0;
+  const hasImages = finals.length > 0;
   const quality = presets?.find((p) => p.is_quality) ?? null;
 
   return (
@@ -351,7 +357,7 @@ export function PanelInspector({
               <Field label="Workflow" htmlFor="preset">
                 <Select id="preset" value={d.generation_preset ?? ""} onChange={(e) => setPreset(e.target.value)} disabled={busy || !presets}>
                   <option value="">Automatique ({resolvedName})</option>
-                  {(presets ?? []).map((p) => (
+                  {(presets ?? []).filter((p) => (p.role ?? "generation") === "generation").map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.name}
                       {p.reference_slots ? ` · ${p.reference_slots} réf.` : ""}
@@ -458,6 +464,27 @@ export function PanelInspector({
             onOverride={overrideQC}
             onRepair={(image, preset) => setRepair({ image, preset })}
           />
+
+          {series.sketch_enabled && (
+            <SketchBlock
+              panelId={panelId}
+              chapterId={d.chapter_id}
+              pageId={d.page_id}
+              sketches={sketches}
+              validatedId={d.sketch_image_id ?? null}
+              denoise={d.sketch_denoise ?? null}
+              seriesDenoise={series.sketch_denoise}
+              busy={busy}
+              run={run}
+              onDone={(message, queued) => {
+                if (queued) refresh();
+                onChanged();
+                detail.reload();
+                setGenerated(queued);
+                setNotice(message);
+              }}
+            />
+          )}
 
           <div className="space-y-2">
             <h3 className="text-sm font-medium text-zinc-300">
@@ -594,6 +621,124 @@ function UsedReferences({ image }: { image: PanelImage }) {
           })}
         </ol>
       )}
+    </div>
+  );
+}
+
+/** Palier croquis d'une case : croquer, valider la composition, débruitage propre à la case, passer au propre. */
+function SketchBlock({
+  panelId,
+  chapterId,
+  pageId,
+  sketches,
+  validatedId,
+  denoise,
+  seriesDenoise,
+  busy,
+  run,
+  onDone,
+}: {
+  panelId: number;
+  chapterId: number;
+  pageId: number;
+  sketches: PanelImage[];
+  validatedId: number | null;
+  denoise: number | null;
+  seriesDenoise: number | null;
+  busy: boolean;
+  run: (action: () => Promise<void>) => Promise<void>;
+  onDone: (message: string, queued: boolean) => void;
+}) {
+  const [denoiseText, setDenoiseText] = useState<string | null>(null);
+  const validated = sketches.find((s) => s.id === validatedId) ?? null;
+  const latest = sketches.length ? sketches[sketches.length - 1] : null;
+  const text = denoiseText ?? (denoise !== null ? String(denoise) : "");
+  const value = text.trim() === "" ? null : Number(text.replace(",", "."));
+  const invalid = value !== null && !(value >= 0.05 && value <= 1);
+  return (
+    <div className="space-y-2 rounded-lg border border-zinc-800 p-3" data-testid="panel-sketch">
+      <div className="flex items-baseline justify-between gap-2">
+        <h3 className="text-sm font-medium text-zinc-300">Croquis</h3>
+        <Link href={`/chapitres/${chapterId}/croquis?page=${pageId}&case=${panelId}`} className="text-xs text-zinc-400 hover:text-zinc-100">
+          Trier la page →
+        </Link>
+      </div>
+      <p className="text-xs text-zinc-400">
+        {sketches.length === 0
+          ? "Aucun croquis : un brouillon en quelques secondes pour juger la composition."
+          : validated
+            ? `Composition validée : croquis v${validated.version} (seed ${validated.seed ?? "—"}).`
+            : `${sketches.length} croquis, aucun validé.`}
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          variant="secondary"
+          className="!px-2.5 !py-1 text-xs"
+          disabled={busy}
+          onClick={() =>
+            run(async () => {
+              await api.sketchPanel(panelId);
+              onDone("Croquis mis en file (nouvelle graine).", true);
+            })
+          }
+        >
+          {sketches.length ? "Re-croquer" : "Croquer"}
+        </Button>
+        {latest && !validated && (
+          <Button
+            variant="secondary"
+            className="!px-2.5 !py-1 text-xs"
+            disabled={busy}
+            onClick={() =>
+              run(async () => {
+                await api.validateSketch(panelId, latest.id);
+                onDone(`Croquis v${latest.version} validé.`, false);
+              })
+            }
+          >
+            Valider le dernier croquis
+          </Button>
+        )}
+        <Button
+          className="!px-2.5 !py-1 text-xs"
+          disabled={busy || !validated || invalid}
+          title={validated ? "Version finale au palier de la série, même cadrage que le croquis validé" : "Valide d'abord un croquis"}
+          onClick={() =>
+            run(async () => {
+              if (denoiseText !== null) await api.updatePanel(panelId, { sketch_denoise: value });
+              setDenoiseText(null);
+              await api.cleanPanel(panelId);
+              onDone("Passage au propre mis en file (même graine et même prompt que le croquis).", true);
+            })
+          }
+          data-testid="clean-panel"
+        >
+          Passer au propre
+        </Button>
+      </div>
+      <Field
+        label="Débruitage du passage au propre (cette case)"
+        htmlFor="sketch-denoise"
+        error={invalid ? "Entre 0,05 et 1" : undefined}
+        hint={`Vide : ${seriesDenoise !== null ? `celui de la série (${seriesDenoise})` : "celui du preset"}. Plus bas = plus fidèle au croquis.`}
+      >
+        <Input
+          id="sketch-denoise"
+          inputMode="decimal"
+          className="!w-28"
+          value={text}
+          onChange={(e) => setDenoiseText(e.target.value)}
+          onBlur={() => {
+            if (denoiseText === null || invalid) return;
+            void run(async () => {
+              await api.updatePanel(panelId, { sketch_denoise: value });
+              setDenoiseText(null);
+              onDone(value === null ? "Débruitage de la case retiré." : `Débruitage de la case : ${value}.`, false);
+            });
+          }}
+          aria-invalid={invalid || undefined}
+        />
+      </Field>
     </div>
   );
 }

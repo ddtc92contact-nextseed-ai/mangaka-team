@@ -107,6 +107,7 @@ class LoraChain(_Strict):
 
 
 REQUIRED_WORKFLOW_PARAMS = ("positive_prompt", "negative_prompt", "seed", "width", "height")
+WorkflowRole = Literal["generation", "croquis", "propre"]
 # Un preset de réparation (inpainting) part de l'image source : pas de taille, mais un débruitage partiel.
 REQUIRED_INPAINT_PARAMS = ("positive_prompt", "negative_prompt", "seed", "denoise")
 REPAIR_TARGETS = ("face", "hand", "zone")
@@ -183,6 +184,15 @@ class WorkflowPreset(_Strict):
     tier: WorkflowTier | None = None
     # Durée estimée d'une case (s), utilisée tant que les vraies durées de ce preset sont trop peu nombreuses.
     estimated_s: float | None = Field(default=None, gt=0)
+    # Rôle : `generation` (palier de série), `croquis` (brouillon rapide de la composition, jamais
+    # assemblé) ou `propre` (version finale tirée d'une image de composition : croquis validé).
+    role: WorkflowRole = "generation"
+    # Croquis : grand côté de l'image en px (même ratio que la case) ; absent = taille de la mise en page.
+    long_side: int | None = Field(default=None, ge=64, le=4096)
+    # Propre : nœud qui reçoit l'image de composition (croquis validé envoyé à ComfyUI).
+    source_image: NodeInput | None = None
+    # Palier de série : workflow « propre depuis croquis » du même palier (« Passer au propre »).
+    from_sketch: str | None = None
     # Preset de réparation ciblée (inpainting) du même palier, pour les versions produites par ce workflow.
     inpaint_with: str | None = Field(default=None, description="Id du preset de réparation (bloc `inpaint`)")
     # Présent = ce workflow est un preset de réparation (jamais proposé pour générer une case).
@@ -208,6 +218,17 @@ class WorkflowPreset(_Strict):
             raise ValueError("trial : positive_prompt est obligatoire")
         if self.with_references == self.id:
             raise ValueError("with_references ne peut pas désigner le workflow lui-même")
+        if self.from_sketch == self.id:
+            raise ValueError("from_sketch ne peut pas désigner le workflow lui-même")
+        if self.role == "propre":
+            if self.source_image is None:
+                raise ValueError("un workflow « propre » doit déclarer source_image (image de composition)")
+            if "denoise" not in self.mapping:
+                raise ValueError("un workflow « propre » doit mapper denoise (débruitage partiel)")
+        elif self.source_image is not None:
+            raise ValueError("source_image est réservé aux workflows « propre »")
+        if self.long_side is not None and self.role != "croquis":
+            raise ValueError("long_side est réservé aux workflows « croquis »")
         if self.inpaint is not None and (self.trial or self.with_references or self.inpaint_with):
             raise ValueError("un preset de réparation (inpaint) n'a ni trial, ni with_references, ni inpaint_with")
         if self.inpaint is not None and self.tier is not None and self.tier.choice:
@@ -255,6 +276,10 @@ class UpscalerPreset(_Strict):
     def inpaint(self) -> InpaintSettings | None:
         return None
 
+    @property
+    def source_image(self) -> NodeInput | None:
+        return None
+
     @model_validator(mode="after")
     def _check_mapping(self) -> UpscalerPreset:
         missing = [p for p in REQUIRED_UPSCALER_PARAMS if p not in self.mapping]
@@ -297,6 +322,9 @@ class Defaults(_Strict):
     layout_style: str | None = None
     # Palier de « Régénérer en Qualité » (atelier) ; son `with_references` sert aux cases avec références.
     workflow_quality: str | None = None
+    # Palier croquis : activé pour les nouvelles séries, et workflow des croquis (rôle `croquis`).
+    sketch_enabled: bool = True
+    workflow_sketch: str | None = None
     # Finition d'impression : agrandisseur par défaut (presets/upscalers/), surchargeable par série.
     upscaler: str | None = None
     # Pas d'agrandissement si la case atteint déjà cette part du dpi cible (0,9 × 300 = 270 dpi).

@@ -148,6 +148,9 @@ def list_presets(ctx: AppContext = Depends(get_ctx)) -> dict[str, Any]:
                 "tier_choice": w.preset.tier.choice if w.preset.tier else None,
                 "tier_order": w.preset.tier.order if w.preset.tier else None,
                 "estimated_s": w.preset.estimated_s,
+                "role": w.preset.role,
+                "from_sketch": w.preset.from_sketch,
+                "denoise": w.preset.defaults.get("denoise"),
             }
             for w in reg.workflows.values()
         ],

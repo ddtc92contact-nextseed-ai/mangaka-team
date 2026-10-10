@@ -17,7 +17,14 @@ function caption(img: PanelImage): string {
 /** Pastille du palier qui a produit la version (Turbo, Rapide, Qualité). */
 function TierBadge({ tier }: { tier: string | null }) {
   if (!tier) return null;
-  const tone = tier === "Qualité" ? "bg-amber-500/15 text-amber-300" : tier === "Turbo" ? "bg-sky-500/15 text-sky-300" : "bg-zinc-800 text-zinc-300";
+  const tone =
+    tier === "Qualité"
+      ? "bg-amber-500/15 text-amber-300"
+      : tier === "Turbo"
+        ? "bg-sky-500/15 text-sky-300"
+        : tier === "Croquis"
+          ? "bg-zinc-200 text-zinc-800"
+          : "bg-zinc-800 text-zinc-300";
   return (
     <span className={`rounded px-1 py-px text-[9px] font-semibold uppercase tracking-wide ${tone}`} data-testid="version-tier">
       {tier}
@@ -203,8 +210,13 @@ export function VersionsStrip({
                 </Button>
               )}
               {!compared && (
-                <Button onClick={() => run(() => onSelect(viewed))} disabled={busy || viewed.selected} data-testid="choose-version">
-                  {viewed.selected ? "Version choisie" : "Choisir cette version"}
+                <Button
+                  onClick={() => run(() => onSelect(viewed))}
+                  disabled={busy || viewed.selected || viewed.kind === "croquis"}
+                  title={viewed.kind === "croquis" ? "Un croquis n'est jamais assemblé : valide-le puis « Passer au propre »" : undefined}
+                  data-testid="choose-version"
+                >
+                  {viewed.kind === "croquis" ? "Croquis (non assemblé)" : viewed.selected ? "Version choisie" : "Choisir cette version"}
                 </Button>
               )}
             </>
@@ -264,14 +276,16 @@ export function VersionsStrip({
                       {img.selected && <span className="ml-2 text-xs text-rose-300">choisie</span>}
                     </span>
                   )}
-                  <Button
-                    variant={img.selected ? "ghost" : "secondary"}
-                    className="!px-2.5 !py-1 text-xs"
-                    disabled={busy || img.selected}
-                    onClick={() => run(() => onSelect(img))}
-                  >
-                    {img.selected ? "Choisie" : "Choisir celle-ci"}
-                  </Button>
+                  {img.kind !== "croquis" && (
+                    <Button
+                      variant={img.selected ? "ghost" : "secondary"}
+                      className="!px-2.5 !py-1 text-xs"
+                      disabled={busy || img.selected}
+                      onClick={() => run(() => onSelect(img))}
+                    >
+                      {img.selected ? "Choisie" : "Choisir celle-ci"}
+                    </Button>
+                  )}
                 </div>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
@@ -297,6 +311,16 @@ function VersionLarge({ img }: { img: PanelImage }) {
     ["Durée", formatDuration(imageDurationS(img))],
     ["Palier", img.tier ?? "—"],
     ["Workflow", img.preset ?? "—"],
+    ...(typeof img.params.composition === "object" && img.params.composition
+      ? ([
+          [
+            "Composition",
+            `croquis v${(img.params.composition as { version?: number }).version ?? "?"} · débruitage ${
+              (img.params.composition as { denoise?: number }).denoise ?? "—"
+            }`,
+          ],
+        ] as [string, string][])
+      : []),
     ["Taille", img.width && img.height ? `${img.width} × ${img.height} px` : "—"],
     ["Créée le", new Date(img.created_at).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })],
     ...(p.repair

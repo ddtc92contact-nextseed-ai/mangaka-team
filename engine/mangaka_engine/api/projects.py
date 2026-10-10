@@ -28,6 +28,8 @@ def project_out(project: Project, character_count: int, chapter_count: int, laid
         style_lora_weight=project.style_lora_weight,
         style_lora_trigger_words=project.style_lora_trigger_words or "",
         layout_style=project.layout_style,
+        sketch_enabled=project.sketch_enabled,
+        sketch_denoise=project.sketch_denoise,
         upscaler=project.upscaler,
         character_count=character_count,
         chapter_count=chapter_count,
@@ -111,6 +113,11 @@ def create_project(
         style_lora_weight=body.style_lora_weight,
         style_lora_trigger_words=body.style_lora_trigger_words,
         layout_style=layout_style,
+        # Palier croquis : activé pour les nouvelles séries sauf avis contraire (defaults.yaml).
+        sketch_enabled=body.sketch_enabled
+        if body.sketch_enabled is not None
+        else defaults is None or defaults.sketch_enabled,
+        sketch_denoise=body.sketch_denoise,
         upscaler=body.upscaler,
     )
     session.add(project)
@@ -142,6 +149,7 @@ def update_project(
         "status",
         "style_lora_weight",
         "layout_style",
+        "sketch_enabled",
     ):
         if key in changes and changes[key] is None:
             raise FieldError(key, "ne peut pas être vide")

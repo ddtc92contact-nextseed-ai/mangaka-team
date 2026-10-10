@@ -36,6 +36,7 @@ class BuiltWorkflow:
     reference_images: list[str] = field(default_factory=list)  # noms côté ComfyUI, dans l'ordre des emplacements
     loras: list[LoraSpec] = field(default_factory=list)
     removed_nodes: list[str] = field(default_factory=list)
+    source_image: str | None = None  # image de composition (nom côté ComfyUI)
 
 
 def is_link(value: Any) -> bool:
@@ -56,6 +57,7 @@ def build_workflow(
     *,
     reference_images: Sequence[str] = (),
     loras: Sequence[LoraSpec] = (),
+    source_image: str | None = None,
     inpaint_images: tuple[str, str] | None = None,
 ) -> BuiltWorkflow:
     """Applique `defaults` puis `params` sur une copie du JSON API.
@@ -65,6 +67,8 @@ def build_workflow(
     - `reference_images` remplissent les emplacements dans l'ordre, les emplacements vides
       sont retirés ;
     - `loras` sont chaînés au point d'insertion `lora_chain`, dans l'ordre ;
+    - `source_image` (nom côté ComfyUI de l'image de composition, ex. le croquis validé) est écrite
+      dans le nœud `source_image` du preset : obligatoire pour un workflow qui en déclare un.
     - preset de réparation (bloc `inpaint`) : `inpaint_images` = (image source, masque), noms côté
       ComfyUI ; pas de taille à fournir (celle de l'image source).
     """
@@ -95,6 +99,10 @@ def build_workflow(
             f"le workflow {preset.id} accepte au plus {len(slots)} image(s) de référence "
             f"({len(reference_images)} fournie(s))"
         )
+    if preset.source_image is not None and not source_image:
+        raise PresetError(f"le workflow {preset.id} attend une image de composition (croquis validé)")
+    if source_image and preset.source_image is None:
+        raise PresetError(f"le workflow {preset.id} n'accepte pas d'image de composition (source_image)")
     if loras and preset.lora_chain is None:
         raise PresetError(f"le workflow {preset.id} ne déclare pas de point d'insertion LoRA (lora_chain)")
 
@@ -106,6 +114,9 @@ def build_workflow(
         source, mask = inpaint_images
         workflow[inpaint.source_image.node]["inputs"][inpaint.source_image.input] = source
         workflow[inpaint.mask_image.node]["inputs"][inpaint.mask_image.input] = mask
+
+    if preset.source_image is not None:
+        workflow[preset.source_image.node]["inputs"][preset.source_image.input] = source_image
 
     removed: list[str] = []
     for i, slot in enumerate(slots):
@@ -127,6 +138,7 @@ def build_workflow(
         reference_images=list(reference_images),
         loras=list(loras),
         removed_nodes=removed,
+        source_image=source_image,
     )
 
 

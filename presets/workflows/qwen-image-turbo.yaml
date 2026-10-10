@@ -11,6 +11,7 @@ description: >-
 workflow_file: qwen-image-turbo.json
 output_node: "11"
 timeout_s: 300   # au-delà, la génération est interrompue et le job passe en échec
+from_sketch: qwen-image-turbo-from-sketch   # « Passer au propre » depuis un croquis validé, même palier
 with_references: qwen-image-edit-ref-turbo   # même palier pour les cases avec références
 inpaint_with: qwen-image-inpaint-turbo   # réparation ciblée (inpainting) du même palier
 tier:

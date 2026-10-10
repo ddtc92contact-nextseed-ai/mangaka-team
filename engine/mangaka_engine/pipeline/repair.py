@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 from ..presets import ImagePromptSettings, LoadedWorkflow, PresetError, PresetRegistry
 from ..presets.schemas import REPAIR_TARGETS, InpaintSettings
 from ..store.files import FileStore
-from ..store.models import ChapterStatus, Character, Job, JobStatus, PageState, PanelImage, PanelState
+from ..store.models import ChapterStatus, Character, ImageKind, Job, JobStatus, PageState, PanelImage, PanelState
 from .generation import STEP, GenerationError, _prompt_entry, panel_cast, panel_target, style_with_triggers
 from .inpaint import MaskError, Region, build_mask, is_sketch, png_bytes
 from .prompt import PromptCharacter, _clean, describe_character, strip_quoted
@@ -141,6 +141,8 @@ def enqueue_repair(
     seed: int | None = None,
 ) -> Job:
     """Crée le job de réparation d'une version (sans commit). Le masque brut est gardé dans data/."""
+    if image.kind == ImageKind.croquis:
+        raise GenerationError("un croquis ne se répare pas : valide-le puis « Passer au propre »")
     if target not in REPAIR_TARGETS:
         raise GenerationError(f"zone inconnue : {target} (possibles : {', '.join(REPAIR_TARGETS)})")
     ctx = repair_context(session, presets, image)

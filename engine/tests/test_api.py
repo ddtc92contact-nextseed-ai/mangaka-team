@@ -49,6 +49,8 @@ def test_presets_endpoint(client: TestClient) -> None:
         "workflow_quality": "qwen-image-base",
         "workflow_inpaint": "qwen-image-inpaint-turbo",
         "layout_style": "dynamique",
+        "sketch_enabled": True,
+        "workflow_sketch": "qwen-image-croquis",
         "upscaler": "realesrgan-x4plus-anime-6b",
         "finishing_tolerance": 0.9,
     }

@@ -1,0 +1,52 @@
+# Qwen-Image 2.1 · Turbo (texte → image) — propre depuis un croquis validé (image → image).
+# Passage au propre du palier croquis : le croquis validé de la case est agrandi à la taille finale
+# (nœud 31, ImageScale), encodé par le VAE (nœud 32) puis débruité partiellement (`denoise`, nœud 9)
+# avec la même graine et le même prompt que le croquis → même cadrage, mêmes poses, détails propres.
+# Même modèle, même encodeur et mêmes LoRA que « qwen-image-turbo » ; seul le latent de départ change
+# (EmptyLatentImage remplacé par LoadImage → ImageScale → VAEEncode, nœuds natifs de ComfyUI).
+# Graphe provisoire, À REMPLACER par l'export réel de Morigane (~/mangaka-comfy-exports/).
+# Voir presets/README.md (palier croquis, réglage du denoise).
+id: qwen-image-turbo-from-sketch
+name: "Qwen-Image 2.1 · Turbo — propre depuis croquis (sans référence)"
+description: >-
+  Passage au propre au palier Turbo (8 étapes) à partir du croquis validé de la case (image → image, denoise réglable) ; LoRA de la série conservés.
+workflow_file: qwen-image-turbo-from-sketch.json
+output_node: "11"
+timeout_s: 300   # au-delà, la génération est interrompue et le job passe en échec
+role: propre
+with_references: qwen-image-edit-ref-turbo-from-sketch   # même palier pour les cases avec références
+tier:
+  name: Turbo
+# Durée d'une case (s) tant qu'il y a moins de 3 générations terminées avec ce preset.
+estimated_s: 15
+# Image de composition (croquis validé) : envoyée à ComfyUI puis écrite dans ce LoadImage.
+source_image: { node: "30", input: image }
+mapping:
+  # TextEncodeQwenImage21 encode les deux prompts : sorties 0 (positif) et 1 (négatif).
+  positive_prompt: { node: "6", input: prompt }
+  negative_prompt: { node: "6", input: negative_prompt }
+  seed: { node: "9", input: seed }
+  steps: { node: "9", input: steps }
+  cfg: { node: "9", input: cfg }
+  denoise: { node: "9", input: denoise }
+  # Taille finale : celle du croquis agrandi (le latent en découle).
+  width: { node: "31", input: width }
+  height: { node: "31", input: height }
+  filename_prefix: { node: "11", input: filename_prefix }
+# LoRA (style de la série puis identité de chaque fiche) chaînés après le modèle, comme le croquis.
+lora_chain:
+  class_type: LoraLoaderModelOnly
+  model_from: { node: "1", output: 0 }
+  model_input: model
+  name_input: lora_name
+  strength_input: strength_model
+defaults:
+  negative_prompt: "texte, lettres, bulles, filigrane, signature, flou, mains déformées"
+  steps: 8
+  cfg: 1
+  # Part du croquis redessinée : 0 = croquis inchangé, 1 = image neuve (composition perdue).
+  # 0,6-0,7 garde cadrage et poses ; réglable par série et par case (fiche série / atelier).
+  denoise: 0.65
+  width: 1024
+  height: 1024
+  filename_prefix: mangaka/case

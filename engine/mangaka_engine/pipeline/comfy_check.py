@@ -63,6 +63,8 @@ def check_workflow(loaded: LoadedWorkflow | LoadedUpscaler, object_info: dict[st
     preset = loaded.preset
     runtime = {(t.node, t.input) for t in preset.mapping.values()}
     runtime |= {(s.node, s.input) for s in preset.reference_images}
+    if preset.source_image is not None:  # croquis validé, envoyé à chaque passage au propre
+        runtime.add((preset.source_image.node, preset.source_image.input))
     if preset.inpaint is not None:  # image source et masque : envoyés par le moteur
         runtime |= {(t.node, t.input) for t in (preset.inpaint.source_image, preset.inpaint.mask_image)}
     problems: list[str] = []

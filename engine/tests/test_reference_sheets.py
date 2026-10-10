@@ -479,6 +479,14 @@ def test_database_v11_keeps_reference_order(make_settings: Callable[..., Setting
         files = [("files", (f"{i}.png", png_bytes(), "image/png")) for i in range(3)]
         _ok(client.post(f"/characters/{entry['id']}/images", files=files), 201)
     con = sqlite3.connect(settings.database_path)
+    for table, column in [
+        ("panel_images", "kind"),
+        ("panels", "sketch_image_id"),
+        ("panels", "sketch_denoise"),
+        ("projects", "sketch_enabled"),
+        ("projects", "sketch_denoise"),
+    ]:  # colonnes du palier croquis (v14)
+        con.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
     con.execute("ALTER TABLE panel_images DROP COLUMN finish")  # v13 : finition d'impression
     con.execute("ALTER TABLE projects DROP COLUMN upscaler")
     con.execute("DROP TABLE reference_variants")

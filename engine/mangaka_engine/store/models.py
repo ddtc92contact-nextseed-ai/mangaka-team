@@ -83,6 +83,11 @@ class PanelState(enum.StrEnum):
     approved = "approved"
 
 
+class ImageKind(enum.StrEnum):
+    final = "final"  # version de case (choisie, assemblée, lettrée, exportée)
+    croquis = "croquis"  # brouillon de composition (palier croquis) : jamais choisi ni assemblé
+
+
 class QCVerdict(enum.StrEnum):
     ok = "ok"
     review = "review"  # à revoir
@@ -129,6 +134,10 @@ class Project(TimestampMixin, Base):
     style_lora_trigger_words: Mapped[str] = mapped_column(Text, default="")
     # Grammaire de mise en page de la série (presets/layout_styles/) : sage, dynamique, nerveuse…
     layout_style: Mapped[str] = mapped_column(String(100), default="dynamique")
+    # Palier croquis (brouillon de page, tri, passage au propre) ; `sketch_denoise` : débruitage du
+    # passage au propre (None = `denoise` du preset « propre »).
+    sketch_enabled: Mapped[bool] = mapped_column(default=True)
+    sketch_denoise: Mapped[float | None] = mapped_column(Float, default=None)
     # Agrandisseur de la finition d'impression (presets/upscalers/) ; None = celui de defaults.yaml.
     upscaler: Mapped[str | None] = mapped_column(String(100), default=None)
 
@@ -340,6 +349,10 @@ class Panel(TimestampMixin, Base):
     # True : prompt final édité à la main, conservé tant qu'on ne demande pas de le reconstruire.
     final_prompt_manual: Mapped[bool] = mapped_column(default=False)
     generation_preset: Mapped[str | None] = mapped_column(String(100), default=None)
+    # Croquis validé au tri (composition retenue, id de `panel_images` de sorte croquis) ; None = aucun.
+    sketch_image_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    # Débruitage du passage au propre imposé à cette case (None = celui de la série, sinon du preset).
+    sketch_denoise: Mapped[float | None] = mapped_column(Float, default=None)
     qc_score: Mapped[int | None] = mapped_column(Integer, default=None)
     state: Mapped[PanelState] = mapped_column(_enum(PanelState), default=PanelState.draft)
 
@@ -361,6 +374,8 @@ class PanelImage(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     panel_id: Mapped[int] = mapped_column(ForeignKey("panels.id", ondelete="CASCADE"), index=True)
     version: Mapped[int] = mapped_column(Integer)
+    # Sorte de version : `final` (par défaut) ou `croquis` (jamais choisie, assemblée ni exportée).
+    kind: Mapped[ImageKind] = mapped_column(_enum(ImageKind), default=ImageKind.final)
     path: Mapped[str] = mapped_column(String(500))
     seed: Mapped[int | None] = mapped_column(Integer, default=None)
     params: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)

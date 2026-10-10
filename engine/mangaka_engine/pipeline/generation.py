@@ -11,6 +11,11 @@
 - `refresh_states` : états des cases et des pages (queued → generating → review, puis selon le
   verdict QC de la version choisie : approved / flagged ; `qc` pendant un contrôle).
 
+Palier croquis (voir `pipeline/sketch.py`) : un job dont le preset a le rôle `croquis` produit une
+version `kind = croquis` (petite image, jamais choisie, sans QC automatique) ; un preset `propre`
+reçoit l'image de composition (le croquis validé, `params.source_image_id`) et la version produite
+garde sa source dans `params.composition`.
+
 Aucun nom de modèle, de LoRA ni de nœud ici : tout vient des presets et des fiches.
 """
 
@@ -46,6 +51,7 @@ from ..store.models import (
     ChapterStatus,
     Character,
     CharacterImage,
+    ImageKind,
     Job,
     JobStatus,
     Page,
@@ -243,6 +249,30 @@ def panel_target(presets: PresetRegistry, page: Page, panel: Panel) -> dict[str,
     return None
 
 
+def sketch_size(target: dict[str, int], long_side: int, multiple: int) -> dict[str, int]:
+    """Taille d'un croquis : même ratio que la case, grand côté ≈ `long_side`, côtés multiples de `multiple`."""
+    w, h = target["width"], target["height"]
+    scale = long_side / max(w, h)
+
+    def snap(v: int) -> int:
+        return max(multiple, round(v * scale / multiple) * multiple)
+
+    return {"width": snap(w), "height": snap(h)}
+
+
+def composition_params(img: PanelImage) -> dict[str, Any]:
+    """Paramètres de job qui rejouent la source de composition d'une version (croquis validé) :
+    un nouvel essai automatique du QC repart du même croquis, avec une nouvelle graine."""
+    comp = (img.params or {}).get("composition")
+    if not isinstance(comp, dict) or comp.get("image_id") is None:
+        return {}
+    return {
+        "source_image_id": comp["image_id"],
+        "denoise": comp.get("denoise"),
+        "sketch_prompt": (img.params or {}).get("prompt"),
+    }
+
+
 def pick_references(
     characters: Sequence[LibraryEntry], slots: int
 ) -> list[tuple[LibraryEntry, CharacterImage | SeriesAssetImage]]:
@@ -389,7 +419,13 @@ def refresh_states(session: Session, panel_ids: Iterable[int]) -> None:
                 )
             )
         }
-        n_images = session.scalar(select(func.count()).where(PanelImage.panel_id == panel.id)) or 0
+        # Les croquis ne comptent pas : une case qui n'a que des croquis reste « à générer ».
+        n_images = (
+            session.scalar(
+                select(func.count()).where(PanelImage.panel_id == panel.id, PanelImage.kind == ImageKind.final)
+            )
+            or 0
+        )
         chosen = session.scalar(select(PanelImage).where(PanelImage.panel_id == panel.id, PanelImage.selected))
         panel.qc_score = chosen.qc_score if chosen is not None else None
         if (STEP, JobStatus.running) in active:
@@ -406,7 +442,13 @@ def refresh_states(session: Session, panel_ids: Iterable[int]) -> None:
     for page in pages.values():
         states = [p.state for p in page.panels]
         ids = [p.id for p in page.panels]
-        with_images = set(session.scalars(select(PanelImage.panel_id).where(PanelImage.panel_id.in_(ids)).distinct()))
+        with_images = set(
+            session.scalars(
+                select(PanelImage.panel_id)
+                .where(PanelImage.panel_id.in_(ids), PanelImage.kind == ImageKind.final)
+                .distinct()
+            )
+        )
         if any(s in (PanelState.queued, PanelState.generating) for s in states):
             page.state = PageState.generating
         elif ids and len(with_images) == len(ids):
@@ -444,6 +486,9 @@ class _Plan:
     repair: dict[str, Any] | None = None
     source_data: bytes = b""
     mask_data: bytes = b""
+    # Image de composition (preset `propre`) : {image_id, version, method, denoise, filename} + son contenu.
+    sketch: dict[str, Any] | None = None
+    sketch_data: bytes | None = None
 
 
 def _capitalize(text: str) -> str:
@@ -534,10 +579,16 @@ class GenerationExecutor:
             else:
                 if loaded.preset.inpaint is not None:
                     raise GenerationError(f"le workflow {preset_id} sert à réparer une version, pas à générer une case")
-                prompt = update_panel_prompt(presets, session, panel, self.knowledge)
+                # Passage au propre : même prompt que le croquis validé (sinon le prompt final de la case).
+                prompt = str(job.params.get("sketch_prompt") or "").strip() or update_panel_prompt(
+                    presets, session, panel, self.knowledge
+                )
                 size = panel_target(presets, page, panel)
             if size is None:
                 raise GenerationError(f"la page {page.number} n'est pas mise en page")
+            if repair is None and loaded.preset.role == "croquis" and loaded.preset.long_side:
+                size = sketch_size(size, loaded.preset.long_side, presets.layout.generation.multiple)
+            sketch, sketch_data = self._sketch_source(session, job, panel, loaded)
             references: list[dict[str, Any]] = []
             reference_data: list[bytes] = []
             for entry, image in pick_references(entries, len(loaded.preset.reference_images)):
@@ -571,10 +622,12 @@ class GenerationExecutor:
                 params["denoise"] = float(repair.get("denoise") or loaded.preset.defaults.get("denoise") or 0.45)
             else:
                 params.update(size)
+            if sketch is not None and "denoise" in loaded.preset.mapping:
+                params["denoise"] = sketch["denoise"]
             if "filename_prefix" in loaded.preset.mapping:
                 params["filename_prefix"] = (
                     f"mangaka/serie-{chapter.project_id}/chapitre-{chapter.number}/page-{page.number}"
-                    f"/case-{panel.index + 1}"
+                    f"/{'croquis-' if loaded.preset.role == 'croquis' else ''}case-{panel.index + 1}"
                 )
             plan = _Plan(
                 loaded=loaded,
@@ -588,9 +641,40 @@ class GenerationExecutor:
                 repair={**repair, "image_width": size["width"], "image_height": size["height"]} if repair else None,
                 source_data=source_data,
                 mask_data=mask_data,
+                sketch=sketch,
+                sketch_data=sketch_data,
             )
             session.commit()  # prompt final éventuellement reconstruit
             return plan
+
+    def _sketch_source(
+        self, session: Session, job: Job, panel: Panel, loaded: LoadedWorkflow
+    ) -> tuple[dict[str, Any] | None, bytes | None]:
+        """Image de composition d'un preset `propre` : le croquis désigné par le job (`source_image_id`)."""
+        if loaded.preset.source_image is None:
+            return None, None
+        source_id = job.params.get("source_image_id")
+        sketch = session.get(PanelImage, int(source_id)) if source_id is not None else None
+        if sketch is None or sketch.panel_id != panel.id:
+            raise GenerationError(
+                "croquis source introuvable (supprimé entre-temps ?) : valide un croquis puis relance"
+            )
+        path = self.files.absolute(sketch.path)
+        if not path.is_file():
+            raise GenerationError(f"fichier du croquis absent de data/ ({sketch.path})")
+        denoise = job.params.get("denoise")
+        if denoise is None:
+            denoise = loaded.preset.defaults.get("denoise")
+        source = {
+            "source": sketch.kind.value,
+            "image_id": sketch.id,
+            "version": sketch.version,
+            "seed": sketch.seed,
+            "method": "img2img",
+            "denoise": denoise,
+            "filename": f"croquis_case{panel.id}_v{sketch.version}{PurePosixPath(sketch.path).suffix or '.png'}",
+        }
+        return source, path.read_bytes()
 
     def _repair_inputs(
         self, session: Session, panel_id: int, repair: dict[str, Any]
@@ -627,6 +711,10 @@ class GenerationExecutor:
         for i, (ref, data) in enumerate(zip(plan.references, plan.reference_data, strict=True), start=1):
             report(4, f"Envoi de l'image de référence {i}/{len(plan.references)} à ComfyUI…")
             uploaded.append(comfy.upload_image(data, ref["filename"], subfolder=UPLOAD_SUBFOLDER))
+        sketch_name: str | None = None
+        if plan.sketch is not None and plan.sketch_data is not None:
+            report(6, f"Envoi du croquis validé (version {plan.sketch['version']}) à ComfyUI…")
+            sketch_name = comfy.upload_image(plan.sketch_data, plan.sketch["filename"], subfolder=UPLOAD_SUBFOLDER)
         inpaint_images: tuple[str, str] | None = None
         if plan.repair is not None:
             report(6, "Envoi de la version source et du masque à ComfyUI…")
@@ -636,7 +724,12 @@ class GenerationExecutor:
                 comfy.upload_image(plan.mask_data, f"masque_job{job_id}.png", subfolder=UPLOAD_SUBFOLDER),
             )
         built = build_workflow(
-            plan.loaded, plan.params, reference_images=uploaded, loras=plan.loras, inpaint_images=inpaint_images
+            plan.loaded,
+            plan.params,
+            reference_images=uploaded,
+            loras=plan.loras,
+            inpaint_images=inpaint_images,
+            source_image=sketch_name,
         )
         if cancel.is_set():
             raise ComfyUIInterruptedError("génération annulée")
@@ -700,13 +793,27 @@ class GenerationExecutor:
             has_selected = session.scalar(
                 select(PanelImage.id).where(PanelImage.panel_id == panel.id, PanelImage.selected)
             )
+            kind = ImageKind.croquis if preset.role == "croquis" else ImageKind.final
+            composition = (
+                {
+                    **{k: v for k, v in plan.sketch.items() if k != "filename"},
+                    "denoise": built.params.get("denoise", plan.sketch["denoise"]),
+                    "comfyui_name": sketch_name,
+                }
+                if plan.sketch is not None
+                else None
+            )
             image = PanelImage(
                 panel_id=panel.id,
                 version=version,
+                kind=kind,
                 path=stored.path,
                 seed=built.params["seed"],
-                selected=has_selected is None,  # la première version est choisie d'office
+                # La première version est choisie d'office ; un croquis ne l'est jamais (jamais assemblé).
+                selected=has_selected is None and kind == ImageKind.final,
                 params={
+                    "kind": kind.value,
+                    **({"composition": composition, "sketch_image_id": composition["image_id"]} if composition else {}),
                     "preset": preset.id,
                     "preset_name": preset.name,
                     "tier": preset.tier.name if preset.tier else None,
@@ -739,7 +846,8 @@ class GenerationExecutor:
             session.add(image)
             session.flush()
             job = session.get(Job, job_id)
-            if self.on_generated is not None and job is not None:
+            # Pas de QC automatique sur un croquis : c'est l'œil de l'auteur qui trie.
+            if self.on_generated is not None and job is not None and kind == ImageKind.final:
                 try:
                     self.on_generated(session, job, image)
                 except Exception:  # noqa: BLE001 — la version est gardée même si le QC ne peut être mis en file
@@ -747,7 +855,8 @@ class GenerationExecutor:
             session.commit()
         if plan.repair is not None:
             return f"Version {version} — réparation de la v{plan.repair.get('source_version')}, seed {built.params['seed']}"
-        return f"Version {version} — {stored.width}×{stored.height}, seed {built.params['seed']}"
+        label = "Croquis" if kind == ImageKind.croquis else "Version"
+        return f"{label} {version} — {stored.width}×{stored.height}, seed {built.params['seed']}"
 
 
 def _repair_params(repair: dict[str, Any]) -> dict[str, Any]:

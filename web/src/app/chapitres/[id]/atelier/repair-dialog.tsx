@@ -42,7 +42,7 @@ export function isSketch(img: PanelImage): boolean {
   const p = img.params;
   const kind = String(p.kind ?? "").toLowerCase();
   const tier = (img.tier ?? "").toLowerCase();
-  return kind === "croquis" || kind === "sketch" || tier === "croquis" || Boolean(p.sketch);
+  return img.kind === "croquis" || kind === "croquis" || kind === "sketch" || tier === "croquis" || Boolean(p.sketch);
 }
 
 function plainBox(b: DetectionBox | RepairRegion): RepairRegion {

@@ -26,6 +26,10 @@ export interface Project {
   style_lora_trigger_words: string;
   /** Style de mise en page de la série (presets/layout_styles/). */
   layout_style: string;
+  /** Palier croquis : brouillon de page, tri, passage au propre (désactivable). */
+  sketch_enabled: boolean;
+  /** Débruitage du passage au propre (null : celui du preset). */
+  sketch_denoise: number | null;
   /** Agrandisseur de la finition d'impression (presets/upscalers/) ; null = celui de defaults.yaml. */
   upscaler: string | null;
   character_count: number;
@@ -48,6 +52,8 @@ export type ProjectInput = Pick<
   | "style_lora_weight"
   | "style_lora_trigger_words"
   | "layout_style"
+  | "sketch_enabled"
+  | "sketch_denoise"
   | "upscaler"
 >;
 
@@ -120,6 +126,16 @@ export interface PanelData {
   detections: Detections | null;
   /** Le ratio de la case s'écarte trop de celui de l'image retenue : régénération conseillée. */
   regeneration_advised: boolean;
+  /** Palier croquis : nombre de croquis, croquis montré (validé, sinon le plus récent). */
+  sketch_count?: number;
+  sketch_image_id?: number | null;
+  sketch_image_url?: string | null;
+  /** Composition retenue au tri. */
+  sketch_validated?: boolean;
+  /** Débruitage du passage au propre imposé à la case (null : celui de la série). */
+  sketch_denoise?: number | null;
+  /** Une version propre a déjà été tirée du croquis validé. */
+  sketch_cleaned?: boolean;
   /** Dpi de la version retenue à l'impression (null : pas de version retenue ou pas de mise en page). */
   print_info?: PrintInfo | null;
 }
@@ -397,10 +413,14 @@ export interface Job {
 }
 
 /** Une version générée d'une case. */
+export type ImageKind = "final" | "croquis";
+
 export interface PanelImage {
   id: number;
   panel_id: number;
   version: number;
+  /** croquis : brouillon de composition, jamais choisi, assemblé ni exporté. */
+  kind?: ImageKind;
   url: string;
   seed: Seed | null;
   selected: boolean;
@@ -654,6 +674,9 @@ export interface PanelDetail {
   target: { width: number; height: number } | null;
   images: PanelImage[];
   active_jobs: Job[];
+  /** Croquis validé au tri (null : aucun). */
+  sketch_image_id?: number | null;
+  sketch_denoise?: number | null;
   print_info?: PrintInfo | null;
   /** Nom de l'agrandisseur de la série (finition d'impression), null : aucun configuré. */
   upscaler?: string | null;
@@ -721,6 +744,22 @@ export interface WorkflowPreset {
   estimated_s: number | null;
   /** Palier de « Régénérer en Qualité ». */
   is_quality: boolean;
+  /** generation : palier de série ; croquis ; propre : version finale depuis un croquis validé. */
+  role?: "generation" | "croquis" | "propre";
+  from_sketch?: string | null;
+  is_sketch?: boolean;
+}
+
+/** Temps estimés du palier croquis d'une page ou d'un chapitre. */
+export interface SketchEstimate {
+  panels: number;
+  /** Cases encore à croquer (sans version propre choisie ni croquis validé). */
+  to_sketch: number;
+  validated: number;
+  /** Cases validées sans version propre tirée de leur croquis. */
+  to_clean: number;
+  sketch: Estimate;
+  clean: Estimate;
 }
 
 /** Temps estimé des cases encore à générer (chapitre ou série). */
@@ -938,6 +977,8 @@ export interface Presets {
     workflow_with_references?: string | null;
     workflow_quality?: string | null;
     layout_style?: string | null;
+    sketch_enabled?: boolean;
+    workflow_sketch?: string | null;
     /** Agrandisseur de la finition d'impression et part du dpi cible qui suffit (0,9). */
     upscaler?: string | null;
     finishing_tolerance?: number;
@@ -964,6 +1005,11 @@ export interface Presets {
     tier_choice: string | null;
     tier_order: number | null;
     estimated_s: number | null;
+    role?: "generation" | "croquis" | "propre";
+    /** Workflow « propre depuis croquis » du même palier. */
+    from_sketch?: string | null;
+    /** Débruitage livré (workflows « propre »). */
+    denoise?: number | null;
   }[];
   /** Agrandisseurs de la finition d'impression (presets/upscalers/). */
   upscalers?: Omit<Upscaler, "timeout_s">[];
@@ -1607,7 +1653,15 @@ export const api = {
     request<LoraCatalog>(`/comfyui/loras${refresh ? "?refresh=true" : ""}`, { signal: AbortSignal.timeout(15_000) }),
   startComfyTrial: (preset: string) => request<Job>("/comfyui/trial", json("POST", { preset })),
   getPanel: (id: number) => request<PanelDetail>(`/panels/${id}`),
-  updatePanel: (id: number, body: { final_prompt?: string | null; generation_preset?: string | null }) =>
+  updatePanel: (
+    id: number,
+    body: {
+      final_prompt?: string | null;
+      generation_preset?: string | null;
+      description?: string;
+      sketch_denoise?: number | null;
+    },
+  ) =>
     request<PanelDetail>(`/panels/${id}`, json("PATCH", body)),
   rebuildPrompt: (id: number) => request<PanelDetail>(`/panels/${id}/prompt/rebuild`, { method: "POST" }),
   generatePanel: (id: number, body: GenerateInput = {}) => request<Job[]>(`/panels/${id}/generate`, json("POST", body)),
@@ -1618,6 +1672,17 @@ export const api = {
     request<BatchGenerateResult>(`/pages/${id}/generate`, json("POST", body)),
   generateChapter: (id: number, body: { force?: boolean; count?: number } = {}) =>
     request<BatchGenerateResult>(`/chapters/${id}/generate`, json("POST", body)),
+  sketchPanel: (id: number, body: { seed?: Seed | null } = {}) => request<Job[]>(`/panels/${id}/sketch`, json("POST", body)),
+  validateSketch: (id: number, imageId?: number) =>
+    request<PanelDetail>(`/panels/${id}/sketch/validate`, json("POST", imageId ? { image_id: imageId } : {})),
+  unvalidateSketch: (id: number) => request<PanelDetail>(`/panels/${id}/sketch/validate`, { method: "DELETE" }),
+  cleanPanel: (id: number, body: { denoise?: number | null } = {}) => request<Job[]>(`/panels/${id}/clean`, json("POST", body)),
+  sketchPage: (id: number) => request<BatchGenerateResult>(`/pages/${id}/sketch`, { method: "POST" }),
+  sketchChapter: (id: number) => request<BatchGenerateResult>(`/chapters/${id}/sketch`, { method: "POST" }),
+  cleanPage: (id: number) => request<BatchGenerateResult>(`/pages/${id}/clean`, { method: "POST" }),
+  cleanChapter: (id: number) => request<BatchGenerateResult>(`/chapters/${id}/clean`, { method: "POST" }),
+  pageSketchEstimate: (id: number) => request<SketchEstimate>(`/pages/${id}/sketch-estimate`),
+  chapterSketchEstimate: (id: number) => request<SketchEstimate>(`/chapters/${id}/sketch-estimate`),
   upscalers: () => request<Upscaler[]>("/presets/upscalers"),
   finishPanel: (id: number) => request<Job>(`/panels/${id}/finish`, { method: "POST" }),
   finishPage: (id: number) => request<BatchGenerateResult>(`/pages/${id}/finish`, { method: "POST" }),

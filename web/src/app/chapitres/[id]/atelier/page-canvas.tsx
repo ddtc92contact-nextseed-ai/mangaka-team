@@ -163,6 +163,9 @@ export function PageCanvas({
                   ? "Contrôle qualité…"
                   : "QC en file"
                 : PANEL_STATE[panel.state] ?? panel.state;
+        // Sans version choisie, le croquis (palier croquis) montre déjà la composition de la case.
+        const isSketch = !panel.selected_image_url && Boolean(panel.sketch_image_url);
+        const imageUrl = panel.selected_image_url ?? panel.sketch_image_url ?? null;
         // Case en biais : le bouton est découpé au polygone, son contour est dessiné en SVG.
         const poly = lp.slanted ? panelPolygon(lp) : null;
         const qcLabel = panel.qc_verdict
@@ -179,7 +182,7 @@ export function PageCanvas({
             onClick={() => onOpen(panel.id)}
             onKeyDown={(e) => onKeyDown(e, lp)}
             aria-pressed={selected}
-            aria-label={`Case ${panel.index + 1} — ${stateLabel}${qcLabel}${panel.print_info ? ` — ${dpiLabel(panel.print_info)}` : ""}${panel.shot_type ? ` — ${panel.shot_type}` : ""}`}
+            aria-label={`Case ${panel.index + 1} — ${stateLabel}${isSketch ? ` — croquis${panel.sketch_validated ? " validé" : ""}` : ""}${qcLabel}${panel.print_info ? ` — ${dpiLabel(panel.print_info)}` : ""}${panel.shot_type ? ` — ${panel.shot_type}` : ""}`}
             data-testid="workshop-panel"
             data-state={running ? "generating" : queued ? "queued" : failure ? "failed" : panel.state}
             data-qc={panel.qc_verdict ?? "none"}
@@ -201,13 +204,14 @@ export function PageCanvas({
               clipPath: poly ? cssClipPath(poly, lp) : undefined,
             }}
           >
-            {panel.selected_image_url ? (
+            {imageUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
-                src={engineUrl(panel.selected_image_url)}
+                src={engineUrl(imageUrl)}
                 alt=""
                 className={`h-full w-full object-cover ${running || queued ? "opacity-60" : ""} ${queued ? "grayscale" : ""}`}
                 draggable={false}
+                data-sketch={isSketch ? "true" : undefined}
               />
             ) : null}
             {panel.selected_image_url && showBoxes && panel.detections ? (
@@ -224,7 +228,7 @@ export function PageCanvas({
                   <DpiBadge info={panel.print_info} />
                 ) : null}
               </span>
-            ) : (
+            ) : isSketch ? null : (
               <span
                 className={`flex h-full w-full flex-col items-center justify-center gap-1 p-1 text-center [background-image:repeating-linear-gradient(45deg,transparent_0_10px,rgba(0,0,0,0.035)_10px_20px)] ${
                   failure ? "bg-red-100 text-red-800" : queued ? "bg-zinc-300 text-zinc-500" : "bg-zinc-200 text-zinc-600"
@@ -236,9 +240,14 @@ export function PageCanvas({
                 <span className="text-[11px] font-medium leading-tight">{stateLabel}</span>
               </span>
             )}
-            {panel.selected_image_url && (
+            {imageUrl && (
               <span className="absolute left-1 top-1 rounded bg-zinc-950/80 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-100">
                 {panel.index + 1}
+                {isSketch && (
+                  <span className="ml-1 font-normal text-zinc-300" data-testid="panel-sketch-badge">
+                    · croquis{panel.sketch_validated ? " ✓" : ""}
+                  </span>
+                )}
                 {(running || queued || failure || checking || panel.state === "review") && (
                   <span className="ml-1 font-normal text-zinc-300">· {stateLabel}</span>
                 )}

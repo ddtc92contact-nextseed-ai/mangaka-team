@@ -23,6 +23,9 @@ LoraTriggers = Annotated[str, StringConstraints(strip_whitespace=True, max_lengt
 IntensityName = Literal["calme", "normal", "choc"]
 RythmeName = Literal["lent", "normal", "rapide"]
 FrameKindName = Literal["border", "none", "fade"]
+# Débruitage du passage au propre (palier croquis) : 0 = croquis inchangé, 1 = image neuve.
+Denoise = Annotated[float, Field(ge=0.05, le=1)]
+ImageKindName = Literal["final", "croquis"]
 
 
 class _In(BaseModel):
@@ -42,6 +45,9 @@ class ProjectCreate(_In):
     style_lora_trigger_words: LoraTriggers = ""
     # Absent : style par défaut des presets (« dynamique »).
     layout_style: PresetId | None = None
+    # Absent : `sketch_enabled` de presets/defaults.yaml (activé).
+    sketch_enabled: bool | None = None
+    sketch_denoise: Denoise | None = None
     # Agrandisseur de la finition d'impression (None : celui de defaults.yaml).
     upscaler: PresetId | None = None
 
@@ -57,6 +63,8 @@ class ProjectUpdate(_In):
     style_lora_weight: LoraWeight | None = None
     style_lora_trigger_words: LoraTriggers | None = None
     layout_style: PresetId | None = None
+    sketch_enabled: bool | None = None
+    sketch_denoise: Denoise | None = None  # null : `denoise` du preset « propre »
     upscaler: PresetId | None = None  # null : revient à l'agrandisseur de defaults.yaml
 
 
@@ -72,6 +80,8 @@ class ProjectOut(BaseModel):
     style_lora_weight: float
     style_lora_trigger_words: str
     layout_style: str
+    sketch_enabled: bool = True
+    sketch_denoise: float | None = None
     upscaler: str | None = None
     character_count: int
     chapter_count: int
@@ -240,9 +250,17 @@ class PanelOut(BaseModel):
     final_prompt: str | None = None
     final_prompt_manual: bool = False
     generation_preset: str | None = None
-    image_count: int = 0
+    image_count: int = 0  # versions propres (les croquis sont comptés à part)
     selected_image_id: int | None = None
     selected_image_url: str | None = None
+    # Palier croquis : nombre de croquis, croquis montré (validé, sinon le plus récent), validation.
+    sketch_count: int = 0
+    sketch_image_id: int | None = None
+    sketch_image_url: str | None = None
+    sketch_validated: bool = False
+    sketch_denoise: float | None = None
+    # Version propre déjà tirée du croquis validé.
+    sketch_cleaned: bool = False
     # QC de la version choisie (None : pas encore contrôlée).
     qc_verdict: QCVerdictName | None = None
     qc_score: int | None = None
@@ -457,6 +475,7 @@ class PanelImageOut(BaseModel):
     id: int
     panel_id: int
     version: int
+    kind: ImageKindName = "final"  # croquis : jamais choisi, assemblé ni exporté
     url: str
     seed: int | None
     selected: bool
@@ -508,6 +527,10 @@ class PanelUpdate(_In):
     final_prompt: FinalPrompt | None = None
     # generation_preset : null = choix automatique.
     generation_preset: PresetId | None = None
+    # Description de la case (tri des croquis : « modifier la description puis re-croquer »).
+    description: LongText | None = None
+    # Débruitage du passage au propre de cette case ; null = celui de la série (sinon du preset).
+    sketch_denoise: Denoise | None = None
 
 
 class LibraryRef(BaseModel):
@@ -541,6 +564,8 @@ class PanelDetailOut(BaseModel):
     target: dict[str, int] | None
     images: list[PanelImageOut]
     active_jobs: list[JobOut]
+    sketch_image_id: int | None = None  # croquis validé
+    sketch_denoise: float | None = None
     print_info: PrintInfoOut | None = None
     upscaler: str | None = None  # agrandisseur de la finition (nom), None si aucun configuré
 
@@ -591,6 +616,9 @@ class WorkflowPresetOut(BaseModel):
     tier_order: int | None = None
     estimated_s: float | None = None
     is_quality: bool = False  # palier de « Régénérer en Qualité »
+    role: Literal["generation", "croquis", "propre"] = "generation"
+    from_sketch: str | None = None  # workflow « propre depuis croquis » du même palier
+    is_sketch: bool = False  # workflow des croquis (defaults.workflow_sketch)
 
 
 class PresetEstimateOut(BaseModel):
@@ -607,6 +635,28 @@ class EstimateOut(BaseModel):
     total_s: float | None  # None : un preset sans durée connue ni `estimated_s`
     measured: bool  # False : au moins une partie vient des estimations des presets (« estimation »)
     by_preset: list[PresetEstimateOut]
+
+
+# --- Palier croquis ----------------------------------------------------------------
+class SketchIn(_In):
+    seed: Annotated[int, Field(ge=0, le=MAX_SEED)] | None = None  # null : nouvelle graine
+
+
+class SketchValidateIn(_In):
+    image_id: int | None = None  # null : le croquis le plus récent
+
+
+class CleanIn(_In):
+    denoise: Denoise | None = None  # null : case > série > preset
+
+
+class SketchEstimateOut(BaseModel):
+    panels: int  # cases de la page / du chapitre
+    to_sketch: int  # cases encore à croquer (sans version propre ni croquis validé)
+    validated: int  # cases au croquis validé
+    to_clean: int  # cases validées sans version propre tirée de leur croquis
+    sketch: EstimateOut  # « croquis de la page »
+    clean: EstimateOut  # « passage au propre des cases validées »
 
 
 # --- Contrôle qualité (étape 4) ------------------------------------------------

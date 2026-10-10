@@ -183,6 +183,8 @@ def apply_overrides(
                         path = setting.path
                         if path[0] == "defaults" and len(path) == 2 and path[1] not in wf.preset.mapping:
                             continue  # paramètre non mappé par ce workflow
+                        if wf.preset.role == "croquis" and list(path) == ["defaults", "steps"]:
+                            continue  # le croquis garde ses quelques étapes (c'est tout son intérêt)
                         _set(data, path, value)
                     workflows[wf_id] = dataclasses.replace(wf, preset=WorkflowPreset.model_validate(data))
                 changes["workflows"] = workflows
