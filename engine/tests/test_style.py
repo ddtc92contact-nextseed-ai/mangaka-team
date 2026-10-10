@@ -89,10 +89,11 @@ def test_v1_packs_carry_the_calibrated_keywords_and_their_language() -> None:
     assert len(packs) == 7 + 4 + 4 + 9
     for pack in packs:
         assert pack.lang in ("fr", "en") and pack.prompt_keywords and all(pack.prompt_keywords), pack
-    # Calibrage du 10/10/2026 : trames = points nommés ; franco-belge = exclusion explicite de l'anime.
+    # Calibrage du 10/10/2026 : trames = points nommés (en anglais depuis l'A/B à référence figée) ;
+    # franco-belge = exclusion explicite de l'anime.
     assert "halftone" in ", ".join(REG.style_renderings["nb-trames"].prompt_keywords)
     assert "PAS de style anime japonais" in REG.style_genres["franco-belge"].prompt_keywords
-    assert (REG.style_genres["franco-belge"].lang, REG.style_renderings["nb-trames"].lang) == ("fr", "fr")
+    assert (REG.style_genres["franco-belge"].lang, REG.style_renderings["nb-trames"].lang) == ("fr", "en")
     assert REG.style_options.options["trait"].choices["moyen"].lang == "fr"
     assert "entre fin et épais" in ", ".join(REG.style_options.options["trait"].choices["moyen"].prompt_keywords)
 
@@ -158,6 +159,9 @@ def test_style_is_lora_then_genre_rendering_tone_and_fine_settings_in_a_fixed_or
         *opts["trames"].choices["denses"].prompt_keywords,
         *opts["detail"].choices["riche"].prompt_keywords,
     ]
+    # Rendu « N&B à trames » : mots-clés anglais (A/B à référence figée du 10/10/2026).
+    style = series_style(REG, series)
+    assert "black and white manga, halftone screentone dots, regular grey dot pattern, no cross-hatching" in style
 
 
 def test_style_combinations_lora_out_of_catalog_and_color() -> None:
@@ -169,10 +173,10 @@ def test_style_combinations_lora_out_of_catalog_and_color() -> None:
     assert "color manga" in color and "screentone" not in color
     # Un pack disparu des presets est ignoré ; le rendu revient au rendu par défaut.
     gone = series_style(REG, _series(style_genre="disparu", style_rendering="disparu"))
-    assert "manga noir et blanc" in gone and "seinen" not in gone
+    assert "black and white manga" in gone and "seinen" not in gone
     # Ancien texte libre : utilisé tant qu'aucun pack n'est choisi, ignoré ensuite.
     legacy = _series(legacy_style="Aquarelle pastel", style_genre=None, style_rendering=None, style_tone=None)
-    assert series_style(REG, legacy).startswith("Aquarelle pastel, manga noir et blanc")
+    assert series_style(REG, legacy).startswith("Aquarelle pastel, black and white manga")
     assert "Aquarelle" not in series_style(REG, _series(legacy_style="Aquarelle pastel"))
 
 
@@ -279,7 +283,9 @@ def test_presets_endpoint_lists_the_packs(client: TestClient) -> None:
     assert [g["id"] for g in data["style_genres"]][:2] == ["shonen", "seinen"]
     jeunesse = next(g for g in data["style_genres"] if g["id"] == "jeunesse")
     assert "dark" not in jeunesse["allowed_tones"]
-    assert [r["id"] for r in data["style_renderings"] if r["is_default"]] == ["nb-trames"]
+    assert [(r["id"], r["name"]) for r in data["style_renderings"] if r["is_default"]] == [
+        ("nb-trames", "N&B à trames")
+    ]
     assert {r["id"]: r["monochrome"] for r in data["style_renderings"]}["couleur"] is False
     assert [o["id"] for o in data["style_options"]] == ["trait", "trames", "detail"]
     assert any(lo["file"] == "encre-seinen_v2.safetensors" for lo in data["style_loras"])
@@ -292,7 +298,8 @@ def test_generated_panel_prompt_carries_the_three_packs(client: TestClient) -> N
     panel = page["panels"][0]
     _ok(client.post(f"/panels/{panel['id']}/generate"), 202)
     assert client.app.state.ctx.generation.wait_idle(20)  # type: ignore[attr-defined]
-    [img] = _ok(client.get(f"/panels/{panel['id']}/images"))
+    # Le QC mock peut rejeter l'image et relancer un essai (nouvelle seed, même prompt) : on lit la v1.
+    img = next(i for i in _ok(client.get(f"/panels/{panel['id']}/images")) if i["version"] == 1)
     prompt = img["params"]["prompt"]
     for pack in (REG.style_genres["seinen"], REG.style_renderings["nb-trames"], REG.style_tones["dark"]):
         assert all(k in prompt for k in pack.prompt_keywords), (pack.id, prompt)

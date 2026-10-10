@@ -260,7 +260,7 @@ Tout nouveau pack s'écrit selon les mêmes règles, et se mesure de la même fa
   au chargement.
 - **La langue dépend du pack** : l'anglais marche mieux pour le trait et les trames, le français pour le
   ton et le décor riche. `lang` documente le choix mesuré ; il ne traduit rien.
-- **Trames : nommer les points** (« points de trame », « halftone ») : « screentone » seul sort des
+- **Trames : nommer les points** (« halftone screentone dots », « grey dot pattern ») : « screentone » seul sort des
   hachures.
 - **Franco-belge : cumuler** ligne claire + aplats + trait de contour uniforme **et exclure
   explicitement l'anime** (« PAS de style anime japonais ») ; sans cela le modèle sort de l'anime
@@ -268,6 +268,13 @@ Tout nouveau pack s'écrit selon les mêmes règles, et se mesure de la même fa
 - **Niveaux « moyen » : nommer la position relative** (« entre fin et épais »), sinon ils ne se lisent
   pas.
 - Le style ne change pas le temps de génération (médiane 9,7 s par image).
+
+**A/B à référence figée (10/10/2026).** Après la planche de style, chaque pack a été rejoué en français
+et en anglais avec la **référence de style de la série figée** (graph `qwen-image-edit-ref-turbo`,
+graine 12345, même scène). Avec une référence, la langue pèse peu (1,5 à 15 % de pixels différents).
+Seul **N&B à trames** passe en anglais : points de trame plus nets et réguliers, verdict tenu dans les
+deux ordres d'affichage. Les autres packs gardent leur langue faute de preuve (jeunesse, seinen et
+trames moyennes indécis).
 
 Les accents sont écrits normalement (le modèle les lit comme sans accent).
 
