@@ -11,7 +11,7 @@ Après modification d'un preset, redémarre le moteur (`npm run dev`).
 
 | Fichier | Rôle |
 | --- | --- |
-| `defaults.yaml` | Format de page, workflow (palier **Turbo**) et style de mise en page (`layout_style`) appliqués aux nouvelles séries ; workflow « avec références » de repli pour un preset qui ne déclare pas `with_references` (`workflow_with_references`) ; palier de « Régénérer en Qualité » (`workflow_quality`) ; agrandisseur de la finition d'impression (`upscaler`) et tolérance de dpi (`finishing_tolerance`) ; preset de réparation ciblée de repli (`workflow_inpaint`) ; palier croquis (`sketch_enabled`, `workflow_sketch`) ; planche de style (`style_board`) |
+| `defaults.yaml` | Format de page, workflow (palier **Rapide**) et style de mise en page (`layout_style`) appliqués aux nouvelles séries ; workflow « avec références » de repli pour un preset qui ne déclare pas `with_references` (`workflow_with_references`) ; palier de « Régénérer en Qualité » (`workflow_quality`) ; palier des fiches de référence et de la planche de style (`workflow_library`, Turbo) ; agrandisseur de la finition d'impression (`upscaler`) et tolérance de dpi (`finishing_tolerance`) ; preset de réparation ciblée de repli (`workflow_inpaint`) ; palier croquis (`sketch_enabled`, `workflow_sketch`) ; planche de style (`style_board`) |
 | `providers.yaml` | Paramètres des fournisseurs (URL, modèle LLM, timeouts). **Aucune clé d'API ici** : elles vont dans `.env` |
 | `page_formats/*.yaml` | Formats de page (dimensions en mm, DPI, marges, gouttières) : A4 (défaut) et B4 JIS à 300 DPI |
 | `layout.yaml` | Découpage : taille mini d'une case, taille cible de génération, zones de bulles, seuil de régénération conseillée |
@@ -241,7 +241,8 @@ Un seul module (`engine/mangaka_engine/pipeline/style.py`) compose le style d'un
 
 - **`$style`** des prompts image (cases, fiches de référence, réparation, croquis et passage au
   propre) = mots déclencheurs du LoRA de style (catalogue), puis mots-clés du **genre**, du **rendu**,
-  du **ton** et des **réglages fins** (dans l'ordre de `style_options.yaml`), sans doublon ;
+  du **ton** et des **réglages fins** (dans l'ordre de `style_options.yaml`), sans doublon, dans un
+  **bloc court** (voir « Bloc Style court ») ;
 - **`$style_packs`** et **`$style_guidelines`** des prompts LLM (scénario, direction artistique) : nom
   et description des packs, puis consignes du genre et du ton.
 
@@ -279,6 +280,27 @@ deux ordres d'affichage. Les autres packs gardent leur langue faute de preuve (j
 trames moyennes indécis).
 
 Les accents sont écrits normalement (le modèle les lit comme sans accent).
+
+**Décors simples (10/10/2026).** `detail.simple` disait `simple background, minimal, plain` : cela
+contredisait le `Lieu :` décrit de la case (fonds vides). Il dit désormais `uncluttered background, few
+details` — moins de détails, mais le lieu reste dessiné.
+
+### Bloc Style court (`style_max_chars` de `image_prompt.yaml`)
+
+Tous les mots-clés des packs mis bout à bout pesaient ~1/3 du prompt d'une case (300 à 400 caractères,
+français et anglais mêlés) et noyaient sa description. `$style` est donc plafonné (`style_max_chars`,
+240 livré, `null` = sans plafond) :
+
+1. les mots déclencheurs du LoRA de style d'abord ;
+2. puis les packs donnent leurs mots-clés **à tour de rôle** : le 1er mot-clé de chaque pack, puis le
+   2e, etc., **le rendu en premier à chaque tour** (sans planche de style jointe aux cases, c'est lui
+   qui porte trait, encrage et trames : « halftone screentone dots » passe avant le reste) ;
+3. un pack s'arrête au premier mot-clé qui ne tient plus ; un mot-clé déjà dit par un pack précédent
+   (même texte, ou contenu mot pour mot : « manga » derrière « manga seinen ») est retiré.
+
+L'ordre d'affichage reste l'ordre fixe (LoRA, genre, rendu, ton, réglages fins). **Les mots-clés
+calibrés ne changent pas** : seul l'assemblage choisit les premiers de chaque pack. Écrire donc les
+mots-clés d'un pack **du plus important au moins important**.
 
 ### Ajouter un genre
 
@@ -354,7 +376,7 @@ Sur la fiche série, « Générer 4 essais » met en file `trials` croquis (pali
 **scène test** du genre (`scene_test`, obligatoire : un genre sans scène test est écarté au chargement)
 avec le `$style` de la série et une graine différente par essai. Le manager en choisit un (clic ou
 touches 1-4) ou relance 4 autres (touche R). L'essai retenu passe au propre (`from_sketch` du palier
-de la série, même graine, même prompt, débruitage de la série ou du preset) à la taille
+des fiches, `workflow_library` : Turbo — sinon de la série —, même graine, même prompt, débruitage de la série ou du preset) à la taille
 `width` × `height`, puis devient la **référence de style** de la série (une seule active ; les
 précédentes restent dans l'historique et peuvent être reprises).
 
@@ -368,7 +390,7 @@ style_board:
     - "Style : $style."
   negative_prompt: "texte, bulles"   # ajouté au négatif du workflow
   reference_sheets: with_subject  # with_subject | always | never : voir ci-dessous
-  panels: with_subject      # with_subject | free_slot | never : voir « Cases » ci-dessous
+  panels: never             # with_subject | free_slot | never : voir « Cases » ci-dessous
 ```
 
 - **Fiches de référence** (`reference_sheets`) :
@@ -386,9 +408,16 @@ style_board:
   Quand elle est jointe, le morceau `$style_ref` des types de fiche dit son rôle : référence de
   style uniquement (trait, trames, encrage), sans reprendre son personnage, sa scène ni sa
   composition.
-- **Cases** : priorité inchangée — personnages > décor > objets > **style**. La référence de style ne
-  prend qu'un emplacement resté libre une fois toutes les images des fiches servies.
-  `with_subject` (livré) : **jamais seule** — une case sans image de personnage, de décor ni d'objet
+- **Cases** : `never` (livré depuis le 10/10/2026) — la planche de style **n'est jamais jointe à une
+  case** (génération, passage au propre, réparation). Mesure A/B à graine figée : jointe en 3e image,
+  elle faisait apparaître ses propres sujets dans la case (l'enfant et son chat, le cerf-volant de la
+  scène test) malgré la consigne « référence de style seulement » ; sans elle, la case montre la scène
+  décrite. Le cadrage des références (#76) corrige les fiches de personnage, pas la planche. Le style
+  des cases passe par `$style` (bloc court, rendu prioritaire) et le LoRA de style ; la planche reste
+  utilisée pour les fiches de référence (`reference_sheets`).
+  Autres réglages possibles — priorité personnages > décor > objets > **style**, la référence de style
+  ne prenant qu'un emplacement resté libre une fois toutes les images des fiches servies :
+  `with_subject` : **jamais seule** — une case sans image de personnage, de décor ni d'objet
   passe par le workflow texte de son palier, sans référence de style (avec une seule image, le modèle
   d'édition la redessinait telle quelle). `free_slot` : jointe même seule (la case passe alors au
   workflow « avec références »). `never` : jamais.
@@ -505,21 +534,33 @@ Les fichiers int8 « convrot » se chargent avec les nœuds standard (`UNETLoade
 
 | Preset | Palier | Usage | Étapes | Délai max | `estimated_s` |
 | --- | --- | --- | --- | --- | --- |
-| `qwen-image-turbo` | Turbo (défaut des nouvelles séries) | texte → image | 8 | 5 min | 20 |
+| `qwen-image-turbo` | Turbo (fiches de référence, planche de style) | texte → image | 8 | 5 min | 20 |
 | `qwen-image-edit-ref-turbo` | Turbo | avec images de référence | 8 | 10 min | 80 |
-| `qwen-image-base-rapide` | Rapide | texte → image | 25 | 10 min | 60 |
+| `qwen-image-base-rapide` | Rapide (défaut des nouvelles séries) | texte → image | 25 | 10 min | 60 |
 | `qwen-image-edit-ref-rapide` | Rapide | avec images de référence | 25 | 15 min | 240 |
 | `qwen-image-base` | Qualité (finitions, « Régénérer en Qualité ») | texte → image | 50 | 20 min | 70 |
 | `qwen-image-edit-ref` | Qualité | avec images de référence | 50 | 25 min | 280 |
 
 Le palier se choisit avec le **workflow de la série** (liste « Palier de génération » de la fiche
-série : « Turbo (rapide, production) », « Rapide », « Qualité (finitions) »). Les séries existantes
-gardent leur preset. Chaque preset déclare son palier :
+série : « Turbo (production en volume, ~35 s par case) », « Rapide (recommandé pour la qualité, ~1 min
+par case) », « Qualité (finitions) »). Les séries existantes gardent leur preset ; une série restée sous
+le palier par défaut voit dans sa fiche un bouton « Passer en Rapide » (puis Enregistrer).
+
+**Quel palier pour quelle tâche (10/10/2026)** :
+
+| Tâche | Palier | Pourquoi |
+| --- | --- | --- |
+| Cases (génération, passage au propre, réparation) | **Rapide** (`defaults.workflow`, `workflow_with_references`) | Mesure en génération libre avec références : 8 pas (Turbo) contre 25 pas changent ~60 % de l'image, au profit de 25 pas — le réglage du workflow officiel « Image Edit (Qwen Image 2.1) » (int8, 25 pas, cfg 1, euler/simple). ~35 s → ~60 s par case, accepté : la qualité prime. L'encodeur de texte n'y est pour rien (int8 contre bf16 : 0,1 % des pixels changés). |
+| Croquis | croquis (`workflow_sketch`, modèle Turbo, 6 pas) | Tri rapide des compositions. |
+| Fiches de référence, propre de la planche de style | **Turbo** (`workflow_library`) | Images de travail, refaites souvent ; « Qualité » reste proposé par fiche. |
+| Finitions | Qualité (`workflow_quality`) | « Régénérer en Qualité » des cases importantes. |
+
+Chaque preset déclare son palier :
 
 ```yaml
 tier:
   name: Turbo                            # affiché sur chaque version de case (atelier)
-  choice: "Turbo (rapide, production)"   # libellé de la fiche série ; absent = pas proposé
+  choice: "Turbo (production en volume, ~35 s par case)"   # libellé de la fiche série ; absent = pas proposé
   order: 1                               # ordre dans la liste
 estimated_s: 20                          # s / case tant qu'il y a moins de 3 générations réelles
 ```
@@ -963,8 +1004,8 @@ GX10, pour un détourage plus fin qu'un rectangle — ce sera un autre preset `i
 Sur chaque fiche de la bibliothèque (personnage, objet, décor), le panneau **« Créer des références »**
 génère des variantes d'un type de fiche dans la file ComfyUI (même progression, même annulation que
 les cases), à partir de la description visuelle, des mots-clés, du LoRA de style de la série et du
-LoRA de la fiche. **Par défaut, la fiche part de zéro** : texte → image au palier de la série (Turbo
-par défaut, Qualité sur demande), aucune image envoyée — même si la série a une référence de style.
+LoRA de la fiche. **Par défaut, la fiche part de zéro** : texte → image au palier des fiches (`workflow_library` : Turbo ;
+sinon celui de la série — Qualité sur demande), aucune image envoyée — même si la série a une référence de style.
 **« Image de départ (facultatif) »** : une des images de référence de la fiche (ou une nouvelle, par
 exemple la photo d'un croquis à la main, rangée avec les autres) part en image 1 du workflow
 « avec références » du palier ; le morceau `$start` dit d'en garder le sujet, la silhouette et la pose.
@@ -985,7 +1026,7 @@ kinds: [object]                  # character | object | decor (plusieurs possibl
 order: 30                        # ordre dans la liste
 width: 1024                      # multiples de 8, 256 à 2048
 height: 768
-workflow: null                   # null : palier de la série (Turbo par défaut) ou Qualité si demandé ;
+workflow: null                   # null : `workflow_library` (Turbo), sinon palier de la série, ou Qualité si demandé ;
                                  # un id de workflows/ l'impose (le choix du palier est alors ignoré)
 prompt:                          # morceaux assemblés ; un morceau dont une variable est vide est omis
   - "Vue éclatée de $name."
