@@ -11,12 +11,15 @@ height: 1024
 # presets/workflows/ impose ce workflow (le choix du palier est alors ignoré).
 workflow: null
 # Morceaux assemblés dans l'ordre ; un morceau dont une variable est vide est omis.
-# Variables : $name, $description, $keywords, $style, $instruction (consigne d'« Affiner »).
+# Variables : $name, $description, $keywords, $style, $instruction (consigne d'« Affiner »),
+# $start (image de départ, si choisie), $style_ref (référence de style jointe, toujours la dernière image).
 prompt:
   - "Fiche de référence de personnage : portrait de face de $name, buste cadré à hauteur des épaules, regard vers le spectateur, expression neutre."
   - "$description."
   - "Détails : $keywords."
   - "Modification demandée : $instruction."
+  - "Image de départ ($start) : garder le sujet, sa silhouette et sa pose, et le redessiner proprement comme le demande la fiche."
   - "Style : $style."
+  - "Dernière image ($style_ref) : référence de style uniquement — trait, trames, encrage ; ne pas reprendre son personnage, sa scène ni sa composition."
   - "Fond blanc uni, éclairage neutre et régulier, un seul personnage, aucun texte."
 negative_prompt: "plusieurs personnages, décor chargé, profil, vue de dos"

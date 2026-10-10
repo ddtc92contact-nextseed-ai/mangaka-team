@@ -365,13 +365,25 @@ style_board:
     - "Planche de style, scène test : $scene."
     - "Style : $style."
   negative_prompt: "texte, bulles"   # ajouté au négatif du workflow
-  reference_sheets: always  # always | never : référence jointe à chaque fiche de référence
+  reference_sheets: with_subject  # with_subject | always | never : voir ci-dessous
   panels: free_slot         # free_slot | never : jointe à une case s'il reste un emplacement libre
 ```
 
-- **Fiches de référence** (`always`) : la génération passe par le pendant « avec références » du
-  palier, la référence de style en image (après la variante de départ d'« Affiner »). Sans pendant
-  « avec références », la fiche se génère sans elle.
+- **Fiches de référence** (`reference_sheets`) :
+  - `with_subject` (défaut) : la référence de style n'est jointe que si une image du sujet est déjà
+    envoyée (image de départ choisie, ou variante d'« Affiner »), **toujours après elle** et seulement
+    s'il reste un emplacement dans le workflow « avec références » du palier. Une fiche créée à
+    partir de zéro reste en texte → image : le workflow d'édition traite l'image 1 comme le sujet à
+    redessiner, la planche seule en image 1 remplacerait donc la description par son personnage
+    (la jeune femme de la scène test). Le style vient alors de `$style` et du LoRA de style.
+  - `always` : jointe à chaque fiche (comportement d'avant : seule image sans image de départ,
+    workflow « avec références » du palier ; sans pendant « avec références », la fiche se génère
+    sans elle).
+  - `never` : jamais jointe.
+
+  Quand elle est jointe, le morceau `$style_ref` des types de fiche dit son rôle : référence de
+  style uniquement (trait, trames, encrage), sans reprendre son personnage, sa scène ni sa
+  composition.
 - **Cases** (`free_slot`) : priorité inchangée — personnages > décor > objets > **style**. La
   référence de style ne prend qu'un emplacement resté libre une fois toutes les images des fiches
   servies ; une case sans aucune référence passe donc au workflow « avec références » de son palier.
@@ -941,8 +953,14 @@ GX10, pour un détourage plus fin qu'un rectangle — ce sera un autre preset `i
 Sur chaque fiche de la bibliothèque (personnage, objet, décor), le panneau **« Créer des références »**
 génère des variantes d'un type de fiche dans la file ComfyUI (même progression, même annulation que
 les cases), à partir de la description visuelle, des mots-clés, du LoRA de style de la série et du
-LoRA de la fiche. **« Affiner »** repart d'une variante, envoyée comme image de référence (workflow
-« avec références » du même palier), avec une consigne (« cheveux plus courts »). **« Garder comme
+LoRA de la fiche. **Par défaut, la fiche part de zéro** : texte → image au palier de la série (Turbo
+par défaut, Qualité sur demande), aucune image envoyée — même si la série a une référence de style.
+**« Image de départ (facultatif) »** : une des images de référence de la fiche (ou une nouvelle, par
+exemple la photo d'un croquis à la main, rangée avec les autres) part en image 1 du workflow
+« avec références » du palier ; le morceau `$start` dit d'en garder le sujet, la silhouette et la pose.
+**« Affiner »** repart d'une variante, envoyée en image 1 (workflow « avec références » du même
+palier), avec une consigne (« cheveux plus courts »). La référence de style de la série ne vient
+qu'après l'image du sujet (voir « Planche de style », `style_board.reference_sheets`). **« Garder comme
 référence »** copie la variante parmi les images de référence de la fiche (8 au plus) ; la première
 image est la référence principale, servie en premier quand les emplacements d'une case manquent.
 
@@ -964,7 +982,9 @@ prompt:                          # morceaux assemblés ; un morceau dont une var
   - "$description."
   - "Détails : $keywords."       # mots-clés + mots déclencheurs du LoRA de la fiche
   - "Modification demandée : $instruction."   # consigne d'« Affiner » (omis sinon)
+  - "Image de départ ($start) : garder l'objet et sa silhouette."   # « image 1 » si une image de départ est choisie
   - "Style : $style."            # packs de style de la série + mots déclencheurs du LoRA de style
+  - "Dernière image ($style_ref) : référence de style uniquement."   # « image N » si la référence de style est jointe
 negative_prompt: "personnage"    # ajouté au négatif du workflow (les termes « pas de texte » y sont toujours)
 ```
 

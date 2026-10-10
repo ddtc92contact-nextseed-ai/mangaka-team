@@ -425,8 +425,10 @@ class StyleBoardSettings(_Strict):
     height: int = Field(ge=256, le=2048, multiple_of=16)
     prompt: list[str] = Field(min_length=1)
     negative_prompt: str = Field(default="", description="Ajouté au prompt négatif du workflow")
-    # Fiches de référence (personnages, objets, décors) : `always` = la référence de style est jointe.
-    reference_sheets: Literal["always", "never"]
+    # Fiches de référence (personnages, objets, décors) : `with_subject` = jointe seulement après une
+    # image du sujet (image de départ ou variante d'« Affiner »), `always` = jointe à chaque fiche (seule
+    # image sans sujet), `never` = jamais.
+    reference_sheets: Literal["with_subject", "always", "never"]
     # Cases : `free_slot` = jointe s'il reste un emplacement après les personnages, le décor et les objets.
     panels: Literal["free_slot", "never"]
 
@@ -1147,7 +1149,7 @@ class ImagePromptSettings(_Strict):
 
 
 # --- Fiches de référence (« Créer des références » de la bibliothèque) ---------
-REFERENCE_SHEET_VARIABLES = {"name", "description", "keywords", "style", "instruction"}
+REFERENCE_SHEET_VARIABLES = {"name", "description", "keywords", "style", "instruction", "start", "style_ref"}
 LibraryKindName = Literal["character", "object", "decor"]
 
 
@@ -1157,7 +1159,9 @@ class ReferenceSheet(_Strict):
     `prompt` : morceaux assemblés dans l'ordre, un morceau dont une variable est vide est omis.
     Variables : $name, $description (description visuelle de la fiche), $keywords (mots-clés + mots
     déclencheurs de son LoRA), $style (style de la série + mots déclencheurs du LoRA de style),
-    $instruction (consigne d'« Affiner », vide pour une première génération).
+    $instruction (consigne d'« Affiner », vide pour une première génération), $start (« image 1 » si
+    une image de départ est envoyée, vide sinon), $style_ref (« image N » si la référence de style de
+    la série est jointe, toujours en dernier, vide sinon).
     """
 
     id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")

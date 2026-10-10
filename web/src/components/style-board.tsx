@@ -276,7 +276,12 @@ export function StyleBoardCard({ projectId, board }: { projectId: number; board:
 }
 
 function ActiveReference({ reference: ref, board }: { reference: StyleReference; board: StyleBoard }) {
-  const sheets = board.use_reference_sheets === "always" ? "jointe à chaque fiche de référence (personnages, objets, décors)" : null;
+  const sheets =
+    board.use_reference_sheets === "always"
+      ? "jointe à chaque fiche de référence (personnages, objets, décors)"
+      : board.use_reference_sheets === "with_subject"
+        ? "aux fiches de référence après leur image de départ ou la variante à affiner (pour le trait seulement)"
+        : null;
   const panels = board.use_panels === "free_slot" ? "aux cases s’il reste une place parmi leurs images de référence" : null;
   const uses = [sheets, panels].filter(Boolean).join(", ");
   return (

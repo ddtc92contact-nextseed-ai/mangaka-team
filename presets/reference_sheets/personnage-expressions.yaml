@@ -12,6 +12,8 @@ prompt:
   - "$description."
   - "Détails : $keywords."
   - "Modification demandée : $instruction."
+  - "Image de départ ($start) : garder le sujet, son visage et sa coiffure, et le redessiner proprement dans chaque expression demandée."
   - "Style : $style."
+  - "Dernière image ($style_ref) : référence de style uniquement — trait, trames, encrage ; ne pas reprendre son personnage, sa scène ni sa composition."
   - "Fond blanc uni, même coiffure et même visage sur chaque vignette, aucun texte."
 negative_prompt: "visages différents, texte, légendes"

@@ -37,8 +37,12 @@ style_board:
     - "Style : $style."
     - "Une seule illustration pleine page, aucun texte, aucune bulle."
   negative_prompt: "texte, lettres, bulles, cases multiples"
-  # Référence de style validée — fiches de référence (personnages, objets, décors) : always | never.
-  reference_sheets: always
+  # Référence de style validée — fiches de référence (personnages, objets, décors) :
+  # with_subject = jointe seulement après une image du sujet (image de départ choisie ou variante
+  # d'« Affiner »), en dernière image et s'il reste un emplacement ; sans image de départ, la fiche
+  # se crée à partir de la description seule (texte → image) ;
+  # always = jointe à chaque fiche (seule image envoyée sans image de départ) ; never = jamais.
+  reference_sheets: with_subject
   # Cases : free_slot = jointe s'il reste un emplacement libre parmi les images de référence du
   # workflow (priorité : personnages > décor > objets > style) ; never = jamais.
   panels: free_slot

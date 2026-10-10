@@ -102,7 +102,7 @@ def test_every_genre_has_a_french_scene_test() -> None:
         assert len(genre.scene_test) > 30, genre.id
     settings = REG.defaults.style_board  # type: ignore[union-attr]
     assert settings is not None and settings.trials == 4
-    assert (settings.reference_sheets, settings.panels) == ("always", "free_slot")
+    assert (settings.reference_sheets, settings.panels) == ("with_subject", "free_slot")
 
 
 def test_a_genre_without_scene_test_is_refused_at_load(tmp_path: Path) -> None:
@@ -240,28 +240,156 @@ def test_errors_series_without_pack_and_engine_offline(make_settings: Callable[.
         assert c.get("/projects/999/style-board").status_code == 404
 
 
-# --- fiches de référence : la référence de style toujours jointe --------------------------
-def test_style_reference_is_joined_to_reference_sheets(c: TestClient, comfy: MockComfyUIClient) -> None:
+# --- fiches de référence : la référence de style seulement après l'image du sujet -----------
+STYLE_ROLE = "référence de style uniquement — trait, trames, encrage ; ne pas reprendre son personnage"
+
+
+def _sheet_client(make_settings: Callable[..., Settings], tmp_path: Path, mode: str | None) -> TestClient:
+    """Client dont `style_board.reference_sheets` vaut `mode` (None : presets du dépôt)."""
+    if mode is None:
+        return TestClient(create_app(make_settings(), providers=_providers(MockComfyUIClient())))
+    root = tmp_path / "presets"
+    shutil.copytree(PRESETS_DIR, root)
+    path = root / "defaults.yaml"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace("reference_sheets: with_subject", f"reference_sheets: {mode}"),
+        encoding="utf-8",
+    )
+    settings = make_settings(mangaka_presets_dir=root)
+    return TestClient(create_app(settings, providers=_providers(MockComfyUIClient())))
+
+
+def _dragon(c: TestClient) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Série avec une référence de style active et un personnage décrit, sans image."""
     s = _series(c)
     style = _make_style_reference(c, s["id"])
-    entry = _ok(c.post(f"/projects/{s['id']}/characters", json={"name": "Aiko", "visual_description": "x"}), 201)
+    entry = _ok(
+        c.post(
+            f"/projects/{s['id']}/characters",
+            json={"name": "Petit dragon rondouillard", "visual_description": "petit dragon vert, ventre rond"},
+        ),
+        201,
+    )
+    return s, style, entry
+
+
+def _sheet(c: TestClient, entry_id: int, **body: Any) -> tuple[dict[str, Any], dict[str, Any]]:
     [job] = _ok(
-        c.post(f"/characters/{entry['id']}/reference-variants", json={"sheet": "personnage-portrait", "count": 1}),
+        c.post(f"/characters/{entry_id}/reference-variants", json={"sheet": "personnage-portrait", "count": 1, **body}),
         202,
     )
-    assert job["params"]["preset"] == "qwen-image-edit-ref-turbo" and job["params"]["style_asset_id"] == style["id"]
     _idle(c)
-    [variant] = _ok(c.get(f"/characters/{entry['id']}/reference-variants"))["variants"]
-    [sent] = variant["params"]["reference_images"]
-    assert sent["kind"] == "style" and sent["asset_id"] == style["id"]
-    wf = list(comfy.prompts.values())[-1]
-    assert wf["20"]["inputs"]["image"] == sent["comfyui_name"] and "21" not in wf
+    variant = _ok(c.get(f"/characters/{entry_id}/reference-variants"))["variants"][0]
+    return job, variant
 
-    # « Affiner » : la variante de départ d'abord, puis la référence de style.
-    _ok(c.post(f"/reference-variants/{variant['id']}/refine", json={"instruction": "plus sombre", "count": 1}), 202)
-    _idle(c)
-    refined = _ok(c.get(f"/characters/{entry['id']}/reference-variants"))["variants"][0]
-    assert [r["kind"] for r in refined["params"]["reference_images"]] == ["variant", "style"]
+
+def test_defaults_join_style_only_with_a_subject() -> None:
+    settings = REG.defaults.style_board  # type: ignore[union-attr]
+    assert settings is not None and settings.reference_sheets == "with_subject"
+
+
+def test_sheet_from_scratch_is_text_to_image_despite_the_style_board(
+    make_settings: Callable[..., Settings], tmp_path: Path
+) -> None:
+    with _sheet_client(make_settings, tmp_path, None) as c:
+        s, _style, entry = _dragon(c)
+        job, variant = _sheet(c, entry["id"])
+        assert job["params"]["preset"] == s["workflow_preset"] == "qwen-image-turbo"
+        assert job["params"]["style_asset_id"] is None and job["params"]["start_image_id"] is None
+        assert variant["params"]["reference_images"] == []
+        assert "petit dragon vert, ventre rond." in variant["prompt"]
+        assert "Image de départ" not in variant["prompt"] and "Dernière image" not in variant["prompt"]
+        sent = list(c.app.state.ctx.providers.comfyui.prompts.values())[-1]  # type: ignore[attr-defined]
+        assert not [n for n in sent.values() if n["class_type"] == "LoadImage"]
+
+
+def test_starting_image_then_style_reference(make_settings: Callable[..., Settings], tmp_path: Path) -> None:
+    with _sheet_client(make_settings, tmp_path, None) as c:
+        _s, style, entry = _dragon(c)
+        updated = _ok(
+            c.post(f"/characters/{entry['id']}/images", files=[("files", ("croquis.png", png_bytes(), "image/png"))]),
+            201,
+        )
+        sketch = updated["reference_images"][0]
+        job, variant = _sheet(c, entry["id"], start_image_id=sketch["id"])
+        assert job["params"]["preset"] == "qwen-image-edit-ref-turbo"
+        assert job["params"]["start_image_id"] == sketch["id"] and job["params"]["style_asset_id"] == style["id"]
+        refs = variant["params"]["reference_images"]
+        assert [r["kind"] for r in refs] == ["start", "style"]
+        assert refs[0]["image_id"] == sketch["id"] and refs[1]["asset_id"] == style["id"]
+        assert "Image de départ (image 1) : garder le sujet, sa silhouette et sa pose" in variant["prompt"]
+        assert f"Dernière image (image 2) : {STYLE_ROLE}" in variant["prompt"]
+        assert "petit dragon vert, ventre rond." in variant["prompt"]
+        wf = list(c.app.state.ctx.providers.comfyui.prompts.values())[-1]  # type: ignore[attr-defined]
+        assert wf["20"]["inputs"]["image"] == refs[0]["comfyui_name"]
+        assert wf["21"]["inputs"]["image"] == refs[1]["comfyui_name"] and "22" not in wf
+
+        # « Affiner » : la variante en image 1, puis la référence de style.
+        _ok(c.post(f"/reference-variants/{variant['id']}/refine", json={"instruction": "plus sombre", "count": 1}), 202)
+        _idle(c)
+        refined = _ok(c.get(f"/characters/{entry['id']}/reference-variants"))["variants"][0]
+        assert [r["kind"] for r in refined["params"]["reference_images"]] == ["variant", "style"]
+        assert f"Dernière image (image 2) : {STYLE_ROLE}" in refined["prompt"]
+        assert "Image de départ" not in refined["prompt"]
+
+        # Une image d'une autre fiche n'est pas une image de départ.
+        other = _ok(c.post(f"/projects/{_s['id']}/characters", json={"name": "Autre", "visual_description": "x"}), 201)
+        bad = c.post(
+            f"/characters/{other['id']}/reference-variants",
+            json={"sheet": "personnage-portrait", "count": 1, "start_image_id": sketch["id"]},
+        )
+        assert bad.status_code == 422 and "image de départ" in bad.text
+
+
+def test_starting_image_without_style_board(make_settings: Callable[..., Settings], tmp_path: Path) -> None:
+    with _sheet_client(make_settings, tmp_path, None) as c:
+        s = _series(c)
+        entry = _ok(c.post(f"/projects/{s['id']}/characters", json={"name": "Aiko", "visual_description": "x"}), 201)
+        updated = _ok(
+            c.post(f"/characters/{entry['id']}/images", files=[("files", ("a.png", png_bytes(), "image/png"))]), 201
+        )
+        _job, variant = _sheet(c, entry["id"], start_image_id=updated["reference_images"][0]["id"])
+        assert [r["kind"] for r in variant["params"]["reference_images"]] == ["start"]
+        assert "Dernière image" not in variant["prompt"]
+
+
+@pytest.mark.parametrize(
+    ("mode", "scratch", "with_start", "refine"),
+    [
+        ("never", [], ["start"], ["variant"]),
+        ("always", ["style"], ["start", "style"], ["variant", "style"]),
+    ],
+)
+def test_reference_sheets_setting_never_and_always(
+    make_settings: Callable[..., Settings],
+    tmp_path: Path,
+    mode: str,
+    scratch: list[str],
+    with_start: list[str],
+    refine: list[str],
+) -> None:
+    with _sheet_client(make_settings, tmp_path, mode) as c:
+        s, style, entry = _dragon(c)
+        job, variant = _sheet(c, entry["id"])
+        kinds = [r["kind"] for r in variant["params"]["reference_images"]]
+        assert kinds == scratch
+        if mode == "always":  # comportement d'avant : la référence de style seule, workflow « avec références »
+            assert (
+                job["params"]["preset"] == "qwen-image-edit-ref-turbo"
+                and job["params"]["style_asset_id"] == style["id"]
+            )
+            assert f"Dernière image (image 1) : {STYLE_ROLE}" in variant["prompt"]
+        else:
+            assert job["params"]["preset"] == s["workflow_preset"] and "Dernière image" not in variant["prompt"]
+        _ok(c.post(f"/reference-variants/{variant['id']}/refine", json={"instruction": "plus sombre", "count": 1}), 202)
+        _idle(c)
+        refined = _ok(c.get(f"/characters/{entry['id']}/reference-variants"))["variants"][0]
+        assert [r["kind"] for r in refined["params"]["reference_images"]] == refine
+        updated = _ok(
+            c.post(f"/characters/{entry['id']}/images", files=[("files", ("a.png", png_bytes(), "image/png"))]), 201
+        )
+        _job, started = _sheet(c, entry["id"], start_image_id=updated["reference_images"][0]["id"])
+        assert [r["kind"] for r in started["params"]["reference_images"]] == with_start
 
 
 # --- cases : seulement s'il reste un emplacement libre -------------------------------------

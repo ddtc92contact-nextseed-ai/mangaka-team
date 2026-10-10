@@ -56,7 +56,7 @@ def test_presets_endpoint(client: TestClient) -> None:
         "style_board": data["defaults"]["style_board"],
     }
     board = data["defaults"]["style_board"]
-    assert (board["trials"], board["reference_sheets"], board["panels"]) == (4, "always", "free_slot")
+    assert (board["trials"], board["reference_sheets"], board["panels"]) == (4, "with_subject", "free_slot")
     assert {st["id"] for st in data["layout_styles"]} >= {"sage", "dynamique", "nerveuse"}
     assert [st["id"] for st in data["layout_styles"] if st["is_default"]] == ["dynamique"]
     formats = {f["id"]: f for f in data["page_formats"]}

@@ -2,7 +2,8 @@
 
 Même famille de routes pour les trois sortes (`/characters`, `/objects`, `/decors`) :
 - `GET /{sorte}/{id}/reference-variants` : historique des variantes et générations en cours ;
-- `POST /{sorte}/{id}/reference-variants` : génère N variantes d'un type de fiche (file ComfyUI unique) ;
+- `POST /{sorte}/{id}/reference-variants` : génère N variantes d'un type de fiche (file ComfyUI unique),
+  à partir de zéro ou d'une image de départ (`start_image_id`, une image de référence de la fiche) ;
 - `PUT /{sorte}/{id}/images/order` : ordre des images de référence (la 1re est la principale).
 Et par variante : `/reference-variants/{id}/file`, `/refine` (« Affiner »), `/keep` (« Garder comme
 référence »), `DELETE`. Types de fiches : `GET /presets/reference-sheets`.
@@ -177,6 +178,13 @@ def _routes(kind: str) -> APIRouter:
         """Met en file `count` variantes (1–4, 4 par défaut) du type de fiche ; progression : /jobs/{id}/events."""
         _require_comfyui(ctx)
         entry = _entry_or_404(session, kind, entry_id)
+        start = None
+        if body.start_image_id is not None:
+            start = next((img for img in entry.reference_images if img.id == body.start_image_id), None)
+            if start is None:
+                raise FieldError(
+                    "start_image_id", "image de départ introuvable parmi les images de référence de la fiche"
+                )
         try:
             jobs = enqueue_sheet(
                 session,
@@ -186,6 +194,7 @@ def _routes(kind: str) -> APIRouter:
                 count=body.count,
                 quality=body.quality,
                 seed=body.seed,
+                start=start,
             )
         except (PresetError, GenerationError) as exc:
             raise FieldError("sheet", str(exc)) from None

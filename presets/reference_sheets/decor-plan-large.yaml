@@ -12,6 +12,8 @@ prompt:
   - "$description."
   - "Détails : $keywords."
   - "Modification demandée : $instruction."
+  - "Image de départ ($start) : garder le lieu, sa disposition et ses éléments, et le redessiner proprement comme le demande la fiche."
   - "Style : $style."
+  - "Dernière image ($style_ref) : référence de style uniquement — trait, trames, encrage ; ne pas reprendre son personnage, sa scène ni sa composition."
   - "Aucun personnage, perspective claire, aucun texte ni enseigne lisible."
 negative_prompt: "personnages, foule, gros plan"

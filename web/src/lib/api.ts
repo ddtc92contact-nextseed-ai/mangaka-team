@@ -1099,7 +1099,7 @@ export interface StyleBoard {
   style: string;
   style_names: string;
   trials_per_batch: number;
-  use_reference_sheets: "always" | "never" | null;
+  use_reference_sheets: "with_subject" | "always" | "never" | null;
   use_panels: "free_slot" | "never" | null;
   active: StyleReference | null;
   history: StyleReference[];

@@ -12,6 +12,8 @@ prompt:
   - "$description."
   - "Détails : $keywords."
   - "Modification demandée : $instruction."
+  - "Image de départ ($start) : garder le sujet, sa silhouette et sa tenue, et le redessiner proprement sous les trois vues demandées."
   - "Style : $style."
+  - "Dernière image ($style_ref) : référence de style uniquement — trait, trames, encrage ; ne pas reprendre son personnage, sa scène ni sa composition."
   - "Fond blanc uni, éclairage neutre, aucun texte ni légende."
 negative_prompt: "personnages différents, vues coupées, décor"
