@@ -16,6 +16,8 @@
 - 10 : mots déclencheurs des LoRA (style de la série, identité des personnages).
 - 11 : bibliothèque de la série (objets et décors récurrents + images de référence ; décor et objets
   de chaque case). Les données existantes ne changent pas : les cases n'ont ni décor ni objet.
+- 12 : « Créer des références » (variantes générées par fiche) et ordre des images de référence ; les
+  images existantes gardent leur ordre (celui de leur ajout).
 
 Une base neuve est créée directement à la dernière version. Chaque migration tourne dans une
 transaction unique, clés étrangères désactivées (recette « 12 étapes » de SQLite pour reconstruire
@@ -44,6 +46,7 @@ from .models import (
     LLMRun,
     PanelImageAnnotation,
     QCBenchRun,
+    ReferenceVariant,
     SeriesAsset,
     SeriesAssetImage,
     SeriesBible,
@@ -51,7 +54,7 @@ from .models import (
 
 log = logging.getLogger("mangaka_engine")
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 
 class MigrationError(RuntimeError):
@@ -213,6 +216,16 @@ def _v10_to_v11(cur: sqlite3.Cursor) -> None:
     cur.execute("ALTER TABLE panels ADD COLUMN object_ids JSON NOT NULL DEFAULT '[]'")
 
 
+def _v11_to_v12(cur: sqlite3.Cursor) -> None:
+    for table in ("character_images", "series_asset_images"):
+        # series_asset_images vient d'être créée par la v11 depuis le modèle courant (déjà avec position).
+        if "position" not in {row[1] for row in cur.execute(f"PRAGMA table_info({table})")}:
+            cur.execute(f"ALTER TABLE {table} ADD COLUMN position INTEGER NOT NULL DEFAULT 0")
+        cur.execute(f"UPDATE {table} SET position = id")
+    for stmt in _ddl(ReferenceVariant.__table__):
+        cur.execute(stmt)
+
+
 MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     # version de départ → (version d'arrivée, fonction)
     0: (2, _v0_to_v2),
@@ -226,6 +239,7 @@ MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     8: (9, _v8_to_v9),
     9: (10, _v9_to_v10),
     10: (11, _v10_to_v11),
+    11: (12, _v11_to_v12),
 }
 
 

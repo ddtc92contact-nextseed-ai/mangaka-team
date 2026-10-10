@@ -12,9 +12,10 @@ from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from ..pipeline.reference_sheets import delete_entry_variants, next_position
 from ..store.files import StoredImage
 from ..store.models import AssetKind, Chapter, Page, Panel, SeriesAsset, SeriesAssetImage
-from .characters import apply_changes, read_uploads, reference_image_out, store_uploads
+from .characters import apply_changes, check_room, read_uploads, reference_image_out, store_uploads
 from .deps import AppContext, get_ctx, get_session
 from .projects import get_project_or_404
 from .schemas import AssetCreate, AssetOut, AssetUpdate
@@ -115,6 +116,7 @@ def _router(kind: AssetKind) -> APIRouter:
     ) -> Response:
         asset = get_asset_or_404(session, kind, asset_id)
         paths = [img.path for img in asset.reference_images]
+        paths += delete_entry_variants(session, asset.kind.value, asset.id)
         unlink_asset(session, asset)
         session.delete(asset)
         session.commit()
@@ -133,6 +135,7 @@ def _router(kind: AssetKind) -> APIRouter:
     ) -> AssetOut:
         asset = get_asset_or_404(session, kind, asset_id)
         payloads = await read_uploads(files, ctx)
+        check_room(asset, len(payloads))
 
         def add(name: str, path: str, stored: StoredImage) -> None:
             asset.reference_images.append(
@@ -142,6 +145,7 @@ def _router(kind: AssetKind) -> APIRouter:
                     content_type=stored.content_type,
                     width=stored.width,
                     height=stored.height,
+                    position=next_position(asset),
                 )
             )
 

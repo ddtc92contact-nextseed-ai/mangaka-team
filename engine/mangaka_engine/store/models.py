@@ -2,6 +2,7 @@
 
 Série (`Project`) → Character (+ images de référence)
 Série → SeriesAsset : objets et décors récurrents de la bibliothèque (+ images de référence)
+Série → ReferenceVariant : images générées par « Créer des références » d'une fiche, gardées ou non
 Série → Chapter → Page → Panel (+ versions d'image → annotation humaine) → Bubble · Job.
 Banc d'essai du QC : `QCBenchRun` (historique des mesures du QC sur les cases annotées).
 Savoir-faire : `KnowledgeCollection` (globale ou d'une série) → `KnowledgeDocument` → `KnowledgeChunk`
@@ -154,7 +155,9 @@ class Character(TimestampMixin, Base):
 
     project: Mapped[Project] = relationship(back_populates="characters")
     reference_images: Mapped[list[CharacterImage]] = relationship(
-        back_populates="character", cascade="all, delete-orphan", order_by="CharacterImage.id"
+        back_populates="character",
+        cascade="all, delete-orphan",
+        order_by="[CharacterImage.position, CharacterImage.id]",
     )
 
 
@@ -168,6 +171,9 @@ class CharacterImage(Base):
     content_type: Mapped[str] = mapped_column(String(50))
     width: Mapped[int] = mapped_column(Integer)
     height: Mapped[int] = mapped_column(Integer)
+    # Ordre choisi par l'auteur : la première image est la référence principale (servie en premier
+    # quand les emplacements du workflow manquent).
+    position: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
     character: Mapped[Character] = relationship(back_populates="reference_images")
@@ -195,7 +201,9 @@ class SeriesAsset(TimestampMixin, Base):
 
     project: Mapped[Project] = relationship(back_populates="assets")
     reference_images: Mapped[list[SeriesAssetImage]] = relationship(
-        back_populates="asset", cascade="all, delete-orphan", order_by="SeriesAssetImage.id"
+        back_populates="asset",
+        cascade="all, delete-orphan",
+        order_by="[SeriesAssetImage.position, SeriesAssetImage.id]",
     )
 
 
@@ -209,9 +217,42 @@ class SeriesAssetImage(Base):
     content_type: Mapped[str] = mapped_column(String(50))
     width: Mapped[int] = mapped_column(Integer)
     height: Mapped[int] = mapped_column(Integer)
+    position: Mapped[int] = mapped_column(Integer, default=0)  # comme CharacterImage.position
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
     asset: Mapped[SeriesAsset] = relationship(back_populates="reference_images")
+
+
+class ReferenceVariant(Base):
+    """Image générée par « Créer des références » pour une fiche de la bibliothèque.
+
+    La fiche est repérée par (`entry_kind`, `entry_id`) — personnage, objet ou décor —, sans clé
+    étrangère (deux tables possibles) : l'API supprime les variantes avec leur fiche. « Garder comme
+    référence » copie l'image parmi les références de la fiche (`kept_image_id`) ; la variante reste
+    dans l'historique.
+    """
+
+    __tablename__ = "reference_variants"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    entry_kind: Mapped[str] = mapped_column(String(20))  # character | object | decor
+    entry_id: Mapped[int] = mapped_column(Integer, index=True)
+    job_id: Mapped[int | None] = mapped_column(ForeignKey("jobs.id", ondelete="SET NULL"), default=None)
+    sheet: Mapped[str] = mapped_column(String(100))  # presets/reference_sheets/
+    path: Mapped[str] = mapped_column(String(500))  # relatif à data/
+    content_type: Mapped[str] = mapped_column(String(50))
+    width: Mapped[int] = mapped_column(Integer)
+    height: Mapped[int] = mapped_column(Integer)
+    seed: Mapped[int | None] = mapped_column(Integer, default=None)
+    # Variante de départ d'un « Affiner » (sans clé étrangère : la variante de départ peut être supprimée).
+    parent_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    instruction: Mapped[str] = mapped_column(Text, default="")
+    # Preset, palier, prompts, LoRA, image de référence envoyée, durée…
+    params: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    # Image de référence créée par « Garder comme référence » (None : pas gardée).
+    kept_image_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
 
 class Chapter(TimestampMixin, Base):
