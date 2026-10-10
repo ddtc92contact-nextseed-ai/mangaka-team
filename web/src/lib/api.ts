@@ -85,6 +85,10 @@ export interface PanelData {
   index: number;
   description: string;
   characters: string[];
+  /** Décor de la bibliothèque de la série (id), null : aucun. */
+  decor?: number | null;
+  /** Objets de la bibliothèque de la série (ids). */
+  objets?: number[];
   shot_type: string | null;
   importance: number;
   intensity: Intensity | null;
@@ -297,6 +301,10 @@ export interface PanelInput {
   id?: number;
   description: string;
   characters: string[];
+  /** Absent : décor gardé ; null : aucun décor. */
+  decor?: number | null;
+  /** Absent : objets gardés. */
+  objets?: number[];
   shot_type: string | null;
   importance: number;
   intensity?: Intensity | null;
@@ -347,7 +355,8 @@ export interface PanelImage {
     negative_prompt?: string;
     duration_ms?: number;
     loras?: unknown[];
-    references?: unknown[];
+    /** Emplacements de référence remplis (personnages, puis décor, puis objets). */
+    reference_images?: UsedReference[];
     [key: string]: unknown;
   };
   qc_score: number | null;
@@ -358,6 +367,18 @@ export interface PanelImage {
   /** Jugement humain bonne / mauvaise (banc d'essai du QC), indépendant du verdict QC. */
   annotation: Annotation | null;
   created_at: string;
+}
+
+/** Image de référence envoyée dans un emplacement du workflow. */
+export interface UsedReference {
+  slot?: number;
+  /** Absent sur les versions d'avant la bibliothèque (personnage). */
+  kind?: LibraryKind;
+  id?: number;
+  name?: string;
+  character_id?: number;
+  image_id: number;
+  comfyui_name?: string;
 }
 
 export type AnnotationLabel = "good" | "bad";
@@ -506,6 +527,8 @@ export interface PanelDetail {
   description: string;
   characters: string[];
   character_ids: number[];
+  decor: LibraryRef | null;
+  objets: LibraryRef[];
   shot_type: string | null;
   state: PanelState;
   bbox: Rect | null;
@@ -652,10 +675,34 @@ export interface Character {
   updated_at: string;
 }
 
-export type CharacterInput = Pick<
+/** Sortes de fiches de la bibliothèque d'une série. */
+export type LibraryKind = "character" | "object" | "decor";
+
+/** Objet ou décor récurrent : mêmes champs qu'un personnage. */
+export interface SeriesAsset extends Character {
+  kind: "object" | "decor";
+}
+
+/** Fiche de la bibliothèque (personnage, objet ou décor). */
+export type LibraryEntry = Character | SeriesAsset;
+export type LibraryEntryInput = Pick<
   Character,
   "name" | "visual_description" | "prompt_keywords" | "lora_name" | "lora_weight"
 >;
+
+/** Élément de la bibliothèque cité par une case. */
+export interface LibraryRef {
+  id: number;
+  kind: LibraryKind;
+  name: string;
+}
+
+/** Segment d'URL du moteur pour chaque sorte. */
+const LIBRARY_SEGMENT: Record<LibraryKind, string> = {
+  character: "characters",
+  object: "objects",
+  decor: "decors",
+};
 
 export interface Health {
   engine: { status: string; version: string };
@@ -980,6 +1027,9 @@ export interface DaPanel {
   cadre: string | null;
   ambiance: string;
   sfx: DaSfx[];
+  /** Bibliothèque proposée par l'agent (null ou absent : garder le décor / les objets du scénario). */
+  decor?: number | null;
+  objets?: number[] | null;
 }
 
 /** Choix de direction artistique d'une page (`has_direction` faux : pas encore proposée). */
@@ -1200,6 +1250,9 @@ export interface Bible {
   rules: string;
   motifs: string;
   characters: { id: number; name: string; visual_description: string; note: string }[];
+  /** Décors et objets de la bibliothèque, repris dans la bible injectée aux agents. */
+  decors?: { id: number; name: string; visual_description: string }[];
+  objets?: { id: number; name: string; visual_description: string }[];
   chapter_summaries: ChapterSummaryEntry[];
   rendered: BibleSummary | null;
   updated_at: string | null;
@@ -1260,20 +1313,23 @@ export const api = {
   updateProject: (id: number, body: Partial<ProjectInput>) => request<Project>(`/projects/${id}`, json("PATCH", body)),
   deleteProject: (id: number) => request<void>(`/projects/${id}`, { method: "DELETE" }),
 
-  listCharacters: (projectId: number) => request<Character[]>(`/projects/${projectId}/characters`),
-  getCharacter: (id: number) => request<Character>(`/characters/${id}`),
-  createCharacter: (projectId: number, body: CharacterInput) =>
-    request<Character>(`/projects/${projectId}/characters`, json("POST", body)),
-  updateCharacter: (id: number, body: Partial<CharacterInput>) =>
-    request<Character>(`/characters/${id}`, json("PATCH", body)),
-  deleteCharacter: (id: number) => request<void>(`/characters/${id}`, { method: "DELETE" }),
-  uploadReferenceImages: (id: number, files: File[]) => {
+  listLibrary: <T extends LibraryEntry = LibraryEntry>(kind: LibraryKind, projectId: number) =>
+    request<T[]>(`/projects/${projectId}/${LIBRARY_SEGMENT[kind]}`),
+  getLibraryEntry: (kind: LibraryKind, id: number) => request<LibraryEntry>(`/${LIBRARY_SEGMENT[kind]}/${id}`),
+  createLibraryEntry: (kind: LibraryKind, projectId: number, body: LibraryEntryInput) =>
+    request<LibraryEntry>(`/projects/${projectId}/${LIBRARY_SEGMENT[kind]}`, json("POST", body)),
+  updateLibraryEntry: (kind: LibraryKind, id: number, body: Partial<LibraryEntryInput>) =>
+    request<LibraryEntry>(`/${LIBRARY_SEGMENT[kind]}/${id}`, json("PATCH", body)),
+  deleteLibraryEntry: (kind: LibraryKind, id: number) =>
+    request<void>(`/${LIBRARY_SEGMENT[kind]}/${id}`, { method: "DELETE" }),
+  uploadLibraryImages: (kind: LibraryKind, id: number, files: File[]) => {
     const form = new FormData();
     for (const f of files) form.append("files", f);
-    return request<Character>(`/characters/${id}/images`, { method: "POST", body: form });
+    return request<LibraryEntry>(`/${LIBRARY_SEGMENT[kind]}/${id}/images`, { method: "POST", body: form });
   },
-  deleteReferenceImage: (characterId: number, imageId: number) =>
-    request<void>(`/characters/${characterId}/images/${imageId}`, { method: "DELETE" }),
+  deleteLibraryImage: (kind: LibraryKind, id: number, imageId: number) =>
+    request<void>(`/${LIBRARY_SEGMENT[kind]}/${id}/images/${imageId}`, { method: "DELETE" }),
+  listCharacters: (projectId: number) => request<Character[]>(`/projects/${projectId}/characters`),
 
   listChapters: (projectId: number) => request<Chapter[]>(`/projects/${projectId}/chapters`),
   upcomingChapters: (days = 7) => request<Chapter[]>(`/chapters/upcoming?days=${days}`),

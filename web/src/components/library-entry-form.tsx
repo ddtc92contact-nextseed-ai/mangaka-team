@@ -1,7 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { api, EngineError, engineUrl, errorMessage, type Character, type CharacterInput } from "@/lib/api";
+import {
+  api,
+  EngineError,
+  engineUrl,
+  errorMessage,
+  type LibraryEntry,
+  type LibraryEntryInput,
+  type LibraryKind,
+} from "@/lib/api";
+import { LIBRARY_KINDS } from "@/lib/library";
 import { ImageDropzone } from "./image-dropzone";
 import { Alert, Button, Field, Input, Textarea } from "./ui";
 
@@ -13,19 +22,22 @@ function parseKeywords(raw: string): string[] {
 }
 
 /**
- * Création (projectId) ou édition (initial) d'un personnage.
+ * Création (projectId) ou édition (initial) d'une fiche de la bibliothèque : personnage, objet ou décor.
  * En création, les images déposées sont envoyées juste après l'enregistrement.
  */
-export function CharacterForm({
+export function LibraryEntryForm({
+  kind,
   projectId,
   initial,
   onSaved,
 }: {
+  kind: LibraryKind;
   projectId: number;
-  initial?: Character;
-  /** `uploadError` : le personnage est enregistré mais les images déposées ont été refusées. */
-  onSaved: (character: Character, uploadError?: string) => void;
+  initial?: LibraryEntry;
+  /** `uploadError` : la fiche est enregistrée mais les images déposées ont été refusées. */
+  onSaved: (entry: LibraryEntry, uploadError?: string) => void;
 }) {
+  const info = LIBRARY_KINDS[kind];
   const [name, setName] = useState(initial?.name ?? "");
   const [description, setDescription] = useState(initial?.visual_description ?? "");
   const [keywords, setKeywords] = useState((initial?.prompt_keywords ?? []).join(", "));
@@ -47,7 +59,7 @@ export function CharacterForm({
       setSaving(false);
       return;
     }
-    const body: CharacterInput = {
+    const body: LibraryEntryInput = {
       name,
       visual_description: description,
       prompt_keywords: parseKeywords(keywords),
@@ -55,14 +67,16 @@ export function CharacterForm({
       lora_weight: weight,
     };
     try {
-      let saved = initial ? await api.updateCharacter(initial.id, body) : await api.createCharacter(projectId, body);
+      let saved = initial
+        ? await api.updateLibraryEntry(kind, initial.id, body)
+        : await api.createLibraryEntry(kind, projectId, body);
       let uploadError: string | undefined;
       if (pending.length) {
         try {
-          saved = await api.uploadReferenceImages(saved.id, pending);
+          saved = await api.uploadLibraryImages(kind, saved.id, pending);
           setPending([]);
         } catch (err) {
-          // Le personnage existe : on y va quand même, en transmettant l'erreur à afficher sur sa fiche.
+          // La fiche existe : on y va quand même, en transmettant l'erreur à afficher sur sa page.
           uploadError = describe(err);
         }
       }
@@ -83,7 +97,7 @@ export function CharacterForm({
           id="name"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="Aiko"
+          placeholder={info.namePlaceholder}
           aria-invalid={Boolean(errors.name)}
           maxLength={120}
           required
@@ -93,13 +107,13 @@ export function CharacterForm({
         label="Description visuelle"
         htmlFor="visual_description"
         error={errors.visual_description}
-        hint="Ce qui doit rester identique d'une case à l'autre : visage, coiffure, tenue, signes distinctifs."
+        hint={info.descriptionHint}
       >
         <Textarea
           id="visual_description"
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          placeholder="Jeune femme, cheveux noirs courts, cicatrice sur la joue gauche, kimono rouge"
+          placeholder={info.descriptionPlaceholder}
         />
       </Field>
       <Field
@@ -112,16 +126,16 @@ export function CharacterForm({
           id="prompt_keywords"
           value={keywords}
           onChange={(e) => setKeywords(e.target.value)}
-          placeholder="aiko, kimono rouge, katana"
+          placeholder={info.keywordsPlaceholder}
         />
       </Field>
       <div className="grid gap-5 md:grid-cols-[1fr_10rem]">
-        <Field label="LoRA d'identité (optionnel)" htmlFor="lora_name" error={errors.lora_name}>
+        <Field label={info.loraLabel} htmlFor="lora_name" error={errors.lora_name}>
           <Input
             id="lora_name"
             value={loraName}
             onChange={(e) => setLoraName(e.target.value)}
-            placeholder="aiko_v1.safetensors"
+            placeholder={info.loraPlaceholder}
           />
         </Field>
         <Field label="Poids du LoRA" htmlFor="lora_weight" error={errors.lora_weight}>
@@ -146,7 +160,7 @@ export function CharacterForm({
       )}
       <div className="flex justify-end">
         <Button type="submit" disabled={saving}>
-          {saving ? "Enregistrement…" : initial ? "Enregistrer" : "Créer le personnage"}
+          {saving ? "Enregistrement…" : initial ? "Enregistrer" : info.createLabel}
         </Button>
       </div>
     </form>
@@ -182,14 +196,16 @@ function PendingImages({ files, onRemove }: { files: File[]; onRemove: (index: n
   );
 }
 
-/** Galerie des images de référence d'un personnage existant (ajout immédiat, suppression). */
+/** Galerie des images de référence d'une fiche existante (ajout immédiat, suppression). */
 export function ReferenceImages({
-  character,
+  kind,
+  entry,
   onChange,
   initialError,
 }: {
-  character: Character;
-  onChange: (character: Character) => void;
+  kind: LibraryKind;
+  entry: LibraryEntry;
+  onChange: (entry: LibraryEntry) => void;
   initialError?: string | null;
 }) {
   const [busy, setBusy] = useState(false);
@@ -199,7 +215,7 @@ export function ReferenceImages({
     setBusy(true);
     setError(null);
     try {
-      onChange(await api.uploadReferenceImages(character.id, files));
+      onChange(await api.uploadLibraryImages(kind, entry.id, files));
     } catch (err) {
       setError(describe(err));
     } finally {
@@ -210,8 +226,8 @@ export function ReferenceImages({
   async function remove(imageId: number) {
     setError(null);
     try {
-      await api.deleteReferenceImage(character.id, imageId);
-      onChange({ ...character, reference_images: character.reference_images.filter((i) => i.id !== imageId) });
+      await api.deleteLibraryImage(kind, entry.id, imageId);
+      onChange({ ...entry, reference_images: entry.reference_images.filter((i) => i.id !== imageId) });
     } catch (err) {
       setError(errorMessage(err));
     }
@@ -221,9 +237,9 @@ export function ReferenceImages({
     <div className="space-y-4">
       {error && <Alert>{error}</Alert>}
       <ImageDropzone onFiles={upload} disabled={busy} label={busy ? "Envoi en cours…" : undefined} />
-      {character.reference_images.length > 0 ? (
+      {entry.reference_images.length > 0 ? (
         <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3">
-          {character.reference_images.map((img) => (
+          {entry.reference_images.map((img) => (
             <li key={img.id} className="overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950">
               <a href={engineUrl(img.url)} target="_blank" rel="noreferrer">
                 {/* eslint-disable-next-line @next/next/no-img-element */}

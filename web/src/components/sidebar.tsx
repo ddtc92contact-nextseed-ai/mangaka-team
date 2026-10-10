@@ -9,12 +9,15 @@ const NAV = [
   {
     href: "/projets",
     label: "Séries",
-    match: (p: string) => (p.startsWith("/projets") && !p.includes("/personnages")) || p.startsWith("/chapitres"),
+    match: (p: string) =>
+      (p.startsWith("/projets") && !p.includes("/personnages") && !p.includes("/bibliotheque")) ||
+      p.startsWith("/chapitres"),
   },
   {
-    href: "/personnages",
-    label: "Personnages",
-    match: (p: string) => p.startsWith("/personnages") || p.includes("/personnages"),
+    href: "/bibliotheque",
+    label: "Bibliothèque",
+    match: (p: string) =>
+      p.startsWith("/bibliotheque") || p.startsWith("/personnages") || p.includes("/personnages") || p.includes("/bibliotheque"),
   },
   { href: "/equipe", label: "L'équipe", match: (p: string) => p.startsWith("/equipe") },
   { href: "/savoir-faire", label: "Savoir-faire", match: (p: string) => p.startsWith("/savoir-faire") },

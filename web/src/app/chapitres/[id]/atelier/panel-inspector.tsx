@@ -17,6 +17,7 @@ import {
 import { useEngineData } from "@/lib/hooks";
 import { MAX_VARIANTS, PANEL_STATE, formatDuration, isValidSeed } from "@/lib/generation";
 import { useJob } from "@/lib/jobs";
+import { LIBRARY_KINDS } from "@/lib/library";
 import type { PanelView } from "./page-canvas";
 import { PanelQC } from "./panel-qc";
 import { VersionsStrip } from "./versions";
@@ -153,6 +154,8 @@ export function PanelInspector({
   }
 
   const qcImage = chosen ?? (d?.images.length ? d.images[d.images.length - 1] : null);
+  // « Références utilisées » : celles de la version choisie, sinon de la plus récente.
+  const refsImage = qcImage;
 
   const resolvedName = presets?.find((p) => p.id === d?.resolved_preset)?.name ?? d?.resolved_preset ?? "—";
   const hasImages = (d?.images.length ?? 0) > 0;
@@ -213,7 +216,18 @@ export function PanelInspector({
               ) : (
                 <span className="text-zinc-500">Aucun personnage</span>
               )}
+              {d.decor && (
+                <span className={`rounded px-2 py-0.5 ${LIBRARY_KINDS.decor.badge}`} title="Décor récurrent">
+                  Décor : {d.decor.name}
+                </span>
+              )}
+              {d.objets.map((o) => (
+                <span key={o.id} className={`rounded px-2 py-0.5 ${LIBRARY_KINDS.object.badge}`} title="Objet récurrent">
+                  {o.name}
+                </span>
+              ))}
             </div>
+            {refsImage && <UsedReferences image={refsImage} />}
           </div>
 
           {(running || pending.length > 0) && (
@@ -394,5 +408,30 @@ export function PanelInspector({
         </div>
       ) : null}
     </section>
+  );
+}
+
+/** Images de référence envoyées au workflow pour une version : personnages, puis décor, puis objets. */
+function UsedReferences({ image }: { image: PanelImage }) {
+  const refs = image.params.reference_images ?? [];
+  return (
+    <div className="text-xs text-zinc-400" data-testid="used-references">
+      <span className="text-zinc-500">Références utilisées (v{image.version}) : </span>
+      {refs.length === 0 ? (
+        <span>aucune</span>
+      ) : (
+        <ol className="mt-1 flex flex-wrap gap-1.5">
+          {refs.map((r, i) => {
+            const kind = r.kind ?? "character";
+            return (
+              <li key={`${r.image_id}-${i}`} className={`rounded px-2 py-0.5 ${LIBRARY_KINDS[kind].badge}`}>
+                {r.slot ?? i + 1}. {r.name ?? `${LIBRARY_KINDS[kind].singular} n° ${r.id ?? r.character_id ?? "?"}`}
+                <span className="opacity-70"> · {LIBRARY_KINDS[kind].singular}</span>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </div>
   );
 }
