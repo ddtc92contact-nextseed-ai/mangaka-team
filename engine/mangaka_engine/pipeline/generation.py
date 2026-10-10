@@ -3,9 +3,12 @@
 - `enqueue_panel` : prépare le prompt final, choisit le workflow et crée `count` jobs
   `generation` (variantes) en attente ;
 - `pick_references` : emplacements d'images de référence du workflow (3 au plus), remplis par
-  ordre de priorité — personnages de la case, puis son décor, puis ses objets, puis la référence de
-  style de la série s'il reste un emplacement libre (voir la fonction) ;
+  ordre de priorité — personnages de la case, puis son décor, puis ses objets (leur image principale
+  seulement, `panel_references` de defaults.yaml), puis la référence de style de la série s'il reste un
+  emplacement libre et que la case a déjà une autre référence (voir la fonction et `panel_cast`) ;
   les emplacements retenus sont notés sur le job (`params.references`) et sur la version produite ;
+  le prompt envoyé les nomme dans l'ordre (« Image 1 : référence d'identité de Urus… »,
+  `prompt.frame_references`) ;
 - `GenerationExecutor` : exécuté par la file sérielle (`pipeline/queue.py`) pour un job :
   envoi des images de référence, construction du workflow (références + LoRA via le preset),
   file ComfyUI, progression, récupération de l'image → nouvelle `PanelImage` (version n+1) ;
@@ -76,7 +79,7 @@ from .jobs import JobReporter
 from .knowledge import KnowledgeBase
 from .layout import target_size
 from .library import panel_assets, style_for
-from .prompt import PromptCharacter, build_negative_prompt, build_prompt
+from .prompt import PromptCharacter, ReferenceSlot, build_negative_prompt, build_prompt, frame_references
 from .style import series_style
 
 log = logging.getLogger("mangaka_engine")
@@ -134,11 +137,21 @@ class PanelCast:
 
 def panel_cast(session: Session, panel: Panel, presets: PresetRegistry | None = None) -> PanelCast:
     """Fiches citées par la case ; avec `presets`, la référence de style de la série si `style_board.panels`
-    de defaults.yaml le permet (sans `presets` : jamais, pour qui ne lit que les personnages)."""
+    de defaults.yaml le permet (sans `presets` : jamais, pour qui ne lit que les personnages).
+
+    `with_subject` : la référence de style n'est jamais la seule image — sans image d'un personnage, du
+    décor ou d'un objet, elle est écartée et la case passe par le workflow texte (le modèle d'édition,
+    avec une seule image, la redessinerait telle quelle)."""
     project_id = panel.page.chapter.project_id
     decor, objects = panel_assets(session, panel, project_id)
+    characters = panel_characters(session, panel)
     style = style_for(session, presets, project_id, "panels") if presets is not None else None
-    return PanelCast(characters=panel_characters(session, panel), decor=decor, objects=objects, style=style)
+    if style is not None and presets is not None and presets.defaults is not None:
+        board = presets.defaults.style_board
+        subjects = [*characters, *([decor] if decor is not None else []), *objects]
+        if board is not None and board.panels == "with_subject" and not any(e.reference_images for e in subjects):
+            style = None
+    return PanelCast(characters=characters, decor=decor, objects=objects, style=style)
 
 
 def entry_kind(entry: LibraryEntry) -> str:
@@ -188,6 +201,8 @@ def build_panel_prompt(
     da = applied_panel_direction(panel)
     return build_prompt(
         description=panel.description,
+        setting=panel.setting,
+        staging=panel.staging,
         shot_type=panel.shot_type,
         plan=da.get("plan"),
         angle=da.get("angle"),
@@ -279,6 +294,13 @@ def sketch_size(target: dict[str, int], long_side: int, multiple: int) -> dict[s
 CONTROL_KEYS = ("source", "image_id", "version", "path", "type", "strength")
 
 
+def scene_prompt(img: PanelImage) -> str | None:
+    """Prompt de la case d'une version, sans le cadrage des images de référence (`panel_prompt`) : c'est
+    lui que reprend un passage au propre, qui recadre ses propres références."""
+    params = img.params or {}
+    return params.get("panel_prompt") or params.get("prompt")
+
+
 def composition_params(img: PanelImage) -> dict[str, Any]:
     """Paramètres de job qui rejouent la source de composition d'une version (croquis validé, image
     guide d'un verrou) : un nouvel essai automatique du QC repart de la même composition, avec une
@@ -287,14 +309,14 @@ def composition_params(img: PanelImage) -> dict[str, Any]:
     if isinstance(comp, dict) and comp.get("method") == "controlnet":
         out: dict[str, Any] = {"control": {k: comp.get(k) for k in CONTROL_KEYS}, "locked": bool(comp.get("locked"))}
         if not comp.get("locked"):  # passage au propre par ControlNet : même prompt que le croquis
-            out["sketch_prompt"] = (img.params or {}).get("prompt")
+            out["sketch_prompt"] = scene_prompt(img)
         return out
     if not isinstance(comp, dict) or comp.get("image_id") is None:
         return {}
     return {
         "source_image_id": comp["image_id"],
         "denoise": comp.get("denoise"),
-        "sketch_prompt": (img.params or {}).get("prompt"),
+        "sketch_prompt": scene_prompt(img),
     }
 
 
@@ -350,9 +372,13 @@ def guide_image(
 
 
 def pick_references(
-    characters: Sequence[LibraryEntry], slots: int
+    characters: Sequence[LibraryEntry], slots: int, per_entry: str = "toutes"
 ) -> list[tuple[LibraryEntry, CharacterImage | SeriesAssetImage]]:
     """Remplit les emplacements par tours, dans l'ordre de priorité des fiches.
+
+    `per_entry` (`panel_references` de defaults.yaml) : `principale` = un seul tour (l'image principale
+    de chaque fiche, jamais une 2e image — souvent une planche multi-poses que le modèle recopierait) ;
+    `toutes` = tours successifs comme ci-dessous.
 
     Ordre de priorité (`PanelCast.entries`) : personnages de la case (dans l'ordre de la case), puis
     son décor, puis ses objets. 1er tour : la 1re image de chaque fiche, dans cet ordre ; 2e tour :
@@ -366,7 +392,8 @@ def pick_references(
     fiches = [c for c in characters if not is_style(c)]
     out: list[tuple[LibraryEntry, CharacterImage | SeriesAssetImage]] = []
     depth = 0
-    while len(out) < slots and any(depth < len(c.reference_images) for c in fiches):
+    rounds = 1 if per_entry == "principale" else max((len(c.reference_images) for c in fiches), default=0)
+    while len(out) < slots and depth < rounds and any(depth < len(c.reference_images) for c in fiches):
         for c in fiches:
             if depth < len(c.reference_images) and len(out) < slots:
                 out.append((c, c.reference_images[depth]))
@@ -575,8 +602,9 @@ class _Plan:
     reference_data: list[bytes]
     loras: list[LoraSpec]
     folder: str
-    prompt: str
+    prompt: str  # prompt envoyé (avec le cadrage des images de référence)
     panel_id: int
+    panel_prompt: str = ""  # prompt de la case, sans le cadrage
     # Réparation ciblée : version source, masque adouci (PNG) et réglages (`params.repair` du job).
     repair: dict[str, Any] | None = None
     source_data: bytes = b""
@@ -691,7 +719,8 @@ class GenerationExecutor:
             control, control_data = self._control_source(session, job, panel, loaded)
             references: list[dict[str, Any]] = []
             reference_data: list[bytes] = []
-            for entry, image in pick_references(entries, len(loaded.preset.reference_images)):
+            per_entry = presets.defaults.panel_references if presets.defaults else "toutes"
+            for entry, image in pick_references(entries, len(loaded.preset.reference_images), per_entry):
                 path = self.files.absolute(image.path)
                 if not path.is_file():
                     raise GenerationError(f"image de référence de {entry.name} absente de data/ ({image.path})")
@@ -711,6 +740,11 @@ class GenerationExecutor:
                 reference_data.append(path.read_bytes())
             # « Références utilisées » : notées sur le job dès la préparation (visibles dans l'atelier).
             job.params = {**(job.params or {}), "references": references}
+            panel_prompt = prompt
+            if repair is None:
+                # Chaque image nommée dans l'ordre des emplacements + « identité seulement, scène nouvelle ».
+                slots = [ReferenceSlot(r["kind"], r["name"]) for r in references]
+                prompt = frame_references(prompt, slots, presets.image_prompt)
             params: dict[str, Any] = {
                 "positive_prompt": prompt,
                 "negative_prompt": build_negative_prompt(
@@ -737,6 +771,7 @@ class GenerationExecutor:
                 loras=collect_loras(panel, entries),
                 folder=f"projects/{chapter.project_id}/chapters/{chapter.id}/panels/{panel.id}",
                 prompt=prompt,
+                panel_prompt=panel_prompt,
                 panel_id=panel.id,
                 repair={**repair, "image_width": size["width"], "image_height": size["height"]} if repair else None,
                 source_data=source_data,
@@ -965,6 +1000,7 @@ class GenerationExecutor:
                     "preset_name": preset.name,
                     "tier": preset.tier.name if preset.tier else None,
                     "prompt": built.params["positive_prompt"],
+                    **({"panel_prompt": plan.panel_prompt} if plan.panel_prompt != plan.prompt else {}),
                     "negative_prompt": built.params["negative_prompt"],
                     "seed": built.params["seed"],
                     "width": built.params.get("width", stored.width),

@@ -241,6 +241,8 @@ def trial_layout(ctx: TrialContext) -> dict[str, Any]:
 PANEL = {
     "description": "Aiko lève son sabre face à Ren sur le toit, le vent soulève son bandeau. « Je n'ai pas peur ! »",
     "shot_type": "contre-plongée",
+    "setting": "toit d'un lycée au crépuscule, château d'eau, antennes, ville en contrebas",
+    "staging": "Aiko au premier plan à gauche, sabre levé ; Ren à droite, en retrait, bras croisés",
     # Direction artistique appliquée à la case d'essai ($plan, $angle, $ambiance).
     "plan": "gros plan",
     "angle": "en contre-plongée",
@@ -251,7 +253,7 @@ PANEL = {
 
 def trial_image_prompt(ctx: TrialContext) -> dict[str, Any]:
     from ..pipeline.layout import target_size
-    from ..pipeline.prompt import PromptCharacter, build_negative_prompt, build_prompt
+    from ..pipeline.prompt import PromptCharacter, ReferenceSlot, build_negative_prompt, build_prompt, frame_references
 
     presets = ctx.presets
     characters = [
@@ -260,6 +262,8 @@ def trial_image_prompt(ctx: TrialContext) -> dict[str, Any]:
     ]
     positive = build_prompt(
         description=PANEL["description"],  # type: ignore[arg-type]
+        setting=PANEL["setting"],  # type: ignore[arg-type]
+        staging=PANEL["staging"],  # type: ignore[arg-type]
         shot_type=PANEL["shot_type"],  # type: ignore[arg-type]
         plan=PANEL["plan"],  # type: ignore[arg-type]
         angle=PANEL["angle"],  # type: ignore[arg-type]
@@ -286,6 +290,8 @@ def trial_image_prompt(ctx: TrialContext) -> dict[str, Any]:
                 {
                     "description": PANEL["description"],
                     "plan": PANEL["shot_type"],
+                    "lieu": PANEL["setting"],
+                    "mise en scène": PANEL["staging"],
                     "personnages": [f"{c.name} : {c.visual_description}" for c in characters],
                     "style de la série": trial_style(presets),
                     "case (px)": f"{w} × {h}",
@@ -294,6 +300,12 @@ def trial_image_prompt(ctx: TrialContext) -> dict[str, Any]:
         ],
         "output": [
             text("Prompt positif", positive),
+            text(
+                "Avec images de référence (une par personnage)",
+                frame_references(
+                    positive, [ReferenceSlot("character", c.name) for c in characters], presets.image_prompt
+                ),
+            ),
             text("Prompt négatif", negative),
             data("Envoyé à ComfyUI", {"workflow": wf.preset.name, **params, **size}),
         ],

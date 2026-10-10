@@ -183,6 +183,8 @@ class Character(TimestampMixin, Base):
     lora_name: Mapped[str | None] = mapped_column(String(255), default=None)
     lora_weight: Mapped[float] = mapped_column(Float, default=0.8)
     lora_trigger_words: Mapped[str] = mapped_column(Text, default="")  # ajoutés au prompt avec le LoRA
+    # Autres noms du personnage (« le petit dragon », « Urus le dragon ») : reconnus par le scénario.
+    aliases: Mapped[list[str]] = mapped_column(JSON, default=list, server_default="[]")
 
     project: Mapped[Project] = relationship(back_populates="characters")
     reference_images: Mapped[list[CharacterImage]] = relationship(
@@ -364,6 +366,10 @@ class Panel(TimestampMixin, Base):
     decor_id: Mapped[int | None] = mapped_column(Integer, default=None)
     object_ids: Mapped[list[int]] = mapped_column(JSON, default=list)
     shot_type: Mapped[str | None] = mapped_column(String(50), default=None)
+    # Donnés par le scénario : lieu (lieu, moment, éléments du décor) et mise en scène (qui fait quoi,
+    # où dans le cadre, interactions) ; vides pour les cases d'avant (le prompt les omet alors).
+    setting: Mapped[str] = mapped_column(Text, default="", server_default="")
+    staging: Mapped[str] = mapped_column(Text, default="", server_default="")
     dialogues: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)  # inutilisé : voir Bubble
     importance: Mapped[int] = mapped_column(Integer, default=1)
     # Intensité dramatique donnée par le scénario : calme | normal | choc (None = non précisée).

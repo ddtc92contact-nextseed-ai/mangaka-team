@@ -404,6 +404,10 @@ class Defaults(_Strict):
     finishing_tolerance: float = Field(default=0.9, gt=0, le=1)
     # Preset de réparation ciblée pour un workflow qui ne déclare pas `inpaint_with`.
     workflow_inpaint: str | None = None
+    # Images de référence d'une case, par fiche (personnage, décor, objet) : `principale` = sa seule image
+    # principale (la 1re de la fiche : une vue simple plutôt qu'une planche multi-poses) ; `toutes` = la
+    # principale d'abord, puis les suivantes tant qu'il reste des emplacements.
+    panel_references: Literal["principale", "toutes"] = "principale"
     # Planche de style de la série (essais, référence de style) ; absent = pas de planche de style.
     style_board: StyleBoardSettings | None = None
 
@@ -429,8 +433,10 @@ class StyleBoardSettings(_Strict):
     # image du sujet (image de départ ou variante d'« Affiner »), `always` = jointe à chaque fiche (seule
     # image sans sujet), `never` = jamais.
     reference_sheets: Literal["with_subject", "always", "never"]
-    # Cases : `free_slot` = jointe s'il reste un emplacement après les personnages, le décor et les objets.
-    panels: Literal["free_slot", "never"]
+    # Cases : `with_subject` = jointe s'il reste un emplacement, et seulement si la case a déjà une image
+    # de référence d'un personnage, du décor ou d'un objet (jamais seule : une case sans référence passe
+    # par le workflow texte) ; `free_slot` = jointe s'il reste un emplacement, même seule ; `never` = jamais.
+    panels: Literal["with_subject", "free_slot", "never"]
 
     @field_validator("prompt")
     @classmethod
@@ -1111,7 +1117,52 @@ IMAGE_PROMPT_VARIABLES = {
     "style",
     "savoir_faire",
     "bible",
+    "setting",
+    "staging",
+    "character_count",
 }
+# Lignes d'images de référence (`references.character`…) et morceaux autour du prompt (`before`, `after`).
+REFERENCE_LINE_VARIABLES = {"slot", "name"}
+REFERENCE_PART_VARIABLES = {"images", "count"}
+
+
+def _check_templates(parts: list[str], allowed: set[str]) -> None:
+    for part in parts:
+        if not string.Template(part).is_valid():
+            raise ValueError("gabarit invalide : un « $ » isolé doit s'écrire « $$ »")
+        unknown = set(string.Template(part).get_identifiers()) - allowed
+        if unknown:
+            raise ValueError(f"variables inconnues : {', '.join(sorted(unknown))}")
+
+
+class ReferencePromptSettings(_Strict):
+    """Cadrage des images de référence dans le prompt envoyé (workflow avec références, voir
+    pipeline/prompt.py `frame_references`) : quelle image est quel personnage, et ce qu'elles donnent.
+
+    Une ligne par image envoyée, dans l'ordre des emplacements ($slot : numéro de l'image, $name : nom de
+    la fiche), selon sa sorte ; `before` et `after` entourent le prompt de la case ($images : les lignes
+    jointes par `separator`, $count : nombre d'images).
+    """
+
+    character: str = "Image $slot : référence d'identité de $name"
+    decor: str = "Image $slot : référence du lieu $name"
+    object: str = "Image $slot : référence de l'objet $name"
+    style: str = "Image $slot : référence de style seulement"
+    separator: str = " ; "
+    before: list[str] = Field(default_factory=lambda: ["$images."])
+    after: list[str] = Field(default_factory=list)
+
+    @field_validator("character", "decor", "object", "style")
+    @classmethod
+    def _check_line(cls, value: str) -> str:
+        _check_templates([value], REFERENCE_LINE_VARIABLES)
+        return value
+
+    @field_validator("before", "after")
+    @classmethod
+    def _check_parts(cls, value: list[str]) -> list[str]:
+        _check_templates(value, REFERENCE_PART_VARIABLES)
+        return value
 
 
 class ImagePromptSettings(_Strict):
@@ -1121,7 +1172,8 @@ class ImagePromptSettings(_Strict):
     # Variables : $shot, $description, $characters, $decor, $objects (bibliothèque de la série), $style,
     # $savoir_faire (passages du savoir-faire),
     # $bible (notes de la bible sur les personnages de la case) ; direction artistique appliquée :
-    # $plan (son type de plan, sinon celui du scénario), $angle, $ambiance.
+    # $plan (son type de plan, sinon celui du scénario), $angle, $ambiance ; scénario : $setting (lieu),
+    # $staging (mise en scène), $character_count (« Deux personnages »).
     parts: list[str] = Field(
         default_factory=lambda: [
             "$shot.",
@@ -1138,16 +1190,13 @@ class ImagePromptSettings(_Strict):
         default_factory=lambda: ["texte", "lettres", "bulles", "phylactères", "onomatopées", "filigrane", "signature"]
     )
     strip_quotes: bool = Field(default=True, description="Retire les répliques entre guillemets de la description")
+    # Cadrage des images de référence (workflows avec références).
+    references: ReferencePromptSettings = Field(default_factory=ReferencePromptSettings)
 
     @field_validator("parts")
     @classmethod
     def _check_parts(cls, value: list[str]) -> list[str]:
-        for part in value:
-            if not string.Template(part).is_valid():
-                raise ValueError("gabarit invalide : un « $ » isolé doit s'écrire « $$ »")
-            unknown = set(string.Template(part).get_identifiers()) - IMAGE_PROMPT_VARIABLES
-            if unknown:
-                raise ValueError(f"variables inconnues : {', '.join(sorted(unknown))}")
+        _check_templates(value, IMAGE_PROMPT_VARIABLES)
         return value
 
 

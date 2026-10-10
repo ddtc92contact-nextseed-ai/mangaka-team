@@ -13,6 +13,7 @@ from ..pipeline.finishing import panel_print_info
 from ..pipeline.knowledge import record_chapter_summary
 from ..pipeline.layout import LayoutError
 from ..pipeline.library import SeriesLibrary
+from ..pipeline.names import CharacterMatcher, name_key, relink_project
 from ..pipeline.pages import (
     FRAME_KEYS,
     apply_frame_change,
@@ -51,6 +52,8 @@ from .schemas import (
     ChapterOut,
     ChapterReorder,
     ChapterUpdate,
+    CharacterLinkIn,
+    CharacterLinkOut,
     CutSlant,
     GutterMove,
     JobOut,
@@ -135,12 +138,21 @@ def page_out(
     presets: PresetRegistry | None = None,
     files: FileStore | None = None,
     last_jobs: dict[int, Job] | None = None,
+    matcher: CharacterMatcher | None = None,
 ) -> PageOut:
     """`presets` + `files` : ajoute le dpi d'impression de chaque case (finition d'impression).
 
-    `last_jobs` : dernier job de génération de chaque case (lu ici si absent)."""
+    `last_jobs` : dernier job de génération de chaque case (lu ici si absent) ; `matcher` : fiches
+    personnages de la série, pour signaler les noms sans fiche (lues ici si absent)."""
+    session = object_session(page)
     if last_jobs is None:
-        last_jobs = last_generation_jobs(object_session(page), [p.id for p in page.panels])
+        last_jobs = last_generation_jobs(session, [p.id for p in page.panels])
+    if matcher is None:
+        matcher = (
+            CharacterMatcher.for_project(session, page.chapter.project_id)
+            if session is not None
+            else CharacterMatcher([])
+        )
     chosen = {p.id: next((i for i in p.images if i.selected), None) for p in page.panels}
     layout_panels = {lp.get("panel_id"): lp for lp in (page.layout or {}).get("panels", [])}
     return PageOut(
@@ -160,7 +172,10 @@ def page_out(
                 id=p.id,
                 index=p.index,
                 description=p.description,
+                setting=p.setting or "",
+                staging=p.staging or "",
                 characters=list(p.character_names or []),
+                unmatched_characters=matcher.unmatched(p.character_names or []),
                 decor=p.decor_id,
                 objets=list(p.object_ids or []),
                 shot_type=p.shot_type,
@@ -333,6 +348,44 @@ def delete_chapter(chapter_id: int, session: Session = Depends(get_session)) -> 
 
 
 # --- étape 1 : scénario ---------------------------------------------------------
+@router.post("/chapters/{chapter_id}/character-links", response_model=CharacterLinkOut)
+def link_character_name(
+    chapter_id: int, body: CharacterLinkIn, session: Session = Depends(get_session)
+) -> CharacterLinkOut:
+    """Nom de personnage sans fiche (« le petit dragon ») : le rattache à une fiche — il devient un de ses
+    alias, reconnu dans toute la série et aux prochains découpages — ou l'écarte (`character_id` null :
+    figurant sans fiche, retiré des personnages des cases du chapitre ; la description ne change pas)."""
+    chapter = get_chapter_or_404(session, chapter_id)
+    key = name_key(body.name)
+    panels = [
+        pa
+        for page in _load_pages(session, chapter_id)
+        for pa in page.panels
+        if any(name_key(n) == key for n in pa.character_names or [])
+    ]
+    alias_added = False
+    if body.character_id is None:
+        for pa in panels:
+            pa.character_names = [n for n in pa.character_names or [] if name_key(n) != key]
+    else:
+        character = session.get(Character, body.character_id)
+        if character is None or character.project_id != chapter.project_id:
+            raise FieldError("character_id", "personnage inconnu dans cette série")
+        others = session.scalars(
+            select(Character).where(Character.project_id == chapter.project_id, Character.id != character.id)
+        )
+        clash = next((o for o in others if name_key(o.name) == key), None)
+        if clash is not None:
+            raise FieldError("name", f"« {body.name} » est déjà le nom de la fiche {clash.name}")
+        if key not in {name_key(n) for n in (character.name, *(character.aliases or []))}:
+            character.aliases = [*(character.aliases or []), body.name]
+            alias_added = True
+    session.flush()
+    relink_project(session, chapter.project_id)
+    session.commit()
+    return CharacterLinkOut(name=body.name, character_id=body.character_id, panels=len(panels), alias_added=alias_added)
+
+
 @router.post("/chapters/{chapter_id}/script", response_model=JobOut, status_code=202)
 def start_script(
     chapter_id: int, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
@@ -384,20 +437,24 @@ def list_pages(
     return pages_out(session, ctx, _load_pages(session, chapter_id))
 
 
-def _page_out(ctx: AppContext, page: Page, last_jobs: dict[int, Job] | None = None) -> PageOut:
+def _page_out(
+    ctx: AppContext, page: Page, last_jobs: dict[int, Job] | None = None, matcher: CharacterMatcher | None = None
+) -> PageOut:
     return page_out(
         page,
         ctx.presets.layout.regeneration.ratio_threshold,
         ctx.agents.presets_for(page.chapter.project_id),
         ctx.files,
         last_jobs,
+        matcher,
     )
 
 
 def pages_out(session: Session, ctx: AppContext, pages: list[Page]) -> list[PageOut]:
     """Pages d'un chapitre, avec le dernier job de génération de chaque case lu en une seule requête."""
     last_jobs = last_generation_jobs(session, [p.id for page in pages for p in page.panels])
-    return [_page_out(ctx, page, last_jobs) for page in pages]
+    matcher = CharacterMatcher.for_project(session, pages[0].chapter.project_id) if pages else None
+    return [_page_out(ctx, page, last_jobs, matcher) for page in pages]
 
 
 @router.put("/chapters/{chapter_id}/pages", response_model=list[PageOut])
@@ -417,10 +474,7 @@ def replace_pages(
     pages = _load_pages(session, chapter_id)
     pages_by_id = {p.id: p for p in pages}
     panels_by_id = {pa.id: pa for p in pages for pa in p.panels}
-    names = {
-        c.name.casefold(): c.id
-        for c in session.scalars(select(Character).where(Character.project_id == chapter.project_id))
-    }
+    matcher = CharacterMatcher.for_project(session, chapter.project_id)
     library = SeriesLibrary.load(session, chapter.project_id)
     decor_ids = {e["id"] for e in library.decors}
     object_ids = {e["id"] for e in library.objets}
@@ -470,8 +524,12 @@ def replace_pages(
             ordered.append(panel)
             panel.index = i
             panel.description = cin.description
+            if cin.setting is not None:
+                panel.setting = cin.setting
+            if cin.staging is not None:
+                panel.staging = cin.staging
             panel.character_names = list(dict.fromkeys(c for c in cin.characters if c))
-            panel.character_ids = [names[c.casefold()] for c in panel.character_names if c.casefold() in names]
+            panel.character_ids = matcher.ids(panel.character_names)
             panel.shot_type = normalize_shot_type(cin.shot_type) or None
             panel.importance = cin.importance
             panel.intensity = cin.intensity
@@ -486,7 +544,7 @@ def replace_pages(
                 Bubble(
                     order=j,
                     speaker_name=d.speaker,
-                    speaker_id=names.get(d.speaker.casefold()),
+                    speaker_id=matcher.match(d.speaker),
                     text=d.text,
                     kind=BubbleKind(d.kind),
                     position=previous[d.id].position if d.id in previous else None,

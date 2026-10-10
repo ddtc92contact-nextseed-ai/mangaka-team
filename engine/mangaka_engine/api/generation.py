@@ -35,6 +35,7 @@ from ..pipeline.generation import (
     update_panel_prompt,
 )
 from ..pipeline.inpaint import MaskError, Region, decode_png
+from ..pipeline.names import CharacterMatcher
 from ..pipeline.qc_bench import STEP as BENCH_STEP
 from ..pipeline.reference_sheets import KIND_LABELS
 from ..pipeline.reference_sheets import STEP as REFERENCE_STEP
@@ -176,8 +177,13 @@ def panel_detail(session: Session, ctx: AppContext, panel: Panel) -> PanelDetail
         index=panel.index,
         label=panel_label(panel),
         description=panel.description,
+        setting=panel.setting or "",
+        staging=panel.staging or "",
         characters=list(panel.character_names or []),
         character_ids=list(panel.character_ids or []),
+        unmatched_characters=CharacterMatcher.for_project(session, page.chapter.project_id).unmatched(
+            panel.character_names or []
+        ),
         decor=_ref(cast.decor) if cast.decor is not None else None,
         objets=[_ref(o) for o in cast.objects],
         shot_type=panel.shot_type,
@@ -319,8 +325,8 @@ def get_panel(
 def update_panel(
     panel_id: int, body: PanelUpdate, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
 ) -> PanelDetailOut:
-    """Édite le prompt final (conservé tel quel ensuite), la description, le débruitage du passage au
-    propre et/ou impose un workflow à la case."""
+    """Édite le prompt final (conservé tel quel ensuite), la description, le lieu et la mise en scène, le
+    débruitage du passage au propre et/ou impose un workflow à la case."""
     panel = get_panel_or_404(session, panel_id)
     changes = body.model_dump(exclude_unset=True)
     if "sketch_denoise" in changes:
@@ -330,6 +336,10 @@ def update_panel(
             raise FieldError("description", "ne peut pas être vide")
         panel.description = changes["description"]
         update_panel_prompt(_presets(ctx, panel), session, panel, ctx.knowledge)
+    for key in ("setting", "staging"):
+        if key in changes:
+            setattr(panel, key, changes[key] or "")
+            update_panel_prompt(_presets(ctx, panel), session, panel, ctx.knowledge)
     if "generation_preset" in changes:
         preset = changes["generation_preset"]
         known = _presets(ctx, panel).workflows

@@ -40,6 +40,7 @@ from ..store.models import (
 from ..validation import format_errors
 from .knowledge import AgentKnowledge, KnowledgeBase
 from .library import SeriesLibrary
+from .names import CharacterMatcher
 from .pages import layout_pages
 from .style import NO_GUIDELINES, style_brief, style_names
 
@@ -128,8 +129,15 @@ class ScriptSfx(_LLMModel):
     _intensity = field_validator("intensity", mode="before")(_hint)
 
 
+SceneText = Annotated[str, StringConstraints(strip_whitespace=True, max_length=1500)]
+
+
 class ScriptPanel(_LLMModel):
     description: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)]
+    # Lieu (lieu, moment, éléments du décor) et mise en scène (qui fait quoi, où dans le cadre,
+    # interactions) : repris tels quels dans le prompt image, même sans décor de la bibliothèque.
+    setting: SceneText = ""
+    staging: SceneText = ""
     characters: list[Short] = Field(default_factory=list, max_length=20)
     shot_type: ShotType
     dialogues: list[ScriptDialogue] = Field(default_factory=list, max_length=12)
@@ -142,6 +150,11 @@ class ScriptPanel(_LLMModel):
 
     _shot = field_validator("shot_type", mode="before")(normalize_shot_type)
     _intensity = field_validator("intensity", mode="before")(_hint)
+
+    @field_validator("setting", "staging", mode="before")
+    @classmethod
+    def _no_text(cls, v: Any) -> Any:
+        return "" if v is None else v
 
     @field_validator("decor", mode="before")
     @classmethod
@@ -235,7 +248,7 @@ def parse_script(text: str, library: SeriesLibrary | None = None) -> ScriptOutpu
 @dataclass
 class ScriptContext:
     series: dict[str, Any]
-    characters: list[dict[str, str]]
+    characters: list[dict[str, Any]]
     previous_chapters: list[dict[str, Any]]
     chapter: dict[str, Any]
     knowledge: AgentKnowledge | None = None
@@ -291,7 +304,9 @@ def build_context(
             "style_guidelines": brief.guidelines,
             "reading_direction": series.reading_direction.value,
         },
-        characters=[{"name": c.name, "description": c.visual_description} for c in characters],
+        characters=[
+            {"name": c.name, "aliases": list(c.aliases or []), "description": c.visual_description} for c in characters
+        ],
         previous_chapters=[
             {"number": c.number, "title": c.title, "summary": c.summary or "(pas encore de résumé)"}
             for c in reversed(previous)
@@ -318,8 +333,15 @@ def _render(template: str, values: dict[str, str], part: str) -> str:
         raise PresetError(f"presets/prompts : gabarit « {part} » invalide ({exc})") from None
 
 
+def _aliases(character: dict[str, Any]) -> str:
+    aliases = [a for a in character.get("aliases") or [] if a]
+    return f" (aussi appelé : {', '.join(aliases)})" if aliases else ""
+
+
 def render_messages(prompt: PromptPreset, ctx: ScriptContext) -> list[ChatMessage]:
-    chars = "\n".join(f"- {c['name']} : {c['description'] or '(sans description)'}" for c in ctx.characters)
+    chars = "\n".join(
+        f"- {c['name']}{_aliases(c)} : {c['description'] or '(sans description)'}" for c in ctx.characters
+    )
     prev = "\n".join(
         f"- Chapitre {c['number']}{' — ' + c['title'] if c['title'] else ''} : {c['summary']}"
         for c in ctx.previous_chapters
@@ -332,6 +354,8 @@ def render_messages(prompt: PromptPreset, ctx: ScriptContext) -> list[ChatMessag
         "series_style": ctx.series["style"] or "(non précisé)",  # ancien nom de $style_packs
         "reading_direction": DIRECTION_LABELS.get(ctx.series["reading_direction"], ctx.series["reading_direction"]),
         "characters": chars or "(aucun personnage enregistré)",
+        # Noms exacts des fiches, à recopier tels quels dans « characters » et « speaker ».
+        "character_names": ", ".join(f"« {c['name']} »" for c in ctx.characters) or "(aucune fiche personnage)",
         "decors": ctx.library.text("decors") or "(aucun décor enregistré : « decor » vaut null)",
         "objets": ctx.library.text("objets") or "(aucun objet enregistré : « objets » reste vide)",
         "previous_chapters": prev or "(premier chapitre de la série)",
@@ -395,10 +419,9 @@ def run_script(llm: LLMProvider, prompt: PromptPreset, ctx: ScriptContext, progr
 # --- enregistrement -------------------------------------------------------------
 def save_script(session: Session, chapter: Chapter, output: ScriptOutput) -> list[Page]:
     """Remplace les pages « story » du chapitre ; les pages bonus / de garde sont conservées à la suite."""
-    by_name = {
-        c.name.casefold(): c.id
-        for c in session.scalars(select(Character).where(Character.project_id == chapter.project_id))
-    }
+    # Noms rapprochés des fiches (casse, accents, alias, nom partiel : pipeline/names.py) ; un nom sans
+    # fiche reste dans `character_names` et l'API le signale à l'auteur.
+    matcher = CharacterMatcher.for_project(session, chapter.project_id)
     # Sans autoflush : la cascade de `session.delete` charge les relations de la page (cases, direction
     # artistique) ; un autoflush à ce moment, page déjà retirée de `chapter.pages`, fait échouer la session
     # (« Failed to add object to the flush context ») et un second « Découper » n'était jamais enregistré.
@@ -420,8 +443,10 @@ def save_script(session: Session, chapter: Chapter, output: ScriptOutput) -> lis
             panel = Panel(
                 index=i,
                 description=sc.description,
+                setting=sc.setting,
+                staging=sc.staging,
                 character_names=list(sc.characters),
-                character_ids=[by_name[n.casefold()] for n in sc.characters if n.casefold() in by_name],
+                character_ids=matcher.ids(sc.characters),
                 shot_type=sc.shot_type,
                 importance=sc.importance,
                 intensity=sc.intensity,
@@ -433,7 +458,7 @@ def save_script(session: Session, chapter: Chapter, output: ScriptOutput) -> lis
                     Bubble(
                         order=j,
                         speaker_name=d.speaker,
-                        speaker_id=by_name.get(d.speaker.casefold()),
+                        speaker_id=matcher.match(d.speaker),
                         text=d.text,
                         kind=BubbleKind(d.kind),
                     )

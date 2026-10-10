@@ -241,7 +241,10 @@ def test_generate_panel_mock_end_to_end(make_client: Callable[..., TestClient]) 
     assert Image.open(io.BytesIO(resp.content)).size == (w, h)
 
     panel = _ok(c.get(f"/panels/{p1['id']}"))
-    assert panel["state"] == "review" and panel["final_prompt"] == params["prompt"]
+    # Prompt envoyé = prompt de la case encadré par les images de référence (nommées dans l'ordre).
+    assert panel["state"] == "review" and panel["final_prompt"] == params["panel_prompt"]
+    assert params["prompt"].startswith("Image 1 : référence d'identité de Aiko. " + params["panel_prompt"])
+    assert "ne pas reproduire la mise en page des fiches de référence" in params["prompt"]
     assert panel["final_prompt_manual"] is False and panel["label"].endswith("p. 1 · case 1")
     pages = _ok(c.get(f"/chapters/{data['chapter']['id']}/pages"))
     assert pages[0]["panels"][0]["selected_image_url"] == img["url"] and pages[0]["panels"][0]["state"] == "review"
@@ -325,7 +328,8 @@ def test_manual_prompt_is_kept_until_rebuilt(make_client: Callable[..., TestClie
     [job] = _ok(c.post(f"/panels/{p1['id']}/generate"), 202)
     _wait(c)
     [img] = _ok(c.get(f"/panels/{p1['id']}/images"))
-    assert img["params"]["prompt"] == "Ninja en contre-jour"
+    assert img["params"]["panel_prompt"] == "Ninja en contre-jour"
+    assert "Image 1 : référence d'identité de Aiko. Ninja en contre-jour. Les images" in img["params"]["prompt"]
 
     panel = _ok(c.post(f"/panels/{p1['id']}/prompt/rebuild"))
     assert panel["final_prompt_manual"] is False and panel["final_prompt"].startswith("Plan large. Aiko sur un toit.")
@@ -334,7 +338,7 @@ def test_manual_prompt_is_kept_until_rebuilt(make_client: Callable[..., TestClie
     _wait(c)
     panel = _ok(c.get(f"/panels/{p1['id']}"))
     assert panel["final_prompt"] == "Toit vide" and panel["final_prompt_manual"] is True
-    assert panel["images"][-1]["params"]["prompt"] == "Toit vide"
+    assert panel["images"][-1]["params"]["panel_prompt"] == "Toit vide"
 
     # imposer un workflow à la case
     panel = _ok(c.patch(f"/panels/{p1['id']}", json={"generation_preset": "qwen-image-base"}))

@@ -33,6 +33,8 @@
   données et ids gardés.
 - 19 : note « mise en page sage héritée » : les séries encore en « sage » (réglé par la v8, pas par
   l'utilisateur) gardent leur style, mais la fiche série le signale une fois. Rien d'autre ne change.
+- 20 : lieu et mise en scène de chaque case (vides pour les cases existantes), autres noms (alias) des
+  personnages (aucun pour les fiches existantes).
 
 Une base neuve est créée directement à la dernière version. Chaque migration tourne dans une
 transaction unique, clés étrangères désactivées (recette « 12 étapes » de SQLite pour reconstruire
@@ -74,7 +76,7 @@ from .models import (
 
 log = logging.getLogger("mangaka_engine")
 
-SCHEMA_VERSION = 19
+SCHEMA_VERSION = 20
 
 
 class MigrationError(RuntimeError):
@@ -304,6 +306,19 @@ def _v18_to_v19(cur: sqlite3.Cursor) -> None:
     cur.execute("UPDATE projects SET layout_style_notice = 1 WHERE layout_style = 'sage'")
 
 
+def _v19_to_v20(cur: sqlite3.Cursor) -> None:
+    # panels et characters reconstruites par la v18 depuis le modèle courant ont déjà ces colonnes.
+    existing = {
+        table: {row[1] for row in cur.execute(f"PRAGMA table_info({table})")} for table in ("panels", "characters")
+    }
+    if "setting" not in existing["panels"]:
+        cur.execute("ALTER TABLE panels ADD COLUMN setting TEXT NOT NULL DEFAULT ''")
+    if "staging" not in existing["panels"]:
+        cur.execute("ALTER TABLE panels ADD COLUMN staging TEXT NOT NULL DEFAULT ''")
+    if "aliases" not in existing["characters"]:
+        cur.execute("ALTER TABLE characters ADD COLUMN aliases JSON NOT NULL DEFAULT '[]'")
+
+
 MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     # version de départ → (version d'arrivée, fonction)
     0: (2, _v0_to_v2),
@@ -325,6 +340,7 @@ MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     16: (17, _v16_to_v17),
     17: (18, _v17_to_v18),
     18: (19, _v18_to_v19),
+    19: (20, _v19_to_v20),
 }
 
 

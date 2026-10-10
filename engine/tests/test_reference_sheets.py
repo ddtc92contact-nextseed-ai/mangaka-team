@@ -344,7 +344,7 @@ def test_generate_refine_keep_reorder_then_used_by_panels(c: TestClient, comfy: 
     assert sum(v["kept"] for v in studio["variants"]) == 2 and studio["kept_count"] == 2
     assert len(studio["variants"]) == 5  # les variantes non gardées restent dans l'historique
 
-    # Une case qui cite la fiche est générée avec sa référence principale en premier.
+    # Une case qui cite la fiche est générée avec sa seule référence principale (panel_references: principale).
     ch = _ok(c.post(f"/projects/{s['id']}/chapters", json={"title": "Un"}), 201)
     panel_body: dict[str, Any] = {"description": "Une case"}
     if kind == "character":
@@ -358,7 +358,7 @@ def test_generate_refine_keep_reorder_then_used_by_panels(c: TestClient, comfy: 
     [job] = _ok(c.post(f"/panels/{panel_id}/generate"), 202)
     _idle(c)
     used = _ok(c.get(f"/jobs/{job['id']}"))["params"]["references"]
-    assert [(r["kind"], r["image_id"]) for r in used] == [(kind, ids[1]), (kind, ids[0])]
+    assert [(r["kind"], r["image_id"]) for r in used] == [(kind, ids[1])]
 
 
 def test_cancel_a_pending_variant_and_queue_label(

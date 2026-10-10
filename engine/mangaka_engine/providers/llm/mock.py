@@ -66,6 +66,24 @@ def _sentences(text: str) -> list[str]:
     return parts or ["La scène s'installe."]
 
 
+_SETTINGS = [
+    "clairière au bord d'un lac, fin d'après-midi, herbes hautes, rochers moussus, montagnes au loin",
+    "falaise battue par le vent, aube grise, nuages bas, mer agitée en contrebas",
+    "village de pierre, midi, ruelles pavées, linge aux fenêtres, foule de marché",
+    "forêt dense, nuit de pleine lune, troncs immenses, lucioles, brume au sol",
+]
+_PLACES = ["au premier plan à gauche", "au centre", "à droite, en retrait", "en arrière-plan"]
+
+
+def _staging(who: str, other: str, i: int) -> str:
+    if other == who:
+        return f"{who} {_PLACES[i % len(_PLACES)]}, en mouvement, regard vers l'horizon"
+    return (
+        f"{who} {_PLACES[i % len(_PLACES)]}, tourné vers {other} ; "
+        f"{other} {_PLACES[(i + 2) % len(_PLACES)]}, lui répond d'un geste"
+    )
+
+
 def mock_script(ctx: dict[str, Any]) -> dict[str, Any]:
     chapter = ctx.get("chapter") or {}
     names = [c["name"] for c in ctx.get("characters") or [] if c.get("name")] or ["Héros", "Rival"]
@@ -100,10 +118,13 @@ def mock_script(ctx: dict[str, Any]) -> dict[str, Any]:
                 sfx.append({"text": _SFX[(p + i) % len(_SFX)], "intensity": "choc"})
             elif intensity == "calme" and p % 3 == 1:
                 sfx.append({"text": "tic… tac…", "intensity": "calme"})
+            cast = [who] if i % 2 else list(dict.fromkeys([who, other]))
             panels.append(
                 {
                     "description": f"{text} ({who}{' et ' + other if other != who else ''}, page {p + 1}, case {i + 1})",
-                    "characters": [who] if i % 2 else [who, other],
+                    "setting": _SETTINGS[p % len(_SETTINGS)],
+                    "staging": _staging(cast[0], cast[-1], i),
+                    "characters": cast,
                     "shot_type": _SHOTS[(p * 3 + i) % len(_SHOTS)],
                     "importance": importance,
                     "intensity": intensity,

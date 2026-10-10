@@ -72,6 +72,7 @@ settings:
       - series_style
       - reading_direction
       - characters
+      - character_names
       - decors
       - objets
       - previous_chapters
