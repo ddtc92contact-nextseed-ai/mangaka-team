@@ -452,6 +452,14 @@ def test_database_from_before_the_library_keeps_working(make_settings: Callable[
             )
         )
     con = sqlite3.connect(settings.database_path)
+    for table, column in [
+        ("panel_images", "kind"),
+        ("panels", "sketch_image_id"),
+        ("panels", "sketch_denoise"),
+        ("projects", "sketch_enabled"),
+        ("projects", "sketch_denoise"),
+    ]:  # colonnes du palier croquis (v12)
+        con.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
     con.execute("ALTER TABLE panels DROP COLUMN decor_id")
     con.execute("ALTER TABLE panels DROP COLUMN object_ids")
     con.execute("DROP TABLE series_asset_images")

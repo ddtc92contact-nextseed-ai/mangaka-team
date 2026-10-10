@@ -3,6 +3,10 @@
 Renvoie une image à la taille demandée, avec le libellé de la case (dernier segment du
 `filename_prefix` du nœud SaveImage, ex. « case 3 ») et la seed dessinés dessus ; simule une
 progression par étapes ; vérifie que les images de référence des `LoadImage` ont été envoyées.
+
+Palier croquis : un croquis (libellé « croquis case N ») est un crayonné gris sur papier dont la
+composition (formes) dépend de la graine ; un workflow image → image (`VAEEncode` d'une image
+chargée) repart de l'image envoyée, agrandie à la taille demandée et « encrée » : même composition.
 """
 
 from __future__ import annotations
@@ -14,7 +18,7 @@ import uuid
 from collections.abc import Callable, Sequence
 from typing import Any
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 from .base import (
     ComfyStatus,
@@ -101,6 +105,84 @@ def render_mock_image(width: int, height: int, seed: int, label: str) -> bytes:
     return buf.getvalue()
 
 
+def render_mock_sketch(width: int, height: int, seed: int, label: str) -> bytes:
+    """Crayonné : papier clair, formes grises placées selon la graine (la « composition »), libellé."""
+    img = Image.new("RGB", (width, height), (246, 243, 234))
+    draw = ImageDraw.Draw(img)
+    side = min(width, height)
+    stroke = max(2, side // 120)
+    x = seed % 9973
+    for i in range(4):
+        x = (x * 7919 + 104729 + i) % 9973
+        cx, cy = width * (0.15 + 0.7 * (x % 101) / 100), height * (0.2 + 0.6 * ((x // 101) % 97) / 96)
+        r = side * (0.08 + 0.12 * ((x // 7) % 10) / 10)
+        draw.ellipse((cx - r, cy - r, cx + r, cy + r), outline=(110, 110, 110), width=stroke)
+        draw.line((cx, cy + r, cx + (x % 3 - 1) * r, min(height, cy + 3 * r)), fill=(130, 130, 130), width=stroke)
+    draw.rectangle((0, 0, width - 1, height - 1), outline=(150, 150, 150), width=stroke)
+    font = _font(max(10, side // 10))
+    draw.text((width / 2, height * 0.06), label.upper(), fill=(90, 90, 90), font=font, anchor="ma")
+    draw.text((width / 2, height * 0.9), f"seed {seed}", fill=(90, 90, 90), font=_font(max(9, side // 18)), anchor="ma")
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def render_mock_from_image(source: bytes, width: int, height: int, seed: int, denoise: float | None) -> bytes:
+    """Image → image : la source agrandie à la taille demandée, encrée (même composition), légendée."""
+    with Image.open(io.BytesIO(source)) as src:
+        base = ImageOps.grayscale(src.convert("RGB")).resize((width, height), Image.Resampling.LANCZOS)
+    base = ImageOps.autocontrast(base, cutoff=2)
+    tint = (seed * 37 % 120 + 120, seed * 91 % 120 + 120, seed * 53 % 120 + 120)
+    img = ImageOps.colorize(base, black=(15, 15, 25), white=tint)
+    draw = ImageDraw.Draw(img)
+    side = min(width, height)
+    size = max(10, side // 16)
+    text = f"PROPRE · seed {seed}" + (f" · denoise {denoise:g}" if denoise is not None else "")
+    draw.text(
+        (width / 2, height - size * 1.6),
+        text,
+        fill=(255, 255, 255),
+        font=_font(size),
+        anchor="ma",
+        stroke_width=max(1, size // 15),
+        stroke_fill=(0, 0, 0),
+    )
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def _linked(workflow: dict[str, Any], value: Any) -> dict[str, Any] | None:
+    if isinstance(value, list) and len(value) == 2 and isinstance(value[0], str):
+        node = workflow.get(value[0])
+        return node if isinstance(node, dict) else None
+    return None
+
+
+def source_image_name(workflow: dict[str, Any]) -> str | None:
+    """Image chargée qui alimente un `VAEEncode` (workflow image → image), en remontant les liaisons."""
+    for node in workflow.values():
+        if not isinstance(node, dict) or node.get("class_type") != "VAEEncode":
+            continue
+        current = _linked(workflow, node.get("inputs", {}).get("pixels"))
+        for _ in range(8):
+            if current is None:
+                break
+            if current.get("class_type") == "LoadImage":
+                image = current.get("inputs", {}).get("image")
+                return image if isinstance(image, str) else None
+            current = _linked(workflow, current.get("inputs", {}).get("image"))
+    return None
+
+
+def _first_float(workflow: dict[str, Any], key: str) -> float | None:
+    for node in workflow.values():
+        value = node.get("inputs", {}).get(key) if isinstance(node, dict) else None
+        if isinstance(value, int | float) and not isinstance(value, bool):
+            return float(value)
+    return None
+
+
 class MockComfyUIClient:
     name = "mock"
 
@@ -170,7 +252,15 @@ class MockComfyUIClient:
         self.prompts[prompt_id] = workflow
         width, height = requested_size(workflow)
         filename = f"mock_{prompt_id}.png"
-        self._images[filename] = render_mock_image(width, height, _first_int(workflow, "seed") or 0, _label(workflow))
+        seed, label = _first_int(workflow, "seed") or 0, _label(workflow)
+        source = source_image_name(workflow)
+        if source is not None:
+            data = render_mock_from_image(self.uploads[source], width, height, seed, _first_float(workflow, "denoise"))
+        elif label.startswith("croquis"):
+            data = render_mock_sketch(width, height, seed, label)
+        else:
+            data = render_mock_image(width, height, seed, label)
+        self._images[filename] = data
         output_nodes = [k for k, n in workflow.items() if isinstance(n, dict) and n.get("class_type") == "SaveImage"]
         outputs = {
             node: {"images": [{"filename": filename, "subfolder": "", "type": "output"}]}

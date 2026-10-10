@@ -3,6 +3,9 @@
 Durée par case d'un preset = médiane des dernières générations réussies de ce preset (durées des
 jobs) dès qu'il y en a `MIN_MEASURED` ; avant, `estimated_s` du preset (YAML) et l'estimation est
 signalée comme telle.
+
+Le palier croquis réutilise ce calcul avec un autre choix de preset (`resolve`) : « croquis de la page »
+(preset croquis de chaque case) et « passage au propre des cases validées » (preset `propre`).
 """
 
 from __future__ import annotations
@@ -15,8 +18,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..presets import PresetRegistry
-from ..store.models import Job, JobStatus, Page, Panel, PanelImage
-from .generation import STEP, panel_cast, preset_tier, resolve_preset_id
+from ..store.models import ImageKind, Job, JobStatus, Page, Panel, PanelImage
+from .generation import STEP, GenerationError, LibraryEntry, panel_cast, preset_tier, resolve_preset_id
+
+# Choix du preset d'une case : (presets de la série, case, fiches citées) → id du preset.
+Resolver = Callable[[PresetRegistry, Panel, list[LibraryEntry]], str]
+UNKNOWN = "?"  # cases dont le preset ne peut pas être déterminé (palier sans passage au propre…)
 
 MIN_MEASURED = 3  # en dessous : `estimated_s` du preset
 SAMPLE = 20  # dernières générations prises en compte par preset
@@ -63,21 +70,31 @@ def remaining_panels(session: Session, pages: Iterable[Page]) -> list[Panel]:
         return []
     done = set(
         session.scalars(
-            select(PanelImage.panel_id).where(PanelImage.panel_id.in_([p.id for p in panels]), PanelImage.selected)
+            select(PanelImage.panel_id).where(
+                PanelImage.panel_id.in_([p.id for p in panels]), PanelImage.selected, PanelImage.kind == ImageKind.final
+            )
         )
     )
     return [p for p in panels if p.id not in done]
 
 
 def estimate_panels(
-    session: Session, presets_for: Callable[[int], PresetRegistry], panels: Iterable[Panel]
+    session: Session,
+    presets_for: Callable[[int], PresetRegistry],
+    panels: Iterable[Panel],
+    resolve: Resolver | None = None,
 ) -> Estimate:
-    """Somme, preset par preset, des cases à générer × durée par case de ce preset."""
+    """Somme, preset par preset, des cases à générer × durée par case de ce preset (`resolve` : choix du
+    preset, par défaut celui d'une génération normale)."""
     counts: dict[str, int] = {}
     registries: dict[str, PresetRegistry] = {}
     for panel in panels:
         presets = presets_for(panel.page.chapter.project_id)
-        preset_id = resolve_preset_id(presets, panel, panel_cast(session, panel).entries)
+        entries = panel_cast(session, panel).entries
+        try:
+            preset_id = resolve(presets, panel, entries) if resolve else resolve_preset_id(presets, panel, entries)
+        except GenerationError:
+            preset_id = UNKNOWN
         counts[preset_id] = counts.get(preset_id, 0) + 1
         registries.setdefault(preset_id, presets)
     durations = measured_durations(session) if counts else {}

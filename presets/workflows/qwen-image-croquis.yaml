@@ -1,0 +1,55 @@
+# Qwen-Image 2.1 · Croquis — brouillon de case en quelques secondes (texte → image).
+# Palier « croquis » : même graphe et même modèle distillé que Turbo (int8 convrot), mais petite
+# image (`long_side` : grand côté en px, même ratio que la case, côtés multiples de 16) et 6 étapes.
+# Sert à trier les compositions d'une page avant de payer la version propre : les croquis sont des
+# versions de case marquées « croquis », jamais choisies, assemblées, lettrées ni exportées.
+# Graphe provisoire, À REMPLACER par l'export réel de Morigane (~/mangaka-comfy-exports/).
+# Voir presets/README.md (palier croquis, passage au propre).
+id: qwen-image-croquis
+name: "Qwen-Image 2.1 · Croquis — texte → image"
+description: >-
+  Palier croquis : modèle Turbo distillé int8, ~512 px sur le grand côté, 6 étapes. Brouillon de la composition d'une case en quelques secondes (LoRA de la série conservés).
+workflow_file: qwen-image-croquis.json
+output_node: "11"
+timeout_s: 120   # au-delà, la génération est interrompue et le job passe en échec
+role: croquis
+with_references: qwen-image-edit-ref-croquis   # croquis des cases avec références
+tier:
+  name: Croquis
+# Durée d'une case (s) tant qu'il y a moins de 3 générations terminées avec ce preset.
+estimated_s: 6
+# Grand côté du croquis (px) ; l'autre côté suit le ratio de la case (multiple de layout.yaml).
+long_side: 512
+mapping:
+  # TextEncodeQwenImage21 encode les deux prompts : sorties 0 (positif) et 1 (négatif).
+  positive_prompt: { node: "6", input: prompt }
+  negative_prompt: { node: "6", input: negative_prompt }
+  seed: { node: "9", input: seed }
+  steps: { node: "9", input: steps }
+  cfg: { node: "9", input: cfg }
+  width: { node: "8", input: width }
+  height: { node: "8", input: height }
+  filename_prefix: { node: "11", input: filename_prefix }
+# LoRA (style de la série puis identité de chaque fiche) : les mêmes que la version propre.
+lora_chain:
+  class_type: LoraLoaderModelOnly
+  model_from: { node: "1", output: 0 }
+  model_input: model
+  name_input: lora_name
+  strength_input: strength_model
+defaults:
+  negative_prompt: "texte, lettres, bulles, filigrane, signature, flou, mains déformées"
+  steps: 6
+  cfg: 1
+  width: 512
+  height: 512
+  filename_prefix: mangaka/croquis
+# « Générer une case d'essai » (tableau de bord).
+trial:
+  positive_prompt: >-
+    manga panel, black and white ink, screentone shading, a young swordswoman standing on a
+    rooftop at dusk, wind in her hair, dynamic angle
+  width: 512
+  height: 512
+  steps: 6
+  filename_prefix: mangaka/essai

@@ -71,13 +71,16 @@ def test_check_ok_with_recorded_object_info() -> None:
     assert REG.issues == []
     report = _report(_object_info(), [LoraUse(_installed_lora(), "série « Les Lames », style")])
     assert report["ok"] and report["online"] and not report["simulated"]
-    assert set(_problems(report)) == {
+    assert set(_problems(report)) == set(REG.workflows)
+    assert set(REG.workflows) >= {
         "qwen-image-base",
         "qwen-image-base-rapide",
         "qwen-image-edit-ref",
         "qwen-image-edit-ref-rapide",
         "qwen-image-turbo",
         "qwen-image-edit-ref-turbo",
+        "qwen-image-croquis",
+        "qwen-image-turbo-from-sketch",
     }
     assert all(p["ok"] and p["problems"] == [] for p in report["presets"])
     assert report["loras"] == {"checked": 1, "problems": []}
@@ -111,7 +114,8 @@ def test_missing_model_file_is_reported_per_preset() -> None:
 
 
 def test_missing_turbo_file_names_the_file_and_the_folder() -> None:
-    """Fichier Turbo absent de la GX10 : message lisible pour les deux presets Turbo, et eux seuls."""
+    """Fichier Turbo absent de la GX10 : message lisible pour les presets Turbo (croquis et propre depuis
+    croquis compris : même modèle), et eux seuls."""
     info = _object_info()
     missing = _preset_value("qwen-image-turbo", "1", "unet_name")
     assert missing == _preset_value("qwen-image-edit-ref-turbo", "1", "unet_name")
@@ -123,7 +127,8 @@ def test_missing_turbo_file_names_the_file_and_the_folder() -> None:
     )
     assert problems["qwen-image-turbo"] == [expected]
     assert problems["qwen-image-edit-ref-turbo"] == [expected]
-    assert all(not v for k, v in problems.items() if "turbo" not in k)
+    assert problems["qwen-image-croquis"] == [expected] and problems["qwen-image-turbo-from-sketch"] == [expected]
+    assert all(not v for k, v in problems.items() if "turbo" not in k and "croquis" not in k)
 
 
 def test_missing_encoder_and_vae_are_named() -> None:

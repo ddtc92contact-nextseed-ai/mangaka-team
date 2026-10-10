@@ -31,8 +31,19 @@ from ..pipeline.generation import (
     update_panel_prompt,
 )
 from ..pipeline.qc_bench import STEP as BENCH_STEP
+from ..pipeline.sketch import validated_sketch
 from ..presets import PresetError, PresetRegistry
-from ..store.models import Chapter, Job, JobStatus, Page, Panel, PanelImage, PanelImageAnnotation, Project
+from ..store.models import (
+    Chapter,
+    ImageKind,
+    Job,
+    JobStatus,
+    Page,
+    Panel,
+    PanelImage,
+    PanelImageAnnotation,
+    Project,
+)
 from .chapters import get_chapter_or_404, get_page_or_404
 from .deps import AppContext, get_ctx, get_session
 from .errors import FieldError
@@ -75,6 +86,7 @@ def panel_image_out(img: PanelImage, presets: PresetRegistry | None = None) -> P
         id=img.id,
         panel_id=img.panel_id,
         version=img.version,
+        kind=img.kind.value,
         url=image_url(img),
         seed=img.seed,
         selected=img.selected,
@@ -157,6 +169,8 @@ def panel_detail(session: Session, ctx: AppContext, panel: Panel) -> PanelDetail
         target=panel_target(presets, page, panel),
         images=[panel_image_out(i, presets) for i in panel.images],
         active_jobs=[job_out(j) for j in _active_jobs(session, panel.id)],
+        sketch_image_id=sketch.id if (sketch := validated_sketch(panel)) else None,
+        sketch_denoise=panel.sketch_denoise,
     )
 
 
@@ -196,9 +210,17 @@ def get_panel(
 def update_panel(
     panel_id: int, body: PanelUpdate, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
 ) -> PanelDetailOut:
-    """Édite le prompt final (conservé tel quel ensuite) et/ou impose un workflow à la case."""
+    """Édite le prompt final (conservé tel quel ensuite), la description, le débruitage du passage au
+    propre et/ou impose un workflow à la case."""
     panel = get_panel_or_404(session, panel_id)
     changes = body.model_dump(exclude_unset=True)
+    if "sketch_denoise" in changes:
+        panel.sketch_denoise = changes["sketch_denoise"]
+    if "description" in changes:
+        if changes["description"] is None:
+            raise FieldError("description", "ne peut pas être vide")
+        panel.description = changes["description"]
+        update_panel_prompt(_presets(ctx, panel), session, panel, ctx.knowledge)
     if "generation_preset" in changes:
         preset = changes["generation_preset"]
         if preset is not None and preset not in _presets(ctx, panel).workflows:
@@ -335,8 +357,10 @@ def get_panel_image_file(
 def select_panel_image(
     image_id: int, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
 ) -> list[PanelImageOut]:
-    """Choisit cette version pour la case (une seule version choisie par case)."""
+    """Choisit cette version pour la case (une seule version choisie par case ; jamais un croquis)."""
     img = _get_image_or_404(session, image_id)
+    if img.kind == ImageKind.croquis:
+        raise FieldError("image_id", "un croquis ne peut pas être choisi : valide-le puis « Passer au propre »")
     panel = img.panel
     for other in panel.images:
         other.selected = other.id == img.id
@@ -353,6 +377,8 @@ def delete_panel_image(
     """Supprime une version (et son fichier). Si c'était la version choisie, aucune ne l'est plus."""
     img = _get_image_or_404(session, image_id)
     panel_id, path = img.panel_id, img.path
+    if img.panel.sketch_image_id == img.id:
+        img.panel.sketch_image_id = None  # croquis validé supprimé : la case est à trier de nouveau
     session.delete(img)
     session.flush()
     refresh_states(session, [panel_id])
@@ -557,6 +583,9 @@ def list_workflow_presets(ctx: AppContext = Depends(get_ctx)) -> list[WorkflowPr
             tier_order=w.preset.tier.order if w.preset.tier else None,
             estimated_s=w.preset.estimated_s,
             is_quality=bool(defaults and defaults.workflow_quality == w.preset.id),
+            role=w.preset.role,
+            from_sketch=w.preset.from_sketch,
+            is_sketch=bool(defaults and defaults.workflow_sketch == w.preset.id),
         )
         for w in presets.workflows.values()
     ]

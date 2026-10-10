@@ -9,3 +9,9 @@ workflow_with_references: qwen-image-edit-ref-turbo
 workflow_quality: qwen-image-base
 # Style de mise en page des nouvelles séries (presets/layout_styles/) : sage, dynamique, nerveuse.
 layout_style: dynamique
+# Palier « croquis » : brouillon de chaque case en quelques secondes, tri rapide, puis « Passer au
+# propre » des seules compositions validées (preset `from_sketch` du palier de la série).
+# Activé pour les nouvelles séries ; désactivable dans la fiche série.
+sketch_enabled: true
+# Workflow des croquis (son `with_references` sert aux cases avec références).
+workflow_sketch: qwen-image-croquis

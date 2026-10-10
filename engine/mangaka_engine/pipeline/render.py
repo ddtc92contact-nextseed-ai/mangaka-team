@@ -36,7 +36,7 @@ from sqlalchemy.orm import Session, selectinload
 from ..presets import PresetError, PresetRegistry
 from ..store.db import Database
 from ..store.files import FileStore
-from ..store.models import Bubble, BubbleKind, Chapter, Job, Page, Panel, PanelImage
+from ..store.models import Bubble, BubbleKind, Chapter, ImageKind, Job, Page, Panel, PanelImage
 from .assembly import Canvas, PageArt, PanelArt, canvas_geometry, cover_transform, png_bytes, render_png, render_svg
 from .fonts import FontBook
 from .jobs import JobReporter
@@ -121,7 +121,8 @@ class PageInputs:
 
 
 def selected_image(panel: Panel) -> PanelImage | None:
-    return next((i for i in panel.images if i.selected), None)
+    """Version assemblée : la version choisie, jamais un croquis (palier croquis)."""
+    return next((i for i in panel.images if i.selected and i.kind == ImageKind.final), None)
 
 
 def _image_size(img: PanelImage, files: FileStore) -> tuple[int, int] | None:

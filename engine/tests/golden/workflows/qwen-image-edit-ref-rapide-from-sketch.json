@@ -1,0 +1,219 @@
+{
+  "1": {
+    "_meta": {
+      "title": "Modèle de diffusion"
+    },
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "qwen_image_2.1_int8_convrot.safetensors",
+      "weight_dtype": "default"
+    }
+  },
+  "10": {
+    "_meta": {
+      "title": "Décodage VAE"
+    },
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "9",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ]
+    }
+  },
+  "11": {
+    "_meta": {
+      "title": "Sauvegarde"
+    },
+    "class_type": "SaveImage",
+    "inputs": {
+      "filename_prefix": "mangaka/serie-1/chapitre-1/page-1/case-1",
+      "images": [
+        "10",
+        0
+      ]
+    }
+  },
+  "2": {
+    "_meta": {
+      "title": "Encodeur de texte (Qwen3-VL 8B)"
+    },
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "qwen3vl_8b_int8_convrot.safetensors",
+      "device": "default",
+      "type": "qwen_image"
+    }
+  },
+  "20": {
+    "_meta": {
+      "title": "Référence 1"
+    },
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "mangaka/perso1_img1.png"
+    }
+  },
+  "21": {
+    "_meta": {
+      "title": "Référence 2"
+    },
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "mangaka/perso2_img4.png"
+    }
+  },
+  "3": {
+    "_meta": {
+      "title": "VAE"
+    },
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "qwen_image_2.1_vae_bf16.safetensors"
+    }
+  },
+  "30": {
+    "_meta": {
+      "title": "Croquis validé (composition)"
+    },
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "mangaka/croquis_case1_v1.png"
+    }
+  },
+  "31": {
+    "_meta": {
+      "title": "Croquis agrandi à la taille finale"
+    },
+    "class_type": "ImageScale",
+    "inputs": {
+      "crop": "disabled",
+      "height": 1216,
+      "image": [
+        "30",
+        0
+      ],
+      "upscale_method": "lanczos",
+      "width": 832
+    }
+  },
+  "32": {
+    "_meta": {
+      "title": "Encodage VAE du croquis"
+    },
+    "class_type": "VAEEncode",
+    "inputs": {
+      "pixels": [
+        "31",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ]
+    }
+  },
+  "33": {
+    "_meta": {
+      "title": "LoRA style"
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "lora_name": "encre-seinen.safetensors",
+      "model": [
+        "1",
+        0
+      ],
+      "strength_model": 0.7
+    }
+  },
+  "34": {
+    "_meta": {
+      "title": "LoRA Aiko"
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "lora_name": "aiko-v3.safetensors",
+      "model": [
+        "33",
+        0
+      ],
+      "strength_model": 0.9
+    }
+  },
+  "4": {
+    "_meta": {
+      "title": "Cache Qwen Image 2.1"
+    },
+    "class_type": "QwenImage21Cache",
+    "inputs": {
+      "device": "auto",
+      "dtype": "default",
+      "model": [
+        "34",
+        0
+      ]
+    }
+  },
+  "6": {
+    "_meta": {
+      "title": "Prompts (positif / négatif) + références"
+    },
+    "class_type": "TextEncodeQwenImage21",
+    "inputs": {
+      "clip": [
+        "2",
+        0
+      ],
+      "images.image_1": [
+        "20",
+        0
+      ],
+      "images.image_2": [
+        "21",
+        0
+      ],
+      "negative_prompt": "texte, bulles",
+      "prompt": "plan moyen, Aiko sur un toit au crépuscule, encre et trames",
+      "resolution": 1024,
+      "vae": [
+        "3",
+        0
+      ]
+    }
+  },
+  "9": {
+    "_meta": {
+      "title": "KSampler"
+    },
+    "class_type": "KSampler",
+    "inputs": {
+      "cfg": 1,
+      "denoise": 0.65,
+      "latent_image": [
+        "32",
+        0
+      ],
+      "model": [
+        "4",
+        0
+      ],
+      "negative": [
+        "6",
+        1
+      ],
+      "positive": [
+        "6",
+        0
+      ],
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "seed": 424242,
+      "steps": 25
+    }
+  }
+}

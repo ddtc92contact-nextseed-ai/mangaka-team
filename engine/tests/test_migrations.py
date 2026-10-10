@@ -62,7 +62,16 @@ def _version(path: Path) -> int:
     return v
 
 
+def _drop_v12_sketch(con: sqlite3.Connection) -> None:
+    con.execute("ALTER TABLE panel_images DROP COLUMN kind")
+    con.execute("ALTER TABLE panels DROP COLUMN sketch_image_id")
+    con.execute("ALTER TABLE panels DROP COLUMN sketch_denoise")
+    con.execute("ALTER TABLE projects DROP COLUMN sketch_enabled")
+    con.execute("ALTER TABLE projects DROP COLUMN sketch_denoise")
+
+
 def _drop_v11_library(con: sqlite3.Connection) -> None:
+    _drop_v12_sketch(con)
     con.execute("ALTER TABLE panels DROP COLUMN decor_id")
     con.execute("ALTER TABLE panels DROP COLUMN object_ids")
     con.execute("DROP TABLE series_asset_images")
@@ -355,6 +364,26 @@ def test_v8_database_gets_frame_and_sfx_columns(make_settings: Callable[..., Set
         res = c.put(f"/panels/{panel['id']}/frame", json={"frame": "none"})
         assert res.status_code == 200, res.text
         assert res.json()["layout"]["panels"][0]["frame"] == "none"
+    assert _version(settings.database_path) == SCHEMA_VERSION
+    fresh = settings.database_path.parent / "fresh.db"
+    create_db_engine(fresh).dispose()
+    assert _columns(settings.database_path) == _columns(fresh)
+
+
+def test_v11_database_gets_sketch_columns(make_settings: Callable[..., Settings]) -> None:
+    """v11 → v12 : palier croquis. Les versions existantes sont « final », le croquis est activé."""
+    settings = make_settings()
+    with TestClient(create_app(settings)) as c:
+        project = c.post("/projects", json={"title": "Série v11"}).json()
+    con = sqlite3.connect(settings.database_path)
+    _drop_v12_sketch(con)
+    con.execute("PRAGMA user_version = 11")
+    con.commit()
+    con.close()
+
+    with TestClient(create_app(settings)) as c:
+        got = c.get(f"/projects/{project['id']}").json()
+        assert got["sketch_enabled"] is True and got["sketch_denoise"] is None
     assert _version(settings.database_path) == SCHEMA_VERSION
     fresh = settings.database_path.parent / "fresh.db"
     create_db_engine(fresh).dispose()

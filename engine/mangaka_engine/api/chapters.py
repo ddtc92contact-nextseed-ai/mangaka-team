@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import func, select
@@ -22,6 +23,7 @@ from ..pipeline.pages import (
     slant_page_cut,
 )
 from ..pipeline.script import normalize_shot_type, script_job
+from ..pipeline.sketch import cleaned_from, latest_sketch, validated_sketch
 from ..presets import PresetError
 from ..store.models import (
     Bubble,
@@ -29,6 +31,7 @@ from ..store.models import (
     Chapter,
     ChapterStatus,
     Character,
+    ImageKind,
     Job,
     JobStatus,
     Page,
@@ -95,6 +98,20 @@ def _one_out(session: Session, chapter: Chapter) -> ChapterOut:
     return chapter_out(chapter, _page_counts(session, [chapter.id]).get(chapter.id, (0, 0)))
 
 
+def _sketch_fields(panel: Panel) -> dict[str, Any]:
+    """Palier croquis : croquis montré (validé, sinon le plus récent), validation, propre déjà tiré."""
+    validated = validated_sketch(panel)
+    shown = validated or latest_sketch(panel)
+    return {
+        "sketch_count": sum(1 for i in panel.images if i.kind == ImageKind.croquis),
+        "sketch_image_id": shown.id if shown else None,
+        "sketch_image_url": f"/panel-images/{shown.id}/file" if shown else None,
+        "sketch_validated": validated is not None,
+        "sketch_denoise": panel.sketch_denoise,
+        "sketch_cleaned": validated is not None and cleaned_from(panel, validated) is not None,
+    }
+
+
 def page_out(page: Page, regen_threshold: float | None = None) -> PageOut:
     chosen = {p.id: next((i for i in p.images if i.selected), None) for p in page.panels}
     layout_panels = {lp.get("panel_id"): lp for lp in (page.layout or {}).get("panels", [])}
@@ -138,7 +155,8 @@ def page_out(page: Page, regen_threshold: float | None = None) -> PageOut:
                 final_prompt=p.final_prompt,
                 final_prompt_manual=p.final_prompt_manual,
                 generation_preset=p.generation_preset,
-                image_count=len(p.images),
+                image_count=sum(1 for i in p.images if i.kind == ImageKind.final),
+                **_sketch_fields(p),
                 selected_image_id=next((i.id for i in p.images if i.selected), None),
                 selected_image_url=next((f"/panel-images/{i.id}/file" for i in p.images if i.selected), None),
                 qc_verdict=c.qc_verdict.value if (c := chosen[p.id]) and c.qc_verdict else None,

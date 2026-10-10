@@ -63,6 +63,8 @@ def check_workflow(loaded: LoadedWorkflow, object_info: dict[str, Any]) -> list[
     preset = loaded.preset
     runtime = {(t.node, t.input) for t in preset.mapping.values()}
     runtime |= {(s.node, s.input) for s in preset.reference_images}
+    if preset.source_image is not None:  # croquis validé, envoyé à chaque passage au propre
+        runtime.add((preset.source_image.node, preset.source_image.input))
     problems: list[str] = []
     unknown: set[str] = set()
     for node_id in sorted(loaded.workflow, key=_node_order):

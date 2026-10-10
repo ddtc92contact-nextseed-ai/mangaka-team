@@ -28,6 +28,7 @@ from .api import (
     projects,
     qc,
     qc_bench,
+    sketch,
     system,
 )
 from .api.deps import AppContext
@@ -162,6 +163,7 @@ def create_app(settings: Settings | None = None, providers: Providers | None = N
     app.include_router(art_direction.router)
     app.include_router(jobs.router)
     app.include_router(generation.router)
+    app.include_router(sketch.router)
     app.include_router(lettering.router)
     app.include_router(qc.router)
     app.include_router(qc_bench.router)

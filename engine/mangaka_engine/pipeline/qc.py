@@ -37,8 +37,26 @@ from ..providers.qc import Detections, QCProviderError
 from ..providers.vision import VisionError, VisionProvider, VisionResponseError
 from ..store.db import Database
 from ..store.files import FileStore
-from ..store.models import Character, Job, JobStatus, Page, Panel, PanelImage, PanelState, QCVerdict, utcnow
-from .generation import ACTIVE, GenerationError, enqueue_panel, panel_characters, refresh_states
+from ..store.models import (
+    Character,
+    ImageKind,
+    Job,
+    JobStatus,
+    Page,
+    Panel,
+    PanelImage,
+    PanelState,
+    QCVerdict,
+    utcnow,
+)
+from .generation import (
+    ACTIVE,
+    GenerationError,
+    composition_params,
+    enqueue_panel,
+    panel_characters,
+    refresh_states,
+)
 from .generation import QC_STEP as STEP
 from .generation import STEP as GENERATION_STEP
 from .jobs import JobReporter
@@ -369,7 +387,8 @@ def make_qc_job(
 def target_image(panel: Panel) -> PanelImage | None:
     """Version contrôlée par défaut : la version choisie, sinon la plus récente."""
     chosen = next((i for i in panel.images if i.selected), None)
-    return chosen or (panel.images[-1] if panel.images else None)
+    finals = [i for i in panel.images if i.kind == ImageKind.final]  # jamais un croquis
+    return chosen or (finals[-1] if finals else None)
 
 
 class AutoQC:
@@ -809,7 +828,7 @@ class QCExecutor:
                 panel,
                 count=1,
                 preset=(img.params or {}).get("preset"),
-                extra_params={"qc_attempt": attempt, "retry_of": img.id},
+                extra_params={"qc_attempt": attempt, "retry_of": img.id, **composition_params(img)},
             )
         except (GenerationError, PresetError) as exc:
             return {"attempt": attempt, "error": str(exc)}

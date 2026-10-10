@@ -50,6 +50,9 @@ from .schemas import (
     WorkflowPreset,
 )
 
+# Ordre des rôles de workflow dans les listes : paliers de série, croquis, propre depuis croquis.
+ROLE_ORDER = {"generation": 0, "croquis": 1, "propre": 2}
+
 
 class PresetError(Exception):
     """Preset introuvable ou invalide (message lisible, en français)."""
@@ -172,10 +175,18 @@ class PresetRegistry:
                 reg._register(reg.workflows, wf.preset.id, wf, path)
 
         reg._check_reference_pairs()
-        # Ordre des listes déroulantes : texte → image d'abord, puis avec références ; par nom ensuite
-        # (« … · Qualité » avant « … · Rapide »).
+        reg._check_sketch_pairs()
+        # Ordre des listes déroulantes : paliers de série, puis croquis, puis « propre depuis croquis » ;
+        # texte → image d'abord, puis avec références ; par nom ensuite (« … · Qualité » avant « … · Rapide »).
         reg.workflows = dict(
-            sorted(reg.workflows.items(), key=lambda kv: (bool(kv[1].preset.reference_images), kv[1].preset.name))
+            sorted(
+                reg.workflows.items(),
+                key=lambda kv: (
+                    ROLE_ORDER[kv[1].preset.role],
+                    bool(kv[1].preset.reference_images),
+                    kv[1].preset.name,
+                ),
+            )
         )
 
         for path in sorted((root / "layouts").glob("*.y*ml")):
@@ -265,6 +276,17 @@ class PresetRegistry:
                         PresetIssue(reg._rel(defaults_path), f"workflow inconnu : {defaults.workflow_quality}")
                     )
                     reg.defaults = defaults.model_copy(update={"workflow_quality": None})
+                elif defaults.workflow_sketch and (
+                    defaults.workflow_sketch not in reg.workflows
+                    or reg.workflows[defaults.workflow_sketch].preset.role != "croquis"
+                ):
+                    reg.issues.append(
+                        PresetIssue(
+                            reg._rel(defaults_path),
+                            f"workflow_sketch : workflow inconnu ou sans rôle croquis : {defaults.workflow_sketch}",
+                        )
+                    )
+                    reg.defaults = defaults.model_copy(update={"workflow_sketch": None})
                 elif defaults.layout_style and defaults.layout_style not in reg.layout_styles:
                     reg.issues.append(
                         PresetIssue(reg._rel(defaults_path), f"style de mise en page inconnu : {defaults.layout_style}")
@@ -299,6 +321,25 @@ class PresetRegistry:
             else:
                 continue
             self.issues.append(PresetIssue(self._rel(wf.preset_path or wf.source), problem))
+
+    def _check_sketch_pairs(self) -> None:
+        """`from_sketch` doit désigner un workflow « propre » chargé ; le `with_references` d'un workflow
+        croquis ou propre doit garder le même rôle. Le workflow reste chargé ; « Passer au propre » échoue
+        avec un message clair (jamais de repli sur un autre palier)."""
+        for wf in self.workflows.values():
+            problems: list[str] = []
+            target = wf.preset.from_sketch
+            if target is not None:
+                other = self.workflows.get(target)
+                if other is None:
+                    problems.append(f"from_sketch : workflow inconnu ou invalide : {target}")
+                elif other.preset.role != "propre":
+                    problems.append(f"from_sketch : le workflow {target} n'a pas le rôle « propre »")
+            refs = self.workflows.get(wf.preset.with_references or "")
+            if refs is not None and wf.preset.role != "generation" and refs.preset.role != wf.preset.role:
+                problems.append(f"with_references : le workflow {refs.preset.id} n'a pas le rôle « {wf.preset.role} »")
+            for problem in problems:
+                self.issues.append(PresetIssue(self._rel(wf.preset_path or wf.source), problem))
 
     def _rel(self, path: Path) -> str:
         try:
@@ -374,6 +415,13 @@ def check_workflow_mapping(preset: WorkflowPreset, workflow: Any) -> list[str]:
                 errors.append(f"référence {i} : nœud {extra} absent du workflow")
             elif extra in mapped:
                 errors.append(f"référence {i} : le nœud {extra} est mappé, il ne peut pas être retiré")
+    source = preset.source_image
+    if source is not None:
+        node = workflow.get(source.node)
+        if not isinstance(node, dict):
+            errors.append(f"source_image : nœud {source.node} absent du workflow")
+        elif source.input not in node.get("inputs", {}):
+            errors.append(f"source_image : entrée « {source.input} » absente du nœud {source.node}")
     chain = preset.lora_chain
     if chain is not None:
         for label, src in (("model_from", chain.model_from), ("clip_from", chain.clip_from)):
