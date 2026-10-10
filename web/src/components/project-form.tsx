@@ -140,14 +140,15 @@ export function ProjectForm({
     setErrors((e) => ({ ...e, [key]: "" }));
   };
 
-  /** Le genre pré-remplit la mise en page, le sens de lecture et les polices (modifiables ensuite). */
+  /** Le genre pré-remplit le sens de lecture et les polices (modifiables ensuite) ; il peut suggérer une
+   * mise en page (jamais « sage ») — sans suggestion : celle des nouvelles séries, ou celle déjà choisie. */
   function chooseGenre(id: string) {
     const g = genres.find((x) => x.id === id);
     setForm((f) => ({
       ...f,
       style_genre: id || undefined,
       ...(g && {
-        layout_style: g.layout_style,
+        layout_style: g.layout_style ?? (initial ? f.layout_style : undefined),
         reading_direction: g.reading_direction,
         dialogue_font: g.fonts.dialogue,
         shout_font: g.fonts.shout,
@@ -431,7 +432,12 @@ export function ProjectForm({
         htmlFor="layout_style"
         help="serie.layout_style"
         error={errors.layout_style}
-        hint={styleInfo?.description || "Découpes, biais et gouttières de toutes les pages de la série."}
+        hint={
+          (styleInfo?.description || "Découpes, biais et gouttières de toutes les pages de la série.") +
+          (initial && layoutStyle !== initial.layout_style && initial.relayout_page_count > 0
+            ? " Après l'enregistrement, tu pourras remettre en page les pages pas encore générées."
+            : "")
+        }
       >
         <Select
           id="layout_style"

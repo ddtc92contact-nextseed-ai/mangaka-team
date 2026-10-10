@@ -63,7 +63,12 @@ def _version(path: Path) -> int:
     return v
 
 
+def _drop_v19_layout_notice(con: sqlite3.Connection) -> None:
+    con.execute("ALTER TABLE projects DROP COLUMN layout_style_notice")
+
+
 def _drop_v17_style_board(con: sqlite3.Connection) -> None:
+    _drop_v19_layout_notice(con)
     con.execute("ALTER TABLE series_assets DROP COLUMN active")
 
 
@@ -594,6 +599,7 @@ def test_v17_database_never_reuses_ids(make_settings: Callable[..., Settings]) -
         c.post(f"/decors/{decor['id']}/images", files=[("files", ("d.png", png_bytes(), "image/png"))])
         content = [c.get(i["url"]).content for i in images]
     con = sqlite3.connect(settings.database_path)
+    _drop_v19_layout_notice(con)
     _drop_v18_autoincrement(con)
     con.execute("PRAGMA user_version = 17")
     con.commit()
@@ -625,3 +631,30 @@ def test_v17_database_never_reuses_ids(make_settings: Callable[..., Settings]) -
     assert con.execute("PRAGMA foreign_key_check").fetchall() == []
     assert con.execute("PRAGMA integrity_check").fetchone() == ("ok",)
     con.close()
+
+
+def test_v18_database_flags_series_left_on_sage(make_settings: Callable[..., Settings]) -> None:
+    """v18 → v19 : les séries en « sage » (réglé par la v8) gardent leur style, avec une note unique."""
+    settings = make_settings()
+    with TestClient(create_app(settings)) as c:
+        sage = c.post("/projects", json={**STYLE, "title": "Ancienne", "layout_style": "sage"}).json()
+        dyn = c.post("/projects", json={**STYLE, "title": "Vivante"}).json()
+    con = sqlite3.connect(settings.database_path)
+    _drop_v19_layout_notice(con)
+    con.execute("PRAGMA user_version = 18")
+    con.commit()
+    con.close()
+
+    with TestClient(create_app(settings)) as c:
+        old = c.get(f"/projects/{sage['id']}").json()
+        assert (old["layout_style"], old["layout_style_notice"]) == ("sage", True)
+        assert c.get(f"/projects/{dyn['id']}").json()["layout_style_notice"] is False
+        # « Garder sage » : la note disparaît, le style ne bouge pas.
+        kept = c.patch(f"/projects/{sage['id']}", json={"layout_style_notice": False}).json()
+        assert (kept["layout_style"], kept["layout_style_notice"]) == ("sage", False)
+        r = c.patch(f"/projects/{sage['id']}", json={"layout_style_notice": True})
+        assert r.status_code == 422
+    assert _version(settings.database_path) == SCHEMA_VERSION
+    fresh = settings.database_path.parent / "fresh.db"
+    create_db_engine(fresh).dispose()
+    assert _columns(settings.database_path) == _columns(fresh)

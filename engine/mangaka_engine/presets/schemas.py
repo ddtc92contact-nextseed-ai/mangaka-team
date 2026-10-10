@@ -732,9 +732,12 @@ class GenreFonts(_Strict):
 
 
 class StyleGenre(StylePack):
-    """Genre et public (`presets/style_genres/*.yaml`) : il pré-remplit la mise en page de la série."""
+    """Genre et public (`presets/style_genres/*.yaml`) : il peut suggérer la mise en page de la série."""
 
-    layout_style: str = Field(description="Grammaire de mise en page par défaut (layout_styles/)")
+    layout_style: str | None = Field(
+        default=None,
+        description="Grammaire de mise en page suggérée (layout_styles/), jamais « sage » ; absente : defaults.yaml",
+    )
     reading_direction: Literal["ltr", "rtl"]
     fonts: GenreFonts
     llm_guidelines: str = Field(min_length=1, description="Consignes du scénariste et du directeur artistique")

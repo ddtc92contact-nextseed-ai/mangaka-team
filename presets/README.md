@@ -89,13 +89,15 @@ d'avant. Les gabarits de la bibliothèque n'ont pas de biais : ce sont les style
 ## Styles de mise en page (`layout_styles/*.yaml`)
 
 Chaque série a sa signature de mise en page : le champ « Style de mise en page » de la série (défaut
-`dynamique`, `defaults.yaml`). Une page peut imposer le sien (atelier de mise en page). Aucune valeur de
+`dynamique`, `defaults.yaml`). Un genre peut suggérer `dynamique` ou `nerveuse`, jamais `sage` : les
+découpes droites restent un choix explicite de la fiche série. Une page peut imposer le sien (atelier de
+mise en page). Aucune valeur de
 style n'est écrite dans le code : tout est dans ces fichiers, et **tous les champs sont obligatoires**.
 
 | Style | Intention |
 | --- | --- |
 | `sage` | Découpes droites, gouttières du format, toujours le gabarit le mieux adapté : identique à la mise en page d'avant les styles |
-| `dynamique` | Quelques biais sur les cases fortes et les temps d'action, gouttières légèrement variables |
+| `dynamique` | Au moins une découpe en biais sur la plupart des pages de 4 cases ou plus (davantage sur les cases fortes et les temps d'action), pages calmes plus posées, gouttières légèrement variables |
 | `nerveuse` | Biais fréquents et plus raides, fort contraste de tailles, grilles régulières rares |
 
 ```yaml
@@ -288,7 +290,7 @@ description: Compétition et dépassement — matchs, entraînements, esprit d'�
 order: 80
 lang: en                      # langue mesurée au calibrage (fr | en)
 prompt_keywords: [sports manga style, dynamic athletic poses, motion blur, stadium atmosphere]
-layout_style: nerveuse        # grammaire par défaut (layout_styles/) : sage | dynamique | nerveuse
+layout_style: nerveuse        # facultatif : style suggéré (dynamique | nerveuse ; jamais sage) — absent : defaults.yaml
 reading_direction: rtl        # rtl (manga) | ltr (BD)
 fonts: { dialogue: baloo2, shout: bowlby-one }   # polices de fonts.yaml
 llm_guidelines: >-            # consignes du scénariste et du directeur artistique

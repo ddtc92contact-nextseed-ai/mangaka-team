@@ -5,7 +5,6 @@ description: Enfantin (kodomo) — histoires simples, personnages ronds et attac
 order: 40
 lang: fr
 prompt_keywords: [manga pour enfants, style simple et mignon, tout public]
-layout_style: sage
 reading_direction: rtl
 fonts: { dialogue: fredoka, shout: titan-one }
 # Planche de style : scène test des essais (français, aucun personnage de la série).

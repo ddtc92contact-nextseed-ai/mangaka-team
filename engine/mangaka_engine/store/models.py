@@ -146,6 +146,9 @@ class Project(TimestampMixin, Base):
     style_lora_weight: Mapped[float] = mapped_column(Float, default=0.8)
     # Grammaire de mise en page de la série (presets/layout_styles/) : sage, dynamique, nerveuse…
     layout_style: Mapped[str] = mapped_column(String(100), default="dynamique")
+    # Série passée en « sage » par la migration v8, pas par l'utilisateur : note unique dans la fiche
+    # série, retirée dès que le style change ou que la note est fermée.
+    layout_style_notice: Mapped[bool] = mapped_column(default=False)
     # Palier croquis (brouillon de page, tri, passage au propre) ; `sketch_denoise` : débruitage du
     # passage au propre (None = `denoise` du preset « propre »).
     sketch_enabled: Mapped[bool] = mapped_column(default=True)

@@ -22,7 +22,7 @@ export const HELP = {
   "serie.direction":
     "Manga : on lit de droite à gauche ; BD : de gauche à droite. Le sens décide de l'ordre des cases, de la reliure et de la place des bulles ; le changer recalcule les pages déjà mises en page.",
   "serie.layout_style":
-    "La façon de découper les pages, de sage (grille régulière) à nerveuse (cases inclinées, tailles contrastées). Il s'applique à toutes les pages de la série à leur mise en page.",
+    "La façon de découper les pages : sage (découpes droites, grille régulière), dynamique (des découpes en biais sur la plupart des pages, par défaut) ou nerveuse (biais fréquents et raides, tailles contrastées). Il s'applique aux pages à leur mise en page ; après un changement, « Remettre en page » recalcule les pages pas encore générées.",
   "serie.fonts":
     "Les polices du lettrage, pré-remplies par le genre. Celle des cris sert aux bulles « cri » ; chaque bulle peut encore changer de police au lettrage.",
   "serie.page_format":
@@ -50,7 +50,7 @@ export const HELP = {
   "chapitre_infos.summary":
     "Résumé écrit par le LLM au découpage. Les chapitres suivants le relisent pour garder la continuité de l'histoire.",
   "chapitre_infos.generate_all":
-    "Met en file la génération de toutes les cases qui n'ont pas encore de version choisie, au palier de la série. Les cases déjà choisies ne sont pas touchées ; une confirmation montre le nombre de cases et la durée estimée.",
+    "Met en file tout le chapitre en un clic : les pages sans mise en page sont mises en page d'abord, puis chaque case sans version choisie des pages de l'histoire et bonus part en génération (en croquis d'abord si le palier croquis est activé). Une génération à la fois ; une confirmation montre le nombre de cases et la durée estimée.",
 
   // --- planche de style ------------------------------------------------------------------------------------------
   "style_board.trials":
@@ -158,7 +158,7 @@ export const HELP = {
   "direction.panel":
     "Intensité, plan, angle et cadre guident la taille de la case et le prompt de l'image ; l'ambiance décrit la lumière. Le cadre et les onomatopées servent ensuite au lettrage.",
   "atelier.generate_missing":
-    "Met en file toutes les cases de la page sans version choisie. Suis l'avancement dans la file en haut à droite ou dans l'onglet Production.",
+    "Seulement la page affichée : met en file ses cases sans version choisie, en version finale. Pour tout le chapitre, utilise « Générer le chapitre ». Suis l'avancement dans la file en haut à droite ou dans l'onglet Production.",
   "atelier.finish":
     "Finition d'impression : agrandit la version retenue des cases trop petites pour le dpi du format, sans changer la composition. À faire une fois les versions choisies, avant l'export.",
   "atelier.dpi":

@@ -140,7 +140,8 @@ def list_presets(ctx: AppContext = Depends(get_ctx)) -> dict[str, Any]:
                 "id": g.id,
                 "name": g.name,
                 "description": g.description,
-                "layout_style": g.layout_style,
+                # Suggestion du genre (jamais « sage ») ; null : style par défaut des nouvelles séries.
+                "layout_style": g.layout_style if reg.genre_layout_style(g.id) == g.layout_style else None,
                 "reading_direction": g.reading_direction,
                 "fonts": {"dialogue": g.fonts.dialogue, "shout": g.fonts.shout},
                 "allowed_tones": g.allowed_tones,

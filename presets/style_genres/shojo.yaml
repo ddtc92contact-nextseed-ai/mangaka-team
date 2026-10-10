@@ -5,7 +5,6 @@ description: Romance et émotions — sentiments intérieurs, relations, regards
 order: 30
 lang: fr
 prompt_keywords: [manga shojo, style romantique, grands yeux, traits fins et fleuris]
-layout_style: sage
 reading_direction: rtl
 fonts: { dialogue: fredoka, shout: lilita-one }
 # Planche de style : scène test des essais (français, aucun personnage de la série).

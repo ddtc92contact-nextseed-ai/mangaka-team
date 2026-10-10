@@ -5,7 +5,6 @@ description: Le quotidien — moments ordinaires, petites émotions, ambiance in
 order: 60
 lang: fr
 prompt_keywords: [manga tranche de vie, scène quotidienne calme]
-layout_style: sage
 reading_direction: rtl
 fonts: { dialogue: baloo2, shout: lilita-one }
 # Planche de style : scène test des essais (français, aucun personnage de la série).

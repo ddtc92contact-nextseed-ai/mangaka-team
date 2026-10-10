@@ -31,6 +31,8 @@
 - 18 : ids jamais réutilisés (AUTOINCREMENT) sur les tables dont l'id entre dans l'URL d'un fichier
   (personnages, objets, décors et leurs images, cases, versions de case, jobs) : tables reconstruites,
   données et ids gardés.
+- 19 : note « mise en page sage héritée » : les séries encore en « sage » (réglé par la v8, pas par
+  l'utilisateur) gardent leur style, mais la fiche série le signale une fois. Rien d'autre ne change.
 
 Une base neuve est créée directement à la dernière version. Chaque migration tourne dans une
 transaction unique, clés étrangères désactivées (recette « 12 étapes » de SQLite pour reconstruire
@@ -72,7 +74,7 @@ from .models import (
 
 log = logging.getLogger("mangaka_engine")
 
-SCHEMA_VERSION = 18
+SCHEMA_VERSION = 19
 
 
 class MigrationError(RuntimeError):
@@ -297,6 +299,11 @@ def _v17_to_v18(cur: sqlite3.Cursor) -> None:
         _rebuild(cur, model.__table__)  # type: ignore[arg-type]
 
 
+def _v18_to_v19(cur: sqlite3.Cursor) -> None:
+    cur.execute("ALTER TABLE projects ADD COLUMN layout_style_notice BOOLEAN NOT NULL DEFAULT 0")
+    cur.execute("UPDATE projects SET layout_style_notice = 1 WHERE layout_style = 'sage'")
+
+
 MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     # version de départ → (version d'arrivée, fonction)
     0: (2, _v0_to_v2),
@@ -317,6 +324,7 @@ MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     15: (16, _v15_to_v16),
     16: (17, _v16_to_v17),
     17: (18, _v17_to_v18),
+    18: (19, _v18_to_v19),
 }
 
 

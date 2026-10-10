@@ -27,6 +27,7 @@ from .api import (
     jobs,
     knowledge,
     lettering,
+    production,
     projects,
     qc,
     qc_bench,
@@ -231,6 +232,7 @@ def create_app(settings: Settings | None = None, providers: Providers | None = N
     app.include_router(jobs.router)
     app.include_router(generation.router)
     app.include_router(sketch.router)
+    app.include_router(production.router)
     app.include_router(composition.router)
     app.include_router(finishing.router)
     app.include_router(lettering.router)

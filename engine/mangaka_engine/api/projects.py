@@ -8,13 +8,27 @@ from sqlalchemy.orm import Session
 
 from ..agents.profiles import ProfileInvalid
 from ..pipeline.comfy_check import control_types
-from ..pipeline.pages import change_reading_direction
+from ..pipeline.generation import ACTIVE
+from ..pipeline.generation import STEP as GENERATION_STEP
+from ..pipeline.layout import LayoutError
+from ..pipeline.pages import change_reading_direction, layout_page
 from ..pipeline.style import StyleError, check_style, lora_triggers, series_style, style_names
+from ..presets import PresetError
 from ..presets.schemas import AgentPreset
-from ..store.models import Chapter, Character, Page, Project, ReadingDirection, SeriesStatus
+from ..store.models import (
+    Chapter,
+    Character,
+    Job,
+    Page,
+    Panel,
+    PanelImage,
+    Project,
+    ReadingDirection,
+    SeriesStatus,
+)
 from .deps import AppContext, get_ctx, get_session
 from .errors import FieldError
-from .schemas import ProjectCreate, ProjectOut, ProjectUpdate
+from .schemas import ProjectCreate, ProjectOut, ProjectUpdate, RelayoutOut
 
 router = APIRouter(prefix="/projects", tags=["projets"])
 
@@ -23,7 +37,12 @@ FONT_SOURCES = {"dialogue_font": "fonts.yaml#styles.speech.font", "shout_font": 
 
 
 def project_out(
-    ctx: AppContext, project: Project, character_count: int, chapter_count: int, laid_out: int = 0
+    ctx: AppContext,
+    project: Project,
+    character_count: int,
+    chapter_count: int,
+    laid_out: int = 0,
+    relayout: int = 0,
 ) -> ProjectOut:
     presets = ctx.agents.presets_for(project.id)
     styles = presets.fonts.styles if presets.fonts else {}
@@ -56,6 +75,8 @@ def project_out(
         character_count=character_count,
         chapter_count=chapter_count,
         laid_out_page_count=laid_out,
+        relayout_page_count=relayout,
+        layout_style_notice=project.layout_style_notice,
         created_at=project.created_at,
         updated_at=project.updated_at,
     )
@@ -109,7 +130,31 @@ def _save_fonts(ctx: AppContext, session: Session, project: Project, fonts: dict
         raise FieldError(field, " ; ".join(e.message for e in exc.errors)) from None
 
 
-def _counts(session: Session, project_id: int) -> tuple[int, int, int]:
+def _ungenerated_pages(session: Session, project_id: int) -> list[Page]:
+    """Pages avec des cases mais sans aucune image (croquis compris) ni génération en cours, dans
+    l'ordre de lecture : un changement de style peut les remettre en page sans rien perdre."""
+    generated = select(Panel.page_id).join(PanelImage, PanelImage.panel_id == Panel.id)
+    busy = (
+        select(Panel.page_id)
+        .join(Job, Job.panel_id == Panel.id)
+        .where(Job.step == GENERATION_STEP, Job.status.in_(ACTIVE))
+    )
+    return list(
+        session.scalars(
+            select(Page)
+            .join(Chapter, Page.chapter_id == Chapter.id)
+            .where(
+                Chapter.project_id == project_id,
+                Page.id.in_(select(Panel.page_id)),
+                Page.id.not_in(generated),
+                Page.id.not_in(busy),
+            )
+            .order_by(Chapter.number, Page.number)
+        )
+    )
+
+
+def _counts(session: Session, project_id: int) -> tuple[int, int, int, int]:
     chars = session.scalar(select(func.count()).where(Character.project_id == project_id)) or 0
     chapters = session.scalar(select(func.count()).where(Chapter.project_id == project_id)) or 0
     laid_out = (
@@ -121,7 +166,7 @@ def _counts(session: Session, project_id: int) -> tuple[int, int, int]:
         )
         or 0
     )
-    return chars, chapters, laid_out
+    return chars, chapters, laid_out, len(_ungenerated_pages(session, project_id))
 
 
 def _check_presets(
@@ -166,9 +211,10 @@ def create_project(
     if workflow is None:
         raise FieldError("workflow_preset", "aucun workflow par défaut : choisis-en un")
     _check_style(ctx, body.style_genre, body.style_rendering, body.style_tone, body.style_options)
-    # Le genre pré-remplit la mise en page, le sens de lecture et les polices (modifiables).
+    # Le genre pré-remplit le sens de lecture et les polices (modifiables) ; il peut suggérer un style
+    # de mise en page (jamais « sage »), sinon celui de defaults.yaml.
     genre = ctx.presets.style_genres[body.style_genre]
-    layout_style = body.layout_style or genre.layout_style
+    layout_style = body.layout_style or ctx.agents.presets_for(None).genre_layout_style(body.style_genre)
     _check_presets(ctx, page_format, workflow, layout_style, body.upscaler, body.clean_control)
     lora = ctx.presets.style_loras.get(body.style_lora_name)
     weight = body.style_lora_weight if body.style_lora_weight is not None else (lora.weight if lora else 0.8)
@@ -235,6 +281,7 @@ def update_project(
         "layout_style",
         "sketch_enabled",
         "clean_mode",
+        "layout_style_notice",
     ):
         if key in changes and changes[key] is None:
             raise FieldError(key, "ne peut pas être vide")
@@ -256,6 +303,8 @@ def update_project(
             changes.get("style_tone", project.style_tone),
             changes.get("style_options", project.style_options or {}),
         )
+    if changes.get("layout_style", project.layout_style) != project.layout_style:
+        changes["layout_style_notice"] = False  # style choisi par l'utilisateur : plus de note
     fonts = {k: changes.pop(k) for k in FONT_SOURCES if k in changes}
     _check_fonts(ctx, fonts)
     direction = changes.pop("reading_direction", None)
@@ -271,6 +320,33 @@ def update_project(
     session.commit()
     _save_fonts(ctx, session, project, fonts)
     return project_out(ctx, project, *_counts(session, project_id))
+
+
+@router.post("/{project_id}/relayout", response_model=RelayoutOut)
+def relayout_ungenerated_pages(
+    project_id: int, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
+) -> RelayoutOut:
+    """« Remettre en page les pages non générées » (après un changement de style de mise en page) :
+    seules les pages sans aucune image ni génération en cours sont recalculées, chacune avec sa graine."""
+    project = get_project_or_404(session, project_id)
+    presets = ctx.agents.presets_for(project.id)
+    pages = _ungenerated_pages(session, project_id)
+    for page in pages:
+        try:
+            layout_page(presets, page)
+        except (LayoutError, PresetError) as exc:
+            raise FieldError("layout", f"chapitre {page.chapter.number}, page {page.number} : {exc}") from None
+    session.commit()
+    total = (
+        session.scalar(
+            select(func.count(func.distinct(Page.id)))
+            .join(Chapter, Page.chapter_id == Chapter.id)
+            .join(Panel, Panel.page_id == Page.id)
+            .where(Chapter.project_id == project_id)
+        )
+        or 0
+    )
+    return RelayoutOut(relaid_page_ids=[p.id for p in pages], kept_pages=total - len(pages))
 
 
 @router.delete("/{project_id}", status_code=204)
