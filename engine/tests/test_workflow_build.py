@@ -37,7 +37,7 @@ def test_edit_preset_is_valid_and_declares_slots_and_chain() -> None:
     assert all(not s.remove for s in preset.reference_images)
     assert preset.lora_chain is not None and preset.lora_chain.class_type == "LoraLoaderModelOnly"
     assert preset.timeout_s == 1500
-    assert REG.defaults is not None and REG.defaults.workflow_with_references == "qwen-image-edit-ref-turbo"
+    assert REG.defaults is not None and REG.defaults.workflow_with_references == "qwen-image-edit-ref-rapide"
 
 
 @pytest.mark.parametrize("preset_id", EDIT_TIERS)
@@ -139,8 +139,8 @@ def test_invalid_reference_slot_and_chain_are_reported(presets_copy: Path) -> No
     assert "référence 1 : nœud 99 absent" in msg
     assert "le nœud 6 est mappé" in msg
     assert "lora_chain.model_from : nœud 77 absent" in msg
-    # le défaut « avec références » pointe vers un workflow écarté → signalé, ignoré
-    assert reg.defaults is not None and reg.defaults.workflow_with_references is None
+    # le défaut « avec références » (Rapide) n'est pas touché
+    assert reg.defaults is not None and reg.defaults.workflow_with_references == "qwen-image-edit-ref-rapide"
     # le workflow Turbo qui l'appariait reste chargé, avec un avertissement (pas de repli)
     assert reg.workflow("qwen-image-turbo").preset.with_references == "qwen-image-edit-ref-turbo"
     assert any(i.file.endswith("qwen-image-turbo.yaml") and "with_references" in i.message for i in reg.issues)

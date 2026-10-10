@@ -7,7 +7,8 @@ kinds: [character]
 order: 10
 width: 1024
 height: 1024
-# null : palier de la série (Turbo par défaut), ou Qualité si l'auteur le demande. Un id de
+# null : palier des fiches (`workflow_library` de defaults.yaml : Turbo), sinon celui de la série,
+# ou Qualité si l'auteur le demande. Un id de
 # presets/workflows/ impose ce workflow (le choix du palier est alors ignoré).
 workflow: null
 # Morceaux assemblés dans l'ordre ; un morceau dont une variable est vide est omis.

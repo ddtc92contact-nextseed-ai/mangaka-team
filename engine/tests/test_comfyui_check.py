@@ -530,7 +530,7 @@ def test_trial_generation_mock(make_client: Callable[[ComfyUIClient], TestClient
 
     # sans preset : workflow par défaut des séries
     default = c.post("/comfyui/trial", json={}).json()
-    assert default["params"]["preset"] == "qwen-image-turbo"
+    assert default["params"]["preset"] == "qwen-image-base-rapide"
     _wait_done(c, default["id"])
 
 

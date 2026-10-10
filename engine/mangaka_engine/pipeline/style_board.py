@@ -4,7 +4,7 @@
    d'une **scène test** du genre (`scene_test` de presets/style_genres/, jamais de texte libre), avec le
    `$style` de la série et une graine différente par essai. Chaque essai est une `ReferenceVariant`
    (`entry_kind = style`, `entry_id` = id de la série) : « Relancer » en ajoute 4 autres, l'historique reste.
-2. **Choix** (`enqueue_choice`) : l'essai retenu passe au propre (`from_sketch` du palier de la série,
+2. **Choix** (`enqueue_choice`) : l'essai retenu passe au propre (`from_sketch` de `workflow_library`, sinon du palier de la série,
    image → image depuis l'essai, même graine, même prompt) ; le résultat devient la **référence de
    style** de la série : un `SeriesAsset` de sorte `style`, seul actif (`activate`), les précédents gardés
    en historique.
@@ -132,10 +132,13 @@ def sketch_preset(presets: PresetRegistry) -> LoadedWorkflow:
 
 
 def clean_preset(presets: PresetRegistry, series: Project) -> LoadedWorkflow:
-    """Passage au propre de l'essai retenu : `from_sketch` du palier de la série (image → image)."""
-    base = presets.workflows.get(series.workflow_preset)
+    """Passage au propre de l'essai retenu : `from_sketch` du palier des fiches (`workflow_library` de
+    defaults.yaml), sinon de celui de la série (image → image)."""
+    library = presets.defaults.workflow_library if presets.defaults else None
+    base_id = library or series.workflow_preset
+    base = presets.workflows.get(base_id)
     if base is None:
-        raise GenerationError(f"workflow inconnu : « {series.workflow_preset} »")
+        raise GenerationError(f"workflow inconnu : « {base_id} »")
     clean = presets.workflows.get(base.preset.from_sketch or "")
     if clean is None:
         tier = base.preset.tier.name if base.preset.tier else base.preset.id
