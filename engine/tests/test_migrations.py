@@ -62,7 +62,14 @@ def _version(path: Path) -> int:
     return v
 
 
+def _drop_v12_references(con: sqlite3.Connection) -> None:
+    con.execute("DROP TABLE reference_variants")
+    con.execute("ALTER TABLE character_images DROP COLUMN position")
+    con.execute("ALTER TABLE series_asset_images DROP COLUMN position")
+
+
 def _drop_v11_library(con: sqlite3.Connection) -> None:
+    _drop_v12_references(con)
     con.execute("ALTER TABLE panels DROP COLUMN decor_id")
     con.execute("ALTER TABLE panels DROP COLUMN object_ids")
     con.execute("DROP TABLE series_asset_images")

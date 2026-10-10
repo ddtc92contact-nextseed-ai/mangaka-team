@@ -1,0 +1,17 @@
+# Type de fiche de référence : voir presets/README.md (« Fiches de référence »).
+id: decor-autre-angle
+name: Autre angle
+description: "Le même lieu vu depuis le côté opposé, pour garder la cohérence des contrechamps."
+kinds: [decor]
+order: 20
+width: 1536
+height: 864
+workflow: null
+prompt:
+  - "Fiche de référence de décor : $name vu sous un autre angle, depuis le côté opposé de la pièce ou de la rue (contrechamp), plan moyen large."
+  - "$description."
+  - "Détails : $keywords."
+  - "Modification demandée : $instruction."
+  - "Style : $style."
+  - "Aucun personnage, mêmes matériaux et même lumière que le plan d'ensemble, aucun texte."
+negative_prompt: "personnages, foule"

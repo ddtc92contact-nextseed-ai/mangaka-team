@@ -1,0 +1,17 @@
+# Type de fiche de référence : voir presets/README.md (« Fiches de référence »).
+id: personnage-expressions
+name: Expressions
+description: "Grille de visages du même personnage : joie, colère, tristesse, surprise, peur, neutre."
+kinds: [character]
+order: 30
+width: 1024
+height: 1024
+workflow: null
+prompt:
+  - "Planche d'expressions de $name : grille de six visages du même personnage, de face — neutre, joie, colère, tristesse, surprise, peur."
+  - "$description."
+  - "Détails : $keywords."
+  - "Modification demandée : $instruction."
+  - "Style : $style."
+  - "Fond blanc uni, même coiffure et même visage sur chaque vignette, aucun texte."
+negative_prompt: "visages différents, texte, légendes"

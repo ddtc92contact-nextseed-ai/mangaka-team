@@ -193,7 +193,13 @@ function PendingImages({ files, onRemove }: { files: File[]; onRemove: (index: n
   );
 }
 
-/** Galerie des images de référence d'une fiche existante (ajout immédiat, suppression). */
+/** Plafond d'images de référence par fiche (le même côté moteur : MAX_KEPT). */
+export const MAX_REFERENCE_IMAGES = 8;
+
+/**
+ * Galerie des images de référence d'une fiche existante (ajout immédiat, ordre, suppression).
+ * La première est la référence principale : c'est elle qui sert quand les emplacements d'une case manquent.
+ */
 export function ReferenceImages({
   kind,
   entry,
@@ -220,6 +226,18 @@ export function ReferenceImages({
     }
   }
 
+  async function move(index: number, to: number) {
+    const ids = entry.reference_images.map((i) => i.id);
+    const [moved] = ids.splice(index, 1);
+    ids.splice(to, 0, moved);
+    setError(null);
+    try {
+      onChange(await api.reorderLibraryImages(kind, entry.id, ids));
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
   async function remove(imageId: number) {
     setError(null);
     try {
@@ -233,17 +251,60 @@ export function ReferenceImages({
   return (
     <div className="space-y-4">
       {error && <Alert>{error}</Alert>}
-      <ImageDropzone onFiles={upload} disabled={busy} label={busy ? "Envoi en cours…" : undefined} />
+      <p className="text-xs text-zinc-500" data-testid="reference-count">
+        {entry.reference_images.length} / {MAX_REFERENCE_IMAGES} images · la première est la référence principale.
+      </p>
+      <ImageDropzone
+        onFiles={upload}
+        disabled={busy || entry.reference_images.length >= MAX_REFERENCE_IMAGES}
+        label={
+          busy
+            ? "Envoi en cours…"
+            : entry.reference_images.length >= MAX_REFERENCE_IMAGES
+              ? `${MAX_REFERENCE_IMAGES} images au plus : supprimes-en une pour en ajouter`
+              : undefined
+        }
+      />
       {entry.reference_images.length > 0 ? (
-        <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3">
-          {entry.reference_images.map((img) => (
-            <li key={img.id} className="overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950">
+        <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3" aria-label="Images de référence">
+          {entry.reference_images.map((img, index) => (
+            <li
+              key={img.id}
+              className={`relative overflow-hidden rounded-lg border bg-zinc-950 ${index === 0 ? "border-rose-500/60" : "border-zinc-800"}`}
+            >
+              {index === 0 && (
+                <span className="absolute top-1 left-1 rounded bg-rose-500 px-1.5 py-px text-[10px] font-semibold text-white">
+                  Principale
+                </span>
+              )}
               <a href={engineUrl(img.url)} target="_blank" rel="noreferrer">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={engineUrl(img.url)} alt={img.original_name} className="aspect-square w-full object-cover" />
               </a>
-              <div className="flex items-center justify-between gap-2 px-2 py-1.5 text-xs text-zinc-400">
-                <span className="shrink-0" title={img.original_name}>
+              <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 px-2 py-1.5 text-xs text-zinc-400">
+                <span className="flex shrink-0 items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => move(index, index - 1)}
+                    disabled={index === 0}
+                    className="rounded px-1 hover:bg-zinc-800 hover:text-zinc-100 disabled:opacity-30"
+                    aria-label={`Avancer ${img.original_name}`}
+                    title={index === 1 ? "En faire la référence principale" : "Avancer"}
+                  >
+                    ←
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => move(index, index + 1)}
+                    disabled={index === entry.reference_images.length - 1}
+                    className="rounded px-1 hover:bg-zinc-800 hover:text-zinc-100 disabled:opacity-30"
+                    aria-label={`Reculer ${img.original_name}`}
+                    title="Reculer"
+                  >
+                    →
+                  </button>
+                </span>
+                <span className="whitespace-nowrap tabular-nums" title={img.original_name}>
                   {img.width}×{img.height}
                 </span>
                 <button

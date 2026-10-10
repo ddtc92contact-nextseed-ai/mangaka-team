@@ -17,6 +17,7 @@ Arborescence attendue :
       prompts/*.yaml           # prompts des étapes LLM
       workflows/*.yaml         # workflows ComfyUI (+ leur JSON API)
       agents/*.yaml            # agents du pipeline (écran « L'équipe ») : rôle et réglages éditables
+      reference_sheets/*.yaml  # fiches de référence générées (portrait, turnaround, plan large…)
 
 Un preset invalide n'empêche pas le moteur de démarrer : il est écarté et
 l'erreur est exposée via `GET /presets` et `GET /health`.
@@ -47,6 +48,7 @@ from .schemas import (
     PromptPreset,
     ProvidersPreset,
     QCSettings,
+    ReferenceSheet,
     WorkflowPreset,
 )
 
@@ -86,6 +88,7 @@ class PresetRegistry:
     knowledge: KnowledgeSettings = field(default_factory=KnowledgeSettings)
     defaults: Defaults | None = None
     agents: dict[str, AgentPreset] = field(default_factory=dict)
+    reference_sheets: dict[str, ReferenceSheet] = field(default_factory=dict)
     issues: list[PresetIssue] = field(default_factory=list)
 
     # --- accès -----------------------------------------------------------
@@ -119,6 +122,12 @@ class PresetRegistry:
         if self.defaults and self.defaults.layout_style in self.layout_styles:
             return self.defaults.layout_style
         return next(iter(self.layout_styles), None)
+
+    def reference_sheet(self, sheet_id: str) -> ReferenceSheet:
+        try:
+            return self.reference_sheets[sheet_id]
+        except KeyError:
+            raise PresetError(f"type de fiche de référence inconnu : « {sheet_id} »") from None
 
     def prompt(self, preset_id: str) -> PromptPreset:
         try:
@@ -288,6 +297,16 @@ class PresetRegistry:
             agent = reg._parse(path, AgentPreset)
             if agent is not None:
                 reg._register(reg.agents, agent.id, agent, path)
+
+        for path in sorted((root / "reference_sheets").glob("*.y*ml")):
+            sheet = reg._parse(path, ReferenceSheet)
+            if sheet is None:
+                continue
+            if sheet.workflow is not None and sheet.workflow not in reg.workflows:
+                reg.issues.append(PresetIssue(reg._rel(path), f"workflow inconnu : {sheet.workflow}"))
+                continue
+            reg._register(reg.reference_sheets, sheet.id, sheet, path)
+        reg.reference_sheets = dict(sorted(reg.reference_sheets.items(), key=lambda kv: (kv[1].order, kv[1].name)))
         return reg
 
     def _check_reference_pairs(self) -> None:
