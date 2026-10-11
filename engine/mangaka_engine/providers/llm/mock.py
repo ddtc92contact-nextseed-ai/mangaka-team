@@ -436,9 +436,7 @@ def _mock_english(ctx: dict[str, Any]) -> list[str]:
         look = _LOOKS[(seed + i) % len(_LOOKS)]
         sentences.append(f"{name}, {spot}, {pose}, {look}.")
     if panel.get("camera"):
-        sentences.append(
-            f"The camera frames the panel as a {panel['camera']}, with a slight wide-angle feel and a shallow depth of field."
-        )
+        sentences.append(f"Camera: {panel['camera']}, with a slight wide-angle feel and a shallow depth of field.")
     if (ctx.get("decor") or {}).get("name"):
         sentences.append(f"The scene takes place in {ctx['decor']['name']}, seen from the new camera angle.")
     sentences.append(
