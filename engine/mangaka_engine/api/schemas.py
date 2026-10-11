@@ -162,6 +162,22 @@ class CleanupOut(BaseModel):
     warning: str | None = None
 
 
+class ResetIn(BaseModel):
+    """« Remettre l'atelier à zéro » : le mot RÉINITIALISER tapé, et le mode « tout »."""
+
+    confirm: str
+    all: bool = False  # aussi les réglages globaux des agents et le savoir-faire (remis par défaut)
+
+
+class ResetOut(BaseModel):
+    backup: str  # dossier de la sauvegarde (data/backups/reset-<date-heure>/)
+    all: bool
+    series_deleted: int
+    data_removed: list[str]  # éléments effacés dans data/
+    comfyui_removed: list[str]  # dossiers effacés dans ComfyUI (relatifs à ComfyUI ; old/ jamais)
+    comfyui_warning: str | None = None  # ComfyUI non nettoyé (COMFYUI_DIR absent ou introuvable)
+
+
 class RelayoutOut(BaseModel):
     relaid_page_ids: list[int]  # pages remises en page (sans aucune image)
     kept_pages: int  # pages avec des cases déjà générées (ou en cours) : inchangées

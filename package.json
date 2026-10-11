@@ -20,6 +20,7 @@
     "test:web": "npm --workspace web run test",
     "test:engine": "node scripts/run-engine.mjs -m pytest",
     "lint:engine": "node scripts/run-engine.mjs -m ruff check .",
-    "test:launcher": "node scripts/run-engine.mjs -m pytest ../scripts/tests"
+    "test:launcher": "node scripts/run-engine.mjs -m pytest ../scripts/tests",
+    "reset": "node scripts/run-engine.mjs -m mangaka_engine.reset"
   }
 }
