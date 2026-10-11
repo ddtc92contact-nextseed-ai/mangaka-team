@@ -7,9 +7,11 @@ donnés par le scénario + nombre et fiches des personnages (description visuell
 interdisent au modèle de dessiner du texte (bulles et lettrage sont vectoriels).
 Le gabarit vit dans `presets/image_prompt.yaml`.
 
-`frame_references` ajoute au prompt envoyé à un workflow avec références le cadrage des images (« Image 1 :
-référence d'identité de Urus ; … » et la consigne « identité seulement, scène nouvelle ») : il dépend des
-emplacements retenus au moment de la génération, il n'est donc pas stocké dans le prompt final de la case.
+`frame_references` ajoute au prompt envoyé à un workflow avec références le cadrage des images (« <image1>
+is the identity reference for Urus… » et la consigne « identité seulement, scène nouvelle ») : il dépend
+des emplacements retenus au moment de la génération, il n'est donc pas stocké dans le prompt final de la
+case. Le texte côté image est en anglais (la langue de Qwen-Image 2.1) : plans et angles de la direction
+artistique sont traduits par `camera_terms` (image_prompt.yaml).
 """
 
 from __future__ import annotations
@@ -66,16 +68,29 @@ def describe_character(character: PromptCharacter, settings: ImagePromptSettings
     return string.Template(settings.character).safe_substitute(name=name, details=", ".join(details))
 
 
-# Nombre de personnages en toutes lettres ($character_count).
-_COUNTS = ("", "Un", "Deux", "Trois", "Quatre", "Cinq", "Six", "Sept", "Huit", "Neuf", "Dix")
+# Nombre de personnages en toutes lettres, en anglais ($character_count).
+_COUNTS = ("", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten")
 
 
 def character_count(n: int) -> str:
-    """« Un personnage », « Deux personnages »… (« 12 personnages » au-delà de dix) ; "" pour zéro."""
+    """« One character », « Two characters »… (« 12 characters » au-delà de dix) ; "" pour zéro."""
     if n <= 0:
         return ""
     word = _COUNTS[n] if n < len(_COUNTS) else str(n)
-    return f"{word} personnage{'s' if n > 1 else ''}"
+    return f"{word} character{'s' if n > 1 else ''}"
+
+
+def _term_key(value: str) -> str:
+    return " ".join(value.strip().lower().replace("’", "'").replace("_", " ").split())
+
+
+def camera_term(value: str | None, settings: ImagePromptSettings | None = None) -> str:
+    """Plan ou angle (« contre-plongée ») → terme de cadrage anglais (« low-angle shot ») ; inconnu : tel quel."""
+    text = _clean(value)
+    if not text:
+        return ""
+    terms = {_term_key(k): v for k, v in (settings or ImagePromptSettings()).camera_terms.items()}
+    return terms.get(_term_key(text), text)
 
 
 def build_prompt(
@@ -87,6 +102,7 @@ def build_prompt(
     plan: str | None = None,
     angle: str | None = None,
     ambiance: str | None = None,
+    action: str | None = None,
     characters: Sequence[PromptCharacter] = (),
     decor: PromptEntry | None = None,
     objects: Sequence[PromptEntry] = (),
@@ -97,25 +113,29 @@ def build_prompt(
 ) -> str:
     """Assemble le prompt positif d'une case à partir des morceaux du preset.
 
-    `plan`, `angle`, `ambiance` : direction artistique appliquée à la case ; `$plan` vaut le type de
-    plan du scénario quand la direction artistique n'en donne pas. `decor`, `objects` : fiches de la
+    `plan`, `angle`, `ambiance`, `action` : direction artistique appliquée à la case ; `$plan` vaut le
+    type de plan du scénario quand la direction artistique n'en donne pas (plans et angles en anglais,
+    `camera_terms`). `decor`, `objects` : fiches de la
     bibliothèque (`$decor`, `$objects`), décrites comme les personnages.
     """
     settings = settings or ImagePromptSettings()
     desc, savoir_faire, bible = description or "", savoir_faire or "", bible or ""
     ambiance, setting, staging = ambiance or "", setting or "", staging or ""
+    action = action or ""
     if settings.strip_quotes:
         # Notes de la bible et savoir-faire aussi : le texte n'est jamais dessiné par le modèle.
         desc, savoir_faire, bible = strip_quoted(desc), strip_quoted(savoir_faire), strip_quoted(bible)
         ambiance, setting, staging = strip_quoted(ambiance), strip_quoted(setting), strip_quoted(staging)
+        action = strip_quoted(action)
     described = [d for d in (describe_character(c, settings) for c in characters) if d]
-    shot = _clean(shot_type)
-    chosen = _clean(plan) or shot
+    shot = camera_term(shot_type, settings)
+    chosen = camera_term(plan, settings) or shot
     values = {
         "shot": shot[:1].upper() + shot[1:] if shot else "",
         "plan": chosen[:1].upper() + chosen[1:] if chosen else "",
-        "angle": _clean(angle),
+        "angle": camera_term(angle, settings),
         "ambiance": _clean(ambiance),
+        "action": _clean(action),
         "description": _clean(desc),
         "setting": _clean(setting),
         "staging": _clean(staging),
@@ -163,11 +183,28 @@ def _join(templates: Sequence[str], values: dict[str, str]) -> str:
     return " ".join(p for p in (string.Template(t).substitute(values).strip() for t in templates) if p)
 
 
-def frame_references(prompt: str, slots: Sequence[ReferenceSlot], settings: ImagePromptSettings | None = None) -> str:
-    """Prompt envoyé à un workflow avec références : une ligne par image (« Image 1 : référence
-    d'identité de Urus ») avant le prompt de la case, la consigne « identité seulement » après.
+_IMAGE_TAG = re.compile(r"<image(\d+)>", re.IGNORECASE)
 
-    Sans image de référence, le prompt est renvoyé tel quel.
+
+def image_tags(text: str) -> list[int]:
+    """Numéros des images citées (`<image1>`, `<image2>`…), dans l'ordre de première apparition."""
+    return list(dict.fromkeys(int(n) for n in _IMAGE_TAG.findall(text)))
+
+
+def defines_references(prompt: str, count: int) -> bool:
+    """Le prompt commence par le rôle des images (`<image1>` d'abord) et cite exactement les `count`
+    images envoyées, dans l'ordre : c'est le cas d'un prompt rédigé par l'IA."""
+    return (
+        count > 0 and prompt.lstrip().lower().startswith("<image1>") and image_tags(prompt) == list(range(1, count + 1))
+    )
+
+
+def frame_references(prompt: str, slots: Sequence[ReferenceSlot], settings: ImagePromptSettings | None = None) -> str:
+    """Prompt envoyé à un workflow avec références : le rôle de chaque image (« <image1> is the identity
+    reference for Urus… ») avant le prompt de la case, la consigne « identité seulement » après.
+
+    Un prompt qui définit déjà le rôle de chaque image envoyée en tête (`defines_references` : prompt
+    rédigé par l'IA) ne reçoit que la consigne. Sans image de référence, le prompt est renvoyé tel quel.
     """
     if not slots:
         return prompt
@@ -180,4 +217,5 @@ def frame_references(prompt: str, slots: Sequence[ReferenceSlot], settings: Imag
     body = prompt.strip()
     if body and body[-1] not in ".!?…":
         body += "."  # prompt édité à la main sans point final : la consigne suit en phrase distincte
-    return " ".join(p for p in (_join(refs.before, values), body, _join(refs.after, values)) if p)
+    before = "" if defines_references(body, len(slots)) else _join(refs.before, values)
+    return " ".join(p for p in (before, body, _join(refs.after, values)) if p)

@@ -459,8 +459,8 @@ def test_image_prompt_gets_bible_notes_and_style_passages(make_settings: Callabl
         page = c.get(f"/chapters/{ch['id']}/pages").json()[0]
         panel = next(p for p in page["panels"] if "Aiko" in p["characters"])
         prompt = c.post(f"/panels/{panel['id']}/prompt/rebuild").json()["final_prompt"]
-        assert "Repères de la bible : Aiko : cicatrice à la joue." in prompt
-        assert "Notes de style : Aiko : yeux immenses." in prompt
+        assert "Series bible notes: Aiko : cicatrice à la joue." in prompt
+        assert "Style notes: Aiko : yeux immenses." in prompt
 
 
 def test_knowledge_preset_loads_and_status_reports_mock(client: TestClient) -> None:
@@ -513,8 +513,8 @@ def test_image_prompt_never_carries_quoted_text_from_bible_or_knowledge(
         page = c.get(f"/chapters/{ch['id']}/pages").json()[0]
         panel = next(p for p in page["panels"] if "Léa" in p["characters"])
         prompt = c.post(f"/panels/{panel['id']}/prompt/rebuild").json()["final_prompt"]
-        assert "Repères de la bible : Léa : Détective en herbe, têtue, dit. Imperméable jaune." in prompt
-        assert "Notes de style : Léa : frange courte, crie en pointant du doigt." in prompt
+        assert "Series bible notes: Léa : Détective en herbe, têtue, dit. Imperméable jaune." in prompt
+        assert "Style notes: Léa : frange courte, crie en pointant du doigt." in prompt
         assert "cloche" not in prompt and "Halte" not in prompt
         assert not any(q in prompt for q in '«»“”"')
 

@@ -1,6 +1,12 @@
 # Construction du prompt final d'une case (étape 3, pipeline/prompt.py).
 # Le prompt est stocké sur la case ; une édition manuelle est conservée tant qu'on ne
 # demande pas de le reconstruire.
+#
+# Tout le texte côté image est en anglais (la langue de Qwen-Image 2.1, voir presets/README.md
+# « Prompts en anglais ») ; ce que lit l'auteur (interface, scénario, dialogues) reste en français.
+# Le prompt par fragments est le repli du rédacteur de prompt (prompts/redacteur-image.yaml) : ses
+# gabarits sont anglais, mais la description, le lieu, la mise en scène et l'ambiance y entrent tels
+# que le scénario les a écrits (seul le LLM les traduit).
 
 # Morceaux assemblés dans l'ordre, séparés par une espace. Un morceau dont une variable
 # est vide est omis. Variables : $shot (type de plan du scénario), $description (description de la
@@ -10,33 +16,35 @@
 # $bible (notes de la bible sur les personnages de la case), $savoir_faire (passages des
 # collections de l'agent « image_prompt », voir knowledge.yaml ; budget de jetons serré).
 # Direction artistique appliquée (onglet « Direction artistique » du chapitre) : $plan (son type de
-# plan, sinon celui du scénario), $angle (angle de caméra), $ambiance (lumière, atmosphère).
+# plan, sinon celui du scénario), $angle (angle de caméra) — tous deux traduits par `camera_terms` —,
+# $ambiance (lumière, atmosphère), $action (mouvement ou pose du corps).
 # Scénario : $setting (lieu de la case : lieu, moment, éléments du décor — présent même sans décor de la
 # bibliothèque), $staging (mise en scène : qui fait quoi, où dans le cadre, interactions),
-# $character_count (nombre de personnages en toutes lettres : « Un personnage », « Deux personnages »).
+# $character_count (nombre de personnages en toutes lettres : « One character », « Two characters »).
 parts:
   - "$plan."
-  - "Angle de caméra : $angle."
+  - "Camera angle: $angle."
   - "$description."
-  - "Lieu : $setting."
-  - "Mise en scène : $staging."
-  - "Ambiance : $ambiance."
-  - "Décor : $decor."
-  - "$character_count : $characters."
-  - "Objets : $objects."
-  - "Repères de la bible : $bible."
-  - "Style : $style."
-  - "Notes de style : $savoir_faire."
-  # Aucune mention de rendu ici (« encré », « couleur »…) : le pack de rendu de la série la donne dans $style.
-  - "Aucun texte ni bulle dans l'image."
+  - "Action and pose: $action."
+  - "Setting: $setting."
+  - "Staging: $staging."
+  - "Mood and lighting: $ambiance."
+  - "Recurring setting: $decor."
+  - "$character_count: $characters."
+  - "Objects: $objects."
+  - "Series bible notes: $bible."
+  - "Style: $style."
+  - "Style notes: $savoir_faire."
+  # Aucune mention de rendu ici (« inked », « colour »…) : le pack de rendu de la série la donne dans $style.
+  - "A single continuous scene in one panel, no text or speech bubbles in the image."
 
 # Un personnage (et de même un décor ou un objet de la bibliothèque) : $name, $details (description visuelle + mots-clés de prompt).
 character: "$name ($details)"
-character_separator: " ; "
+character_separator: "; "
 
 # Le modèle d'image ne dessine jamais de texte (bulles et lettrage sont vectoriels) :
 # ces termes sont toujours ajoutés au prompt négatif s'ils n'y sont pas déjà.
-forbidden_text_terms: [texte, lettres, bulles, phylactères, onomatopées, filigrane, signature]
+forbidden_text_terms: [text, letters, speech bubbles, captions, sound effects, watermark, signature]
 
 # Longueur maximale de $style (caractères, séparateurs compris ; null = sans plafond). Le bloc « Style »
 # pesait ~1/3 du prompt et noyait la description de la case : les packs y entrent tour à tour (1er
@@ -49,17 +57,42 @@ style_max_chars: 240
 strip_quotes: true
 
 # Cadrage des images de référence (workflows avec références : edit-ref…), ajouté au prompt envoyé à
-# ComfyUI au moment de la génération (le prompt final de la case ne change pas). Sans ce cadrage, le
-# modèle d'édition reprend l'image telle quelle : planche de poses, portrait sur fond blanc.
+# ComfyUI au moment de la génération (le prompt final de la case ne change pas). Syntaxe de Qwen-Image
+# 2.1 Edit : chaque image est citée par <image1>, <image2>… et son rôle est défini en tête du prompt.
+# Sans ce cadrage, le modèle d'édition reprend l'image telle quelle : planche de poses, portrait de face
+# sur fond blanc. Un prompt rédigé par l'IA qui définit déjà ces rôles en tête ne reçoit que `after`.
 references:
   # Une ligne par image envoyée, dans l'ordre des emplacements : $slot (1, 2, 3), $name (nom de la fiche).
-  character: "Image $slot : référence d'identité de $name"
-  decor: "Image $slot : référence du lieu $name"
-  object: "Image $slot : référence de l'objet $name"
-  style: "Image $slot : référence de style seulement (trait, encrage, trames, couleurs), ne pas reprendre ses personnages ni sa scène"
-  separator: " ; "
+  character: "<image$slot> is the identity reference for $name: keep the face, hair, outfit and colours; ignore its pose, framing and background."
+  decor: "<image$slot> is the location reference for $name: keep its layout, architecture and materials; show it from the new camera angle."
+  object: "<image$slot> is the design reference for the object $name: keep its shape, colours and details."
+  style: "<image$slot> is a style reference only (line work, inking, screentones, colours): do not copy its characters, scene or composition."
+  separator: " "
   # Morceaux avant / après le prompt de la case : $images (les lignes ci-dessus), $count (nombre d'images).
   before:
-    - "$images."
+    - "$images"
   after:
-    - "Les images de référence ne servent qu'à l'identité et au design (visage, silhouette, couleurs, costume, matières) : dessiner une scène nouvelle, avec de nouvelles poses et tout l'arrière-plan décrit ; ne pas reproduire la mise en page des fiches de référence, leurs poses multiples, leurs vues côte à côte ni leur fond blanc."
+    - "Use the reference images for identity and design only (face, hair, body shape, outfit, colours, materials): draw a new scene with new poses, a new camera angle and the whole background described above. Exactly one continuous scene in a single panel: not a character sheet, not a turnaround, not a collage, no side-by-side views, no multiple poses, no plain white background."
+
+# Plans et angles (direction artistique, scénario) → termes de cadrage anglais ($shot, $plan, $angle et
+# le rédacteur de prompt). Clés comparées sans casse ; une valeur absente passe telle quelle.
+camera_terms:
+  plan large: wide shot
+  plan d'ensemble: establishing extreme wide shot
+  plan moyen: medium shot
+  plan américain: medium-long shot (cowboy shot, framed from mid-thigh up)
+  plan rapproché: medium close-up
+  gros plan: close-up
+  très gros plan: extreme close-up
+  insert: insert shot (extreme close-up on a detail)
+  plongée: high-angle shot
+  contre-plongée: low-angle shot
+  de face: frontal view at eye level
+  de trois quarts: three-quarter view
+  de profil: side profile view
+  de dos: view from behind, over-the-shoulder
+  en plongée: high-angle view looking down
+  en contre-plongée: low-angle view looking up
+  vue subjective: point-of-view shot (first-person perspective)
+  cadre penché: dutch angle (tilted frame)
+  vue aérienne: bird's-eye view

@@ -211,6 +211,7 @@ def build_panel_prompt(
         plan=da.get("plan"),
         angle=da.get("angle"),
         ambiance=da.get("ambiance"),
+        action=da.get("action"),
         characters=[_prompt_entry(c) for c in characters],
         decor=_prompt_entry(decor) if decor is not None else None,
         objects=[_prompt_entry(o) for o in objects],
@@ -513,6 +514,7 @@ def panel_brief(
         plan=da.get("plan"),
         angle=da.get("angle"),
         ambiance=da.get("ambiance"),
+        action=da.get("action"),
         characters=[_prompt_entry(c) for c in cast.characters],
         extras=CharacterMatcher(series).unmatched(panel.character_names or []),
         absent=[c.name for c in series if c.id not in present],
@@ -523,6 +525,7 @@ def panel_brief(
         bible=bible,
         savoir_faire=savoir_faire,
         prompt=presets.prompts.get(WRITER_PROMPT_ID),
+        settings=presets.image_prompt,
     )
 
 

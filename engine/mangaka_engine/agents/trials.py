@@ -243,10 +243,11 @@ PANEL = {
     "shot_type": "contre-plongée",
     "setting": "toit d'un lycée au crépuscule, château d'eau, antennes, ville en contrebas",
     "staging": "Aiko au premier plan à gauche, sabre levé ; Ren à droite, en retrait, bras croisés",
-    # Direction artistique appliquée à la case d'essai ($plan, $angle, $ambiance).
+    # Direction artistique appliquée à la case d'essai ($plan, $angle, $ambiance, $action).
     "plan": "gros plan",
     "angle": "en contre-plongée",
     "ambiance": "contre-jour orangé, vent violent",
+    "action": "Aiko bondit en avant, sabre levé à deux mains, le poids sur la jambe avant",
     "size": (1400, 900),
 }
 
@@ -268,6 +269,7 @@ def trial_image_prompt(ctx: TrialContext) -> dict[str, Any]:
         plan=PANEL["plan"],  # type: ignore[arg-type]
         angle=PANEL["angle"],  # type: ignore[arg-type]
         ambiance=PANEL["ambiance"],  # type: ignore[arg-type]
+        action=PANEL["action"],  # type: ignore[arg-type]
         characters=characters,
         style=trial_style(presets),
         settings=presets.image_prompt,
@@ -291,6 +293,7 @@ def trial_image_prompt(ctx: TrialContext) -> dict[str, Any]:
                 {
                     "description": PANEL["description"],
                     "plan": PANEL["shot_type"],
+                    "action": PANEL["action"],
                     "lieu": PANEL["setting"],
                     "mise en scène": PANEL["staging"],
                     "personnages": [f"{c.name} : {c.visual_description}" for c in characters],
@@ -333,11 +336,13 @@ def _trial_written_prompt(ctx: TrialContext, characters: list[Any]) -> tuple[str
         plan=PANEL["plan"],  # type: ignore[arg-type]
         angle=PANEL["angle"],  # type: ignore[arg-type]
         ambiance=PANEL["ambiance"],  # type: ignore[arg-type]
+        action=PANEL["action"],  # type: ignore[arg-type]
         characters=characters,
         absent=["Sensei Okada"],
         references=[ReferenceSlot("character", c.name) for c in characters],
         style=trial_style(presets),
         prompt=prompt,
+        settings=presets.image_prompt,
     )
     llm, error = ctx.llm()
     if llm is None:

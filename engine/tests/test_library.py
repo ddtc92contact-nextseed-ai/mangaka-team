@@ -340,9 +340,9 @@ def test_workflow_graph_has_library_keywords_loras_and_references_in_order() -> 
         style="encre",
         settings=REG.image_prompt,
     )
-    assert "Décor : Le labo (labo encombré, néons)." in prompt
-    assert "Objets : Robot R-2 (antenne rouge)." in prompt
-    assert prompt.index("Décor :") < prompt.index("Un personnage :") < prompt.index("Objets :")
+    assert "Recurring setting: Le labo (labo encombré, néons)." in prompt
+    assert "Objects: Robot R-2 (antenne rouge)." in prompt
+    assert prompt.index("Recurring setting:") < prompt.index("One character:") < prompt.index("Objects:")
 
     class _Series:
         style_lora_name, style_lora_weight = "style.safetensors", 0.8
@@ -417,7 +417,7 @@ def test_generation_records_references_used_on_job_and_version(c: TestClient, co
     assert [r["kind"] for r in recorded] == ["character", "decor", "object"]
     assert recorded[0]["character_id"] == aiko["id"] and all(r["comfyui_name"] in comfy.uploads for r in recorded)
     assert [lo["source"] for lo in img["params"]["loras"]] == ["Robot R-2"]
-    assert "Décor : Le labo (laboratoire encombré, néons)." in img["params"]["prompt"]
+    assert "Recurring setting: Le labo (laboratoire encombré, néons)." in img["params"]["prompt"]
     [wf] = comfy.prompts.values()
     loads = [wf[wf["6"]["inputs"][f"images.image_{i}"][0]]["inputs"]["image"] for i in (1, 2, 3)]
     assert [name.split("/")[-1].split("_")[0] for name in loads] == [

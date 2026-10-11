@@ -76,7 +76,7 @@ settings:
     type: prompt_list
     source: image_prompt.yaml#parts
     variables:
-      [plan, angle, ambiance, shot, description, setting, staging, character_count, characters, decor, objects, style, savoir_faire, bible]
+      [plan, angle, ambiance, action, shot, description, setting, staging, character_count, characters, decor, objects, style, savoir_faire, bible]
     help: Un morceau dont une variable est vide est omis.
   - key: character
     label: Présentation d'un personnage
@@ -141,10 +141,11 @@ settings:
     choices: [fr, en]
     choice_labels: { fr: Français, en: Anglais }
     source: prompts/redacteur-image.yaml#language
-    fallback: fr
+    fallback: en
     help: >-
-      Français par défaut : les A/B mesurés le favorisent sur la plupart des packs. Les mots-clés de
-      style restent dans leur langue mesurée.
+      Anglais par défaut : c'est la langue de Qwen-Image 2.1 (son enhancer officiel écrit toujours en
+      anglais) ; le LLM traduit le scénario et la direction artistique. Les mots-clés de style sont en
+      anglais.
   - key: min_words
     label: Longueur visée — minimum (mots)
     group: Rédacteur de prompt
@@ -188,6 +189,8 @@ settings:
       - max_words
       - plan
       - angle
+      - camera
+      - action
       - ambiance
       - description
       - setting
@@ -198,6 +201,7 @@ settings:
       - decor
       - objects
       - references
+      - image_tags
       - style
       - bible
       - savoir_faire

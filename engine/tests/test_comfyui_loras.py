@@ -268,7 +268,7 @@ def test_picked_mock_lora_reaches_workflow_graph(make_client: Callable[..., Test
     [img] = _ok(c.get(f"/panels/{p1['id']}/images"))
     assert [(lo["name"], lo["weight"]) for lo in img["params"]["loras"]] == [(style, 0.6), (aiko_lora, 0.9)]
     assert style == "styles/aquarelle/lavis-doux.safetensors"  # catalogue : « soft wash painting »
-    assert "soft wash painting, manga seinen" in img["params"]["prompt"] and "aiko_v1" in img["params"]["prompt"]
+    assert "soft wash painting, seinen manga" in img["params"]["prompt"] and "aiko_v1" in img["params"]["prompt"]
     [wf] = comfy.prompts.values()
     sent = [n["inputs"]["lora_name"] for n in wf.values() if n["class_type"] == "LoraLoaderModelOnly"]
     assert sent == [style, aiko_lora]

@@ -65,26 +65,30 @@ def test_prompt_has_setting_staging_and_character_count() -> None:
         characters=[],
         settings=REG.image_prompt,
     )
-    assert "Lieu : clairière au bord d'un lac, fin d'après-midi, herbes hautes." in prompt
-    assert "Mise en scène : Urus au premier plan à gauche, Kael posé sur un rocher à droite." in prompt
-    assert "personnage" not in prompt  # aucun personnage : la ligne est omise
+    assert prompt.startswith("Wide shot. Les deux dragons se retrouvent.")  # plan traduit (camera_terms)
+    assert "Setting: clairière au bord d'un lac, fin d'après-midi, herbes hautes." in prompt
+    assert "Staging: Urus au premier plan à gauche, Kael posé sur un rocher à droite." in prompt
+    assert "character" not in prompt  # aucun personnage : la ligne est omise
     # Sans lieu ni mise en scène (cases d'avant), les lignes sont omises.
-    assert "Lieu :" not in build_prompt(description="x", settings=REG.image_prompt)
+    assert "Setting:" not in build_prompt(description="x", settings=REG.image_prompt)
     assert (character_count(1), character_count(2), character_count(12)) == (
-        "Un personnage",
-        "Deux personnages",
-        "12 personnages",
+        "One character",
+        "Two characters",
+        "12 characters",
     )
 
 
 def test_reference_framing_names_each_image_in_slot_order() -> None:
     slots = [ReferenceSlot("character", "Urus"), ReferenceSlot("character", "Kael"), ReferenceSlot("decor", "Lac")]
-    framed = frame_references("Plan large. Deux dragons", slots, REG.image_prompt)
+    framed = frame_references("Wide shot. Two dragons", slots, REG.image_prompt)
+    identity = "keep the face, hair, outfit and colours; ignore its pose, framing and background."
     assert framed.startswith(
-        "Image 1 : référence d'identité de Urus ; Image 2 : référence d'identité de Kael ; "
-        "Image 3 : référence du lieu Lac. Plan large. Deux dragons. "
+        f"<image1> is the identity reference for Urus: {identity} "
+        f"<image2> is the identity reference for Kael: {identity} "
+        "<image3> is the location reference for Lac: keep its layout, architecture and materials; "
+        "show it from the new camera angle. Wide shot. Two dragons. "
     )
-    assert "ne servent qu'à l'identité" in framed and "ni leur fond blanc" in framed
+    assert "for identity and design only" in framed and "not a character sheet, not a turnaround" in framed
     assert frame_references("Sans image", [], REG.image_prompt) == "Sans image"
 
 
@@ -218,12 +222,14 @@ def test_two_character_panel_gets_two_references_named_in_slot_order(client: Tes
     assert [r["image_id"] for r in refs] == [urus["reference_images"][0]["id"], kael["reference_images"][0]["id"]]
     prompt = img["params"]["prompt"]
     assert prompt.startswith(
-        "Image 1 : référence d'identité de Urus ; Image 2 : référence d'identité de Kaël. Plan large. "
+        "<image1> is the identity reference for Urus: keep the face, hair, outfit and colours; ignore its pose, "
+        "framing and background. <image2> is the identity reference for Kaël: "
     )
-    assert "Lieu : clairière au bord d'un lac, fin d'après-midi, herbes hautes." in prompt
-    assert "Mise en scène : Urus au premier plan à gauche, ailes déployées ; Kaël sur un rocher à droite." in prompt
-    assert "Deux personnages : Urus (dragon bleu, cornes torsadées) ; Kaël (dragon rouge, ailes)." in prompt
-    assert prompt.index("Lieu :") < prompt.index("Deux personnages") < prompt.index("ne servent qu'à l'identité")
+    assert "background. Wide shot. Urus retrouve Kaël." in prompt
+    assert "Setting: clairière au bord d'un lac, fin d'après-midi, herbes hautes." in prompt
+    assert "Staging: Urus au premier plan à gauche, ailes déployées ; Kaël sur un rocher à droite." in prompt
+    assert "Two characters: Urus (dragon bleu, cornes torsadées); Kaël (dragon rouge, ailes)." in prompt
+    assert prompt.index("Setting:") < prompt.index("Two characters") < prompt.index("for identity and design only")
     assert img["params"]["panel_prompt"] == _ok(client.get(f"/panels/{panel['id']}"))["final_prompt"]
 
 
