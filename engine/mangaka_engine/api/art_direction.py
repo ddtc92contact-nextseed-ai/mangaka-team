@@ -32,6 +32,7 @@ class DirectionPanelOut(BaseModel):
     angle: str | None = None
     cadre: str | None = None
     ambiance: str = ""
+    action: str = ""  # mouvement ou pose du corps (repris par le rédacteur de prompt)
     sfx: list[dict[str, str]] = Field(default_factory=list)
     # Bibliothèque proposée par l'agent (null : garder le décor / les objets du scénario).
     decor: int | None = None
@@ -49,6 +50,9 @@ class PageDirectionOut(BaseModel):
     page_choc: str | None = None
     rationale: str = ""
     panels: list[DirectionPanelOut] = Field(default_factory=list)
+    # Règles de mise en scène encore enfreintes après les relances de l'agent (« chapitre : … » pour la
+    # part de cases de face, commune aux pages dirigées ensemble).
+    warnings: list[str] = Field(default_factory=list)
     has_direction: bool = False
     locks: list[str] = Field(default_factory=list)
     status: str = "proposed"  # proposed | accepted
@@ -136,12 +140,14 @@ def direction_out(page: Page) -> PageDirectionOut:
                     index=index.get(pa["panel_id"], -1),
                     **{k: pa.get(k) for k in ("intensity", "plan", "angle", "cadre")},
                     ambiance=pa.get("ambiance") or "",
+                    action=pa.get("action") or "",
                     sfx=list(pa.get("sfx") or []),
                     decor=pa.get("decor"),
                     objets=pa.get("objets"),
                 )
                 for pa in v.get("panels") or []
             ],
+            "warnings": list(v.get("warnings") or []),
             "has_direction": True,
             "locks": list(d.locks or []),
             "status": d.status,

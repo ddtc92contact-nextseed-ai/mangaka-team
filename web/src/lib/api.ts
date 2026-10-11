@@ -1557,6 +1557,8 @@ export interface DaPanel {
   angle: string | null;
   cadre: string | null;
   ambiance: string;
+  /** Mouvement ou pose du corps (français), repris par le rédacteur de prompt. */
+  action: string;
   sfx: DaSfx[];
   /** Bibliothèque proposée par l'agent (null ou absent : garder le décor / les objets du scénario). */
   decor?: number | null;
@@ -1574,6 +1576,8 @@ export interface PageDirection {
   page_choc: DaPageChoc | null;
   rationale: string;
   panels: DaPanel[];
+  /** Règles de mise en scène encore enfreintes (« chapitre : … » : commune aux pages dirigées ensemble). */
+  warnings: string[];
   has_direction: boolean;
   /** Champs modifiés par l'auteur, gardés quand l'agent repropose : « rythme », « 12.plan »… */
   locks: string[];

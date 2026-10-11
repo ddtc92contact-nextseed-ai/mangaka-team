@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from mangaka_engine.config import Settings
 from mangaka_engine.main import create_app
+from mangaka_engine.pipeline import art_direction as da
 from mangaka_engine.pipeline.art_direction import (
     ArtDirectionError,
     DirectionContext,
@@ -369,15 +370,24 @@ def test_image_prompt_gets_plan_angle_and_ambiance(c: TestClient) -> None:
     _panel_edit(
         c,
         page["id"],
-        panels=[{"panel_id": pid, "plan": "contre-plongée", "angle": "de profil", "ambiance": "pluie, néons"}],
+        panels=[
+            {
+                "panel_id": pid,
+                "plan": "contre-plongée",
+                "angle": "de profil",
+                "ambiance": "pluie, néons",
+                "action": "Aiko saute par-dessus la rambarde",
+            }
+        ],
     )
-    # Pas encore appliquée : le prompt garde le plan du scénario.
+    # Pas encore appliquée : le prompt garde le plan du scénario (traduit : camera_terms).
     prompt = c.post(f"/panels/{pid}/prompt/rebuild").json()["final_prompt"]
-    assert prompt.startswith("Plan moyen.") and "de profil" not in prompt
+    assert prompt.startswith("Medium shot.") and "side profile" not in prompt
     c.post(f"/chapters/{chapter_id}/direction/apply", json={})
     prompt = c.post(f"/panels/{pid}/prompt/rebuild").json()["final_prompt"]
-    assert prompt.startswith("Contre-plongée. Angle de caméra : de profil.")
-    assert "Ambiance : pluie, néons." in prompt
+    assert prompt.startswith("Low-angle shot. Camera angle: side profile view.")
+    assert "Mood and lighting: pluie, néons." in prompt
+    assert "Action and pose: Aiko saute par-dessus la rambarde." in prompt
 
 
 def test_scenario_change_marks_direction_out_of_date(c: TestClient) -> None:
@@ -467,3 +477,103 @@ def test_cadre_and_sfx_go_to_frames_and_lettering(c: TestClient) -> None:
     p = c.post(f"/chapters/{chapter_id}/direction/apply", json={}).json()["pages"][0]
     assert [pa["frame"] for pa in p["panels"]] == [None, {"frame": "fade", "bleed": None, "inset": None}, None]
     assert all(pa["sfx"] == [] for pa in p["panels"])  # onomatopées de la DA retirées
+
+
+# --- mise en scène variée (variety_rules) ----------------------------------------------------
+RULES = PROMPT.variety_rules
+
+
+def _pa(plan: str, angle: str, action: str = "Aiko bondit par-dessus la rambarde") -> dict[str, str]:
+    return {"plan": plan, "angle": angle, "action": action}
+
+
+def test_variety_rules_live_in_the_preset() -> None:
+    assert RULES is not None
+    assert (RULES.max_same_plan_in_a_row, RULES.max_same_angle_in_a_row, RULES.max_frontal_share) == (2, 2, 0.35)
+    assert "regarde" in RULES.weak_actions and RULES.require_action
+
+
+def test_variety_flags_repeats_frontal_share_eye_level_and_actions() -> None:
+    assert RULES is not None
+    ok = [_pa("plan large", "de trois quarts"), _pa("gros plan", "en contre-plongée"), _pa("plan large", "de face")]
+    assert da.check_variety([(1, ok)], RULES) == ({}, [])
+    by_page, chapter = da.check_variety(
+        [
+            (1, [_pa("gros plan", "de face"), _pa("gros plan", "de face"), _pa("gros plan", "de face")]),
+            (
+                2,
+                [
+                    _pa("plan moyen", "de profil"),
+                    _pa("plan large", "de dos", ""),
+                    _pa("insert", "de profil", "Aiko regarde Kenji"),
+                ],
+            ),
+        ],
+        RULES,
+    )
+    page1, page2 = " | ".join(by_page[1]), " | ".join(by_page[2])
+    assert "cases 1 à 3 au même plan « gros plan »" in page1 and "cases 1 à 3 au même angle « de face »" in page1
+    assert "aucune case hors hauteur d'œil" in page1 and "aucune case hors hauteur d'œil" in page2
+    assert "case 2 › action : vide" in page2 and "case 3 › action : « Aiko regarde Kenji » trop statique" in page2
+    # 3 cases de face sur 6 : 2 au plus (35 %)
+    assert chapter == ["trop de cases de face : 3 sur 6 (2 au plus, 35 %) : varie les angles"]
+    # une page d'une case : pas d'exigence d'angle ; une longue action avec « regarde » reste une action
+    single = [_pa("plan large", "de trois quarts", "Aiko regarde derrière elle en courant, le manteau au vent")]
+    assert da.check_variety([(1, single)], RULES) == ({}, [])
+
+
+def _repetitive(ctx: DirectionContext) -> str:
+    data = _valid(ctx)
+    for page in data["pages"]:
+        for pa in page["panels"]:
+            pa.update(plan="plan moyen", angle="de face", action="")
+    return json.dumps(data, ensure_ascii=False)
+
+
+def test_variety_violation_is_retried_with_a_readable_error() -> None:
+    ctx = _ctx(rules=RULES)
+    answers = iter([_repetitive(ctx), json.dumps(_valid(ctx), ensure_ascii=False)])
+    llm = MockLLMProvider(lambda _m, _j: next(answers))
+    run = run_direction(llm, PROMPT, ctx, lambda *_: None)
+    assert run.attempts == 2 and run.variety == []
+    retry = llm.calls[1][-1].content
+    assert "mise en scène trop répétitive" in retry and "au même plan « plan moyen »" in retry
+    assert "action : vide" in retry
+
+
+def test_variety_violation_after_the_retries_is_kept_with_warnings() -> None:
+    ctx = _ctx(rules=RULES)
+    llm = MockLLMProvider(lambda _m, _j: _repetitive(ctx))
+    run = run_direction(llm, PROMPT, ctx, lambda *_: None)
+    assert run.attempts == 3 and len(llm.calls) == 3
+    assert any("au même angle « de face »" in v for v in run.variety)
+
+
+def test_mock_direction_respects_the_variety_rules() -> None:
+    pages = [_brief(n, 1 + n % 6) for n in range(1, 11)]
+    for variety in ("sobre", "equilibree", "audacieuse"):
+        for variant in (0, 1, 2):
+            out = parse_direction(json.dumps(_valid(_ctx(pages, variety=variety, variant=variant))), _ctx(pages))
+            assert da.output_variety(out, RULES) == [], (variety, variant)
+            assert all(pa.action for p in out.pages for pa in p.panels)
+
+
+def test_action_and_warnings_through_the_api(c: TestClient) -> None:
+    sid = _series(c)
+    chapter_id = _scripted_chapter(c, sid, pages=2)
+    data = _direct(c, chapter_id)
+    page = data["pages"][0]
+    assert all(pa["action"] for pa in page["panels"]) and page["warnings"] == []
+    ids = [pa["panel_id"] for pa in page["panels"]]
+    assert len(ids) >= 3
+    # l'auteur impose trois gros plans de face d'affilée : avertissement visible, action verrouillée
+    edited = _panel_edit(
+        c,
+        page["page_id"],
+        panels=[{"panel_id": i, "plan": "gros plan", "angle": "de face"} for i in ids[:3]]
+        + [{"panel_id": ids[0], "action": "Aiko regarde"}],
+    )
+    warnings = " | ".join(edited["warnings"])
+    assert "cases 1 à 3 au même plan « gros plan »" in warnings and "« Aiko regarde » trop statique" in warnings
+    assert f"{ids[0]}.action" in edited["locks"]
+    assert next(pa for pa in edited["panels"] if pa["panel_id"] == ids[0])["action"] == "Aiko regarde"

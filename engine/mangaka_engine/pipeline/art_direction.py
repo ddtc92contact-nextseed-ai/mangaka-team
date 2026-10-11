@@ -5,14 +5,21 @@ des options structurées — jamais de géométrie :
 
 - page : rythme (calme / montée / climax / respiration), style de mise en page suggéré, gabarit
   suggéré, « page choc » (pleine page ou splash) et une justification en français ;
-- case : intensité, type de plan, angle de caméra, cadre, note d'ambiance, onomatopées ; et, s'il le
-  juge utile, le décor et les objets de la bibliothèque de la série (ids existants seulement).
+- case : intensité, type de plan, angle de caméra, cadre, note d'ambiance, **action** (mouvement ou pose
+  du corps, reprise par le rédacteur de prompt), onomatopées ; et, s'il le juge utile, le décor et les
+  objets de la bibliothèque de la série (ids existants seulement).
 
 Entrées : scénario validé, bible et personnages de la série, style de mise en page de la série, choix
 de direction artistique du chapitre précédent (pour éviter les répétitions), savoir-faire de l'agent.
 Sortie JSON validée par Pydantic puis contre le chapitre (pages, nombre de cases, gabarits, ids de
 la bibliothèque) ;
 invalide → nouvel essai avec l'erreur (`max_retries`, 2 au maximum) → sinon `ArtDirectionError`.
+
+Mise en scène variée (`variety_rules` du preset, `check_variety`) : pas plus de N cases d'affilée au même
+plan ou au même angle dans une page, une part plafonnée de cases « de face », au moins une case hors
+hauteur d'œil par page, une `action` de case qui décrit un mouvement du corps. Une règle enfreinte
+relance l'agent avec l'erreur ; après les relances, la proposition est gardée avec un avertissement par
+page (`warnings`), visible dans l'écran Direction artistique.
 
 Les choix sont stockés par page (`PageDirection`). Un champ modifié par l'auteur est verrouillé : une
 nouvelle proposition le garde tant qu'il n'est pas déverrouillé. « Appliquer » recopie les choix dans
@@ -29,6 +36,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import re
 from collections import Counter
 from collections.abc import Callable, Sequence
@@ -39,7 +47,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, Validation
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..presets import PresetRegistry, PromptPreset
+from ..presets import PresetRegistry, PromptPreset, VarietyRules
 from ..providers.llm import ChatMessage, LLMError, LLMProvider
 from ..store.db import Database
 from ..store.models import Bubble, BubbleKind, Chapter, Character, LLMRun, Page, PageDirection, PageKind, Panel, utcnow
@@ -98,7 +106,7 @@ PageChocName = Literal["pleine page", "splash"]
 SfxIntensityName = Literal["léger", "moyen", "fort"]
 
 PAGE_FIELDS = ("rythme", "layout_style", "template", "page_choc")
-PANEL_FIELDS = ("intensity", "plan", "angle", "cadre", "ambiance", "sfx")
+PANEL_FIELDS = ("intensity", "plan", "angle", "cadre", "ambiance", "action", "sfx")
 MAX_SFX = 4
 
 
@@ -139,6 +147,8 @@ class DirectionPanel(_LLMModel):
     angle: AngleName = "de face"
     cadre: CadreName = "normal"
     ambiance: Annotated[str, StringConstraints(strip_whitespace=True, max_length=300)] = ""
+    # Mouvement ou pose du corps (français) : exigé par `variety_rules` (règle souple, voir `check_variety`).
+    action: Annotated[str, StringConstraints(strip_whitespace=True, max_length=200)] = ""
     sfx: list[DirectionSfx] = Field(default_factory=list, max_length=MAX_SFX)
     # Bibliothèque (facultatif) : null ou absent = garder le décor / les objets du scénario.
     decor: int | None = None
@@ -151,7 +161,7 @@ class DirectionPanel(_LLMModel):
     def _unique_objects(cls, v: list[int] | None) -> list[int] | None:
         return None if v is None else list(dict.fromkeys(v))
 
-    @field_validator("ambiance", mode="before")
+    @field_validator("ambiance", "action", mode="before")
     @classmethod
     def _none_text(cls, v: Any) -> Any:
         return "" if v is None else v
@@ -219,6 +229,7 @@ class DirectionContext:
     single_page: bool = False
     knowledge: AgentKnowledge | None = None
     library: SeriesLibrary = field(default_factory=SeriesLibrary)
+    rules: VarietyRules | None = None  # `variety_rules` du preset
 
     def as_json(self) -> dict[str, Any]:
         return {
@@ -260,6 +271,7 @@ class DirectionContext:
             "cadres": list(CADRES),
             "page_chocs": list(PAGE_CHOCS),
             "sfx_intensities": list(SFX_INTENSITIES),
+            "variety_rules": self.rules.model_dump() if self.rules is not None else None,
         }
 
 
@@ -393,6 +405,7 @@ def build_context(
         if knowledge
         else None,
         library=SeriesLibrary.load(session, series.id),
+        rules=prompt.variety_rules,
     )
 
 
@@ -487,6 +500,7 @@ def render_messages(prompt: PromptPreset, ctx: DirectionContext) -> list[ChatMes
         "cadres": ", ".join(CADRES),
         "page_chocs": ", ".join(PAGE_CHOCS),
         "sfx_intensities": ", ".join(SFX_INTENSITIES),
+        "variety_rules": variety_text(ctx.rules),
         "context_json": json.dumps(ctx.as_json(), ensure_ascii=False, indent=2),
         "savoir_faire": (ctx.knowledge.savoir_faire() if ctx.knowledge else "")
         or "(aucun savoir-faire pour cet agent)",
@@ -555,6 +569,127 @@ def check_against(out: DirectionOutput, ctx: DirectionContext) -> list[str]:
     return problems
 
 
+# --- mise en scène variée (variety_rules) -------------------------------------------------
+CHAPTER_PREFIX = "chapitre : "  # avertissement qui porte sur toutes les pages dirigées ensemble
+
+
+def _key(value: Any) -> str:
+    return " ".join(str(value or "").strip().lower().replace("’", "'").split())
+
+
+def variety_text(rules: VarietyRules | None) -> str:
+    """Règles de variété en clair, pour le prompt de l'agent ($variety_rules)."""
+    if rules is None:
+        return "(aucune règle imposée)"
+    lines = [
+        f"- jamais plus de {rules.max_same_plan_in_a_row} cases d'affilée au même plan dans une page ;",
+        f"- jamais plus de {rules.max_same_angle_in_a_row} cases d'affilée au même angle dans une page ;",
+        f"- au plus {round(rules.max_frontal_share * 100)} % des cases du chapitre avec l'angle "
+        f"{' / '.join(rules.frontal_angles)} (vue de face, à hauteur d'œil) ;",
+    ]
+    if rules.min_off_eye_level_per_page:
+        lines.append(
+            f"- au moins {rules.min_off_eye_level_per_page} case par page (dès {rules.off_eye_level_min_panels} cases) "
+            f"hors hauteur d'œil : plan ou angle parmi {', '.join(rules.off_eye_level)} ;"
+        )
+    if rules.require_action:
+        weak = f" (pas « {' », « '.join(rules.weak_actions[:4])} »)" if rules.weak_actions else ""
+        lines.append(f"- chaque case a une « action » : un mouvement ou une pose du corps{weak}.")
+    return "\n".join(lines)
+
+
+def _weak_action(action: str, rules: VarietyRules) -> str | None:
+    """Verbe statique d'une action courte (« Aiko regarde Kenji » → « regarde »), sinon None."""
+    text = f" {_key(action)} "
+    if len(text.split()) > rules.weak_max_words:
+        return None
+    return next((w for w in rules.weak_actions if f" {_key(w)} " in text), None)
+
+
+def _runs(values: Sequence[str], limit: int) -> list[tuple[int, int, str]]:
+    """Suites de plus de `limit` valeurs identiques : (première case, dernière case, valeur), numérotées à 1."""
+    out: list[tuple[int, int, str]] = []
+    start = 0
+    for i in range(1, len(values) + 1):
+        if i == len(values) or _key(values[i]) != _key(values[start]):
+            if i - start > limit and values[start]:
+                out.append((start + 1, i, values[start]))
+            start = i
+    return out
+
+
+def check_variety(
+    pages: Sequence[tuple[int, Sequence[dict[str, Any]]]], rules: VarietyRules | None
+) -> tuple[dict[int, list[str]], list[str]]:
+    """Règles de variété sur des pages (numéro, cases dans l'ordre avec plan, angle, action) :
+    (problèmes par numéro de page, problèmes du chapitre). Messages lisibles, en français."""
+    by_page: dict[int, list[str]] = {}
+    chapter: list[str] = []
+    if rules is None:
+        return by_page, chapter
+    frontal = {_key(a) for a in rules.frontal_angles}
+    off_level = {_key(a) for a in rules.off_eye_level}
+    total = front = 0
+    for number, panels in pages:
+        problems: list[str] = []
+        plans = [str(pa.get("plan") or "") for pa in panels]
+        angles = [str(pa.get("angle") or "") for pa in panels]
+        for first, last, value in _runs(plans, rules.max_same_plan_in_a_row):
+            problems.append(
+                f"cases {first} à {last} au même plan « {value} » "
+                f"({rules.max_same_plan_in_a_row} d'affilée au plus : varie le cadrage)"
+            )
+        for first, last, value in _runs(angles, rules.max_same_angle_in_a_row):
+            problems.append(
+                f"cases {first} à {last} au même angle « {value} » ({rules.max_same_angle_in_a_row} d'affilée au plus)"
+            )
+        if rules.min_off_eye_level_per_page and len(panels) >= rules.off_eye_level_min_panels:
+            off = sum(1 for p, a in zip(plans, angles, strict=True) if _key(p) in off_level or _key(a) in off_level)
+            if off < rules.min_off_eye_level_per_page:
+                problems.append(
+                    f"aucune case hors hauteur d'œil (au moins {rules.min_off_eye_level_per_page} : "
+                    f"plan ou angle parmi {', '.join(rules.off_eye_level)})"
+                )
+        if rules.require_action:
+            for i, pa in enumerate(panels, start=1):
+                action = str(pa.get("action") or "").strip()
+                if not action:
+                    problems.append(f"case {i} › action : vide (décris un mouvement ou une pose du corps)")
+                elif (weak := _weak_action(action, rules)) is not None:
+                    problems.append(
+                        f"case {i} › action : « {action} » trop statique (« {weak} ») : "
+                        "décris un mouvement ou une pose du corps"
+                    )
+        total += len(panels)
+        front += sum(1 for a in angles if _key(a) in frontal)
+        if problems:
+            by_page[number] = problems
+    allowed = max(1, math.floor(rules.max_frontal_share * total + 1e-9))
+    if total and front > allowed:
+        chapter.append(
+            f"trop de cases {' / '.join(rules.frontal_angles)} : {front} sur {total} "
+            f"({allowed} au plus, {round(rules.max_frontal_share * 100)} %) : varie les angles"
+        )
+    return by_page, chapter
+
+
+def output_variety(out: DirectionOutput, rules: VarietyRules | None) -> list[str]:
+    """Règles de variété enfreintes par une réponse du LLM (messages pour la relance)."""
+    pages = [(dp.page, [pa.model_dump() for pa in sorted(dp.panels, key=lambda p: p.panel)]) for dp in out.pages]
+    by_page, chapter = check_variety(pages, rules)
+    return [f"page {n} : {p}" for n, problems in by_page.items() for p in problems] + chapter
+
+
+def page_warnings(
+    pages: Sequence[Page], rules: VarietyRules | None, chapter_level: bool = True
+) -> dict[int, list[str]]:
+    """Avertissements de variété des choix stockés, par id de page (« chapitre : … » sur chacune)."""
+    rows = [(p.number, list((p.direction.values or {}).get("panels") or [])) for p in pages if p.direction]
+    by_page, chapter = check_variety(rows, rules)
+    common = [CHAPTER_PREFIX + c for c in chapter] if chapter_level else []
+    return {p.id: [*by_page.get(p.number, []), *common] for p in pages if p.direction}
+
+
 # --- appel du LLM avec relances -------------------------------------------------
 Progress = Callable[[int, str], None]
 
@@ -564,12 +699,16 @@ class DirectionRun:
     output: DirectionOutput
     attempts: int
     messages: list[ChatMessage]
+    # Règles de variété encore enfreintes après les relances (proposition gardée, avertissements).
+    variety: list[str] = field(default_factory=list)
 
 
 def run_direction(llm: LLMProvider, prompt: PromptPreset, ctx: DirectionContext, progress: Progress) -> DirectionRun:
     messages = render_messages(prompt, ctx)
     total = 1 + prompt.max_retries
     last_error = ""
+    # Dernière réponse valide qui n'enfreint que les règles de variété : gardée si les relances échouent.
+    fallback: DirectionRun | None = None
     for attempt in range(1, total + 1):
         progress(10 + (attempt - 1) * 25, f"Direction artistique par le LLM (essai {attempt}/{total})…")
         try:
@@ -582,6 +721,10 @@ def run_direction(llm: LLMProvider, prompt: PromptPreset, ctx: DirectionContext,
             continue
         try:
             output = parse_direction(result.text, ctx)
+            variety = output_variety(output, ctx.rules)
+            if variety:
+                fallback = DirectionRun(output=output, attempts=attempt, messages=messages, variety=variety)
+                raise DirectionValidationError("mise en scène trop répétitive : " + " ; ".join(variety[:8]))
         except DirectionValidationError as exc:
             last_error = str(exc)
             if attempt < total:
@@ -590,6 +733,8 @@ def run_direction(llm: LLMProvider, prompt: PromptPreset, ctx: DirectionContext,
                 messages = [*messages, ChatMessage("assistant", result.text[:20000]), ChatMessage("user", retry)]
             continue
         return DirectionRun(output=output, attempts=attempt, messages=messages)
+    if fallback is not None:
+        return fallback
     raise ArtDirectionError(
         f"Le LLM a renvoyé une direction artistique invalide {total} fois de suite. Dernière erreur : {last_error}"
     )
@@ -610,6 +755,7 @@ def to_values(dp: DirectionPage, page: Page) -> dict[str, Any]:
                 "angle": pa.angle,
                 "cadre": pa.cadre,
                 "ambiance": pa.ambiance,
+                "action": pa.action,
                 "sfx": [s.model_dump() for s in pa.sfx],
                 **({"decor": pa.decor} if pa.decor is not None else {}),
                 **({"objets": pa.objets} if pa.objets is not None else {}),
@@ -661,15 +807,23 @@ def merge_locked(new: dict[str, Any], old: dict[str, Any] | None, locks: Sequenc
 
 
 def save_direction(
-    session: Session, chapter: Chapter, pages: Sequence[Page], output: DirectionOutput, *, single_page: bool
+    session: Session,
+    chapter: Chapter,
+    pages: Sequence[Page],
+    output: DirectionOutput,
+    *,
+    single_page: bool,
+    rules: VarietyRules | None = None,
 ) -> list[int]:
     """Enregistre la proposition ; renvoie les numéros des pages modifiées.
 
     Une page acceptée par l'auteur n'est pas remplacée par une proposition de tout le chapitre (seul
-    « Proposer autre chose » sur cette page la relance). Les champs verrouillés sont gardés.
+    « Proposer autre chose » sur cette page la relance). Les champs verrouillés sont gardés. Les règles
+    de variété encore enfreintes (après verrous) sont notées sur chaque page (`warnings`).
     """
     by_number = {dp.page: dp for dp in output.pages}
     changed: list[int] = []
+    saved: list[Page] = []
     for page in pages:
         dp = by_number.get(page.number)
         if dp is None:
@@ -688,6 +842,12 @@ def save_direction(
             d.variant = (d.variant or 0) + 1
             d.status = "proposed"
         changed.append(page.number)
+        saved.append(page)
+    for page in saved:
+        page.direction.values = {**page.direction.values, "warnings": []}
+    for page_id, warnings in page_warnings(saved, rules).items():
+        page = next(p for p in saved if p.id == page_id)
+        page.direction.values = {**page.direction.values, "warnings": warnings}
     session.flush()
     return changed
 
@@ -715,6 +875,7 @@ class PanelEdit(BaseModel):
     angle: AngleName | None = None
     cadre: CadreName | None = None
     ambiance: Annotated[str, StringConstraints(strip_whitespace=True, max_length=300)] | None = None
+    action: Annotated[str, StringConstraints(strip_whitespace=True, max_length=200)] | None = None
     sfx: list[DirectionSfx] | None = Field(default=None, max_length=MAX_SFX)
 
     _n = field_validator("intensity", "plan", "angle", "cadre", mode="before")(_norm)
@@ -762,11 +923,11 @@ def edit_direction(
             raise ArtDirectionError(f"case {edit.panel_id} : n'appartient pas à la page {page.number}")
         for name in edit.model_fields_set - {"panel_id"}:
             value = getattr(edit, name)
-            if value is None and name not in ("ambiance", "sfx"):
+            if value is None and name not in ("ambiance", "action", "sfx"):
                 raise ArtDirectionError(f"{name} : ne peut pas être vide")
             if name == "sfx":
                 value = [s.model_dump() for s in value or []]
-            elif name == "ambiance":
+            elif name in ("ambiance", "action"):
                 value = value or ""
             target[name] = value
             add_lock(f"{edit.panel_id}.{name}")
@@ -778,6 +939,12 @@ def edit_direction(
     locks = [k for k in locks if k not in set(unlock)]
     d.values = values
     d.locks = locks
+    # Avertissements de variété de la page recalculés ; ceux du chapitre (part de cases de face) restent.
+    prompt = presets.prompts.get(PROMPT_ID)
+    rules = prompt.variety_rules if prompt is not None else None
+    kept = [w for w in values.get("warnings") or [] if w.startswith(CHAPTER_PREFIX)]
+    fresh = page_warnings([page], rules, chapter_level=False).get(page.id, [])
+    d.values = {**values, "warnings": [*fresh, *kept]}
     return d
 
 
@@ -952,9 +1119,13 @@ def direction_job(
             if chapter is None:
                 raise ArtDirectionError("Chapitre introuvable (supprimé entre-temps ?)")
             targets = _targets(chapter, page_id)
-            changed = save_direction(session, chapter, targets, run.output, single_page=page_id is not None)
+            changed = save_direction(
+                session, chapter, targets, run.output, single_page=page_id is not None, rules=prompt.variety_rules
+            )
             session.commit()
         tries = f" en {run.attempts} essais" if run.attempts > 1 else ""
+        if run.variety:
+            tries += f", avec {len(run.variety)} avertissement{'s' if len(run.variety) > 1 else ''} de mise en scène"
         if page_id is not None:
             return f"Nouvelle proposition pour la page {changed[0] if changed else '?'}{tries}"
         kept = len(ctx.pages) - len(changed)
