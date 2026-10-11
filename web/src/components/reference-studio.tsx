@@ -179,9 +179,11 @@ export function ReferenceStudio({
     <div className="space-y-5">
       <p className="text-sm text-zinc-500">
         À partir de la description visuelle, des mots-clés, du style de la série (packs et LoRA de style) et du LoRA
-        de la fiche ; une image de départ est facultative. La référence de style de la série (planche de style) ne
-        sert qu&apos;au trait : elle n&apos;est jointe qu&apos;après une image de départ ou la variante à affiner. Les
-        variantes non gardées restent dans l&apos;historique : tu peux les garder plus tard ou les supprimer.
+        de la fiche ; une image de départ est facultative.{" "}
+        {kind === "character"
+          ? "La référence de style de la série (planche de style) ne sert qu’au trait : elle n’est jointe qu’après une image de départ ou la variante à affiner."
+          : "Personne ne doit y apparaître : jamais de planche de style, prompt négatif « aucune personne » actif (palier Qualité), et une variante où un visage est détecté ne peut pas servir de référence aux cases sans ton accord."}{" "}
+        Les variantes non gardées restent dans l&apos;historique : tu peux les garder plus tard ou les supprimer.
       </p>
       {!sheetList.length ? (
         <Alert tone="info">

@@ -540,7 +540,7 @@ export function ProjectForm({
           htmlFor="workflow_preset"
           help="serie.tier"
           error={errors.workflow_preset}
-          hint="Chaque case peut ensuite être régénérée en Qualité depuis l'atelier."
+          hint="Chaque case peut ensuite être régénérée en Qualité max depuis l'atelier."
         >
           <Select
             id="workflow_preset"

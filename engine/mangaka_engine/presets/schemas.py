@@ -330,12 +330,13 @@ class WorkflowPreset(_Strict):
 
 def check_cfg(cfg: float, *, distilled: bool) -> None:
     """CFG accepté par un preset : 1 à 3, et exactement 1 pour un modèle distillé (ValueError sinon)."""
+    value = f"{cfg:g}".replace(".", ",")
     if distilled and cfg != MIN_CFG:
         raise ValueError(
-            f"cfg {cfg:g} refusé : modèle distillé (Turbo), cfg 1 obligatoire (le prompt négatif n'y est jamais lu)"
+            f"cfg {value} refusé : modèle distillé (Turbo), cfg 1 obligatoire (le prompt négatif n'y est jamais lu)"
         )
     if not MIN_CFG <= cfg <= MAX_CFG:
-        raise ValueError(f"cfg {cfg:g} hors limites ({MIN_CFG:g} à {MAX_CFG:g} : au-delà de 3, l'image se dégrade)")
+        raise ValueError(f"cfg {value} hors limites (1 à 3 : au-delà de 3, l'image se dégrade)")
 
 
 REQUIRED_UPSCALER_PARAMS = ("image", "width", "height")
