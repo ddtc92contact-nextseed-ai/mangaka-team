@@ -2,15 +2,75 @@
 
 import { useState } from "react";
 import { Alert, Button, Card, PageHeader } from "@/components/ui";
-import { api, fullErrorMessage, type ResetResult } from "@/lib/api";
+import { api, fullErrorMessage, type LibraryResult, type ResetResult } from "@/lib/api";
 import { RESET_WORD, isResetConfirmed, resetSummary } from "@/lib/reset";
+import { librarySummary } from "@/lib/storage";
 
 export default function SettingsPage() {
   return (
     <>
       <PageHeader title="Réglages" subtitle="Réglages de l'atelier." />
-      <ResetCard />
+      <div className="space-y-6">
+        <LibraryCard />
+        <ResetCard />
+      </div>
     </>
+  );
+}
+
+/** « Reconstruire la bibliothèque » de toutes les séries (ComfyUI/output/mangaka/), ancienne disposition convertie. */
+function LibraryCard() {
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<LibraryResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function rebuild() {
+    setBusy(true);
+    setError(null);
+    setResult(null);
+    try {
+      setResult(await api.rebuildAllLibraries());
+    } catch (err) {
+      setError(fullErrorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card data-testid="library-card">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="font-semibold text-zinc-100">Bibliothèque lisible</h2>
+        <Button variant="secondary" onClick={rebuild} disabled={busy} data-testid="library-rebuild">
+          {busy ? "Reconstruction…" : "Reconstruire la bibliothèque"}
+        </Button>
+      </div>
+      <div className="space-y-2 text-sm text-zinc-400">
+        <p>
+          Chaque série a son dossier dans ComfyUI, <code>output/mangaka/&lt;série&gt;/</code>, créé avec elle :{" "}
+          <code>references/</code> (un dossier par personnage, objet ou décor, avec un sous-dossier par type de fiche :{" "}
+          <code>portrait/</code>, <code>plein-pied/</code>, <code>expressions/</code>, <code>angles/</code>,{" "}
+          <code>imports/</code>…), <code>chapitre-01/page-01/</code> (croquis validés, versions choisies) et{" "}
+          <code>trash/</code> (tout ce qui a été généré sans être retenu, rangé de la même façon).
+        </p>
+        <p>
+          C&apos;est une copie : l&apos;atelier ne relit jamais ces fichiers. Reconstruire refait l&apos;arborescence de toutes
+          les séries depuis data/ (utile après avoir effacé ou déplacé des fichiers à la main) et convertit
+          l&apos;ancienne disposition à plat. Rejouer ne duplique rien.
+        </p>
+      </div>
+      {result && (
+        <div className="mt-4 space-y-2" data-testid="library-result">
+          <Alert tone="info">{librarySummary(result)}</Alert>
+          {result.warning && <Alert>{result.warning}</Alert>}
+        </div>
+      )}
+      {error && (
+        <div className="mt-4">
+          <Alert>{error}</Alert>
+        </div>
+      )}
+    </Card>
   );
 }
 

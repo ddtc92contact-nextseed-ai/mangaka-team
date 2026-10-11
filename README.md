@@ -186,34 +186,51 @@ configuration incomplète (ex. clé absente) y apparaît en rouge sans empêcher
 ### Où sont mes fichiers ?
 
 Ton travail se parcourt dans l'explorateur de fichiers, dans **`<COMFYUI_DIR>/output/mangaka/<série>/`** :
-la **bibliothèque lisible**, une copie rangée de tout ce qui est **validé ou retenu**, avec des noms clairs.
+la **bibliothèque lisible**, une copie rangée de tout ce qui est **validé ou retenu**, avec des noms clairs, et
+sa **corbeille** `trash/`, la copie de tout ce qui a été généré sans être retenu.
 
 ```
 mangaka/lucius-et-stan/
   references/
-    personnages/lucius/      lucius-portrait.png, lucius-turnaround.png, lucius-expressions.png,
-                             lucius-angle-<angle>.png, lucius-reference.png (image envoyée à la main)…
-    objets/epee/             epee-trois-quarts.png…
-    decors/la-foret/         la-foret-plan-large.png, la-foret-autre-angle.png…
+    personnages/lucius/
+      portrait/              lucius-portrait.png (+ lucius-portrait-2.png… si plusieurs gardées)
+      plein-pied/            lucius-plein-pied.png (turnaround face / profil / dos)
+      expressions/           lucius-expressions.png
+      angles/                lucius-angle-<angle>.png (« Nouvel angle », vues étiquetées par leur angle)
+      imports/               lucius-import.png (images envoyées à la main)
+    objets/epee/             trois-quarts/epee-trois-quarts.png, imports/…
+    decors/la-foret/         plan-large/la-foret-plan-large.png, autre-angle/…, imports/…
     style/                   planche-de-style.png (+ planche-de-style-2.png… : autres images de la référence active)
   chapitre-01/
     page-01/                 case-01-croquis.png (croquis validé), case-01.png (version choisie)
     planches/                page-01.png + page-01.svg (page rendue ou chapitre exporté)
+  trash/                     tout ce qui n'est pas retenu, rangé de la même façon :
+    personnages/lucius/portrait/lucius-portrait-v3.png     (variante non gardée)
+    style/essai-v2.png, style/planche-de-style-<nom>.png   (essai non choisi, ancienne référence de style)
+    chapitre-01/page-01/case-01-v2.png, case-01-croquis-v1.png  (version non choisie, croquis non validé)
   _transit/                  sorties brutes de ComfyUI, effacées dès leur enregistrement : à ignorer
 ```
 
-- Les dossiers `references/{personnages,objets,decors,style}` sont créés avec la série ; un dossier par
-  personnage, objet ou décor dès sa création ; un dossier par chapitre et par page à leur création.
-- Le suffixe d'une référence est son type de fiche (`-portrait`, `-turnaround`…), `-angle-<angle>` pour une
-  vue étiquetée, `-reference` pour une image envoyée ; `-2`, `-3`… s'il y en a plusieurs du même type.
-- `case-01.png` est la version choisie de la case (sa version finalisée si elle a été agrandie) : choisir une
-  autre version le remplace. Les variantes non retenues, essais et fichiers de travail n'y sont jamais.
-- Tout suit l'atelier : renommer une série, un personnage, un objet ou un décor renomme dossier et fichiers ;
-  supprimer une fiche, une image, une case, une page ou un chapitre retire ses fichiers.
-- **Reconstruire la bibliothèque** (fiche série, carte « Fichiers de la série », ou
-  `POST /projects/{id}/library`) régénère toute l'arborescence d'une série depuis `data/` : utile pour une
-  série créée avant cette bibliothèque, ou après avoir déplacé ou effacé des fichiers à la main. Rejouer ne
-  duplique rien.
+- L'arborescence est créée **dès la création** : `references/{personnages,objets,decors,style}/` et `trash/`
+  avec la série ; le dossier d'un personnage, objet ou décor avec **un sous-dossier par type de fiche** de
+  `presets/reference_sheets/` (champ `folder` du preset, sinon l'id sans la sorte : un nouveau preset = un
+  nouveau sous-dossier), plus `angles/` (personnages) et `imports/` ; un dossier par chapitre et par page à
+  leur création. Les dossiers vides sont normaux.
+- Dans les sous-dossiers, **seulement les images gardées**, nommées `<nom>-<type>.png` (`-2`, `-3`… s'il y en a
+  plusieurs). `case-01.png` est la version choisie de la case (sa version finalisée si elle a été agrandie).
+- **Corbeille** : une variante non gardée y est numérotée `-vN` (rang parmi les variantes de la fiche et du même
+  type), une version de case ou un croquis par son numéro de version. Garder une variante ou choisir une version la
+  sort de la corbeille ; retirer une image gardée ou changer de version l'y remet. L'atelier ne relit jamais la
+  corbeille : tu peux l'effacer à la main sans rien casser (« Reconstruire » la refait). « Nettoyer les variantes
+  non retenues » efface ces variantes de data/, donc aussi de la corbeille.
+- Tout suit l'atelier : renommer une série, un personnage, un objet ou un décor déplace ses dossiers (corbeille
+  comprise) ; supprimer une fiche, une image, une case, une page ou un chapitre retire ses fichiers ; supprimer
+  une série supprime son dossier. `old/` n'est jamais touché.
+- **Reconstruire la bibliothèque** (Réglages, pour toutes les séries ; fiche série, carte « Fichiers de la
+  série » ; ou `POST /library`, `POST /projects/{id}/library`) régénère toute l'arborescence depuis `data/` : utile
+  pour une série créée avant cette bibliothèque, ou après avoir déplacé ou effacé des fichiers à la main. Elle
+  convertit l'ancienne disposition à plat (`personnages/lucius/lucius-portrait.png` : retiré une fois la nouvelle
+  copie écrite). Rejouer ne duplique rien.
 - C'est une copie : `data/` reste le stockage de l'application. Ne range pas tes propres fichiers dans ces
   dossiers (un fichier au nom de la bibliothèque, `case-03.png`, `lucius-portrait.png`…, qui n'est plus
   retenu en est retiré).

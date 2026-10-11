@@ -1151,6 +1151,9 @@ name: Vue éclatée                # libellé de la liste déroulante
 description: "Pièces séparées, alignées sur un axe."
 kinds: [object]                  # character | object | decor (plusieurs possibles)
 order: 30                        # ordre dans la liste
+folder: eclate                   # facultatif : sous-dossier de la bibliothèque lisible
+                                 # (objets/<nom>/eclate/) ; absent : l'id sans la sorte (`eclate`) ;
+                                 # `angles` et `imports` sont réservés
 width: 1024                      # multiples de 8, 256 à 2048
 height: 768
 workflow: null                   # null : `workflow_library` (Turbo), sinon palier de la série, ou Qualité si demandé ;
@@ -1253,7 +1256,7 @@ fiche de face donne des cases de face) : d'où « ignore its pose, framing and b
 continuous scene, not a character sheet ». Il recopie aussi la **mise en page des planches** (grille de
 poses, règles, étiquettes, fond blanc) : `references.sorting` donne pour chaque image envoyée, selon sa
 sorte (`character`, `decor`, `object`, `style`), ce qu'il faut en prendre (« From <image1> take only the
-face, hair, body and outfit of Urus; ignore its layout, pose grid, rules, labels and white background. »).
+face, hair, body and outfit of Kaï; ignore its layout, pose grid, rules, labels and white background. »).
 Ces consignes entrent par `$sorting` dans `after` : elles sont donc ajoutées même à un prompt rédigé par
 l'IA. Une sorte sans consigne (vide) n'en reçoit aucune ; aucun texte n'est codé dans le moteur. Un prompt qui **commence** par `<image1>` et cite exactement
 les images envoyées, dans l'ordre (prompt rédigé par l'IA), ne reçoit pas les lignes de rôle une 2e fois,
@@ -1261,8 +1264,8 @@ seulement `after`. Un ancien prompt (français, « Image 1 : … », ou édité 
 avec les lignes de rôle anglaises en tête.
 
 Exemple (deux personnages, une image principale chacun, prompt par fragments) : « <image1> is the
-identity reference for Urus: … <image2> is the identity reference for Kaël: … Wide shot. … Setting: …
-Staging: … Two characters: Urus (…); Kaël (…). Style: … Use the reference images for identity and design
+identity reference for Kaï: … <image2> is the identity reference for Lina: … Wide shot. … Setting: …
+Staging: … Two characters: Kaï (…); Lina (…). Style: … Use the reference images for identity and design
 only … no plain white background. »
 
 ### Rédacteur de prompt (`prompts/redacteur-image.yaml`)

@@ -108,7 +108,7 @@ export const HELP = {
   "scenario.staging":
     "Qui fait quoi et où dans le cadre : premier plan, arrière-plan, gauche, droite, regards et gestes entre personnages. Il devient « Mise en scène : … » dans le prompt image.",
   "scenario.characters":
-    "Tous les personnages visibles dans la case, séparés par des virgules. Chaque nom est rapproché d'une fiche (majuscules, accents et alias ignorés, « Urus le dragon » → Urus) : ses références, sa description et son LoRA servent à la génération.",
+    "Tous les personnages visibles dans la case, séparés par des virgules. Chaque nom est rapproché d'une fiche (majuscules, accents et alias ignorés, « le vieux maître Kaï » → Kaï) : ses références, sa description et son LoRA servent à la génération.",
   "scenario.unmatched":
     "Ces noms ne correspondent à aucune fiche personnage : la case serait générée sans leurs références ni leur description. Rattache chaque nom à la bonne fiche (il devient un alias, reconnu partout dans la série) ou écarte-le si c'est un figurant.",
 

@@ -96,7 +96,7 @@ def build_context(settings: Settings, providers: Providers | None = None) -> App
     if folders.problem:
         log.warning("dossiers ComfyUI : %s", folders.problem)
     # Bibliothèque lisible (output/mangaka/<série>/) : mise à jour après chaque commit qui touche une série.
-    library = ComfyLibrary(folders, files)
+    library = ComfyLibrary(folders, files, presets=presets)
     library.watch(db)
     kb = KnowledgeBase(presets.knowledge, providers.embedding)
     # « Savoir-faire » des profils d'agents (écran « L'équipe ») : prime sur knowledge.yaml.

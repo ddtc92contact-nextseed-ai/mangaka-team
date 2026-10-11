@@ -632,7 +632,7 @@ function PanelEditor({
             className="min-h-12 text-sm"
             value={panel.staging}
             onChange={(e) => set("staging", e.target.value)}
-            placeholder="Urus au premier plan à gauche, ailes déployées ; Kael sur un rocher à droite, le regarde"
+            placeholder="Kaï au premier plan à gauche, bâton levé ; Lina sur un rocher à droite, le regarde"
             maxLength={1500}
             disabled={disabled}
           />

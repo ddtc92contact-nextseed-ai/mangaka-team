@@ -2,7 +2,7 @@
 #
 # Variables disponibles ($nom ; écrire $$ pour un « $ » littéral) :
 #   $series_title $reading_direction $characters $previous_chapters
-#   $character_names  (noms exacts des fiches personnages, à recopier tels quels : « Urus », « Kael »)
+#   $character_names  (noms exacts des fiches personnages, à recopier tels quels : « Kaï », « Lina »)
 #   $style_packs      (packs de style de la série : genre, rendu, ton, réglages fins — noms et descriptions)
 #   $style_guidelines (consignes du genre et du ton : rythme, cases par page, vocabulaire adapté à l'âge)
 #   ($series_style : ancien nom de $style_packs, gardé pour les prompts personnalisés)
@@ -72,14 +72,14 @@ user: |
     le dessinateur ne dessine aucun texte, le lettreur les pose ;
   - « characters » liste TOUS les personnages visibles dans la case, sans en oublier ; pour un
     personnage qui a une fiche, recopie EXACTEMENT le nom de sa fiche, parmi : $character_names
-    (jamais « le petit dragon » ni « Urus le dragon » : seulement « Urus ») ; « speaker » suit la même
+    (jamais « le vieux maître » ni « Maître Kaï » : seulement « Kaï ») ; « speaker » suit la même
     règle ; un figurant sans fiche garde un nom simple ;
   - « setting » : le lieu de la case, toujours rempli, même sans décor récurrent — lieu, moment
     (heure, météo, saison) et éléments visibles du décor (« clairière au bord d'un lac, fin d'après-midi,
     herbes hautes, rochers moussus, montagnes au loin ») ;
   - « staging » : la mise en scène — qui fait quoi, où dans le cadre (premier plan, arrière-plan,
-    gauche, droite), posture, regard et interactions entre les personnages (« Urus au premier plan à
-    gauche, ailes déployées, regarde Kael posé sur un rocher à droite ») ;
+    gauche, droite), posture, regard et interactions entre les personnages (« Kaï au premier plan à
+    gauche, bâton levé, regarde Lina assise sur un rocher à droite ») ;
   - « description » raconte l'action de la case ; « setting » et « staging » la complètent sans la répéter ;
   - « decor » : l'id (nombre) du décor récurrent où se passe la case, pris UNIQUEMENT dans la liste
     des décors ci-dessus, ou null si la case se passe ailleurs ;
