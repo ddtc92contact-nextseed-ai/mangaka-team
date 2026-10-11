@@ -33,6 +33,8 @@ export const HELP = {
     "Force avec laquelle le modèle suit le prompt (1 à 3). À 1, ComfyUI saute la passe négative : le prompt négatif est ignoré (« négatif inactif »). Au-dessus de 1, il est lu, et chaque étape coûte environ deux fois plus. Au-delà de 3, l'image se dégrade (trop contrastée). Les paliers distillés (Turbo, croquis) restent à 1. Vide : la valeur du palier.",
   "serie.ai_prompt":
     "Oui : le LLM du dessinateur rédige le prompt image de chaque case en un vrai paragraphe (sujet, action, cadrage, décor, lumière, style), comme l'attend Qwen-Image. Il est écrit une fois par case, visible et modifiable dans l'atelier. Non : l'assemblage par fragments, sans LLM. Consignes, langue et longueur : écran « L'équipe », Dessinateur.",
+  "serie.anime_consistency":
+    "Ajoute le LoRA « Cohérence anime » aux générations de la série : visages et design des personnages restent plus stables d'une case à l'autre. Testé seulement au palier Qualité (modèle non distillé) : sur Turbo et Rapide il n'est pas ajouté. Désactivé par défaut.",
   "serie.sketch":
     "Avec le palier croquis, chaque case est d'abord esquissée en quelques secondes : tu tries les compositions au clavier, puis seules celles validées passent au propre. Pratique pour ne pas gaspiller de longues générations.",
   "serie.sketch_denoise":
@@ -55,6 +57,22 @@ export const HELP = {
     "Résumé écrit par le LLM au découpage. Les chapitres suivants le relisent pour garder la continuité de l'histoire.",
   "chapitre_infos.generate_all":
     "Met en file tout le chapitre en un clic : les pages sans mise en page sont mises en page d'abord, puis chaque case sans version choisie des pages de l'histoire et bonus part en génération (en croquis d'abord si le palier croquis est activé). Une génération à la fois ; une confirmation montre le nombre de cases et la durée estimée.",
+
+  // --- angles de caméra (LoRA Multiple-Angles) --------------------------------------------------------------------
+  "camera.new_angle":
+    "Crée une nouvelle vue de la fiche sous l'angle choisi (trois-quarts, profil, dos, plongée…) à partir d'une de ses images. La vue est rangée parmi les images de référence, étiquetée par son angle : une case dont la direction artistique demande cet angle la recevra plutôt que la vue principale.",
+  "camera.change_angle":
+    "Redessine cette case sous un autre angle de caméra à partir de la version choisie : une nouvelle version s'ajoute, les autres ne bougent pas. Une génération à la fois, comme les autres.",
+  "camera.angle":
+    "Le cadrage voulu, dans le vocabulaire du LoRA Multiple-Angles : la position de la caméra autour du sujet (face, trois-quarts, profil, dos) et sa hauteur (à hauteur d'yeux, plongée, contre-plongée).",
+  "camera.lora":
+    "Multiple-Angles v2 (par défaut) tourne nettement le sujet, jusqu'à la vue de dos. La v1 est un repli plus sage : elle garde mieux l'identité en déplaçant l'axe de la caméra.",
+  "camera.weight":
+    "La force du LoRA (1,0 par défaut). Si l'image recopie simplement la référence sans tourner la caméra, baisse-le vers 0,8 : c'est le conseil de la fiche du modèle.",
+  "camera.tier":
+    "Ces LoRA n'ont été testés qu'au palier Qualité (modèle non distillé, vrai CFG) : « Nouvel angle » et « Changer l'angle » y tournent toujours, quel que soit le palier de la série (~1 min). Sur Turbo et Rapide, distillés ou non testés, ils ne sont jamais ajoutés en silence : l'option affiche « Disponible en palier Qualité ».",
+  "camera.views":
+    "L'angle de caméra de chaque vue sert à choisir la vue envoyée à une case : celle la plus proche de l'angle demandé par la direction artistique (sinon la principale). Les vues de « Nouvel angle » sont étiquetées d'office ; tu peux étiqueter les autres ici.",
 
   // --- planche de style ------------------------------------------------------------------------------------------
   "style_board.trials":

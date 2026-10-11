@@ -757,3 +757,29 @@ def test_v21_database_keeps_its_tier_and_gets_no_series_cfg(make_settings: Calla
     fresh = settings.database_path.parent / "fresh.db"
     create_db_engine(fresh).dispose()
     assert _columns(settings.database_path) == _columns(fresh)
+
+
+def test_v22_database_gets_untagged_views_and_no_anime_consistency(make_settings: Callable[..., Settings]) -> None:
+    """v22 → v23 : angle des vues de référence (aucune étiquette sur les images existantes) et « Cohérence
+    anime » par série (désactivée sur les séries existantes)."""
+    settings = make_settings()
+    with TestClient(create_app(settings)) as c:
+        project = c.post("/projects", json={**STYLE, "title": "Série v22"}).json()
+        aiko = c.post(f"/projects/{project['id']}/characters", json={"name": "Aiko"}).json()
+        c.post(f"/characters/{aiko['id']}/images", files=[("files", ("a.png", png_bytes(), "image/png"))])
+    con = sqlite3.connect(settings.database_path)
+    con.execute("ALTER TABLE projects DROP COLUMN anime_consistency")
+    con.execute("ALTER TABLE character_images DROP COLUMN angle")
+    con.execute("ALTER TABLE series_asset_images DROP COLUMN angle")
+    con.execute("PRAGMA user_version = 22")
+    con.commit()
+    con.close()
+
+    with TestClient(create_app(settings)) as c:
+        assert c.get(f"/projects/{project['id']}").json()["anime_consistency"] is False
+        [image] = c.get(f"/characters/{aiko['id']}").json()["reference_images"]
+        assert image["angle"] is None
+    assert _version(settings.database_path) == SCHEMA_VERSION
+    fresh = settings.database_path.parent / "fresh.db"
+    create_db_engine(fresh).dispose()
+    assert _columns(settings.database_path) == _columns(fresh)

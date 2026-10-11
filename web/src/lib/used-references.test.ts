@@ -57,3 +57,9 @@ test("références écartées faute d'emplacement : note lisible", () => {
     "Références non envoyées : Épée (objet), Planche (style de la série)",
   );
 });
+
+test("« Changer l'angle » : la version de la case qui tourne", () => {
+  const d = describeUsedReference({ kind: "panel", id: 9, name: "version 2", image_id: 31 }, KINDS);
+  assert.equal(d.name, "version 2");
+  assert.equal(d.kindLabel, "vue à faire tourner");
+});

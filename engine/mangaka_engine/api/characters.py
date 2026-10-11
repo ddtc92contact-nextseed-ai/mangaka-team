@@ -36,6 +36,7 @@ def reference_image_out(img: CharacterImage | SeriesAssetImage, url: str) -> Ref
         width=img.width,
         height=img.height,
         created_at=img.created_at,
+        angle=img.angle,
     )
 
 

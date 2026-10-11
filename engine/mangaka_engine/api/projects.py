@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..agents.profiles import ProfileInvalid
+from ..pipeline.camera import identity_problem
 from ..pipeline.comfy_check import control_types
 from ..pipeline.generation import ACTIVE, ai_prompt_default, drop_written_prompts
 from ..pipeline.generation import STEP as GENERATION_STEP
@@ -74,6 +75,10 @@ def project_out(
         upscaler=project.upscaler,
         cfg=project.cfg,
         ai_prompt=project.ai_prompt,
+        anime_consistency=project.anime_consistency,
+        anime_consistency_problem=identity_problem(
+            presets.camera_loras, presets.workflows.get(project.workflow_preset)
+        ),
         character_count=character_count,
         chapter_count=chapter_count,
         laid_out_page_count=laid_out,
@@ -257,6 +262,7 @@ def create_project(
         cfg=body.cfg,
         # Prompt rédigé par l'IA : réglage global de l'écran « L'équipe » (dessinateur), oui par défaut.
         ai_prompt=body.ai_prompt if body.ai_prompt is not None else ai_prompt_default(ctx.agents.presets_for(None)),
+        anime_consistency=body.anime_consistency,
     )
     fonts = {
         "dialogue_font": body.dialogue_font or genre.fonts.dialogue,
@@ -301,6 +307,7 @@ def update_project(
         "clean_mode",
         "layout_style_notice",
         "ai_prompt",
+        "anime_consistency",
     ):
         if key in changes and changes[key] is None:
             raise FieldError(key, "ne peut pas être vide")

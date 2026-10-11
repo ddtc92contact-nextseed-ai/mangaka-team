@@ -35,6 +35,8 @@
   l'utilisateur) gardent leur style, mais la fiche série le signale une fois. Rien d'autre ne change.
 - 20 : lieu et mise en scène de chaque case (vides pour les cases existantes), autres noms (alias) des
   personnages (aucun pour les fiches existantes).
+- 23 : angle de caméra des vues de référence (aucune étiquette sur les images existantes) et « Cohérence
+  anime » par série (désactivée sur les séries existantes).
 
 Une base neuve est créée directement à la dernière version. Chaque migration tourne dans une
 transaction unique, clés étrangères désactivées (recette « 12 étapes » de SQLite pour reconstruire
@@ -76,7 +78,7 @@ from .models import (
 
 log = logging.getLogger("mangaka_engine")
 
-SCHEMA_VERSION = 22
+SCHEMA_VERSION = 23
 
 
 class MigrationError(RuntimeError):
@@ -345,6 +347,16 @@ def _v21_to_v22(cur: sqlite3.Cursor) -> None:
         cur.execute("ALTER TABLE projects ADD COLUMN cfg FLOAT")
 
 
+def _v22_to_v23(cur: sqlite3.Cursor) -> None:
+    # Angle des vues de référence (aucune étiquette : la principale vaut `main_view`) et « Cohérence anime »
+    # par série (désactivée). Rien d'autre ne change.
+    for table in ("character_images", "series_asset_images"):
+        if "angle" not in {row[1] for row in cur.execute(f"PRAGMA table_info({table})")}:
+            cur.execute(f"ALTER TABLE {table} ADD COLUMN angle VARCHAR(40)")
+    if "anime_consistency" not in {row[1] for row in cur.execute("PRAGMA table_info(projects)")}:
+        cur.execute("ALTER TABLE projects ADD COLUMN anime_consistency BOOLEAN NOT NULL DEFAULT 0")
+
+
 MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     # version de départ → (version d'arrivée, fonction)
     0: (2, _v0_to_v2),
@@ -369,6 +381,7 @@ MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     19: (20, _v19_to_v20),
     20: (21, _v20_to_v21),
     21: (22, _v21_to_v22),
+    22: (23, _v22_to_v23),
 }
 
 

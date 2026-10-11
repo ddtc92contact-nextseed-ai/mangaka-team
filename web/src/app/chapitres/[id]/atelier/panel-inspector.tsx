@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { AnnotationBar } from "@/components/annotation";
+import { TierRestriction } from "@/components/camera-angle";
 import { InfoTip } from "@/components/info-tip";
 import { NegativeBadge } from "@/components/negative-badge";
 import { DpiBadge } from "@/components/print-dpi";
@@ -31,6 +32,7 @@ import { useJob } from "@/lib/jobs";
 import { LIBRARY_KINDS } from "@/lib/library";
 import { describeUsedReference, droppedReferencesNote } from "@/lib/used-references";
 import { useChapter } from "../chapter-context";
+import { ChangeAngleBlock } from "./change-angle";
 import { CompositionBlock, LockBadge } from "./composition-block";
 import type { PanelView } from "./page-canvas";
 import { PanelQC } from "./panel-qc";
@@ -562,6 +564,26 @@ export function PanelInspector({
             <InfoTip help="atelier.regenerate" label="Régénérer et Même seed" />
             <InfoTip help="atelier.quality" label="Régénérer en Qualité" />
           </div>
+
+          <ChangeAngleBlock
+            panelId={panelId}
+            chosen={chosen}
+            busy={busy}
+            run={run}
+            onQueued={(message) => {
+              refresh();
+              onChanged();
+              detail.reload();
+              setGenerated(true);
+              setNotice(message);
+            }}
+          />
+          {series.anime_consistency && series.anime_consistency_problem && (
+            <p className="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400" data-testid="anime-consistency-restriction">
+              Cohérence anime de la série :
+              <TierRestriction label={series.anime_consistency_problem} />
+            </p>
+          )}
 
           <PrintSection
             info={d.print_info ?? null}

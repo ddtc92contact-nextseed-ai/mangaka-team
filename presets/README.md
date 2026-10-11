@@ -22,6 +22,7 @@ Après modification d'un preset, redémarre le moteur (`npm run dev`).
 | `style_tones/*.yaml` | Packs de style : **ton** (lumineux, neutre par défaut, dark, humour) |
 | `style_options.yaml` | Réglages fins bornés du style : trait, trames (N&B seulement), détail des décors |
 | `style_loras.yaml` | Catalogue des LoRA de style : mots déclencheurs et poids conseillé |
+| `camera_loras.yaml` | LoRA Multiple-Angles (« Nouvel angle », « Changer l'angle ») et Cohérence anime, vocabulaire de caméra |
 | `prompts/*.yaml` | Prompts des étapes LLM (`script` : découpage d'un chapitre ; `direction-artistique` ; `redacteur-image` : prompt image de chaque case rédigé en un paragraphe) |
 | `image_prompt.yaml` | Construction du prompt final des cases (étape 3) et termes « pas de texte » du prompt négatif |
 | `qc.yaml` | Contrôle qualité des cases (étape 4) : poids, seuils de verdict, règles des détecteurs, seuil CCIP, zone de doute de la vision, nouveaux essais automatiques |
@@ -1164,6 +1165,39 @@ prompt:                          # morceaux assemblés ; un morceau dont une var
   - "The last image ($style_ref) is a style reference only."   # « <imageN> » si la référence de style est jointe
 negative_prompt: "person, people, text"   # en anglais ; remplace le négatif du workflow (termes « pas de texte » toujours ajoutés)
 ```
+
+## Angles de caméra et cohérence anime (`camera_loras.yaml`)
+
+Deux LoRA Qwen-Image 2.1 (apache-2.0), vérifiés sur la GX10 le 11/10/2026 (ComfyUI 0.39.0, base
+`qwen_image_2.1_bf16` non distillée, `LoraLoaderModelOnly` à 1,0 : 192 patchs chacun, aucune clé ignorée,
+aucune conversion). 40 pas en 1024² avec une référence ≈ 57 à 66 s.
+
+| `id` | Fichier | Rôle | Mot déclencheur | Poids |
+|---|---|---|---|---|
+| `mva-v2` (défaut) | `Qwen21_Multiple-Angles_v2_000001500.safetensors` | angles (rang 64) : tourne nettement le sujet, jusqu'au dos | `<mva>` | 1,0 |
+| `mva-v1` | `Qwen21_Multiple-Angles_v1_step1000.safetensors` | angles (rang 32), repli : garde l'identité | `<mva>` | 1,0 |
+| `anime-consistency` | `Qwen2.1_Anime_consistency.safetensors` | identité, interrupteur de la série | — | 1,0 |
+
+- **Paliers** (`tiers`) : nom du palier sans accent, en minuscules (`qualite`, `qualite-max`…). Turbo et
+  Rapide ne sont pas testés : le LoRA n'y est jamais ajouté, et l'UI affiche « Disponible en palier Qualité »
+  au lieu d'ignorer l'option en silence (la version note la raison dans `params.camera.skipped`).
+- **Mot déclencheur** : `<mva>` ouvre le prompt, suivi du vocabulaire de caméra de la fiche du modèle
+  (`angles[].camera` : « front-right quarter view, eye-level shot », « right side view, elevated shot »…).
+  Le premier morceau de `prompts.sheet` / `prompts.panel` doit commencer par `$trigger`.
+- **Poids** : modifiable dans l'UI à chaque génération ; la fiche du modèle conseille 0,8 si l'image recopie
+  la référence sans tourner.
+- **« Nouvel angle »** (fiche personnage, objet ou décor) : une vue de la fiche (la principale par défaut) en
+  image 1, au `workflow` du catalogue (Qualité avec références) et à ses `steps`, quel que soit le palier de
+  la série. La vue produite est rangée parmi les images de référence, **étiquetée par son angle** (colonne
+  `angle` des images, migration v23) ; les autres vues s'étiquettent à la main sous chaque image.
+- **Vue servie à une case** : la vue étiquetée la plus proche de l'angle de la direction artistique (`angle`,
+  et `plan` pour plongée / contre-plongée, table `direction_angles` ; le côté gauche/droite ne compte pas).
+  Sans angle demandé ou sans vue étiquetée : la vue principale (angle supposé : `main_view`).
+- **« Changer l'angle »** (atelier) : une nouvelle version de la case, la version choisie en image 1, même
+  palier que « Nouvel angle » ; les autres versions ne bougent pas, la file reste une génération à la fois.
+  Le verrou de composition est ignoré pour cette version (l'angle change la composition).
+- **« Cohérence anime »** (fiche série, non par défaut) : le LoRA d'identité est chaîné après ceux de la
+  série et des fiches dans chaque génération dont le palier le permet (cases, fiches de référence).
 
 ## Prompt final des cases (`image_prompt.yaml`)
 

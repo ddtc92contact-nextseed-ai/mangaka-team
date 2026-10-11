@@ -16,6 +16,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..pipeline.camera import QUALITY_TIER_LABEL, tier_allows
 from ..pipeline.generation import GenerationError
 from ..pipeline.reference_sheets import (
     ENTRY_KINDS,
@@ -24,6 +25,7 @@ from ..pipeline.reference_sheets import (
     PEOPLE_WARNING,
     LibraryEntry,
     active_jobs,
+    enqueue_angle_view,
     enqueue_sheet,
     entry_kind,
     keep_variant,
@@ -40,8 +42,13 @@ from .deps import AppContext, get_ctx, get_session
 from .errors import FieldError
 from .jobs import job_out
 from .schemas import (
+    AngleViewIn,
     AssetOut,
+    CameraAngleOut,
+    CameraLoraOut,
+    CameraLorasOut,
     CharacterOut,
+    ImageAngleIn,
     ImageOrderIn,
     JobOut,
     ReferenceGenerateIn,
@@ -145,6 +152,53 @@ def list_reference_sheets(
     ]
 
 
+@router.get("/presets/camera-loras", response_model=CameraLorasOut)
+def get_camera_loras(ctx: AppContext = Depends(get_ctx)) -> CameraLorasOut:
+    """LoRA Multiple-Angles et Cohérence anime (presets/camera_loras.yaml) : fichiers, mots déclencheurs, poids,
+    paliers où ils s'appliquent, vocabulaire de caméra des listes « Nouvel angle » et « Changer l'angle »."""
+    presets = ctx.agents.presets_for(None)
+    catalog = presets.camera_loras
+    loaded = presets.workflows.get(catalog.workflow) if catalog.workflow else None
+    default = catalog.default_angle_lora
+    if loaded is None:
+        problem: str | None = "aucun workflow d'angle configuré (workflow de presets/camera_loras.yaml)"
+    elif default is None:
+        problem = "aucun LoRA Multiple-Angles dans presets/camera_loras.yaml"
+    elif not catalog.angles:
+        problem = "aucun angle de caméra dans presets/camera_loras.yaml"
+    elif not tier_allows(default, loaded):
+        problem = QUALITY_TIER_LABEL
+    else:
+        problem = None
+    return CameraLorasOut(
+        workflow=catalog.workflow,
+        workflow_tier=loaded.preset.tier.name if loaded is not None and loaded.preset.tier else None,
+        angle_problem=problem,
+        loras=[
+            CameraLoraOut(
+                id=lo.id,
+                role=lo.role,
+                name=lo.name,
+                description=lo.description,
+                file=lo.file,
+                trigger=lo.trigger,
+                weight=lo.weight,
+                tiers=list(lo.tiers),
+                default=lo is default,
+                workflows=[w for w, wf in presets.workflows.items() if tier_allows(lo, wf)],
+            )
+            for lo in catalog.loras
+        ],
+        angles=[
+            CameraAngleOut(id=a.id, label=a.label, camera=a.camera, azimuth=a.azimuth, elevation=a.elevation)
+            for a in catalog.angles
+        ],
+        main_view=catalog.main_view,
+        weight_hint=" ".join(catalog.weight_hint.split()),
+        tier_label=QUALITY_TIER_LABEL,
+    )
+
+
 def _routes(kind: str) -> APIRouter:
     segment = FOLDERS[kind]
     sub = APIRouter(tags=["bibliothèque"])
@@ -207,6 +261,69 @@ def _routes(kind: str) -> APIRouter:
         session.commit()
         ctx.generation.notify()
         return [job_out(j) for j in jobs]
+
+    @sub.post(
+        f"/{segment}/{{entry_id}}/angle-views",
+        response_model=list[JobOut],
+        status_code=202,
+        name=f"{segment}_angle_view",
+    )
+    def new_angle(
+        entry_id: int,
+        body: AngleViewIn,
+        session: Session = Depends(get_session),
+        ctx: AppContext = Depends(get_ctx),
+    ) -> list[JobOut]:
+        """« Nouvel angle » : une nouvelle vue de la fiche sous l'angle choisi (LoRA Multiple-Angles, palier Qualité),
+        rangée parmi ses images de référence, étiquetée par son angle ; progression : /jobs/{id}/events."""
+        _require_comfyui(ctx)
+        entry = _entry_or_404(session, kind, entry_id)
+        start = None
+        if body.start_image_id is not None:
+            start = next((img for img in entry.reference_images if img.id == body.start_image_id), None)
+            if start is None:
+                raise FieldError(
+                    "start_image_id", "vue de départ introuvable parmi les images de référence de la fiche"
+                )
+        try:
+            job = enqueue_angle_view(
+                session,
+                _presets(ctx, entry.project_id),
+                entry,
+                body.angle,
+                start=start,
+                lora_id=body.lora,
+                weight=body.weight,
+                seed=body.seed,
+            )
+        except (PresetError, GenerationError) as exc:
+            raise FieldError("angle", str(exc)) from None
+        session.commit()
+        ctx.generation.notify()
+        return [job_out(job)]
+
+    @sub.put(
+        f"/{segment}/{{entry_id}}/images/{{image_id}}/angle",
+        response_model=AssetOut | CharacterOut,
+        name=f"{segment}_image_angle",
+    )
+    def set_image_angle(
+        entry_id: int,
+        image_id: int,
+        body: ImageAngleIn,
+        session: Session = Depends(get_session),
+        ctx: AppContext = Depends(get_ctx),
+    ) -> CharacterOut | AssetOut:
+        """Étiquette (ou retire) l'angle de caméra d'une vue : sert au choix de la vue la plus proche pour une case."""
+        entry = _entry_or_404(session, kind, entry_id)
+        image = next((img for img in entry.reference_images if img.id == image_id), None)
+        if image is None:
+            raise HTTPException(status_code=404, detail="Image de référence introuvable")
+        if body.angle is not None and _presets(ctx, entry.project_id).camera_loras.angle(body.angle) is None:
+            raise FieldError("angle", f"angle de caméra inconnu : « {body.angle} » (presets/camera_loras.yaml)")
+        image.angle = body.angle
+        session.commit()
+        return entry_out(entry)
 
     @sub.put(
         f"/{segment}/{{entry_id}}/images/order",
