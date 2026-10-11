@@ -45,7 +45,7 @@ lora_chain:
   strength_input: strength_model
 defaults:
   # cfg 1 = chemin officiel de Qwen-Image 2.1 : le prompt négatif est alors ignoré par le modèle.
-  negative_prompt: "texte, lettres, bulles, filigrane, signature, flou, mains déformées"
+  negative_prompt: "text, letters, speech bubbles, watermark, signature, blurry, deformed hands"
   steps: 50
   cfg: 1
   width: 1024

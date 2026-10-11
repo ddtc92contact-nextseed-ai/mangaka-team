@@ -3,14 +3,17 @@ id: seinen
 name: Seinen
 description: Pour adultes, dessin réaliste — intrigues mûres, violence et psychologie assumées.
 order: 20
-lang: fr
-prompt_keywords: [manga seinen, style réaliste et mature]
+lang: en
+prompt_keywords: [seinen manga, realistic mature style]
 layout_style: nerveuse
 reading_direction: rtl
 fonts: { dialogue: comic-neue, shout: titan-one }
-# Planche de style : scène test des essais (français, aucun personnage de la série).
+# Planche de style : scène test des essais (français, affichée sur la fiche série ; aucun personnage de la série)
+# et la même scène en anglais, celle qui entre dans le prompt image (scene_prompt).
 scene_test: >-
   un homme anonyme en imperméable sous la pluie dans une ruelle de nuit, néons qui se reflètent dans les flaques, cadrage cinématographique
+scene_prompt: >-
+  an anonymous man in a raincoat stands in the rain in a back alley at night, neon lights reflected in the puddles, cinematic framing
 llm_guidelines: >-
   Seinen, public adulte : rythme posé qui accélère dans les scènes de tension, 5 à 7 cases par page,
   silences et cases muettes bienvenus. Dialogues naturels et nuancés, vocabulaire adulte ; personnages

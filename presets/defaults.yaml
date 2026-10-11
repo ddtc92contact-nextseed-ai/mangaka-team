@@ -45,12 +45,12 @@ style_board:
   width: 1024
   height: 1024
   # Morceaux assemblés dans l'ordre ; un morceau dont une variable est vide est omis.
-  # Variables : $scene (scène test du genre), $style (style de la série).
+  # Variables : $scene (scène test du genre, en anglais : `scene_prompt`), $style (style de la série).
   prompt:
-    - "Planche de style, scène test : $scene."
-    - "Style : $style."
-    - "Une seule illustration pleine page, aucun texte, aucune bulle."
-  negative_prompt: "texte, lettres, bulles, cases multiples"
+    - "Style board, test scene: $scene."
+    - "Style: $style."
+    - "A single full-page illustration, one continuous scene, no text, no speech bubbles."
+  negative_prompt: "text, letters, speech bubbles, multiple panels"
   # Référence de style validée — fiches de référence (personnages, objets, décors) :
   # with_subject = jointe seulement après une image du sujet (image de départ choisie ou variante
   # d'« Affiner »), en dernière image et s'il reste un emplacement ; sans image de départ, la fiche

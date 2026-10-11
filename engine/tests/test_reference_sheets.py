@@ -174,13 +174,13 @@ def test_sheet_builds_prompt_size_and_lora_chain() -> None:
     entry = _entry("character", lora_name="aiko_v1.safetensors", lora_weight=0.7, lora_trigger_words="aiko_v1")
     series = _series(style_lora_name="encre-seinen_v2.safetensors", style_lora_weight=0.6)
     prompt = sheet_prompt(REG, sheet, entry, series)
-    assert prompt.startswith("Fiche de référence de personnage : portrait de face de Aiko")
+    assert prompt.startswith("Character reference sheet: front portrait of Aiko")
     assert "jeune femme, cheveux noirs courts, kimono rouge." in prompt
-    assert "Détails : katana, cicatrice, aiko_v1." in prompt
+    assert "Details: katana, cicatrice, aiko_v1." in prompt
     # Mots déclencheurs du catalogue (style_loras.yaml), puis genre, rendu et ton de la série.
-    assert "Style : ink seinen style, shonen manga, dynamic energetic style," in prompt
-    assert "black and white manga" in prompt and "ambiance lumineuse et joyeuse" in prompt
-    assert "Modification demandée" not in prompt  # pas de consigne : morceau omis
+    assert "Style: ink seinen style, shonen manga, dynamic energetic style," in prompt
+    assert "black and white manga" in prompt and "bright joyful atmosphere" in prompt
+    assert "Requested change" not in prompt  # pas de consigne : morceau omis
 
     preset_id = sheet_preset_id(REG, sheet, series)
     assert preset_id == "qwen-image-turbo"  # palier de la série
@@ -194,8 +194,8 @@ def test_sheet_builds_prompt_size_and_lora_chain() -> None:
     wf = built.workflow
     assert wf["8"]["inputs"]["width"] == 1024 and wf["8"]["inputs"]["height"] == 1024
     assert wf["6"]["inputs"]["prompt"] == prompt
-    assert "plusieurs personnages" in wf["6"]["inputs"]["negative_prompt"]  # négatif du type de fiche
-    assert "texte" in wf["6"]["inputs"]["negative_prompt"]  # toujours : jamais de texte dessiné
+    assert "several characters" in wf["6"]["inputs"]["negative_prompt"]  # négatif du type de fiche
+    assert "text" in wf["6"]["inputs"]["negative_prompt"]  # toujours : jamais de texte dessiné
     chain = [n for n in wf.values() if n["class_type"] == "LoraLoaderModelOnly"]
     assert [n["inputs"]["lora_name"] for n in chain] == ["encre-seinen_v2.safetensors", "aiko_v1.safetensors"]
     assert chain[0]["inputs"]["model"] == ["1", 0]  # style d'abord, branché sur le modèle
@@ -208,10 +208,9 @@ def test_sheet_without_lora_or_style_keeps_a_clean_prompt() -> None:
     # Série d'avant les packs, sans ancien texte : seul le rendu par défaut donne le style.
     legacy = _series(style_genre=None, style_rendering=None, style_tone=None)
     prompt = sheet_prompt(REG, sheet, entry, legacy)
-    assert "Le labo en plan large" in prompt and "Détails" not in prompt
+    assert "Le labo as an establishing wide shot" in prompt and "Details" not in prompt
     assert (
-        "Style : black and white manga, halftone screentone dots, regular grey dot pattern, no cross-hatching."
-        in prompt
+        "Style: black and white manga, halftone screentone dots, regular grey dot pattern, no cross-hatching." in prompt
     )
     assert sheet_loras(_series(), entry) == []
     loaded = REG.workflow(sheet_preset_id(REG, sheet, _series()))
@@ -228,7 +227,7 @@ def test_refine_uses_the_variant_as_reference_with_the_instruction() -> None:
     assert preset_id == "qwen-image-edit-ref-turbo"  # pendant « avec références » du palier de la série
     loaded = REG.workflow(preset_id)
     prompt = sheet_prompt(REG, sheet, entry, series, "cheveux plus courts")
-    assert "Modification demandée : cheveux plus courts." in prompt
+    assert "Requested change: cheveux plus courts." in prompt
     built = build_workflow(
         loaded,
         sheet_params(loaded, sheet, prompt, REG, seed=3),
@@ -330,7 +329,7 @@ def test_generate_refine_keep_reorder_then_used_by_panels(c: TestClient, comfy: 
     _idle(c)
     refined = _ok(c.get(f"/{segment}/{eid}/reference-variants"))["variants"][0]
     assert refined["parent_id"] == first["id"] and refined["instruction"] == "plus de détails"
-    assert "Modification demandée : plus de détails." in refined["prompt"]
+    assert "Requested change: plus de détails." in refined["prompt"]
     [sent] = refined["params"]["reference_images"]
     assert sent["variant_id"] == first["id"] and sent["comfyui_name"] in comfy.uploads
     wf = list(comfy.prompts.values())[-1]

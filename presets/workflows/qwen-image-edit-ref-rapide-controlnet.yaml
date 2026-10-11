@@ -104,7 +104,7 @@ control:
       description: L'image importée est déjà une carte de contrôle (trait, profondeur ou pose) ; aucun prétraitement.
       order: 6
 defaults:
-  negative_prompt: "texte, lettres, bulles, filigrane, signature, flou, mains déformées"
+  negative_prompt: "text, letters, speech bubbles, watermark, signature, blurry, deformed hands"
   steps: 25
   cfg: 1
   width: 1024

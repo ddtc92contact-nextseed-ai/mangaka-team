@@ -36,7 +36,7 @@ lora_chain:
   name_input: lora_name
   strength_input: strength_model
 defaults:
-  negative_prompt: "texte, lettres, bulles, filigrane, signature, flou, mains déformées"
+  negative_prompt: "text, letters, speech bubbles, watermark, signature, blurry, deformed hands"
   steps: 6
   cfg: 1
   width: 512

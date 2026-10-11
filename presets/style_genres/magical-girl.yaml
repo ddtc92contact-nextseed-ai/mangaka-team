@@ -8,9 +8,12 @@ prompt_keywords: [magical girl manga, sparkly magical costume, stars]
 layout_style: dynamique
 reading_direction: rtl
 fonts: { dialogue: fredoka, shout: lilita-one }
-# Planche de style : scène test des essais (français, aucun personnage de la série).
+# Planche de style : scène test des essais (français, affichée sur la fiche série ; aucun personnage de la série)
+# et la même scène en anglais, celle qui entre dans le prompt image (scene_prompt).
 scene_test: >-
   une jeune magicienne anonyme en costume à volants se transforme au sommet d'un pont la nuit, ruban de lumière et étoiles scintillantes autour d'elle
+scene_prompt: >-
+  an anonymous young magician in a frilly costume transforms on top of a bridge at night, a ribbon of light and twinkling stars around her
 llm_guidelines: >-
   Magical girl, public adolescent : alternance de vie quotidienne et de combats magiques, 4 à 6 cases
   par page, une grande case pour chaque transformation ou attaque spéciale. Dialogues enjoués,

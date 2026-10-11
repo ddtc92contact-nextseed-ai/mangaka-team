@@ -3,13 +3,16 @@ id: tranche-de-vie
 name: Tranche de vie
 description: Le quotidien — moments ordinaires, petites émotions, ambiance intime.
 order: 60
-lang: fr
-prompt_keywords: [manga tranche de vie, scène quotidienne calme]
+lang: en
+prompt_keywords: [slice of life manga, calm everyday scene]
 reading_direction: rtl
 fonts: { dialogue: baloo2, shout: lilita-one }
-# Planche de style : scène test des essais (français, aucun personnage de la série).
+# Planche de style : scène test des essais (français, affichée sur la fiche série ; aucun personnage de la série)
+# et la même scène en anglais, celle qui entre dans le prompt image (scene_prompt).
 scene_test: >-
   une jeune femme anonyme prépare un thé dans une petite cuisine baignée de soleil, plantes vertes et vaisselle dépareillée
+scene_prompt: >-
+  an anonymous young woman makes tea in a small sunlit kitchen, green plants and mismatched crockery
 llm_guidelines: >-
   Tranche de vie, tout public : rythme lent et contemplatif, 5 à 7 cases par page, cases de décor et
   de détails du quotidien entre les dialogues. Dialogues naturels du quotidien, vocabulaire courant ;

@@ -34,7 +34,7 @@ lora_chain:
   name_input: lora_name
   strength_input: strength_model
 defaults:
-  negative_prompt: "texte, lettres, bulles, filigrane, signature, flou, mains déformées, doigts en trop"
+  negative_prompt: "text, letters, speech bubbles, watermark, signature, blurry, deformed hands, extra fingers"
   steps: 25
   cfg: 1
   denoise: 0.45      # 0,3 = retouche légère ; 0,6 = la zone est redessinée franchement
@@ -47,11 +47,11 @@ inpaint:
   # Prompt prérempli (modifiable dans l'atelier) ; un morceau dont une variable est vide est omis.
   prompt_parts:
     - "$target."
-    - "Personnage : $character."
-    - "Case : $description."
-    - "Style : $style."
-    - "Aucun texte dans l'image."
+    - "Character: $character."
+    - "Panel: $description."
+    - "Style: $style."
+    - "No text in the image."
   targets:
-    face: "Gros plan sur un visage net et expressif, yeux symétriques, traits fins"
-    hand: "Main bien dessinée, cinq doigts, anatomie correcte, articulations nettes"
-    zone: "Détail redessiné proprement, raccord invisible avec le reste de la case"
+    face: "Close-up of a sharp, expressive face, symmetrical eyes, fine features"
+    hand: "Well-drawn hand, five fingers, correct anatomy, clear joints"
+    zone: "Detail redrawn cleanly, seamless blend with the rest of the panel"

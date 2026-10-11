@@ -3,13 +3,16 @@ id: franco-belge
 name: Franco-belge
 description: BD européenne, ligne claire — aventure lisible, lecture de gauche à droite. Dominante — ligne claire et aplats priment sur le rendu.
 order: 70
-lang: fr
-prompt_keywords: [bande dessinée européenne classique, ligne claire, aplats de couleur, trait de contour uniforme, style franco-belge, PAS de style anime japonais]
+lang: en
+prompt_keywords: [European ligne claire comic, flat colours, uniform outlines, not Japanese anime style, classic Franco-Belgian comic style]
 reading_direction: ltr
 fonts: { dialogue: comic-neue, shout: bowlby-one }
-# Planche de style : scène test des essais (français, aucun personnage de la série).
+# Planche de style : scène test des essais (français, affichée sur la fiche série ; aucun personnage de la série)
+# et la même scène en anglais, celle qui entre dans le prompt image (scene_prompt).
 scene_test: >-
   un jeune reporter anonyme et son chien traversent en courant le quai animé d'un port méditerranéen, bateaux, mouettes et façades colorées à l'arrière-plan
+scene_prompt: >-
+  an anonymous young reporter and his dog run along the busy quay of a Mediterranean harbour, boats, seagulls and colourful facades in the background
 llm_guidelines: >-
   Bande dessinée franco-belge, tout public : planches denses de 6 à 9 cases en gaufrier régulier,
   narration claire, récitatifs pour les ellipses. Dialogues plus fournis qu'en manga, vocabulaire

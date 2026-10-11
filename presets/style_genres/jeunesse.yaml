@@ -3,13 +3,16 @@ id: jeunesse
 name: Jeunesse
 description: Enfantin (kodomo) — histoires simples, personnages ronds et attachants. Pas de ton dark.
 order: 40
-lang: fr
-prompt_keywords: [manga pour enfants, style simple et mignon, tout public]
+lang: en
+prompt_keywords: [children's manga, simple cute style, all ages]
 reading_direction: rtl
 fonts: { dialogue: fredoka, shout: titan-one }
-# Planche de style : scène test des essais (français, aucun personnage de la série).
+# Planche de style : scène test des essais (français, affichée sur la fiche série ; aucun personnage de la série)
+# et la même scène en anglais, celle qui entre dans le prompt image (scene_prompt).
 scene_test: >-
   deux enfants anonymes et un petit chat jouent au cerf-volant dans un parc ensoleillé, arbres ronds et nuages moelleux
+scene_prompt: >-
+  two anonymous children and a small cat fly a kite in a sunny park, round trees and fluffy clouds
 llm_guidelines: >-
   Jeunesse, enfants de 6 à 10 ans : rythme simple et lisible, 3 à 5 cases par page, une action par
   case. Phrases courtes, vocabulaire adapté à l'âge, aucune violence graphique ni peur durable ;

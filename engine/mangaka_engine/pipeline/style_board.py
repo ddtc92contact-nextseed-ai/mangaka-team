@@ -94,8 +94,15 @@ def active_jobs(session: Session, project_id: int) -> list[Job]:
 
 
 def scene_test(presets: PresetRegistry, series: Project) -> str | None:
+    """Scène test du genre, en français (affichée sur la fiche série)."""
     genre = presets.style_genres.get(series.style_genre or "")
     return genre.scene_test if genre is not None else None
+
+
+def scene_prompt(presets: PresetRegistry, series: Project) -> str | None:
+    """Scène test du genre telle qu'elle entre dans le prompt image (anglais : `scene_prompt`)."""
+    genre = presets.style_genres.get(series.style_genre or "")
+    return (genre.scene_prompt or genre.scene_test) if genre is not None else None
 
 
 # --- préparation (pur) --------------------------------------------------------------------
@@ -164,7 +171,7 @@ def enqueue_trials(
 ) -> list[Job]:
     """Crée les jobs d'essai en attente (sans commit) : même prompt, une graine distincte par essai."""
     settings = board_settings(presets)
-    scene = scene_test(presets, series)
+    scene = scene_prompt(presets, series)
     if scene is None:
         raise GenerationError("choisis d'abord le genre, le rendu et le ton de la série (Paramètres)")
     loaded = sketch_preset(presets)

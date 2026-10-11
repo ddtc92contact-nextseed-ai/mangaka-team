@@ -130,7 +130,7 @@ class InpaintSettings(_Strict):
     # Prompt de réparation prérempli : morceaux assemblés comme `image_prompt.yaml` (un morceau dont
     # une variable est vide est omis). Variables : $target, $character, $description, $style.
     prompt_parts: list[str] = Field(
-        default_factory=lambda: ["$target.", "$character.", "$description.", "Style : $style."]
+        default_factory=lambda: ["$target.", "$character.", "$description.", "Style: $style."]
     )
     # Texte de $target selon la zone : visage, main, zone dessinée à la main.
     targets: dict[str, str] = Field(default_factory=dict)
@@ -754,8 +754,10 @@ class StyleGenre(StylePack):
     allowed_tones: list[str] | None = None
     style_lora: str | None = Field(default=None, description="LoRA conseillé (fichier du catalogue style_loras.yaml)")
     scene_test: str = Field(
-        min_length=1, description="Scène test de la planche de style (français, sans personnage de la série)"
+        min_length=1, description="Scène test de la planche de style (français, affichée ; sans personnage de la série)"
     )
+    # Même scène, en anglais : c'est elle qui entre dans le prompt image (absente : `scene_test`).
+    scene_prompt: str | None = Field(default=None, min_length=1, description="Scène test du prompt image (anglais)")
 
 
 class StyleRendering(StylePack):
@@ -1082,6 +1084,33 @@ class LetteringSettings(_Strict):
 
 
 # --- Prompts LLM --------------------------------------------------------------
+class VarietyRules(_Strict):
+    """Mise en scène variée imposée à la direction artistique (`variety_rules` de
+    prompts/direction-artistique.yaml, vérifiée par pipeline/art_direction.py `check_variety`).
+
+    Une règle enfreinte relance l'agent avec l'erreur ; après les relances, la proposition est gardée
+    avec un avertissement visible dans l'écran Direction artistique. Valeurs comparées sans casse.
+    """
+
+    max_same_plan_in_a_row: int = Field(default=2, ge=1, le=20, description="Cases d'affilée au même plan (page)")
+    max_same_angle_in_a_row: int = Field(default=2, ge=1, le=20, description="Cases d'affilée au même angle (page)")
+    # Part maximale des cases « de face / à hauteur d'œil » sur les pages dirigées ensemble (au moins une permise).
+    max_frontal_share: float = Field(default=0.35, ge=0, le=1)
+    frontal_angles: list[str] = Field(default_factory=lambda: ["de face"])
+    # Au moins `min_off_eye_level_per_page` case(s) hors hauteur d'œil par page d'au moins
+    # `off_eye_level_min_panels` cases : angle ou plan de `off_eye_level`.
+    min_off_eye_level_per_page: int = Field(default=1, ge=0, le=20)
+    off_eye_level_min_panels: int = Field(default=2, ge=1, le=20)
+    off_eye_level: list[str] = Field(
+        default_factory=lambda: ["en plongée", "en contre-plongée", "cadre penché", "plongée", "contre-plongée"]
+    )
+    # `action` de chaque case : obligatoire ; une action courte (au plus `weak_max_words` mots) qui contient
+    # l'un de ces verbes statiques est refusée (« Aiko regarde Kenji »).
+    require_action: bool = True
+    weak_actions: list[str] = Field(default_factory=list)
+    weak_max_words: int = Field(default=4, ge=1, le=20)
+
+
 class PromptPreset(_Strict):
     """Gabarits `string.Template` ($variable) d'une étape LLM."""
 
@@ -1101,6 +1130,8 @@ class PromptPreset(_Strict):
     language: Literal["fr", "en"] | None = None
     min_words: int | None = Field(default=None, ge=10, le=1000)
     max_words: int | None = Field(default=None, ge=10, le=1000)
+    # Règles de variété de la direction artistique (prompts/direction-artistique.yaml).
+    variety_rules: VarietyRules | None = None
 
     @model_validator(mode="after")
     def _check_words(self) -> PromptPreset:
@@ -1122,6 +1153,7 @@ class PromptPreset(_Strict):
 # --- Prompt image (étape 3) ---------------------------------------------------
 IMAGE_PROMPT_VARIABLES = {
     "shot",
+    "action",
     "plan",
     "angle",
     "ambiance",
@@ -1159,12 +1191,12 @@ class ReferencePromptSettings(_Strict):
     jointes par `separator`, $count : nombre d'images).
     """
 
-    character: str = "Image $slot : référence d'identité de $name"
-    decor: str = "Image $slot : référence du lieu $name"
-    object: str = "Image $slot : référence de l'objet $name"
-    style: str = "Image $slot : référence de style seulement"
-    separator: str = " ; "
-    before: list[str] = Field(default_factory=lambda: ["$images."])
+    character: str = "<image$slot> is the identity reference for $name."
+    decor: str = "<image$slot> is the location reference for $name."
+    object: str = "<image$slot> is the design reference for the object $name."
+    style: str = "<image$slot> is a style reference only."
+    separator: str = " "
+    before: list[str] = Field(default_factory=lambda: ["$images"])
     after: list[str] = Field(default_factory=list)
 
     @field_validator("character", "decor", "object", "style")
@@ -1193,16 +1225,24 @@ class ImagePromptSettings(_Strict):
         default_factory=lambda: [
             "$shot.",
             "$description.",
-            "Personnages : $characters.",
-            "Style : $style.",
-            "Aucun texte ni bulle dans l'image.",
+            "Characters: $characters.",
+            "Style: $style.",
+            "No text or speech bubbles in the image.",
         ]
     )
     character: str = Field(default="$name ($details)", description="Variables : $name, $details")
-    character_separator: str = " ; "
+    character_separator: str = "; "
     # Toujours présents dans le prompt négatif : le texte est posé au lettrage, jamais dessiné.
     forbidden_text_terms: list[str] = Field(
-        default_factory=lambda: ["texte", "lettres", "bulles", "phylactères", "onomatopées", "filigrane", "signature"]
+        default_factory=lambda: [
+            "text",
+            "letters",
+            "speech bubbles",
+            "captions",
+            "sound effects",
+            "watermark",
+            "signature",
+        ]
     )
     strip_quotes: bool = Field(default=True, description="Retire les répliques entre guillemets de la description")
     # Longueur maximale de `$style` (caractères) : les packs y entrent tour à tour (pipeline/style.py).
@@ -1210,6 +1250,10 @@ class ImagePromptSettings(_Strict):
     style_max_chars: int | None = Field(default=240, ge=40)
     # Cadrage des images de référence (workflows avec références).
     references: ReferencePromptSettings = Field(default_factory=ReferencePromptSettings)
+    # Plans et angles (direction artistique, scénario) → termes de cadrage anglais du prompt image
+    # (`$shot`, `$plan`, `$angle` et le rédacteur de prompt). Clés comparées sans casse ; une valeur
+    # absente passe telle quelle.
+    camera_terms: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("parts")
     @classmethod

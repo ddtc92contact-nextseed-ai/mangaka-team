@@ -114,8 +114,8 @@ def sheet_prompt(
 ) -> str:
     """Prompt positif : morceaux du type de fiche, un morceau dont une variable est vide est omis.
 
-    `start` : une image de départ est envoyée en image 1 ($start) ; `style_slot` : numéro de l'image de
-    la référence de style jointe, la dernière ($style_ref).
+    `start` : une image de départ est envoyée en image 1 ($start : « <image1> ») ; `style_slot` : numéro
+    de l'image de la référence de style jointe, la dernière ($style_ref : « <imageN> »).
     """
     triggers = split_trigger_words(entry.lora_trigger_words) if entry.lora_name else ()
     keywords = list(dict.fromkeys(k for k in (_clean(k) for k in (*(entry.prompt_keywords or []), *triggers)) if k))
@@ -125,8 +125,8 @@ def sheet_prompt(
         "keywords": ", ".join(keywords),
         "style": _clean(series_style(presets, series)),
         "instruction": _clean(instruction),
-        "start": "image 1" if start else "",
-        "style_ref": f"image {style_slot}" if style_slot else "",
+        "start": "<image1>" if start else "",
+        "style_ref": f"<image{style_slot}>" if style_slot else "",
     }
     parts: list[str] = []
     for part in sheet.prompt:

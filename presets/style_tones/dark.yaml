@@ -3,8 +3,8 @@ id: dark
 name: Dark
 description: Ambiance sombre et oppressante, ombres profondes.
 order: 30
-lang: fr
-prompt_keywords: [ambiance sombre et dramatique, éclairage dur, ombres marquées]
+lang: en
+prompt_keywords: [dark dramatic atmosphere, harsh lighting, strong shadows]
 llm_guidelines: >-
   Ton sombre : tension constante, menace qui pèse, victoires coûteuses ; décors nocturnes ou
   confinés privilégiés.

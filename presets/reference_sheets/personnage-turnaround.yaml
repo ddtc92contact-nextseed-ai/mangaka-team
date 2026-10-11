@@ -8,12 +8,12 @@ width: 1536
 height: 864
 workflow: null
 prompt:
-  - "Planche de model sheet (turnaround) de $name : trois vues du même personnage en pied, côte à côte — de face, de profil, de dos — même taille, même tenue, pose neutre bras le long du corps."
+  - "Model sheet (turnaround) of $name: three full-body views of the same character side by side — front, side profile, back — same size, same outfit, neutral pose with arms along the body."
   - "$description."
-  - "Détails : $keywords."
-  - "Modification demandée : $instruction."
-  - "Image de départ ($start) : garder le sujet, sa silhouette et sa tenue, et le redessiner proprement sous les trois vues demandées."
-  - "Style : $style."
-  - "Dernière image ($style_ref) : référence de style uniquement — trait, trames, encrage ; ne pas reprendre son personnage, sa scène ni sa composition."
-  - "Fond blanc uni, éclairage neutre, aucun texte ni légende."
-negative_prompt: "personnages différents, vues coupées, décor"
+  - "Details: $keywords."
+  - "Requested change: $instruction."
+  - "$start is the starting image: keep the subject, the silhouette and the outfit, and redraw them cleanly in the three requested views."
+  - "Style: $style."
+  - "The last image ($style_ref) is a style reference only (line work, screentones, inking): do not copy its character, scene or composition."
+  - "Plain white background, neutral lighting, no text or captions."
+negative_prompt: "different characters, cropped views, background"

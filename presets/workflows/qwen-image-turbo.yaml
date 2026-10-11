@@ -43,7 +43,7 @@ defaults:
   # À CONFIRMER avec le vrai export ComfyUI du manager (~/mangaka-comfy-exports/) : 8 étapes,
   # cfg 1, euler + simple, denoise 1 (ces deux derniers dans le JSON, nœud 9). Une correction ne
   # touche que ce preset (et son JSON), jamais le code.
-  negative_prompt: "texte, lettres, bulles, filigrane, signature, flou, mains déformées"
+  negative_prompt: "text, letters, speech bubbles, watermark, signature, blurry, deformed hands"
   steps: 8
   cfg: 1
   width: 1024
