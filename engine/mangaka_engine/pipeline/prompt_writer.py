@@ -263,11 +263,20 @@ def _or(value: str, empty: str) -> str:
 
 
 def render_messages(prompt: PromptPreset, brief: PromptBrief) -> list[ChatMessage]:
+    values = template_values(brief)
+    return [
+        ChatMessage("system", _render(prompt.system, values, "system")),
+        ChatMessage("user", _render(prompt.user, values, "user")),
+    ]
+
+
+def template_values(brief: PromptBrief) -> dict[str, str]:
+    """Variables des gabarits du rédacteur ($plan, $characters, $references…), aussi lues par le dialogue."""
     chars = [f"- {c.name}: {_details(c) or '(no description)'}" for c in brief.characters]
     chars += [f"- {e} (extra, no character sheet)" for e in brief.extras]
     refs = [f"- {r['tag']} is {r['role']}." for r in brief.reference_lines()]
     lib = ", ".join(f"{o.name} ({_details(o)})" if _details(o) else o.name for o in brief.objects)
-    values = {
+    return {
         "language": brief.language,
         "language_name": LANGUAGE_NAMES.get(brief.language, brief.language),
         "min_words": str(brief.min_words),
@@ -293,10 +302,6 @@ def render_messages(prompt: PromptPreset, brief: PromptBrief) -> list[ChatMessag
         "savoir_faire": _or(brief.savoir_faire, "(none)"),
         "context_json": json.dumps(brief.as_json(), ensure_ascii=False, indent=2),
     }
-    return [
-        ChatMessage("system", _render(prompt.system, values, "system")),
-        ChatMessage("user", _render(prompt.user, values, "user")),
-    ]
 
 
 # --- validation ---------------------------------------------------------------------
@@ -365,8 +370,8 @@ def with_style(text: str, style: str) -> str:
     return f"{body} {style}."
 
 
-def parse_written(text: str, brief: PromptBrief) -> WrittenPrompt:
-    """Valide la réponse brute du LLM (schéma, puis cohérence avec la case) ; paragraphe nettoyé."""
+def load_json_object(text: str, root_hint: str) -> dict[str, Any]:
+    """Objet JSON d'une réponse du LLM (bloc de code toléré) ; `PromptValidationError` lisible sinon."""
     m = _FENCE.match(text)
     raw = m.group(1) if m else text.strip()
     try:
@@ -374,17 +379,17 @@ def parse_written(text: str, brief: PromptBrief) -> WrittenPrompt:
     except json.JSONDecodeError as exc:
         raise PromptValidationError(f"JSON illisible ({exc.msg}, ligne {exc.lineno})") from None
     if not isinstance(data, dict):
-        raise PromptValidationError("la racine doit être un objet JSON avec « prompt »")
-    try:
-        out = WrittenPrompt.model_validate(data)
-    except ValidationError as exc:
-        raise PromptValidationError(format_errors(exc)) from None
+        raise PromptValidationError(f"la racine doit être un objet JSON avec {root_hint}")
+    return data
+
+
+def paragraph_problems(paragraph: str, language: str, brief: PromptBrief) -> list[str]:
+    """Écarts d'un paragraphe (déjà nettoyé) avec la case : langue, images citées, personnages, longueur."""
     problems: list[str] = []
-    if out.language != brief.language:
+    if language != brief.language:
         problems.append(
-            f"language : « {out.language} » au lieu de « {brief.language} » (écris le paragraphe en {LANGUAGE_LABELS.get(brief.language, brief.language)})"
+            f"language : « {language} » au lieu de « {brief.language} » (écris le paragraphe en {LANGUAGE_LABELS.get(brief.language, brief.language)})"
         )
-    paragraph = clean_paragraph(out.prompt)
     problems += reference_problems(paragraph, len(brief.references))
     if brief.language == "en":
         hits = french_hits(paragraph)
@@ -402,6 +407,18 @@ def parse_written(text: str, brief: PromptBrief) -> WrittenPrompt:
         problems.append(f"prompt trop court ({words} mots ; entre {brief.min_words} et {brief.max_words} attendus)")
     elif words > high:
         problems.append(f"prompt trop long ({words} mots ; entre {brief.min_words} et {brief.max_words} attendus)")
+    return problems
+
+
+def parse_written(text: str, brief: PromptBrief) -> WrittenPrompt:
+    """Valide la réponse brute du LLM (schéma, puis cohérence avec la case) ; paragraphe nettoyé."""
+    data = load_json_object(text, "« prompt »")
+    try:
+        out = WrittenPrompt.model_validate(data)
+    except ValidationError as exc:
+        raise PromptValidationError(format_errors(exc)) from None
+    paragraph = clean_paragraph(out.prompt)
+    problems = paragraph_problems(paragraph, out.language, brief)
     if problems:
         raise PromptValidationError(" ; ".join(problems))
     return out.model_copy(update={"prompt": with_style(paragraph, brief.style)})

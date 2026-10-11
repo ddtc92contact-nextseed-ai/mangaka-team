@@ -658,6 +658,47 @@ class PanelUpdate(_In):
     sketch_denoise: Denoise | None = None
 
 
+DialogInstruction = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)]
+
+
+class PanelDialogIn(_In):
+    """Consigne de l'auteur sur une case (« gros plan sur le visage de Lucius, en contre-plongée »)."""
+
+    instruction: DialogInstruction
+
+
+class RebuildPromptIn(_In):
+    """« Reconstruire le prompt » ; `instruction` (facultative) : consigne passée au même pipeline que le
+    dialogue sur la case, sans historique."""
+
+    instruction: Annotated[str, StringConstraints(strip_whitespace=True, max_length=1000)] | None = None
+
+
+class DialogApplyIn(_In):
+    # True : « Appliquer et générer » (une nouvelle version de cette case seulement).
+    generate: bool = False
+
+
+class DialogChangeOut(BaseModel):
+    field: str  # plan | angle | action | ambiance | reference.<id du personnage>
+    label: str  # « Plan », « Référence de Lucius »
+    before: str | None = None
+    after: str | None = None
+
+
+class PanelDialogTurnOut(BaseModel):
+    id: int
+    panel_id: int
+    instruction: str
+    explanation: str
+    status: Literal["proposed", "applied", "cancelled"]
+    prompt_before: str | None = None
+    prompt_after: str
+    changes: list[DialogChangeOut] = Field(default_factory=list)
+    created_at: datetime
+    applied_at: datetime | None = None
+
+
 class CompositionLockIn(_In):
     """« Verrouiller la composition » depuis le croquis validé ou une version de la case."""
 
@@ -728,6 +769,9 @@ class PanelDetailOut(BaseModel):
     bbox: dict[str, int] | None
     final_prompt: str | None
     final_prompt_manual: bool
+    # Ce que le dialogue avec l'IA impose à la case (« Plan : gros plan », « Référence de Lucius : … »),
+    # gardé jusqu'à « Reconstruire le prompt ».
+    dialog_overrides: list[str] = Field(default_factory=list)
     # Origine du prompt automatique : "ia" (rédigé par le LLM) | "fragments" ; `ai_prompt` : réglage de la
     # série ; `prompt_pending` : sera rédigé par l'IA à la prochaine génération (ou « Reconstruire ») ;
     # `prompt_warning` : rédaction en échec, repli par fragments.

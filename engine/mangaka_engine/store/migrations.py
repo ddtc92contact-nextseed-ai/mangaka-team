@@ -37,6 +37,8 @@
   personnages (aucun pour les fiches existantes).
 - 23 : angle de caméra des vues de référence (aucune étiquette sur les images existantes) et « Cohérence
   anime » par série (désactivée sur les séries existantes).
+- 24 : dialogue avec l'IA par case (historique des échanges, direction et référence imposées à la case) ;
+  rien d'imposé sur les cases existantes.
 
 Une base neuve est créée directement à la dernière version. Chaque migration tourne dans une
 transaction unique, clés étrangères désactivées (recette « 12 étapes » de SQLite pour reconstruire
@@ -78,7 +80,7 @@ from .models import (
 
 log = logging.getLogger("mangaka_engine")
 
-SCHEMA_VERSION = 23
+SCHEMA_VERSION = 24
 
 
 class MigrationError(RuntimeError):
@@ -357,6 +359,15 @@ def _v22_to_v23(cur: sqlite3.Cursor) -> None:
         cur.execute("ALTER TABLE projects ADD COLUMN anime_consistency BOOLEAN NOT NULL DEFAULT 0")
 
 
+def _v23_to_v24(cur: sqlite3.Cursor) -> None:
+    # Dialogue par case : la table `panel_dialog_turns` est créée par `create_all` ; panels reconstruite par
+    # une migration antérieure depuis le modèle courant : colonnes déjà là.
+    existing = {row[1] for row in cur.execute("PRAGMA table_info(panels)")}
+    for column in ("dialog_direction", "reference_choice"):
+        if column not in existing:
+            cur.execute(f"ALTER TABLE panels ADD COLUMN {column} JSON")
+
+
 MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     # version de départ → (version d'arrivée, fonction)
     0: (2, _v0_to_v2),
@@ -382,6 +393,7 @@ MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     20: (21, _v20_to_v21),
     21: (22, _v21_to_v22),
     22: (23, _v22_to_v23),
+    23: (24, _v23_to_v24),
 }
 
 

@@ -22,10 +22,15 @@ from ..pipeline.generation import (
     STEP,
     GenerationError,
     LibraryEntry,
+    ai_prompt_enabled,
+    apply_dialog_proposal,
     apply_prompt_request,
+    dialog_overrides,
+    dialog_request,
     enqueue_angle,
     enqueue_panel,
     entry_kind,
+    panel_brief,
     panel_cast,
     panel_label,
     panel_target,
@@ -36,11 +41,13 @@ from ..pipeline.generation import (
     quality_preset_id,
     refresh_states,
     resolve_preset_id,
+    run_dialog_request,
     run_prompt_request,
     update_panel_prompt,
 )
 from ..pipeline.inpaint import MaskError, Region, decode_png
 from ..pipeline.names import CharacterMatcher
+from ..pipeline.prompt_dialog import PromptDialogError
 from ..pipeline.prompt_writer import AGENT_ID as WRITER_AGENT
 from ..pipeline.qc_bench import STEP as BENCH_STEP
 from ..pipeline.reference_sheets import KIND_LABELS
@@ -57,6 +64,7 @@ from ..store.models import (
     JobStatus,
     Page,
     Panel,
+    PanelDialogTurn,
     PanelImage,
     PanelImageAnnotation,
     Project,
@@ -82,6 +90,7 @@ from .schemas import (
     PresetEstimateOut,
     QueueItemOut,
     QueueOut,
+    RebuildPromptIn,
     RepairCharacterOut,
     RepairIn,
     RepairInfoOut,
@@ -198,6 +207,7 @@ def panel_detail(session: Session, ctx: AppContext, panel: Panel) -> PanelDetail
         bbox=panel.bbox,
         final_prompt=panel.final_prompt,
         final_prompt_manual=panel.final_prompt_manual,
+        dialog_overrides=dialog_overrides(session, presets, panel),
         prompt_source=panel.prompt_source if panel.prompt_source in ("ia", "fragments") else None,  # type: ignore[arg-type]
         ai_prompt=bool(page.chapter.project.ai_prompt),
         prompt_pending=prompt_pending(presets, session, panel),
@@ -380,14 +390,26 @@ def update_panel(
 
 @router.post("/panels/{panel_id}/prompt/rebuild", response_model=PanelDetailOut)
 def rebuild_prompt(
-    panel_id: int, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
+    panel_id: int,
+    body: RebuildPromptIn | None = None,
+    session: Session = Depends(get_session),
+    ctx: AppContext = Depends(get_ctx),
 ) -> PanelDetailOut:
-    """Abandonne l'édition manuelle et reconstruit le prompt final depuis la case et les fiches : redemandé
-    au LLM si la série a le « Prompt rédigé par l'IA » (au plus 2 tentatives, puis repli par fragments
-    avec un avertissement sur la case), sinon assemblé par fragments."""
+    """Abandonne l'édition manuelle et ce que le dialogue avec l'IA imposait à la case (direction,
+    références), puis reconstruit le prompt final depuis la case et les fiches : redemandé au LLM si la
+    série a le « Prompt rédigé par l'IA » (au plus 2 tentatives, puis repli par fragments avec un
+    avertissement sur la case), sinon assemblé par fragments.
+
+    `instruction` : la consigne passe par le pipeline du dialogue sur la case (sans historique) ; en
+    échec, erreur lisible et la case ne change pas."""
     panel = get_panel_or_404(session, panel_id)
     presets = _presets(ctx, panel)
+    instruction = (body.instruction or "").strip() if body is not None else ""
+    if instruction:
+        return _rebuild_with_instruction(session, ctx, presets, panel, instruction)
     panel.final_prompt_manual = False
+    panel.dialog_direction = None
+    panel.reference_choice = None
     request = prompt_request(presets, session, panel, ctx.knowledge, force=True)
     if request is None:
         update_panel_prompt(presets, session, panel, ctx.knowledge, reset=True)
@@ -397,6 +419,47 @@ def rebuild_prompt(
         run, error = run_prompt_request(presets, llm, llm_error, request)
         panel = get_panel_or_404(session, panel_id)
         apply_prompt_request(presets, session, panel, request, run, error, ctx.knowledge)
+    session.commit()
+    return panel_detail(session, ctx, panel)
+
+
+def _rebuild_with_instruction(
+    session: Session, ctx: AppContext, presets: PresetRegistry, panel: Panel, instruction: str
+) -> PanelDetailOut:
+    """« Reconstruire le prompt » avec une consigne : la case repart de la direction de sa page (sans les
+    choix d'un dialogue précédent), la consigne est appliquée par l'IA ; échange noté dans l'historique."""
+    kept = (panel.dialog_direction, panel.reference_choice)
+    panel.dialog_direction = panel.reference_choice = None
+    try:
+        request = dialog_request(presets, session, panel, instruction, ctx.knowledge, history=False, current_prompt="")
+    finally:
+        panel.dialog_direction, panel.reference_choice = kept
+    before = {"prompt": panel.final_prompt}
+    session.commit()  # aucune transaction ouverte pendant l'appel au LLM
+    llm, llm_error = ctx.agents.llm_for(WRITER_AGENT, request.project_id)
+    try:
+        run = run_dialog_request(presets, llm, llm_error, request)
+    except PromptDialogError as exc:
+        raise HTTPException(
+            status_code=502, detail=f"L'IA n'a pas pu reconstruire le prompt : {exc}. La case n'a pas changé."
+        ) from None
+    panel = get_panel_or_404(session, panel.id)
+    panel.dialog_direction = panel.reference_choice = None
+    proposal = run.proposal.as_json()
+    # Série par fragments : gardé comme une édition (sinon remplacé par les fragments à la génération).
+    apply_dialog_proposal(panel, proposal, manual=not ai_prompt_enabled(panel))
+    panel.prompt_key = panel_brief(presets, session, panel).key()
+    session.add(
+        PanelDialogTurn(
+            panel_id=panel.id,
+            instruction=instruction,
+            explanation=run.proposal.explanation,
+            proposal={**proposal, "rebuild": True},
+            before=before,
+            status="applied",
+            applied_at=datetime.now(UTC),
+        )
+    )
     session.commit()
     return panel_detail(session, ctx, panel)
 

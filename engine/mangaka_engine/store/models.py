@@ -414,6 +414,12 @@ class Panel(TimestampMixin, Base):
     # "width", "height", "type", "strength", "locked_at", "preview": {"job_id", "path", "width", "height",
     # "type"}} ; None = composition libre.
     composition_lock: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
+    # Dialogue avec l'IA sur cette case (« Appliquer », voir pipeline/prompt_dialog.py) : direction
+    # artistique propre à la case ({"plan", "angle", "action", "ambiance"}, par-dessus celle de la page) et
+    # image de référence choisie par personnage ({"<id du personnage>": id de `character_images`}).
+    # Gardées jusqu'à « Reconstruire le prompt » ; None = rien d'imposé.
+    dialog_direction: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
+    reference_choice: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
     qc_score: Mapped[int | None] = mapped_column(Integer, default=None)
     state: Mapped[PanelState] = mapped_column(_enum(PanelState), default=PanelState.draft)
 
@@ -424,6 +430,29 @@ class Panel(TimestampMixin, Base):
     bubbles: Mapped[list[Bubble]] = relationship(
         back_populates="panel", cascade="all, delete-orphan", order_by="Bubble.order"
     )
+    dialog: Mapped[list[PanelDialogTurn]] = relationship(
+        back_populates="panel", cascade="all, delete-orphan", order_by="PanelDialogTurn.id"
+    )
+
+
+class PanelDialogTurn(Base):
+    """Un échange du dialogue avec l'IA sur une case : la consigne de l'auteur, ce que l'IA propose
+    (`proposal` : prompt, direction, références, changements lisibles), l'état de la case avant
+    (`before`) et le sort de la proposition (`status` : proposed | applied | cancelled)."""
+
+    __tablename__ = "panel_dialog_turns"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    panel_id: Mapped[int] = mapped_column(ForeignKey("panels.id", ondelete="CASCADE"), index=True)
+    instruction: Mapped[str] = mapped_column(Text)
+    explanation: Mapped[str] = mapped_column(Text, default="")
+    proposal: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    before: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(20), default="proposed")
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    applied_at: Mapped[datetime | None] = mapped_column(default=None)
+
+    panel: Mapped[Panel] = relationship(back_populates="dialog")
 
 
 class PanelImage(Base):
