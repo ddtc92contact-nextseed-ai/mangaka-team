@@ -1,8 +1,8 @@
-"""Mise en page dynamique v2 : onomatopées (sfx), cases sans bord, fond perdu, incrustations.
+"""Mise en page dynamique v2 : onomatopées (sfx), cases sans bord, débordement, incrustations.
 
 Image de référence : `tests/golden/planche-cadres-sfx.png` (A5, 100 DPI) — une onomatopée à cheval sur
-une bordure, une case qui se fond au papier, une case sans bord, une case à fond perdu et une
-incrustation. Pour la régénérer : `MANGAKA_UPDATE_GOLDEN=1 npm run test:engine` (et le justifier).
+une bordure, une case qui se fond au papier, une case sans bord, une case qui déborde sur ses voisines
+(jamais sur la marge) et une incrustation. Pour la régénérer : `MANGAKA_UPDATE_GOLDEN=1 npm run test:engine` (et le justifier).
 """
 
 from __future__ import annotations
@@ -24,7 +24,6 @@ from mangaka_engine.pipeline.assembly import (
     PanelArt,
     canvas_geometry,
     draw_order,
-    panel_polygon,
     render_png,
     render_svg,
 )
@@ -198,7 +197,7 @@ def test_french_accents_in_sfx(letterer: Letterer, fonts: FontBook) -> None:
 
 # --- options de cadre : géométrie --------------------------------------------------------------
 def _frames(**by_index: dict[str, Any]) -> list[dict[str, Any]]:
-    out = [{"frame": "border", "bleed": False, "inset": False} for _ in range(4)]
+    out = [{"frame": "border", "break_out": False, "inset": False} for _ in range(4)]
     for k, v in by_index.items():
         out[int(k[1:])].update(v)
     return out
@@ -221,68 +220,85 @@ def _layout(
 
 
 @pytest.mark.parametrize("direction", ["ltr", "rtl"])
-def test_bleed_panel_reaches_the_page_and_bleed_edge_exactly(direction: str, fonts: FontBook) -> None:
-    frames = _frames(p0={"bleed": True}, p3={"inset": True, "host": 2, "size": 0.4, "margin_mm": 3, "min_side_mm": 12})
+def test_break_out_panel_overlaps_neighbours_but_never_the_margin(direction: str) -> None:
+    frames = _frames(
+        p0={"break_out": True}, p3={"inset": True, "host": 2, "size": 0.4, "margin_mm": 3, "min_side_mm": 12}
+    )
     lay = _layout(frames, direction=direction)
     top = lay["panels"][0]
-    W = lay["page"]["width"]
-    assert top["bleed"] and top["bleed_possible"]
-    x1, y1, x2, y2 = geo.bbox([tuple(p) for p in top["polygon"]])
     live = lay["live_area"]
-    # haut et côté extérieur (opposé à la reliure) jusqu'au bord de la page ; reliure inchangée
-    assert y1 == 0 and top["y1"] == 0
-    if lay["inner_side"] == "left":
-        assert x2 == W and x1 == live["x1"]
-    else:
-        assert x1 == 0 and x2 == live["x2"]
-    # la gouttière avec les cases du bas ne bouge pas
-    assert y2 == geo.bbox([tuple(p) for p in top["live_polygon"]])[3]
-    assert top["bubble_zone"]["y1"] >= live["y1"]  # bulles dans la zone utile
-    # à l'export avec fond perdu : jusqu'au bord du fond perdu, exactement
-    canvas = canvas_geometry(A4, PRESETS.lettering, bleed=True, crop_marks=True)
-    art = PanelArt(1, 0, Box(top["x1"], top["y1"], top["x2"], top["y2"]), polygon=[tuple(p) for p in top["polygon"]])
-    sheet = panel_polygon(art, canvas)
-    sx1, sy1, sx2, sy2 = geo.bbox(sheet)
-    assert sy1 == canvas.oy - canvas.bleed
-    if lay["inner_side"] == "left":
-        assert sx2 == canvas.ox + canvas.trim_w + canvas.bleed
-    else:
-        assert sx1 == canvas.ox - canvas.bleed
-    # une case ordinaire ne bouge pas
-    assert not lay["panels"][1]["bleed"] and "live_polygon" not in lay["panels"][1]
+    assert top["break_out"] and "bleed" not in top
+    poly = [tuple(p) for p in top["polygon"]]
+    base = [tuple(p) for p in top["base_polygon"]]
+    x1, y1, x2, y2 = geo.bbox(poly)
+    bx1, by1, bx2, by2 = geo.bbox(base)
+    # bornée à la zone utile, à 0 px près : haut et côtés restent sur la marge
+    assert (x1, y1, x2) == (live["x1"], live["y1"], live["x2"]) == (bx1, by1, bx2)
+    assert (top["x1"], top["y1"], top["x2"]) == (live["x1"], live["y1"], live["x2"])
+    # vers le bas : par-dessus la gouttière et le haut des cases voisines
+    gutter = max(lay["gutters_px"].values())
+    assert y2 == pytest.approx(by2 + gutter + SETTINGS.break_out_mm / 25.4 * A4.dpi, abs=0.1)
+    for other in lay["panels"][1:3]:
+        assert geo.convex_overlap(poly, [tuple(p) for p in other["polygon"]])
+        assert "base_polygon" not in other and not other["break_out"]
+    # bulles dans la case d'origine ; taille de génération de la case agrandie
+    z = top["bubble_zone"]
+    assert geo.contains_box(geo.edges(base), z["x1"], z["y1"], z["x2"], z["y2"])
+    assert top["height"] == top["y2"] - top["y1"] and top["y2"] == math.ceil(y2 - 1e-6)
 
 
-def test_bleed_render_keeps_crop_marks_clean(tmp_path: Path, fonts: FontBook) -> None:
+def test_legacy_bleed_option_is_ignored() -> None:
+    """Ancienne case « à fond perdu » : l'option est ignorée, la case reste dans la zone utile."""
+    inset = {"inset": True, "host": 2, "size": 0.4, "margin_mm": 3, "min_side_mm": 12}
+    plain = _layout(_frames(p3=inset))
+    legacy = _layout(_frames(p0={"bleed": True}, p3=inset))
+    assert legacy == plain
+
+
+def test_break_out_and_old_bleed_render_nothing_in_the_margin_band(tmp_path: Path, fonts: FontBook) -> None:
     fmt = golden_format()
-    lay = _layout(_frames(p0={"bleed": True}, p3={"inset": True, "host": 2}), fmt=fmt)
-    top = lay["panels"][0]
-    img_path = synthetic_image(tmp_path / "a.png", (top["target"]["width"], top["target"]["height"]), COLORS[0])
+    lay = _layout(_frames(p0={"break_out": True}, p3={"inset": True, "host": 2}), fmt=fmt)
+    live = lay["live_area"]
+    canvas = canvas_geometry(fmt, PRESETS.lettering, bleed=True)
+    panels = []
+    for p in lay["panels"]:
+        size = (p["target"]["width"], p["target"]["height"])
+        img_path = synthetic_image(tmp_path / f"{p['index']}.png", size, COLORS[p["index"]])
+        panels.append(
+            PanelArt(
+                p["index"] + 1,
+                p["index"],
+                Box(p["x1"], p["y1"], p["x2"], p["y2"]),
+                img_path,
+                polygon=[tuple(q) for q in p["polygon"]],
+                inset=bool(p.get("inset")),
+                break_out=bool(p.get("break_out")),
+            )
+        )
+    # une case d'avant le garde-fou, posée jusqu'au bord de la page (ancien fond perdu)
+    panels[1] = PanelArt(2, 1, Box(panels[1].box.x1, panels[1].box.y1, fmt.width_px, fmt.height_px), panels[1].image)
+    page_box = Box(live["x1"], live["y1"], live["x2"], live["y2"])
     art = PageArt(
         number=1,
         fmt=fmt,
-        panels=[
-            PanelArt(
-                1,
-                0,
-                Box(top["x1"], top["y1"], top["x2"], top["y2"]),
-                img_path,
-                polygon=[tuple(p) for p in top["polygon"]],
-            )
-        ],
+        panels=panels,
         lettering=Letterer(fonts, PRESETS.lettering, fmt.dpi).letter_page([], "ltr"),
+        live=page_box,
     )
-    canvas = canvas_geometry(fmt, PRESETS.lettering, bleed=True, crop_marks=True)
     img = render_png(art, fonts, PRESETS.lettering, canvas)
-    edge_y = canvas.oy - canvas.bleed  # bord du fond perdu
-    mid_x = round(geo.centroid(panel_polygon(art.panels[0], canvas))[0])
-    assert img.getpixel((mid_x, edge_y)) != (255, 255, 255)  # l'image va jusqu'au bord du fond perdu…
-    assert img.getpixel((mid_x, edge_y - 2)) == (255, 255, 255)  # … et pas au-delà (bande des repères)
-    # repères de coupe toujours dessinés, en noir, hors du fond perdu
-    assert img.getpixel((canvas.ox - canvas.bleed - 5, canvas.oy)) == (0, 0, 0) or img.getpixel(
-        (canvas.ox, canvas.oy - canvas.bleed - 5)
-    ) == (0, 0, 0)
-    # pas de bordure le long du bord rogné : la ligne de coupe est dans l'image, pas noire
-    assert img.getpixel((mid_x, canvas.oy + 1)) != (0, 0, 0)
+    keep = Box(live["x1"] + canvas.ox, live["y1"] + canvas.oy, live["x2"] + canvas.ox, live["y2"] + canvas.oy)
+    paper = (255, 255, 255)
+    # toute la feuille hors de la zone utile (marges et fond perdu) : papier seulement, au pixel près
+    for y in range(img.height):
+        for x in range(img.width):
+            if keep.x1 <= x < keep.x2 and keep.y1 <= y < keep.y2:
+                continue
+            assert img.getpixel((x, y)) == paper, (x, y)
+    # la case qui déborde est dessinée par-dessus ses voisines, dans la zone utile
+    top = lay["panels"][0]
+    y_over = round(geo.bbox([tuple(p) for p in top["polygon"]])[3] - 3) + canvas.oy
+    x_mid = round((lay["panels"][1]["x1"] + lay["panels"][1]["x2"]) / 2) + canvas.ox
+    assert img.getpixel((x_mid, y_over)) == img.getpixel((x_mid, y_over - 40))
 
 
 def test_inset_is_inside_its_host_and_drawn_after_it(tmp_path: Path, fonts: FontBook) -> None:
@@ -363,10 +379,10 @@ def test_style_weights_for_frames() -> None:
     ]
 
     def counts(style: str) -> dict[str, int]:
-        out = {"bleed": 0, "frameless": 0, "inset": 0}
+        out = {"break_out": 0, "frameless": 0, "inset": 0}
         for seed in range(200):
             fr = decide_frames(PRESETS.layout_style(style), strong, seed)
-            out["bleed"] += fr[0]["bleed"]
+            out["break_out"] += sum(f["break_out"] for f in fr)
             out["frameless"] += sum(f["frame"] != "border" for f in fr)
             out["inset"] += sum(f["inset"] for f in fr)
             assert sum(f["inset"] for f in fr) <= PRESETS.layout_style(style).frames.inset.max_per_page
@@ -376,8 +392,8 @@ def test_style_weights_for_frames() -> None:
         return out
 
     sage, dyn, nerv = counts("sage"), counts("dynamique"), counts("nerveuse")
-    assert sage == {"bleed": 0, "frameless": 0, "inset": 0}
-    assert nerv["bleed"] > dyn["bleed"] > 0
+    assert sage == {"break_out": 0, "frameless": 0, "inset": 0}
+    assert nerv["break_out"] == dyn["break_out"] == 0  # jamais tiré : seulement imposé
     assert nerv["frameless"] > dyn["frameless"] > 0
     assert nerv["inset"] > 0 and dyn["inset"] > 0
     # même graine : mêmes décisions ; options imposées : elles gagnent
@@ -385,12 +401,12 @@ def test_style_weights_for_frames() -> None:
         PRESETS.layout_style("nerveuse"), strong, 4
     )
     forced = [
-        PanelSpec(importance=3, intensity="choc", panel_id=1, frame={"bleed": False, "frame": "fade"}),
+        PanelSpec(importance=3, intensity="choc", panel_id=1, frame={"break_out": True, "frame": "fade"}),
         *strong[1:],
     ]
     for seed in range(20):
         f = decide_frames(PRESETS.layout_style("nerveuse"), forced, seed)[0]
-        assert f["bleed"] is False and f["frame"] == "fade"
+        assert f["break_out"] is True and f["frame"] == "fade"
     sage_forced = decide_frames(
         PRESETS.layout_style("sage"), [*strong[:2], PanelSpec(panel_id=3, frame={"inset": True}), strong[3]], 1
     )
@@ -401,7 +417,7 @@ def test_style_weights_for_frames() -> None:
 def _golden_page(fonts: FontBook, tmp: Path) -> tuple[Image.Image, dict[str, Any]]:
     fmt = golden_format()
     frames = _frames(
-        p0={"bleed": True},
+        p0={"break_out": True},
         p1={"frame": "fade"},
         p2={"frame": "none"},
         p3={"inset": True, "host": 2, "size": 0.42, "margin_mm": 3, "min_side_mm": 12},
@@ -409,7 +425,7 @@ def _golden_page(fonts: FontBook, tmp: Path) -> tuple[Image.Image, dict[str, Any
     lay = _layout(frames, fmt=fmt)
     top, host = lay["panels"][0], lay["panels"][2]
     # « VROUM ! » à cheval sur la gouttière entre la grande case et la case de droite
-    gutter_y = (geo.bbox([tuple(p) for p in top["live_polygon"]])[3] + host["y1"]) / 2
+    gutter_y = (geo.bbox([tuple(p) for p in top["base_polygon"]])[3] + host["y1"]) / 2
     sfx = {
         0: [SfxSpec(id=101, text="VROUM !", intensity="choc", angle=-8, center=(host["x1"] + 40, gutter_y - 12))],
         1: [SfxSpec(id=102, text="baïe…", intensity="calme")],
@@ -420,12 +436,12 @@ def _golden_page(fonts: FontBook, tmp: Path) -> tuple[Image.Image, dict[str, Any
     return img, lay
 
 
-def test_golden_page_with_sfx_frameless_bleed_and_inset(tmp_path: Path, fonts: FontBook) -> None:
+def test_golden_page_with_sfx_frameless_break_out_and_inset(tmp_path: Path, fonts: FontBook) -> None:
     first, lay = _golden_page(fonts, tmp_path)
     second, _ = _golden_page(fonts, tmp_path)
     assert first.tobytes() == second.tobytes(), "le rendu n'est pas déterministe"
     assert [p.get("frame") for p in lay["panels"]] == ["border", "fade", "none", "border"]
-    assert lay["panels"][0]["bleed"] and lay["panels"][3]["inset"]
+    assert lay["panels"][0]["break_out"] and lay["panels"][3]["inset"]
     if os.environ.get("MANGAKA_UPDATE_GOLDEN") == "1":
         GOLDEN.parent.mkdir(exist_ok=True)
         first.save(GOLDEN, format="PNG", dpi=(100, 100))

@@ -19,7 +19,8 @@ nouvelle proposition le garde tant qu'il n'est pas déverrouillé. « Appliquer 
 ce que lit la grammaire de mise en page (rythme et style de la page, intensité des cases, gabarit
 suggéré et page choc) et dans le prompt image (plan, angle, ambiance), puis ne recalcule que les
 pages dont la mise en page change. Le cadre devient une option de cadre de la case (`Panel.frame` :
-sans bord, fond perdu, incrustation) et les onomatopées des bulles `sfx` du lettrage — sans toucher
+sans bord, débordement sur les cases voisines — seulement sur une page choc ou une case choc —,
+incrustation) et les onomatopées des bulles `sfx` du lettrage — sans toucher
 à une option ou une onomatopée réglée par l'auteur. Un décor ou des objets proposés remplacent ceux
 de la case seulement s'ils ont changé depuis la dernière application (une correction de l'auteur
 dans l'écran Scénario reste).
@@ -68,7 +69,7 @@ ANGLES = (
     "vue subjective",
     "cadre penché",
 )
-CADRES = ("normal", "sans bord", "fond perdu", "incrustation")
+CADRES = ("normal", "sans bord", "débordement", "incrustation")
 PAGE_CHOCS = ("pleine page", "splash")
 SFX_INTENSITIES = ("léger", "moyen", "fort")
 VARIETIES = ("sobre", "equilibree", "audacieuse")
@@ -93,7 +94,7 @@ AngleName = Literal[
     "vue subjective",
     "cadre penché",
 ]
-CadreName = Literal["normal", "sans bord", "fond perdu", "incrustation"]
+CadreName = Literal["normal", "sans bord", "débordement", "incrustation"]
 PageChocName = Literal["pleine page", "splash"]
 SfxIntensityName = Literal["léger", "moyen", "fort"]
 
@@ -118,6 +119,9 @@ def _norm(value: Any) -> Any:
         "trois quarts": "de trois quarts",
         "leger": "léger",
         "plongee": "plongée",
+        "debordement": "débordement",
+        # Ancien cadre : une case ne franchit plus la marge extérieure, elle déborde sur ses voisines.
+        "fond perdu": "débordement",
     }.get(v, v)
 
 
@@ -821,6 +825,7 @@ def apply_direction(
         elif previous.get("layout_style") and page.layout_style == previous.get("layout_style"):
             page.layout_style = None  # le style imposé par l'application précédente est retiré
         intensities = {pa.get("panel_id"): pa.get("intensity") for pa in v.get("panels") or []}
+        page_choc = bool(v.get("page_choc"))
         by_panel = {pa.get("panel_id"): pa for pa in v.get("panels") or []}
         before = {pa.get("panel_id"): pa for pa in previous.get("panels") or []}
         for panel in page.panels:
@@ -828,7 +833,12 @@ def apply_direction(
                 panel.intensity = intensities[panel.id]
             choice = by_panel.get(panel.id)
             if choice is not None:
-                _apply_cadre(panel, choice.get("cadre"), (before.get(panel.id) or {}).get("cadre"))
+                _apply_cadre(
+                    panel,
+                    choice.get("cadre"),
+                    (before.get(panel.id) or {}).get("cadre"),
+                    break_out_allowed=page_choc or panel.intensity == "choc",
+                )
                 _apply_sfx(panel, choice.get("sfx") or [])
                 if library is not None:
                     _apply_library(panel, choice, before.get(panel.id) or {}, library)
@@ -849,15 +859,20 @@ def apply_direction(
 CADRE_TO_FRAME: dict[str, dict[str, Any]] = {
     "normal": {},
     "sans bord": {"frame": "none"},
-    "fond perdu": {"bleed": True},
+    # Débordement sur les cases voisines : réservé aux pages choc et aux cases choc (sinon « normal »).
+    "débordement": {"break_out": True},
+    "fond perdu": {"break_out": True},  # ancienne proposition déjà stockée
     "incrustation": {"inset": True},
 }
 SFX_TO_INTENSITY = {"léger": "calme", "moyen": "normal", "fort": "choc"}
 DA_SOURCE = "direction"  # marque des onomatopées posées par la direction artistique
 
 
-def _apply_cadre(panel: Panel, cadre: str | None, before: str | None) -> None:
-    """Options de cadre de la DA : remplace celles de l'application précédente, jamais celles de l'auteur."""
+def _apply_cadre(panel: Panel, cadre: str | None, before: str | None, *, break_out_allowed: bool = True) -> None:
+    """Options de cadre de la DA : remplace celles de l'application précédente, jamais celles de l'auteur.
+    Un débordement n'est posé que sur une page choc ou une case choc (`break_out_allowed`)."""
+    if not break_out_allowed and "break_out" in CADRE_TO_FRAME.get(cadre or "normal", {}):
+        cadre = "normal"
     current = dict(panel.frame or {})
     for key, value in CADRE_TO_FRAME.get(before or "normal", {}).items():
         if current.get(key) == value:

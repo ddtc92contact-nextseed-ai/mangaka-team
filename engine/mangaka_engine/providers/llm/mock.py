@@ -217,7 +217,7 @@ def mock_art_direction(ctx: dict[str, Any]) -> dict[str, Any]:
                 plan = "gros plan" if seed % 2 else "contre-plongée"
             cadre = "normal"
             if intensity == "choc" and bold:
-                cadre = "sans bord" if bold == 1 else "fond perdu"
+                cadre = "sans bord" if bold == 1 else "débordement"
             out_panels.append(
                 {
                     "panel": i + 1,

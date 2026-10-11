@@ -13,8 +13,10 @@ Sans boîte, seule la zone réservée aux bulles compte.
 
 Onomatopées : bulles `kind = sfx` ; leurs réglages imposés (`Bubble.sfx` : intensité, police, taille,
 angle, cisaillement) et leur centre placé à la main (`Bubble.position` : {"x", "y", "manual"}).
-Cases à fond perdu : le lettrage reste dans la partie de la case dans la zone utile (`live_polygon`) ;
-une incrustation est un obstacle pour les bulles et onomatopées de sa case hôte.
+Marge extérieure inviolable : la mise en page stockée est relue à travers `clamp_to_live` (une ancienne
+case à fond perdu est ramenée dans la zone utile) ; bulles et onomatopées restent dans la zone utile.
+Case qui déborde sur ses voisines : son lettrage reste dans la case d'origine (`base_polygon`) ; une
+incrustation est un obstacle pour les bulles et onomatopées de sa case hôte.
 """
 
 from __future__ import annotations
@@ -41,6 +43,7 @@ from .assembly import Canvas, PageArt, PanelArt, canvas_geometry, cover_transfor
 from .finishing import finished_art, panel_print_info
 from .fonts import FontBook
 from .jobs import JobReporter
+from .layout import clamp_to_live, live_rect, page_frame
 from .lettering import Box, BubbleSpec, Letterer, LetteringError, LetteringWarning, PanelSpec, SfxSpec
 from .pages import is_stale
 
@@ -197,8 +200,17 @@ def page_inputs(presets: PresetRegistry, files: FileStore, page: Page, fonts: Fo
     specs: list[PanelSpec] = []
     faces_by_panel: dict[int, list[Box]] = {}
     urls: dict[int, str | None] = {}
-    layout_panels = {lp.get("panel_id"): lp for lp in page.layout.get("panels", [])}
-    index_to_id = {lp.get("index"): lp.get("panel_id") for lp in page.layout.get("panels", [])}
+    layout = clamp_to_live(page.layout)
+    # Zone utile : celle de la mise en page, sinon (mise en page d'avant les polygones) celle du format.
+    live_r = (
+        live_rect(layout)
+        or page_frame(
+            fmt, presets.layout, direction="rtl" if direction == "rtl" else "ltr", page_number=page.number
+        ).live
+    )
+    live_box = Box(live_r.x1, live_r.y1, live_r.x2, live_r.y2)
+    layout_panels = {lp.get("panel_id"): lp for lp in layout.get("panels", [])}
+    index_to_id = {lp.get("index"): lp.get("panel_id") for lp in layout.get("panels", [])}
     # Incrustations : obstacles pour le lettrage de leur case hôte.
     insets: dict[int, list[Box]] = {}
     for lp in layout_panels.values():
@@ -207,13 +219,15 @@ def page_inputs(presets: PresetRegistry, files: FileStore, page: Page, fonts: Fo
         if host is not None and rect is not None:
             insets.setdefault(host, []).append(rect)
     for panel in page.panels:
-        box = Box.parse(panel.bbox)
         lp = layout_panels.get(panel.id) or {}
+        box = Box.parse(panel.bbox)
+        if box is not None:  # coupée à la zone utile
+            box = box.intersection(live_box)
         # Polygone de la case (mise en page ≥ v2) ; une ancienne mise en page n'a que la boîte.
         raw_poly = lp.get("polygon")
         polygon = [(float(x), float(y)) for x, y in raw_poly] if raw_poly else None
-        raw_live = lp.get("live_polygon")
-        live = [(float(x), float(y)) for x, y in raw_live] if raw_live else None
+        raw_base = lp.get("base_polygon")
+        base = [(float(x), float(y)) for x, y in raw_base] if raw_base else None
         if box is None:
             warnings.append(
                 LetteringWarning(
@@ -255,13 +269,14 @@ def page_inputs(presets: PresetRegistry, files: FileStore, page: Page, fonts: Fo
                 polygon=polygon,
                 frame=lp.get("frame") if lp.get("frame") in ("border", "none", "fade") else "border",
                 inset=bool(lp.get("inset")),
+                break_out=bool(lp.get("break_out")),
             )
         )
-        # Fond perdu : bulles et onomatopées restent dans la zone utile.
+        # Débordement : bulles et onomatopées restent dans la case d'origine.
         letter_box, letter_poly = box, polygon
-        if live:
-            xs, ys = [x for x, _ in live], [y for _, y in live]
-            letter_box, letter_poly = Box(min(xs), min(ys), max(xs), max(ys)), live
+        if base:
+            xs, ys = [x for x, _ in base], [y for _, y in base]
+            letter_box, letter_poly = Box(min(xs), min(ys), max(xs), max(ys)), base
         specs.append(
             PanelSpec(
                 id=panel.id,
@@ -288,10 +303,15 @@ def page_inputs(presets: PresetRegistry, files: FileStore, page: Page, fonts: Fo
                 ],
             )
         )
-    page_box = Box(0, 0, fmt.width_px, fmt.height_px)
-    lettering = Letterer(fonts, presets.lettering, fmt.dpi).letter_page(specs, direction, page_box)
+    # Onomatopées : jamais au-delà de la zone utile (marge extérieure inviolable).
+    lettering = Letterer(fonts, presets.lettering, fmt.dpi).letter_page(specs, direction, live_box)
     art = PageArt(
-        number=page.number, fmt=fmt, panels=panels, lettering=lettering, warnings=warnings + lettering.warnings
+        number=page.number,
+        fmt=fmt,
+        panels=panels,
+        lettering=lettering,
+        warnings=warnings + lettering.warnings,
+        live=live_box,
     )
     return PageInputs(art=art, specs=specs, faces=faces_by_panel, image_urls=urls, stale=stale)
 
@@ -318,7 +338,6 @@ def lettering_json(
         }
         for font_id in fonts.preset.sfx_choices()
     }
-    layout_panels = {lp.get("panel_id"): lp for lp in (page.layout or {}).get("panels", [])}
     return {
         "page_id": page.id,
         "page_number": page.number,
@@ -329,6 +348,8 @@ def lettering_json(
         "width": art.fmt.width_px,
         "height": art.fmt.height_px,
         "bleed_mm": art.fmt.bleed_mm,
+        # Zone utile : rien n'est dessiné au-delà (marge extérieure inviolable).
+        "live_area": art.live.as_rect() if art.live else None,
         "layout_stale": inputs.stale,
         "styles": styles,
         "sfx_fonts": sfx_fonts,
@@ -341,11 +362,11 @@ def lettering_json(
                 "index": p.index,
                 "box": p.box.as_rect(),
                 "polygon": [[round(x, 1), round(y, 1)] for x, y in p.polygon]
-                if p.polygon and (p.slanted or (layout_panels.get(p.id) or {}).get("bleed"))
+                if p.polygon and (p.slanted or p.break_out)
                 else None,
                 "frame": p.frame,
                 "inset": p.inset,
-                "bleed": bool((layout_panels.get(p.id) or {}).get("bleed")),
+                "break_out": p.break_out,
                 "bubble_zone": spec.zone.as_rect() if spec.zone else None,
                 "image_url": inputs.image_urls.get(p.id),
                 "faces": [f.as_rect() for f in inputs.faces.get(p.id, [])],

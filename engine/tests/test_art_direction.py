@@ -442,7 +442,12 @@ def test_cadre_and_sfx_go_to_frames_and_lettering(c: TestClient) -> None:
         page["id"],
         page={"rythme": "montée", "template": None, "page_choc": None, "layout_style": None},
         panels=[
-            {"panel_id": ids[0], "cadre": "fond perdu", "sfx": [{"text": "VROUM !", "intensity": "fort"}]},
+            {
+                "panel_id": ids[0],
+                "intensity": "choc",
+                "cadre": "débordement",
+                "sfx": [{"text": "VROUM !", "intensity": "fort"}],
+            },
             {"panel_id": ids[1], "cadre": "sans bord", "sfx": []},
             {"panel_id": ids[2], "cadre": "incrustation", "sfx": [{"text": "bip", "intensity": "léger"}]},
         ],
@@ -450,9 +455,9 @@ def test_cadre_and_sfx_go_to_frames_and_lettering(c: TestClient) -> None:
     out = c.post(f"/chapters/{chapter_id}/direction/apply", json={}).json()
     p = out["pages"][0]
     assert [pa["frame"] for pa in p["panels"]] == [
-        {"frame": None, "bleed": True, "inset": None},
-        {"frame": "none", "bleed": None, "inset": None},
-        {"frame": None, "bleed": None, "inset": True},
+        {"frame": None, "break_out": True, "inset": None},
+        {"frame": "none", "break_out": None, "inset": None},
+        {"frame": None, "break_out": None, "inset": True},
     ]
     assert [[(s["text"], s["intensity"]) for s in pa["sfx"]] for pa in p["panels"]] == [
         [("VROUM !", "choc")],
@@ -460,10 +465,37 @@ def test_cadre_and_sfx_go_to_frames_and_lettering(c: TestClient) -> None:
         [("bip", "calme")],
     ]
     lay = p["layout"]["panels"]
-    assert lay[0]["bleed"] and lay[1]["frame"] == "none" and lay[2]["inset"] and not p["layout_stale"]
+    assert lay[0]["break_out"] and lay[1]["frame"] == "none" and lay[2]["inset"] and not p["layout_stale"]
     # l'auteur impose un fondu à la case 2 ; la DA repasse en « normal » partout
     c.put(f"/panels/{ids[1]}/frame", json={"frame": "fade"})
     _panel_edit(c, page["id"], panels=[{"panel_id": i, "cadre": "normal", "sfx": []} for i in ids])
     p = c.post(f"/chapters/{chapter_id}/direction/apply", json={}).json()["pages"][0]
-    assert [pa["frame"] for pa in p["panels"]] == [None, {"frame": "fade", "bleed": None, "inset": None}, None]
+    assert [pa["frame"] for pa in p["panels"]] == [None, {"frame": "fade", "break_out": None, "inset": None}, None]
     assert all(pa["sfx"] == [] for pa in p["panels"])  # onomatopées de la DA retirées
+
+
+def test_break_out_only_on_choc_panel_or_page_choc(c: TestClient) -> None:
+    """La DA ne fait déborder une case sur ses voisines que sur une case choc ou une page choc (#88) ;
+    l'ancien cadre « fond perdu » est lu comme un débordement, jamais comme un passage de la marge."""
+    chapter_id, page = _three_panel_page(c, "sage")
+    ids = [pa["panel_id"] for pa in _direct(c, chapter_id)["pages"][0]["panels"]]
+    _panel_edit(
+        c,
+        page["id"],
+        page={"rythme": "montée", "template": None, "page_choc": None, "layout_style": None},
+        panels=[
+            {"panel_id": ids[0], "intensity": "normal", "cadre": "fond perdu", "sfx": []},
+            {"panel_id": ids[1], "intensity": "calme", "cadre": "débordement", "sfx": []},
+            {"panel_id": ids[2], "intensity": "normal", "cadre": "normal", "sfx": []},
+        ],
+    )
+    p = c.post(f"/chapters/{chapter_id}/direction/apply", json={}).json()["pages"][0]
+    assert [pa["frame"] for pa in p["panels"]] == [None, None, None]
+    assert not any(lp.get("break_out") for lp in p["layout"]["panels"])
+    # page choc : le débordement proposé est posé
+    _panel_edit(c, page["id"], page={"rythme": "climax", "template": None, "page_choc": "splash", "layout_style": None})
+    p = c.post(f"/chapters/{chapter_id}/direction/apply", json={}).json()["pages"][0]
+    assert [bool((pa["frame"] or {}).get("break_out")) for pa in p["panels"]] == [True, True, False]
+    live = p["layout"]["live_area"]
+    for lp in p["layout"]["panels"]:
+        assert live["x1"] <= lp["x1"] and lp["x2"] <= live["x2"] and live["y1"] <= lp["y1"] and lp["y2"] <= live["y2"]
