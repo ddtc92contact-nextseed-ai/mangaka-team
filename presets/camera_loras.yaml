@@ -1,0 +1,112 @@
+# LoRA de caméra et d'identité de Qwen-Image 2.1 (licence apache-2.0), installés et vérifiés sur la GX10
+# le 11/10/2026 : ComfyUI 0.39.0, modèle de base qwen_image_2.1_bf16 (non distillé), LoraLoaderModelOnly à
+# 1,0 — 192 patchs chacun, aucun avertissement « lora key not loaded », aucune conversion de clés à faire.
+# Mesuré : 40 pas en 1024² avec une référence ≈ 57 à 66 s. v2 tourne nettement le sujet (jusqu'à la vue de
+# dos) ; v1 et Anime consistency gardent l'identité en changeant l'axe de la caméra.
+#
+# Aucun nom de fichier ni mot déclencheur dans le code du moteur : tout vient d'ici.
+# `file` : nom du fichier tel que ComfyUI le liste (models/loras) ; `trigger` : mot déclencheur, placé au
+# TOUT DÉBUT du prompt (vide = aucun) ; `weight` : strength_model du LoraLoaderModelOnly (modifiable dans
+# l'UI) ; `tiers` : paliers où le LoRA est ajouté (nom du palier sans accent, en minuscules, espaces → « - » :
+# qualite, qualite-max, rapide, turbo). Turbo et Rapide n'ont pas été testés avec ces LoRA : ailleurs,
+# l'option n'est jamais ignorée en silence, l'UI affiche « Disponible en palier Qualité ».
+# `role` : `angles` (« Nouvel angle » d'une fiche, « Changer l'angle » d'une case) ou `identity`
+# (« Cohérence anime », interrupteur de la fiche série) ; `default` : LoRA d'angle proposé d'abord.
+
+# Workflow des « Nouvel angle » (fiches) et « Changer l'angle » (cases) : palier Qualité avec image de
+# référence (l'image à faire tourner est l'image 1), quel que soit le palier de la série.
+workflow: qwen-image-edit-ref-qualite
+# Pas d'échantillonnage de ces générations (mesuré avec 40 pas ; le palier Qualité en fait 35 par défaut).
+steps: 40
+
+loras:
+  - id: mva-v2
+    role: angles
+    file: Qwen21_Multiple-Angles_v2_000001500.safetensors
+    name: Multiple-Angles v2 (rang 64)
+    description: Tourne nettement le sujet, jusqu'à la vue de dos.
+    trigger: "<mva>"
+    weight: 1.0
+    tiers: [qualite, qualite-max]
+    default: true
+  - id: mva-v1
+    role: angles
+    file: Qwen21_Multiple-Angles_v1_step1000.safetensors
+    name: Multiple-Angles v1 (rang 32)
+    description: Repli plus sage — garde l'identité en déplaçant l'axe de la caméra.
+    trigger: "<mva>"
+    weight: 1.0
+    tiers: [qualite, qualite-max]
+  - id: anime-consistency
+    role: identity
+    file: Qwen2.1_Anime_consistency.safetensors
+    name: Cohérence anime (identité)
+    description: Garde le visage et le design des personnages d'une case à l'autre.
+    trigger: ""
+    weight: 1.0
+    tiers: [qualite, qualite-max]
+
+# Bulle d'aide du poids (conseil de la fiche du modèle).
+weight_hint: >-
+  Poids du LoRA (strength_model) : 1,0 par défaut. Si l'image recopie simplement la référence sans tourner
+  la caméra, baisse-le vers 0,8 (conseil de la fiche du modèle).
+
+# Vocabulaire de caméra de la fiche du modèle, en anglais, après le mot déclencheur. `azimuth` (degrés) :
+# 0 = de face, 90 = profil droit, -90 = profil gauche, 180 = de dos ; `elevation` (degrés) : 0 = hauteur
+# d'yeux, > 0 = caméra plus haute (plongée), < 0 = plus basse (contre-plongée). Ils servent à choisir la vue
+# de référence la plus proche de l'angle demandé par la direction artistique. L'`id` est l'étiquette
+# stockée sur l'image de référence.
+angles:
+  - { id: front-eye, label: "De face, à hauteur d'yeux", camera: "front view, eye-level shot", azimuth: 0, elevation: 0 }
+  - { id: front-right-eye, label: "Trois-quarts face droite, à hauteur d'yeux", camera: "front-right quarter view, eye-level shot", azimuth: 45, elevation: 0 }
+  - { id: front-left-eye, label: "Trois-quarts face gauche, à hauteur d'yeux", camera: "front-left quarter view, eye-level shot", azimuth: -45, elevation: 0 }
+  - { id: right-eye, label: "Profil droit, à hauteur d'yeux", camera: "right side view, eye-level shot", azimuth: 90, elevation: 0 }
+  - { id: left-eye, label: "Profil gauche, à hauteur d'yeux", camera: "left side view, eye-level shot", azimuth: -90, elevation: 0 }
+  - { id: back-right-eye, label: "Trois-quarts dos droit, à hauteur d'yeux", camera: "back-right quarter view, eye-level shot", azimuth: 135, elevation: 0 }
+  - { id: back-left-eye, label: "Trois-quarts dos gauche, à hauteur d'yeux", camera: "back-left quarter view, eye-level shot", azimuth: -135, elevation: 0 }
+  - { id: back-eye, label: "De dos, à hauteur d'yeux", camera: "back view, eye-level shot", azimuth: 180, elevation: 0 }
+  - { id: front-elevated, label: "De face, en plongée", camera: "front view, elevated shot", azimuth: 0, elevation: 30 }
+  - { id: front-right-elevated, label: "Trois-quarts face droite, en plongée", camera: "front-right quarter view, elevated shot", azimuth: 45, elevation: 30 }
+  - { id: right-elevated, label: "Profil droit, en plongée", camera: "right side view, elevated shot", azimuth: 90, elevation: 30 }
+  - { id: front-high, label: "De face, plongée forte (vue d'en haut)", camera: "front view, high-angle shot", azimuth: 0, elevation: 60 }
+  - { id: front-low, label: "De face, en contre-plongée", camera: "front view, low-angle shot", azimuth: 0, elevation: -30 }
+  - { id: front-right-low, label: "Trois-quarts face droite, en contre-plongée", camera: "front-right quarter view, low-angle shot", azimuth: 45, elevation: -30 }
+
+# Angle supposé de l'image principale d'une fiche tant qu'elle n'a pas d'étiquette.
+main_view: front-eye
+
+# Angle de la direction artistique (champ `angle`, ou `plan` pour plongée / contre-plongée) → cible pour
+# choisir la vue de référence. Le côté (gauche / droite) n'est jamais donné : il ne compte pas. Une valeur
+# absente d'ici (vue subjective, cadre penché…) garde l'image principale.
+direction_angles:
+  "de face": { azimuth: 0 }
+  "de trois quarts": { azimuth: 45 }
+  "de profil": { azimuth: 90 }
+  "de dos": { azimuth: 180 }
+  "en plongée": { elevation: 30 }
+  "en contre-plongée": { elevation: -30 }
+  "plongée": { elevation: 30 }
+  "contre-plongée": { elevation: -30 }
+
+# Prompt négatif de « Nouvel angle », par sorte de fiche (lu : le palier Qualité est à vrai CFG).
+sheet_negatives:
+  character: "extra characters, background people, text, multiple views, collage, character sheet"
+  object: "person, people, human, character, face, hands, figure, crowd, text, cluttered background"
+  decor: "person, people, human, character, figure, crowd, silhouette, animal, text"
+# Taille de la nouvelle vue : même ratio que la vue de départ, environ side × side pixels (multiples de 16).
+sheet_side: 1024
+
+# Prompts envoyés (morceaux joints par une espace ; un morceau dont une variable est vide est omis). Le
+# premier morceau commence toujours par le mot déclencheur : il doit ouvrir le prompt.
+# Variables : $trigger, $camera (vocabulaire ci-dessus), $name, $description (fiche), $scene (prompt de la case).
+prompts:
+  # « Nouvel angle » d'une fiche : l'image 1 est la vue de départ de la fiche.
+  sheet:
+    - "$trigger $camera."
+    - "$name: $description."
+    - "Same subject as image 1, same design, proportions and colors, plain background, no text."
+  # « Changer l'angle » d'une case : l'image 1 est la version de la case à faire tourner.
+  panel:
+    - "$trigger $camera."
+    - "Same scene, characters and setting as image 1, seen from this new camera angle."
+    - "$scene"

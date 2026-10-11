@@ -56,6 +56,10 @@ export interface Project {
   cfg: number | null;
   /** « Prompt rédigé par l'IA » : le LLM écrit le prompt de chaque case (false : assemblage par fragments). */
   ai_prompt: boolean;
+  /** « Cohérence anime » : LoRA d'identité (presets/camera_loras.yaml) ajouté aux générations de la série. */
+  anime_consistency: boolean;
+  /** Pourquoi la cohérence anime ne s'applique pas au palier de la série (« Disponible en palier Qualité »). */
+  anime_consistency_problem: string | null;
   character_count: number;
   chapter_count: number;
   /** Pages déjà mises en page : changer le sens de lecture les met en miroir. */
@@ -91,6 +95,7 @@ export type ProjectInput = Pick<
   | "upscaler"
   | "cfg"
   | "ai_prompt"
+  | "anime_consistency"
 >;
 
 export type CleanMode = "img2img" | "controlnet";
@@ -571,11 +576,13 @@ export interface RepairInput {
 export interface UsedReference {
   slot?: number;
   /** Absent sur les versions d'avant la bibliothèque (personnage). */
-  kind?: LibraryKind | "style";
+  kind?: LibraryKind | "style" | "panel";
   id?: number;
   name?: string;
   character_id?: number;
   image_id: number;
+  /** Vue étiquetée par son angle de caméra (choisie pour l'angle de la case). */
+  angle?: string;
   comfyui_name?: string;
 }
 
@@ -1044,6 +1051,52 @@ export interface ReferenceImage {
   width: number;
   height: number;
   created_at: string;
+  /** Angle de caméra de la vue (id de presets/camera_loras.yaml) ; null = non étiquetée. */
+  angle?: string | null;
+}
+
+/** LoRA de caméra ou d'identité (presets/camera_loras.yaml). */
+export interface CameraLora {
+  id: string;
+  role: "angles" | "identity";
+  name: string;
+  description: string;
+  file: string;
+  trigger: string;
+  weight: number;
+  tiers: string[];
+  default: boolean;
+  /** Workflows (paliers) où ce LoRA est ajouté ; ailleurs : « Disponible en palier Qualité ». */
+  workflows: string[];
+}
+
+export interface CameraAngle {
+  id: string;
+  label: string;
+  camera: string;
+  azimuth: number;
+  elevation: number;
+}
+
+/** « Nouvel angle » (fiches) et « Changer l'angle » (cases) : LoRA, vocabulaire de caméra, palier. */
+export interface CameraLoras {
+  workflow: string | null;
+  workflow_tier: string | null;
+  /** null : disponible ; sinon pourquoi (palier non testé, LoRA absent…). */
+  angle_problem: string | null;
+  loras: CameraLora[];
+  angles: CameraAngle[];
+  main_view: string | null;
+  weight_hint: string;
+  tier_label: string;
+}
+
+/** Réglages d'une génération d'angle. */
+export interface AngleInput {
+  angle: string;
+  lora?: string | null;
+  weight?: number | null;
+  seed?: Seed | null;
 }
 
 export interface Character {
@@ -1893,6 +1946,12 @@ export const api = {
     request<void>(`/${LIBRARY_SEGMENT[kind]}/${id}/images/${imageId}`, { method: "DELETE" }),
   reorderLibraryImages: (kind: LibraryKind, id: number, imageIds: number[]) =>
     request<LibraryEntry>(`/${LIBRARY_SEGMENT[kind]}/${id}/images/order`, json("PUT", { image_ids: imageIds })),
+  setLibraryImageAngle: (kind: LibraryKind, id: number, imageId: number, angle: string | null) =>
+    request<LibraryEntry>(`/${LIBRARY_SEGMENT[kind]}/${id}/images/${imageId}/angle`, json("PUT", { angle })),
+  cameraLoras: () => request<CameraLoras>("/presets/camera-loras"),
+  /** « Nouvel angle » : une nouvelle vue de la fiche, rangée parmi ses images et étiquetée par son angle. */
+  newAngleView: (kind: LibraryKind, id: number, body: AngleInput & { start_image_id?: number | null }) =>
+    request<Job[]>(`/${LIBRARY_SEGMENT[kind]}/${id}/angle-views`, json("POST", body)),
   referenceSheets: (kind?: LibraryKind) =>
     request<ReferenceSheet[]>(`/presets/reference-sheets${kind ? `?kind=${kind}` : ""}`),
   referenceStudio: (kind: LibraryKind, id: number) =>
@@ -2005,6 +2064,9 @@ export const api = {
   unlockComposition: (id: number) => request<PanelDetail>(`/panels/${id}/composition-lock`, { method: "DELETE" }),
   generatePanel: (id: number, body: GenerateInput = {}) => request<Job[]>(`/panels/${id}/generate`, json("POST", body)),
   regeneratePanelQuality: (id: number) => request<Job[]>(`/panels/${id}/regenerate-quality`, { method: "POST" }),
+  /** « Changer l'angle » : une nouvelle version de la case vue sous un autre angle (les autres ne bougent pas). */
+  changePanelAngle: (id: number, body: AngleInput & { source_image_id?: number | null }) =>
+    request<Job[]>(`/panels/${id}/change-angle`, json("POST", body)),
   chapterEstimate: (id: number) => request<Estimate>(`/chapters/${id}/estimate`),
   projectEstimate: (id: number) => request<Estimate>(`/projects/${id}/estimate`),
   generatePage: (id: number, body: { force?: boolean; count?: number } = {}) =>

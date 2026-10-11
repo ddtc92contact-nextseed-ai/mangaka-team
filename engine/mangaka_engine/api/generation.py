@@ -23,6 +23,7 @@ from ..pipeline.generation import (
     GenerationError,
     LibraryEntry,
     apply_prompt_request,
+    enqueue_angle,
     enqueue_panel,
     entry_kind,
     panel_cast,
@@ -68,6 +69,7 @@ from .schemas import (
     AnnotationOut,
     BatchGenerateIn,
     BatchGenerateOut,
+    ChangeAngleIn,
     CompositionLockOut,
     ControlPreviewOut,
     EstimateOut,
@@ -415,6 +417,44 @@ def regenerate_panel_quality(
     except GenerationError as exc:
         raise FieldError("preset", str(exc)) from None
     jobs = _enqueue(session, ctx, panel, count=1, preset=preset, extra_params={"regenerate": "quality"})
+    session.commit()
+    ctx.generation.notify()
+    return [job_out(j) for j in jobs]
+
+
+@router.post("/panels/{panel_id}/change-angle", response_model=list[JobOut], status_code=202)
+def change_panel_angle(
+    panel_id: int,
+    body: ChangeAngleIn,
+    session: Session = Depends(get_session),
+    ctx: AppContext = Depends(get_ctx),
+) -> list[JobOut]:
+    """« Changer l'angle » : une nouvelle version de cette case seulement, la version de départ (la choisie par
+    défaut) vue sous un autre angle (LoRA Multiple-Angles, palier de presets/camera_loras.yaml). Les autres
+    versions ne bougent pas ; la file reste une génération à la fois. 422 lisible si le palier ne le permet pas."""
+    _require_comfyui(ctx)
+    panel = get_panel_or_404(session, panel_id)
+    if body.source_image_id is not None:
+        source = session.get(PanelImage, body.source_image_id)
+        if source is None or source.panel_id != panel.id or source.kind != ImageKind.final:
+            raise FieldError("source_image_id", "version introuvable parmi les versions de la case")
+    else:
+        source = session.scalar(select(PanelImage).where(PanelImage.panel_id == panel.id, PanelImage.selected))
+        if source is None:
+            raise FieldError("source_image_id", "génère d'abord une version de la case : c'est elle qui tourne")
+    try:
+        jobs = enqueue_angle(
+            session,
+            _presets(ctx, panel),
+            panel,
+            source,
+            body.angle,
+            lora_id=body.lora,
+            weight=body.weight,
+            seed=body.seed,
+        )
+    except (GenerationError, PresetError) as exc:
+        raise FieldError("angle", str(exc)) from None
     session.commit()
     ctx.generation.notify()
     return [job_out(j) for j in jobs]

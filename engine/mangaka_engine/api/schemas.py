@@ -75,6 +75,8 @@ class ProjectCreate(_In):
     cfg: Cfg | None = None
     # « Prompt rédigé par l'IA » ; absent : `enabled` de presets/prompts/redacteur-image.yaml (oui).
     ai_prompt: bool | None = None
+    # « Cohérence anime » : LoRA d'identité de presets/camera_loras.yaml (palier Qualité) ; non par défaut.
+    anime_consistency: bool = False
 
 
 class ProjectUpdate(_In):
@@ -99,6 +101,7 @@ class ProjectUpdate(_In):
     upscaler: PresetId | None = None  # null : revient à l'agrandisseur de defaults.yaml
     cfg: Cfg | None = None  # null : CFG du palier ; > 1 refusé pour un palier distillé (Turbo)
     ai_prompt: bool | None = None  # « Prompt rédigé par l'IA » (false : assemblage par fragments)
+    anime_consistency: bool | None = None  # « Cohérence anime » (LoRA d'identité, palier Qualité)
     # false : masque la note « série passée en sage par une ancienne mise à jour » (seule valeur admise).
     layout_style_notice: Literal[False] | None = None
 
@@ -134,6 +137,9 @@ class ProjectOut(BaseModel):
     upscaler: str | None = None
     cfg: float | None = None  # null : celui du palier
     ai_prompt: bool = False
+    anime_consistency: bool = False
+    # Pourquoi « Cohérence anime » ne s'applique pas au palier de la série (« Disponible en palier Qualité »).
+    anime_consistency_problem: str | None = None
     character_count: int
     chapter_count: int
     # Pages déjà mises en page : changer le sens de lecture les recalcule (confirmation dans l'UI).
@@ -476,6 +482,21 @@ FinalPrompt = Annotated[str, StringConstraints(strip_whitespace=True, max_length
 
 class ComfyTrialIn(_In):
     preset: PresetId | None = None  # null : workflow par défaut des séries
+
+
+AngleId = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=40)]
+CameraLoraId = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=60)]
+
+
+class ChangeAngleIn(_In):
+    """« Changer l'angle » d'une case : la version `source_image_id` (la version choisie par défaut) vue sous
+    l'angle `angle` (presets/camera_loras.yaml), LoRA Multiple-Angles `lora` (celui par défaut) au poids `weight`."""
+
+    angle: AngleId
+    source_image_id: int | None = None
+    lora: CameraLoraId | None = None
+    weight: LoraWeight | None = None
+    seed: Annotated[int, Field(ge=0, le=MAX_SEED)] | None = None
 
 
 class GenerateIn(_In):
@@ -965,6 +986,12 @@ class ReferenceImageOut(BaseModel):
     width: int
     height: int
     created_at: datetime
+    # Angle de caméra de la vue (id de presets/camera_loras.yaml) ; null = non étiquetée.
+    angle: str | None = None
+
+
+class ImageAngleIn(_In):
+    angle: AngleId | None = None  # null : retire l'étiquette
 
 
 class CharacterOut(BaseModel):
@@ -1021,6 +1048,52 @@ class ReferenceGenerateIn(_In):
     # Image de départ facultative : une image de référence de la fiche (image 1 du workflow « avec
     # références ») ; absente = à partir de zéro, depuis la description seule.
     start_image_id: int | None = None
+
+
+class AngleViewIn(_In):
+    """« Nouvel angle » d'une fiche : la vue `start_image_id` (la principale par défaut) tournée jusqu'à `angle`."""
+
+    angle: AngleId
+    start_image_id: int | None = None
+    lora: CameraLoraId | None = None
+    weight: LoraWeight | None = None
+    seed: Annotated[int, Field(ge=0, le=MAX_SEED)] | None = None
+
+
+class CameraLoraOut(BaseModel):
+    id: str
+    role: Literal["angles", "identity"]
+    name: str
+    description: str
+    file: str
+    trigger: str
+    weight: float
+    tiers: list[str]
+    default: bool
+    # Workflows (paliers) où ce LoRA est ajouté ; ailleurs : « Disponible en palier Qualité ».
+    workflows: list[str]
+
+
+class CameraAngleOut(BaseModel):
+    id: str
+    label: str
+    camera: str
+    azimuth: float
+    elevation: float
+
+
+class CameraLorasOut(BaseModel):
+    """presets/camera_loras.yaml : LoRA d'angle et d'identité, vocabulaire de caméra, palier des générations d'angle."""
+
+    workflow: str | None
+    workflow_tier: str | None
+    # null : « Nouvel angle » et « Changer l'angle » disponibles ; sinon pourquoi (palier, LoRA absent…).
+    angle_problem: str | None
+    loras: list[CameraLoraOut]
+    angles: list[CameraAngleOut]
+    main_view: str | None
+    weight_hint: str
+    tier_label: str
 
 
 class ReferenceKeepIn(_In):

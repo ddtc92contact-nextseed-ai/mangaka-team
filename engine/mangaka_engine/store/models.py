@@ -166,6 +166,9 @@ class Project(TimestampMixin, Base):
     # paragraphe (pipeline/prompt_writer.py) ; False = assemblage par fragments (image_prompt.yaml#parts).
     # Nouvelles séries : `enabled` de presets/prompts/redacteur-image.yaml ; séries d'avant la v21 : False.
     ai_prompt: Mapped[bool] = mapped_column(default=True)
+    # « Cohérence anime » : LoRA d'identité (presets/camera_loras.yaml) ajouté aux générations de la série
+    # dont le palier le permet (Qualité) ; désactivé par défaut.
+    anime_consistency: Mapped[bool] = mapped_column(default=False)
 
     characters: Mapped[list[Character]] = relationship(
         back_populates="project", cascade="all, delete-orphan", order_by="Character.name"
@@ -215,6 +218,9 @@ class CharacterImage(Base):
     # Ordre choisi par l'auteur : la première image est la référence principale (servie en premier
     # quand les emplacements du workflow manquent).
     position: Mapped[int] = mapped_column(Integer, default=0)
+    # Angle de caméra de la vue (`id` d'un angle de presets/camera_loras.yaml) : posé par « Nouvel angle » ou à
+    # la main ; None = non étiquetée (la principale vaut alors `main_view`).
+    angle: Mapped[str | None] = mapped_column(String(40), default=None)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
     character: Mapped[Character] = relationship(back_populates="reference_images")
@@ -268,6 +274,7 @@ class SeriesAssetImage(Base):
     width: Mapped[int] = mapped_column(Integer)
     height: Mapped[int] = mapped_column(Integer)
     position: Mapped[int] = mapped_column(Integer, default=0)  # comme CharacterImage.position
+    angle: Mapped[str | None] = mapped_column(String(40), default=None)  # comme CharacterImage.angle
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
     asset: Mapped[SeriesAsset] = relationship(back_populates="reference_images")

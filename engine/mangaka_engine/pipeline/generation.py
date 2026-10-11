@@ -25,6 +25,13 @@ génération d'un palier passe par son pendant ControlNet (`with_control`, rôle
 guide du verrou (`params.control` du job) ; la version produite note sa source et son contrôle
 (`params.composition`, méthode `controlnet`, et `params.control`).
 
+Angles de caméra (voir `pipeline/camera.py`, presets/camera_loras.yaml) : une fiche peut avoir plusieurs
+vues étiquetées par leur angle ; la vue servie à une case est la plus proche de l'angle de sa direction
+artistique (repli : la vue principale). « Changer l'angle » (`enqueue_angle`) fait une nouvelle version
+d'une case au palier du catalogue : la version de départ en image 1, le LoRA Multiple-Angles et son mot
+déclencheur en tête du prompt. « Cohérence anime » (réglage de la série) ajoute le LoRA d'identité aux
+générations dont le palier le permet ; ailleurs, la raison est notée sur la version (`camera.skipped`).
+
 Aucun nom de modèle, de LoRA ni de nœud ici : tout vient des presets et des fiches.
 """
 
@@ -45,6 +52,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from ..presets import ControlInput, LoadedWorkflow, LoraSpec, PresetError, PresetRegistry, build_workflow
+from ..presets.schemas import AngleTarget, CameraLoraCatalog
 from ..providers.comfyui import (
     ComfyUIClient,
     ComfyUIError,
@@ -76,6 +84,7 @@ from ..store.models import (
     SeriesAssetImage,
 )
 from .art_direction import applied_panel_direction
+from .camera import CameraError, angle_prompt, camera_plan, direction_target, merge_loras, ordered_views
 from .inpaint import png_bytes, recompose, soften_mask
 from .jobs import JobReporter
 from .knowledge import KnowledgeBase
@@ -390,7 +399,12 @@ def guide_image(
 
 
 def pick_references(
-    characters: Sequence[LibraryEntry], slots: int, per_entry: str = "toutes"
+    characters: Sequence[LibraryEntry],
+    slots: int,
+    per_entry: str = "toutes",
+    *,
+    target: AngleTarget | None = None,
+    catalog: CameraLoraCatalog | None = None,
 ) -> list[tuple[LibraryEntry, CharacterImage | SeriesAssetImage]]:
     """Remplit les emplacements par tours, dans l'ordre de priorité des fiches.
 
@@ -406,15 +420,22 @@ def pick_references(
 
     La référence de style (planche de style) ne prend qu'un emplacement resté libre une fois toutes
     les images des autres fiches servies.
+
+    `target` (angle de la direction artistique de la case, voir `panel_angle_target`) : la vue de chaque
+    fiche la plus proche de cet angle passe en tête (vues étiquetées, `catalog`) ; sinon la principale.
     """
     fiches = [c for c in characters if not is_style(c)]
+    views = {
+        id(c): ordered_views(c.reference_images, catalog, target) if catalog is not None else c.reference_images
+        for c in fiches
+    }
     out: list[tuple[LibraryEntry, CharacterImage | SeriesAssetImage]] = []
     depth = 0
     rounds = 1 if per_entry == "principale" else max((len(c.reference_images) for c in fiches), default=0)
     while len(out) < slots and depth < rounds and any(depth < len(c.reference_images) for c in fiches):
         for c in fiches:
             if depth < len(c.reference_images) and len(out) < slots:
-                out.append((c, c.reference_images[depth]))
+                out.append((c, views[id(c)][depth]))
         depth += 1
     for style in (c for c in characters if is_style(c)):
         if len(out) < slots and style.reference_images:
@@ -432,6 +453,11 @@ def collect_loras(panel: Panel, characters: Sequence[LibraryEntry]) -> list[Lora
         if c.lora_name and all(lo.name != c.lora_name for lo in loras):
             loras.append(LoraSpec(c.lora_name, c.lora_weight, c.name))
     return loras
+
+
+def panel_angle_target(presets: PresetRegistry, panel: Panel) -> AngleTarget | None:
+    """Angle demandé par la direction artistique appliquée à la case (None : aucun, vue principale)."""
+    return direction_target(presets.camera_loras, applied_panel_direction(panel))
 
 
 def panel_label(panel: Panel) -> str:
@@ -644,8 +670,11 @@ def enqueue_panel(
     prompt_override: str | None = None,
     extra_params: dict[str, Any] | None = None,
     knowledge: KnowledgeBase | None = None,
+    unlocked: bool = False,
 ) -> list[Job]:
-    """Crée `count` jobs de génération en attente pour une case (sans commit)."""
+    """Crée `count` jobs de génération en attente pour une case (sans commit).
+
+    `unlocked` : ignore le verrou de composition (« Changer l'angle » change la composition par définition)."""
     if not 1 <= count <= MAX_VARIANTS:
         raise GenerationError(f"entre 1 et {MAX_VARIANTS} variantes par demande")
     page = panel.page
@@ -658,7 +687,7 @@ def enqueue_panel(
         raise GenerationError(f"le workflow {preset_id} sert à réparer une version, pas à générer une case")
     extra = dict(extra_params or {})
     lock = panel.composition_lock
-    if isinstance(lock, dict) and loaded.preset.role == "generation" and "control" not in extra:
+    if isinstance(lock, dict) and loaded.preset.role == "generation" and "control" not in extra and not unlocked:
         # Composition verrouillée : le pendant ControlNet du palier demandé, jusqu'au déverrouillage.
         extra = {**extra, "control": lock_control_params(lock), "locked": True, "base_preset": preset_id}
         preset_id = control_variant(presets, preset_id, entries)
@@ -699,6 +728,55 @@ def enqueue_panel(
     if chapter.status in (ChapterStatus.draft, ChapterStatus.script, ChapterStatus.layout):
         chapter.status = ChapterStatus.generation
     return jobs
+
+
+def enqueue_angle(
+    session: Session,
+    presets: PresetRegistry,
+    panel: Panel,
+    source: PanelImage,
+    angle_id: str,
+    *,
+    lora_id: str | None = None,
+    weight: float | None = None,
+    seed: int | None = None,
+) -> list[Job]:
+    """« Changer l'angle » : une nouvelle version de la case, la version `source` vue sous l'angle `angle_id`
+    (LoRA Multiple-Angles, workflow `workflow` de camera_loras.yaml). Les autres versions ne bougent pas ;
+    la file reste une génération à la fois. `GenerationError` lisible si le palier ne le permet pas."""
+    catalog = presets.camera_loras
+    if source.panel_id != panel.id or source.kind != ImageKind.final:
+        raise GenerationError("version de départ introuvable parmi les versions de la case")
+    if not catalog.workflow:
+        raise GenerationError("aucun workflow d'angle configuré (workflow de presets/camera_loras.yaml)")
+    loaded = presets.workflow(catalog.workflow)
+    if not loaded.preset.reference_images:
+        raise GenerationError(f"le workflow d'angle {loaded.preset.id} n'accepte pas d'image de référence")
+    try:
+        plan = camera_plan(catalog, loaded, angle_id=angle_id, lora_id=lora_id, weight=weight)
+    except CameraError as exc:
+        raise GenerationError(str(exc)) from None
+    if plan.skipped:
+        raise GenerationError(plan.skipped[0])
+    assert plan.angle is not None and plan.angle_lora is not None
+    return enqueue_panel(
+        session,
+        presets,
+        panel,
+        count=1,
+        seed=seed,
+        preset=loaded.preset.id,
+        unlocked=True,
+        extra_params={
+            "regenerate": "angle",
+            "angle": plan.angle.id,
+            "angle_lora": plan.angle_lora.id,
+            "angle_weight": plan.loras[0].weight,
+            "angle_source_id": source.id,
+            "angle_source_version": source.version,
+            "angle_scene": scene_prompt(source) or "",
+        },
+    )
 
 
 def panels_to_generate(session: Session, pages: Iterable[Page], *, force: bool) -> list[Panel]:
@@ -814,6 +892,8 @@ class _Plan:
     # locked, filename} + contenu de l'image guide.
     control: dict[str, Any] | None = None
     control_data: bytes | None = None
+    # LoRA de caméra et d'identité : angle demandé, LoRA non ajoutés et pourquoi (`CameraPlan.as_dict`).
+    camera: dict[str, Any] = field(default_factory=dict)
 
 
 def _capitalize(text: str) -> str:
@@ -884,6 +964,8 @@ class GenerationExecutor:
             job = session.get(Job, job_id)
             if job is None or job.panel_id is None or job.params.get("repair") or job.params.get("sketch_prompt"):
                 return  # réparation, passage au propre : leur propre prompt
+            if job.params.get("angle"):
+                return  # « Changer l'angle » : le prompt de la version de départ
             panel = session.get(Panel, job.panel_id)
             if panel is None:
                 return
@@ -933,10 +1015,11 @@ class GenerationExecutor:
             else:
                 if loaded.preset.inpaint is not None:
                     raise GenerationError(f"le workflow {preset_id} sert à réparer une version, pas à générer une case")
-                # Passage au propre : même prompt que le croquis validé (sinon le prompt final de la case).
-                prompt = str(job.params.get("sketch_prompt") or "").strip() or update_panel_prompt(
-                    presets, session, panel, self.knowledge
-                )
+                # Passage au propre : même prompt que le croquis validé ; « Changer l'angle » : celui de la
+                # version de départ (sinon le prompt final de la case).
+                prompt = str(
+                    job.params.get("sketch_prompt") or job.params.get("angle_scene") or ""
+                ).strip() or update_panel_prompt(presets, session, panel, self.knowledge)
                 size = panel_target(presets, page, panel)
             if size is None:
                 raise GenerationError(f"la page {page.number} n'est pas mise en page")
@@ -944,31 +1027,60 @@ class GenerationExecutor:
                 size = sketch_size(size, loaded.preset.long_side, presets.layout.generation.multiple)
             sketch, sketch_data = self._sketch_source(session, job, panel, loaded)
             control, control_data = self._control_source(session, job, panel, loaded)
+            catalog = presets.camera_loras
+            angle_id = job.params.get("angle") if repair is None else None
+            try:
+                camera = camera_plan(
+                    catalog,
+                    loaded,
+                    angle_id=str(angle_id) if angle_id else None,
+                    lora_id=job.params.get("angle_lora"),
+                    weight=_as_float(job.params.get("angle_weight")),
+                    anime=bool(chapter.project.anime_consistency),
+                )
+            except CameraError as exc:
+                raise GenerationError(str(exc)) from None
+            if angle_id and camera.angle is None:
+                raise GenerationError(camera.skipped[0] if camera.skipped else "angle de caméra indisponible")
             references: list[dict[str, Any]] = []
             reference_data: list[bytes] = []
-            per_entry = presets.defaults.panel_references if presets.defaults else "toutes"
-            for entry, image in pick_references(entries, len(loaded.preset.reference_images), per_entry):
-                path = self.files.absolute(image.path)
-                if not path.is_file():
-                    raise GenerationError(f"image de référence de {entry.name} absente de data/ ({image.path})")
-                ext = PurePosixPath(image.path).suffix or ".png"
-                kind = entry_kind(entry)
-                prefix = {"character": "perso", "decor": "decor", "object": "objet", "style": "style"}[kind]
-                references.append(
-                    {
-                        "slot": len(references) + 1,
-                        "kind": kind,
-                        "id": entry.id,
-                        "name": entry.name,
-                        "image_id": image.id,
-                        "filename": f"{prefix}{entry.id}_img{image.id}{ext}",
-                    }
+            if angle_id:
+                # « Changer l'angle » : la version de départ est l'image à faire tourner (image 1, seule).
+                ref, data = self._angle_source(session, job, panel)
+                references.append(ref)
+                reference_data.append(data)
+            else:
+                per_entry = presets.defaults.panel_references if presets.defaults else "toutes"
+                target = panel_angle_target(presets, panel)
+                picked = pick_references(
+                    entries, len(loaded.preset.reference_images), per_entry, target=target, catalog=catalog
                 )
-                reference_data.append(path.read_bytes())
+                for entry, image in picked:
+                    path = self.files.absolute(image.path)
+                    if not path.is_file():
+                        raise GenerationError(f"image de référence de {entry.name} absente de data/ ({image.path})")
+                    ext = PurePosixPath(image.path).suffix or ".png"
+                    kind = entry_kind(entry)
+                    prefix = {"character": "perso", "decor": "decor", "object": "objet", "style": "style"}[kind]
+                    references.append(
+                        {
+                            "slot": len(references) + 1,
+                            "kind": kind,
+                            "id": entry.id,
+                            "name": entry.name,
+                            "image_id": image.id,
+                            **({"angle": image.angle} if image.angle else {}),
+                            "filename": f"{prefix}{entry.id}_img{image.id}{ext}",
+                        }
+                    )
+                    reference_data.append(path.read_bytes())
             # « Références utilisées » : notées sur le job dès la préparation (visibles dans l'atelier).
             job.params = {**(job.params or {}), "references": references}
             panel_prompt = prompt
-            if repair is None:
+            if angle_id:
+                # Mot déclencheur et vocabulaire de caméra en tête, puis la scène de la version de départ.
+                prompt = angle_prompt(catalog.prompts.panel, camera, scene=prompt)
+            elif repair is None:
                 # Chaque image nommée dans l'ordre des emplacements + « identité seulement, scène nouvelle ».
                 slots = [ReferenceSlot(r["kind"], r["name"]) for r in references]
                 prompt = frame_references(prompt, slots, presets.image_prompt)
@@ -982,6 +1094,8 @@ class GenerationExecutor:
             cfg = series_cfg(chapter.project, loaded)
             if cfg is not None:
                 params["cfg"] = cfg
+            if angle_id and catalog.steps and "steps" in loaded.preset.mapping:
+                params["steps"] = catalog.steps
             if repair is not None:
                 params["denoise"] = float(repair.get("denoise") or loaded.preset.defaults.get("denoise") or 0.45)
             else:
@@ -998,7 +1112,8 @@ class GenerationExecutor:
                 params=params,
                 references=references,
                 reference_data=reference_data,
-                loras=collect_loras(panel, entries),
+                loras=merge_loras(collect_loras(panel, entries), camera.loras),
+                camera=camera.as_dict(),
                 folder=f"projects/{chapter.project_id}/chapters/{chapter.id}/panels/{panel.id}",
                 prompt=prompt,
                 panel_prompt=panel_prompt,
@@ -1070,6 +1185,28 @@ class GenerationExecutor:
             "locked": bool(job.params.get("locked")),
             "filename": filename,
         }, data
+
+    def _angle_source(self, session: Session, job: Job, panel: Panel) -> tuple[dict[str, Any], bytes]:
+        """Version de départ de « Changer l'angle » : (emplacement noté sur la version, octets)."""
+        source_id = job.params.get("angle_source_id")
+        img = session.get(PanelImage, int(source_id)) if isinstance(source_id, int) else None
+        if img is None or img.panel_id != panel.id:
+            raise GenerationError(
+                "version de départ introuvable (supprimée entre-temps ?) : relance « Changer l'angle »"
+            )
+        path = self.files.absolute(img.path)
+        if not path.is_file():
+            raise GenerationError(f"image de la version {img.version} absente de data/ ({img.path})")
+        ref = {
+            "slot": 1,
+            "kind": "panel",
+            "id": panel.id,
+            "name": f"version {img.version}",
+            "image_id": img.id,
+            "version": img.version,
+            "filename": f"angle_case{panel.id}_v{img.version}{PurePosixPath(img.path).suffix or '.png'}",
+        }
+        return ref, path.read_bytes()
 
     def _repair_inputs(
         self, session: Session, panel_id: int, repair: dict[str, Any]
@@ -1241,6 +1378,7 @@ class GenerationExecutor:
                     "height": built.params.get("height", stored.height),
                     "workflow_params": built.params,
                     "loras": [lo.as_dict() for lo in built.loras],
+                    **({"camera": plan.camera} if plan.camera else {}),
                     "reference_images": [
                         {
                             **{k: v for k, v in ref.items() if k != "filename"},
