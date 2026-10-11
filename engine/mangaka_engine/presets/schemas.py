@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import string
+import unicodedata
 from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PositiveFloat, field_validator, model_validator
@@ -221,6 +222,16 @@ class WorkflowTier(_Strict):
     # Libellé dans la fiche série ; absent = workflow non proposé comme palier (ex. « avec références »).
     choice: str | None = None
     order: int = 0
+
+    @property
+    def key(self) -> str:
+        """Identifiant du palier (« Qualité max » → `qualite-max`) : `tiers` de camera_loras.yaml."""
+        return tier_key(self.name)
+
+
+def tier_key(name: str) -> str:
+    plain = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode().lower()
+    return "-".join(re.findall(r"[a-z0-9]+", plain))
 
 
 class WorkflowPreset(_Strict):
@@ -918,6 +929,105 @@ class StyleLoraCatalog(_Strict):
 
     def get(self, file: str | None) -> StyleLora | None:
         return next((lo for lo in self.loras if lo.file == file), None) if file else None
+
+
+# --- LoRA de caméra et d'identité (presets/camera_loras.yaml) ---------------------------
+CameraLoraRole = Literal["angles", "identity"]
+
+
+class CameraLora(_Strict):
+    id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
+    role: CameraLoraRole
+    file: str = Field(min_length=1, description="Nom du fichier tel que ComfyUI le liste (sous-dossier compris)")
+    name: str = Field(min_length=1)
+    description: str = ""
+    # Mot déclencheur placé au tout début du prompt ; vide = aucun.
+    trigger: str = ""
+    weight: float = Field(default=1.0, ge=0, le=2, description="strength_model par défaut")
+    # Paliers où le LoRA est ajouté (`WorkflowTier.key`) ; ailleurs : « Disponible en palier Qualité ».
+    tiers: list[str] = Field(min_length=1)
+    default: bool = False
+
+
+class CameraAngle(_Strict):
+    id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$", max_length=40)
+    label: str = Field(min_length=1)
+    camera: str = Field(min_length=1, description="Vocabulaire de caméra de la fiche du modèle (anglais)")
+    azimuth: float = Field(ge=-180, le=180)
+    elevation: float = Field(ge=-90, le=90)
+
+
+class AngleTarget(_Strict):
+    """Cible d'un angle de la direction artistique : un axe absent ne compte pas."""
+
+    azimuth: float | None = Field(default=None, ge=-180, le=180)
+    elevation: float | None = Field(default=None, ge=-90, le=90)
+
+
+class CameraPrompts(_Strict):
+    sheet: list[str] = Field(default_factory=lambda: ["$trigger $camera."])
+    panel: list[str] = Field(default_factory=lambda: ["$trigger $camera.", "$scene"])
+
+    @field_validator("sheet", "panel")
+    @classmethod
+    def _variables(cls, value: list[str]) -> list[str]:
+        allowed = {"trigger", "camera", "name", "description", "scene"}
+        for part in value:
+            unknown = set(string.Template(part).get_identifiers()) - allowed
+            if unknown:
+                raise ValueError(f"variable inconnue : ${sorted(unknown)[0]}")
+        if not value or not value[0].lstrip().startswith("$trigger"):
+            raise ValueError("le premier morceau doit commencer par $trigger (le mot déclencheur ouvre le prompt)")
+        return value
+
+
+class CameraLoraCatalog(_Strict):
+    """`presets/camera_loras.yaml` : LoRA Multiple-Angles et Cohérence anime, vocabulaire de caméra."""
+
+    workflow: str | None = Field(default=None, description="Workflow de « Nouvel angle » et « Changer l'angle »")
+    steps: int | None = Field(default=None, ge=1, le=200)
+    loras: list[CameraLora] = Field(default_factory=list)
+    weight_hint: str = ""
+    angles: list[CameraAngle] = Field(default_factory=list)
+    main_view: str | None = None
+    direction_angles: dict[str, AngleTarget] = Field(default_factory=dict)
+    prompts: CameraPrompts = Field(default_factory=CameraPrompts)
+    # « Nouvel angle » d'une fiche : négatif par sorte (character, object, decor), taille ≈ side × side.
+    sheet_negatives: dict[Literal["character", "object", "decor"], str] = Field(default_factory=dict)
+    sheet_side: int = Field(default=1024, ge=256, le=2048)
+
+    @model_validator(mode="after")
+    def _check(self) -> CameraLoraCatalog:
+        for label, ids in (("loras", [lo.id for lo in self.loras]), ("angles", [a.id for a in self.angles])):
+            dup = sorted({i for i in ids if ids.count(i) > 1})
+            if dup:
+                raise ValueError(f"{label} : identifiant en double : {dup[0]}")
+        if sum(1 for lo in self.loras if lo.role == "angles" and lo.default) > 1:
+            raise ValueError("loras : un seul LoRA d'angle par défaut")
+        if sum(1 for lo in self.loras if lo.role == "identity") > 1:
+            raise ValueError("loras : un seul LoRA d'identité")
+        if self.main_view is not None and self.angle(self.main_view) is None:
+            raise ValueError(f"main_view : angle inconnu « {self.main_view} »")
+        return self
+
+    def lora(self, lora_id: str | None) -> CameraLora | None:
+        return next((lo for lo in self.loras if lo.id == lora_id), None) if lora_id else None
+
+    def angle(self, angle_id: str | None) -> CameraAngle | None:
+        return next((a for a in self.angles if a.id == angle_id), None) if angle_id else None
+
+    @property
+    def angle_loras(self) -> list[CameraLora]:
+        return [lo for lo in self.loras if lo.role == "angles"]
+
+    @property
+    def default_angle_lora(self) -> CameraLora | None:
+        loras = self.angle_loras
+        return next((lo for lo in loras if lo.default), loras[0] if loras else None)
+
+    @property
+    def identity_lora(self) -> CameraLora | None:
+        return next((lo for lo in self.loras if lo.role == "identity"), None)
 
 
 # --- Lettrage (étape 5) -------------------------------------------------------

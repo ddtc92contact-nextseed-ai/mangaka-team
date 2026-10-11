@@ -13,6 +13,7 @@ import {
 } from "@/lib/api";
 import { HELP, type HelpId } from "@/lib/help";
 import { useEngineData } from "@/lib/hooks";
+import { TierRestriction } from "./camera-angle";
 import { InfoTip } from "./info-tip";
 import { NegativeBadge, formatCfg } from "./negative-badge";
 import { Modal } from "./modal";
@@ -61,6 +62,8 @@ export function ProjectForm({
   onSaved: (project: Project) => void;
 }) {
   const presets = useEngineData(() => api.presets());
+  // LoRA d'identité « Cohérence anime » (presets/camera_loras.yaml) et paliers où il s'applique.
+  const camera = useEngineData(() => api.cameraLoras());
   // Passage au propre par ControlNet : proposé seulement si ComfyUI a le patch et son nœud.
   const control = useEngineData(() => api.controlStatus());
   const [form, setForm] = useState<Partial<ProjectInput>>({
@@ -87,6 +90,7 @@ export function ProjectForm({
     upscaler: initial?.upscaler ?? null,
     cfg: initial?.cfg ?? null,
     ai_prompt: initial?.ai_prompt,
+    anime_consistency: initial?.anime_consistency ?? false,
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
@@ -120,6 +124,10 @@ export function ProjectForm({
   const sketchEnabled = form.sketch_enabled ?? defaults?.sketch_enabled ?? true;
   // Prompt rédigé par l'IA : réglage global du dessinateur (« L'équipe ») pour une nouvelle série.
   const aiPrompt = form.ai_prompt ?? presets.data?.ai_prompt_default ?? true;
+  const animeConsistency = form.anime_consistency ?? false;
+  const identityLora = camera.data?.loras.find((l) => l.role === "identity") ?? null;
+  // Palier choisi hors de ceux où le LoRA a été testé : l'interrupteur reste, avec « Disponible en palier Qualité ».
+  const animeAvailable = identityLora !== null && workflow !== "" && identityLora.workflows.includes(workflow);
   // Débruitage livré : celui du preset « propre depuis croquis » du palier choisi.
   const cleanPreset = presets.data?.workflows.find((w) => w.id === currentWorkflow?.from_sketch);
   const presetDenoise = cleanPreset?.denoise ?? null;
@@ -229,6 +237,7 @@ export function ProjectForm({
       sketch_denoise: form.sketch_denoise ?? null,
       cfg: distilled ? null : (form.cfg ?? null),
       ai_prompt: aiPrompt,
+      anime_consistency: animeConsistency,
       style_lora_name: loraName || null,
     };
     try {
@@ -627,6 +636,38 @@ export function ProjectForm({
           </span>
         </label>
       </fieldset>
+      {identityLora && (
+        <fieldset className="min-w-0 space-y-2 rounded-lg border border-zinc-800 p-4" data-testid="anime-consistency-settings">
+          <legend className="flex items-center gap-1.5 px-1 text-sm font-medium text-zinc-200">
+            Cohérence des personnages
+            <InfoTip help="serie.anime_consistency" label="Cohérence anime" />
+          </legend>
+          <label className="flex items-start gap-2 text-sm text-zinc-300">
+            <input
+              type="checkbox"
+              className="mt-0.5 accent-rose-500"
+              checked={animeConsistency}
+              onChange={(e) => set("anime_consistency", e.target.checked)}
+              data-testid="anime-consistency"
+            />
+            <span>
+              {identityLora.name}
+              <span className="block text-xs text-zinc-500">
+                {identityLora.description} LoRA ajouté aux générations de la série (poids {identityLora.weight.toLocaleString("fr-FR", { minimumFractionDigits: 1 })}).
+              </span>
+            </span>
+          </label>
+          {!animeAvailable && camera.data && (
+            <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-400">
+              <TierRestriction label={camera.data.tier_label} />
+              <span>
+                {currentWorkflow?.tier ? `Palier ${currentWorkflow.tier} : ` : ""}
+                {animeConsistency ? "activée, mais sans effet tant que la série n'est pas en Qualité." : "sans effet sur ce palier."}
+              </span>
+            </div>
+          )}
+        </fieldset>
+      )}
       <fieldset className="min-w-0 space-y-3 rounded-lg border border-zinc-800 p-4" data-testid="sketch-settings">
         <legend className="flex items-center gap-1.5 px-1 text-sm font-medium text-zinc-200">
           Palier croquis

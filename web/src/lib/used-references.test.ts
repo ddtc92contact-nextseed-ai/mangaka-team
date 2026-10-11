@@ -40,3 +40,9 @@ test("type inconnu venu du moteur : repli, pas de plantage", () => {
     assert.equal(d.kindLabel, kind);
   }
 });
+
+test("« Changer l'angle » : la version de la case qui tourne", () => {
+  const d = describeUsedReference({ kind: "panel", id: 9, name: "version 2", image_id: 31 }, KINDS);
+  assert.equal(d.name, "version 2");
+  assert.equal(d.kindLabel, "vue à faire tourner");
+});

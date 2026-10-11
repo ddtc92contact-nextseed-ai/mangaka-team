@@ -24,6 +24,7 @@ Arborescence attendue :
       style_tones/*.yaml       # packs de style : ton (lumineux, neutre, dark, humour)
       style_options.yaml       # réglages fins bornés du style (trait, trames, détail des décors)
       style_loras.yaml         # catalogue des LoRA de style (mots déclencheurs, poids conseillé)
+      camera_loras.yaml        # LoRA Multiple-Angles et Cohérence anime, vocabulaire de caméra
 
 Un preset invalide n'empêche pas le moteur de démarrer : il est écarté et
 l'erreur est exposée via `GET /presets` et `GET /health`.
@@ -41,6 +42,7 @@ from pydantic import BaseModel, ValidationError
 
 from .schemas import (
     AgentPreset,
+    CameraLoraCatalog,
     Defaults,
     FontsPreset,
     ImagePromptSettings,
@@ -121,6 +123,7 @@ class PresetRegistry:
     style_tones: dict[str, StyleTone] = field(default_factory=dict)
     style_options: StyleOptions = field(default_factory=StyleOptions)
     style_loras: StyleLoraCatalog = field(default_factory=StyleLoraCatalog)
+    camera_loras: CameraLoraCatalog = field(default_factory=CameraLoraCatalog)
     issues: list[PresetIssue] = field(default_factory=list)
 
     # --- accès -----------------------------------------------------------
@@ -428,6 +431,13 @@ class PresetRegistry:
             loras = self._parse(loras_path, StyleLoraCatalog)
             if loras is not None:
                 self.style_loras = loras
+        camera_path = root / "camera_loras.yaml"
+        if camera_path.exists():
+            camera = self._parse(camera_path, CameraLoraCatalog)
+            if camera is not None and camera.workflow and camera.workflow not in self.workflows:
+                self.issues.append(PresetIssue(self._rel(camera_path), f"workflow inconnu : {camera.workflow}"))
+            elif camera is not None:
+                self.camera_loras = camera
 
         def packs[P: StylePack](folder: str, model: type[P]) -> dict[str, tuple[P, Path]]:
             out: dict[str, tuple[P, Path]] = {}

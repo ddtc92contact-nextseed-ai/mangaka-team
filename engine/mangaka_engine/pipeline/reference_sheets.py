@@ -26,6 +26,13 @@ workflow d'édition redessinerait le personnage de la planche au lieu de la desc
 jointe à chaque fiche (seule image sans sujet) ; `never` = jamais. Le prompt précise son rôle
 ($style_ref : style uniquement). Sans planche de style, rien ne change.
 
+« Nouvel angle » (`enqueue_angle_view`) : une vue de la fiche (la principale par défaut) envoyée en image 1,
+le LoRA Multiple-Angles et son mot déclencheur en tête du prompt, au palier de presets/camera_loras.yaml
+(`workflow`, Qualité) quel que soit celui de la série. La variante produite est aussitôt rangée parmi les
+vues de la fiche, étiquetée par son angle (sauf personnage détecté dans un objet ou un décor, ou fiche
+pleine : elle reste alors dans l'historique, « Garder comme référence » reprend son angle).
+« Cohérence anime » de la série : LoRA d'identité ajouté à chaque fiche dont le palier le permet.
+
 Aucun nom de modèle, de LoRA ni de nœud ici : tout vient des presets et des fiches.
 """
 
@@ -36,7 +43,7 @@ import string
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Any
 
@@ -60,6 +67,7 @@ from ..store.models import (
     SeriesAsset,
     SeriesAssetImage,
 )
+from .camera import CameraError, angle_prompt, camera_plan, merge_loras
 from .generation import UPLOAD_SUBFOLDER, GenerationError, split_trigger_words
 from .jobs import JobReporter
 from .library import active_style, style_for
@@ -83,6 +91,8 @@ UPLOAD_LABELS = {"variant": "la variante de départ", "start": "l'image de dépa
 # Sortes de fiches qui ne doivent montrer personne : visages cherchés après chaque génération.
 PEOPLE_CHECK_KINDS = ("object", "decor")
 PEOPLE_WARNING = "Personnage détecté dans la fiche : régénérer avant de l'utiliser"
+# `sheet` des variantes de « Nouvel angle » (pas un type de presets/reference_sheets/).
+ANGLE_SHEET = "nouvel-angle"
 
 
 def people_check(detectors: DetectorProvider | None, qc: QCSettings | None, data: bytes, *, error: str = "") -> dict:
@@ -250,6 +260,32 @@ def sheet_params(
     return params
 
 
+def angle_params(
+    loaded: LoadedWorkflow,
+    presets: PresetRegistry,
+    kind: str,
+    job_params: dict[str, Any],
+    *,
+    filename_prefix: str | None = None,
+) -> dict[str, Any]:
+    """Paramètres mappés de « Nouvel angle » : prompt du job, négatif de la sorte (camera_loras.yaml, sinon celui
+    du workflow), taille notée sur le job, pas du catalogue."""
+    catalog = presets.camera_loras
+    negative = catalog.sheet_negatives.get(kind, "").strip() or str(loaded.preset.defaults.get("negative_prompt", ""))
+    params: dict[str, Any] = {
+        "positive_prompt": str(job_params.get("prompt") or ""),
+        "negative_prompt": build_negative_prompt(negative, presets.image_prompt),
+        "seed": job_params.get("seed"),
+        "width": int(job_params.get("width") or catalog.sheet_side),
+        "height": int(job_params.get("height") or catalog.sheet_side),
+    }
+    if catalog.steps and "steps" in loaded.preset.mapping:
+        params["steps"] = catalog.steps
+    if filename_prefix and "filename_prefix" in loaded.preset.mapping:
+        params["filename_prefix"] = filename_prefix
+    return params
+
+
 # --- mise en file ----------------------------------------------------------------------
 def sheet_for(presets: PresetRegistry, entry: LibraryEntry, sheet_id: str) -> ReferenceSheet:
     """Type de fiche `sheet_id`, s'il s'applique à la sorte de la fiche (PresetError s'il est inconnu)."""
@@ -344,6 +380,86 @@ def enqueue_sheet(
     return jobs
 
 
+def angle_size(width: int, height: int, side: int, multiple: int = 16) -> dict[str, int]:
+    """Taille d'une nouvelle vue : ratio de la vue de départ, aire ≈ side², côtés multiples de `multiple`."""
+    ratio = (width / height) if width > 0 and height > 0 else 1.0
+    w = side * ratio**0.5
+    h = side / ratio**0.5
+    return {
+        "width": max(multiple, round(w / multiple) * multiple),
+        "height": max(multiple, round(h / multiple) * multiple),
+    }
+
+
+def enqueue_angle_view(
+    session: Session,
+    presets: PresetRegistry,
+    entry: LibraryEntry,
+    angle_id: str,
+    *,
+    start: ReferenceImage | None = None,
+    lora_id: str | None = None,
+    weight: float | None = None,
+    seed: int | None = None,
+) -> Job:
+    """« Nouvel angle » : un job `reference` qui fait tourner la vue `start` (la principale par défaut) jusqu'à
+    l'angle `angle_id` (sans commit). `GenerationError` lisible : fiche sans image, angle ou LoRA inconnu,
+    workflow du catalogue hors des paliers du LoRA."""
+    catalog = presets.camera_loras
+    kind = entry_kind(entry)
+    if not entry.reference_images:
+        raise GenerationError("la fiche n'a encore aucune image : ajoute ou génère d'abord une vue principale")
+    start = start or entry.reference_images[0]
+    if all(img.id != start.id for img in entry.reference_images):
+        raise GenerationError("vue de départ introuvable parmi les images de référence de la fiche")
+    if not catalog.workflow:
+        raise GenerationError("aucun workflow d'angle configuré (workflow de presets/camera_loras.yaml)")
+    loaded = presets.workflow(catalog.workflow)
+    if not loaded.preset.reference_images:
+        raise GenerationError(f"le workflow d'angle {loaded.preset.id} n'accepte pas d'image de référence")
+    try:
+        plan = camera_plan(catalog, loaded, angle_id=angle_id, lora_id=lora_id, weight=weight)
+    except CameraError as exc:
+        raise GenerationError(str(exc)) from None
+    if plan.skipped:
+        raise GenerationError(plan.skipped[0])
+    assert plan.angle is not None and plan.angle_lora is not None
+    prompt = angle_prompt(
+        catalog.prompts.sheet, plan, name=_clean(entry.name), description=_clean(entry.visual_description)
+    )
+    job = Job(
+        project_id=entry.project_id,
+        step=STEP,
+        status=JobStatus.pending,
+        message="En attente…",
+        params={
+            "mode": "angle",
+            "entry_kind": kind,
+            "entry_id": entry.id,
+            "entry_name": entry.name,
+            "sheet": ANGLE_SHEET,
+            "sheet_name": f"Nouvel angle · {plan.angle.label}",
+            "preset": loaded.preset.id,
+            "tier": loaded.preset.tier.name if loaded.preset.tier else None,
+            "quality": False,
+            "prompt": prompt,
+            "seed": seed,
+            "variant": 1,
+            "count": 1,
+            "parent_id": None,
+            "start_image_id": start.id,
+            "instruction": "",
+            "style_asset_id": None,
+            "angle": plan.angle.id,
+            "angle_lora": plan.angle_lora.id,
+            "angle_weight": plan.loras[0].weight,
+            **angle_size(start.width, start.height, catalog.sheet_side),
+        },
+    )
+    session.add(job)
+    return job
+
+
 def active_jobs(session: Session, kind: str, entry_id: int, project_id: int) -> list[Job]:
     """Générations de fiches en cours ou en attente pour cette fiche, dans l'ordre de la file."""
     rows = session.scalars(
@@ -397,6 +513,7 @@ def keep_variant(
         "width": stored.width,
         "height": stored.height,
         "position": next_position(entry),
+        "angle": variant_angle(variant),
     }
     image: ReferenceImage
     if isinstance(entry, Character):
@@ -412,6 +529,12 @@ def keep_variant(
         raise
     variant.kept_image_id = image.id
     return image
+
+
+def variant_angle(variant: ReferenceVariant) -> str | None:
+    """Angle d'une variante de « Nouvel angle » (étiquette de la vue gardée), None sinon."""
+    angle = (variant.params or {}).get("camera", {}).get("angle")
+    return str(angle["id"]) if isinstance(angle, dict) and angle.get("id") else None
 
 
 def delete_entry_variants(session: Session, kind: str, entry_id: int) -> list[str]:
@@ -441,6 +564,8 @@ class _Plan:
     folder: str
     kind: str = "character"  # sorte de la fiche (objet et décor : visages cherchés après génération)
     qc: QCSettings | None = None
+    # LoRA de caméra et d'identité : angle demandé (« Nouvel angle »), LoRA non ajoutés et pourquoi.
+    camera: dict[str, Any] = field(default_factory=dict)
 
 
 class ReferenceExecutor:
@@ -485,8 +610,22 @@ class ReferenceExecutor:
             series = session.get(Project, entry.project_id)
             assert series is not None
             presets = self.presets_for(entry.project_id)
-            sheet = presets.reference_sheet(str(params.get("sheet")))
+            angle_id = params.get("angle") if params.get("mode") == "angle" else None
+            sheet = None if angle_id else presets.reference_sheet(str(params.get("sheet")))
             loaded = presets.workflow(str(params.get("preset")))
+            try:
+                camera = camera_plan(
+                    presets.camera_loras,
+                    loaded,
+                    angle_id=str(angle_id) if angle_id else None,
+                    lora_id=params.get("angle_lora"),
+                    weight=params.get("angle_weight"),
+                    anime=bool(series.anime_consistency),
+                )
+            except CameraError as exc:
+                raise GenerationError(str(exc)) from None
+            if angle_id and camera.angle is None:
+                raise GenerationError(camera.skipped[0] if camera.skipped else "angle de caméra indisponible")
             references: list[dict[str, Any]] = []
             reference_data: list[bytes] = []
             parent_id = params.get("parent_id")
@@ -538,25 +677,43 @@ class ReferenceExecutor:
                 reference_data.append(self.files.absolute(image.path).read_bytes())
             slug = f"{FOLDERS[entry_kind(entry)][:-1]}-{entry.id}"
             prefix = (
-                f"mangaka/serie-{entry.project_id}/references/{slug}/{sheet.id}/variante-{params.get('variant', 1)}"
+                f"mangaka/serie-{entry.project_id}/references/{slug}/{params.get('sheet')}"
+                f"/variante-{params.get('variant', 1)}"
             )
-            return _Plan(
-                loaded=loaded,
-                params=sheet_params(
+            if sheet is not None:
+                mapped = sheet_params(
                     loaded,
                     sheet,
                     str(params.get("prompt") or ""),
                     presets,
                     seed=params.get("seed"),
                     filename_prefix=prefix,
-                ),
-                loras=sheet_loras(series, entry),
+                )
+            else:
+                mapped = angle_params(loaded, presets, entry_kind(entry), params, filename_prefix=prefix)
+            return _Plan(
+                loaded=loaded,
+                params=mapped,
+                loras=merge_loras(sheet_loras(series, entry), camera.loras),
+                camera=camera.as_dict(),
                 references=references,
                 reference_data=reference_data,
                 folder=f"{entry_folder(entry)}/variantes",
                 kind=entry_kind(entry),
                 qc=presets.qc,
             )
+
+    def _store_view(self, session: Session, entry: LibraryEntry, variant: ReferenceVariant) -> str:
+        """« Nouvel angle » : range la variante parmi les vues de la fiche, étiquetée par son angle. Personnage
+        détecté (objet, décor) ou fiche pleine : elle reste dans l'historique (raison dans le message du job)."""
+        if people_blocked(variant):
+            return " (gardée dans l'historique : personnage détecté)"
+        try:
+            # Refus (fiche pleine, fichier absent) avant toute écriture : rien à défaire.
+            keep_variant(session, self.files, entry, variant)
+        except GenerationError as exc:
+            return f" (gardée dans l'historique : {exc})"
+        return " — nouvelle vue rangée dans la fiche"
 
     def _style(self, session: Session, project_id: int, asset_id: int) -> SeriesAsset:
         """Référence de style notée sur le job ; si elle a disparu entre-temps, la référence active."""
@@ -656,6 +813,7 @@ class ReferenceExecutor:
                     "width": built.params["width"],
                     "height": built.params["height"],
                     "loras": [lo.as_dict() for lo in built.loras],
+                    **({"camera": plan.camera} if plan.camera else {}),
                     "reference_images": [
                         {**{k: v for k, v in ref.items() if k != "filename"}, "comfyui_name": name}
                         for ref, name in zip(plan.references, uploaded, strict=True)
@@ -670,6 +828,9 @@ class ReferenceExecutor:
             session.add(variant)
             session.flush()
             job.params = {**params, "variant_id": variant.id}
+            stored_view = ""
+            if params.get("mode") == "angle":
+                stored_view = self._store_view(session, entry, variant)
             n = session.scalar(
                 select(func.count()).where(
                     ReferenceVariant.entry_kind == variant.entry_kind, ReferenceVariant.entry_id == variant.entry_id
@@ -677,4 +838,6 @@ class ReferenceExecutor:
             )
             session.commit()
         warning = f" — {PEOPLE_WARNING}" if check is not None and check["detected"] else ""
+        if params.get("mode") == "angle":
+            return f"{params.get('sheet_name')} — {stored.width}×{stored.height}, seed {built.params['seed']}{stored_view}{warning}"
         return f"Variante {params.get('variant', 1)}/{params.get('count', 1)} — {stored.width}×{stored.height}, seed {built.params['seed']} ({n} dans l'historique){warning}"

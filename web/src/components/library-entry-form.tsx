@@ -10,8 +10,11 @@ import {
   type LibraryEntryInput,
   type LibraryKind,
 } from "@/lib/api";
+import { useEngineData } from "@/lib/hooks";
 import { LIBRARY_KINDS } from "@/lib/library";
+import { angleLabel } from "./camera-angle";
 import { ImageDropzone } from "./image-dropzone";
+import { InfoTip } from "./info-tip";
 import { LoraPicker } from "./lora-picker";
 import { Alert, Button, Field, Input, Textarea } from "./ui";
 
@@ -231,6 +234,17 @@ export function ReferenceImages({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(initialError ?? null);
+  // Vocabulaire de caméra (presets/camera_loras.yaml) : étiquette d'angle de chaque vue.
+  const camera = useEngineData(() => api.cameraLoras());
+
+  async function setAngle(imageId: number, angle: string) {
+    setError(null);
+    try {
+      onChange(await api.setLibraryImageAngle(kind, entry.id, imageId, angle || null));
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
 
   async function upload(files: File[]) {
     setBusy(true);
@@ -269,8 +283,9 @@ export function ReferenceImages({
   return (
     <div className="space-y-4">
       {error && <Alert>{error}</Alert>}
-      <p className="text-xs text-zinc-500" data-testid="reference-count">
+      <p className="flex items-center gap-1.5 text-xs text-zinc-500" data-testid="reference-count">
         {entry.reference_images.length} / {MAX_REFERENCE_IMAGES} images · la première est la référence principale.
+        {camera.data && <InfoTip help="camera.views" label="Angle des vues" />}
       </p>
       <ImageDropzone
         onFiles={upload}
@@ -293,6 +308,14 @@ export function ReferenceImages({
               {index === 0 && (
                 <span className="absolute top-1 left-1 rounded bg-rose-500 px-1.5 py-px text-[10px] font-semibold text-white">
                   Principale
+                </span>
+              )}
+              {img.angle && (
+                <span
+                  className="absolute top-1 right-1 max-w-[70%] truncate rounded bg-zinc-950/80 px-1.5 py-px text-[10px] font-medium text-amber-200"
+                  data-testid="image-angle-badge"
+                >
+                  {angleLabel(camera.data, img.angle)}
                 </span>
               )}
               <a href={engineUrl(img.url)} target="_blank" rel="noreferrer">
@@ -333,6 +356,25 @@ export function ReferenceImages({
                 >
                   Supprimer
                 </button>
+                {camera.data && camera.data.angles.length > 0 && (
+                  <select
+                    value={img.angle ?? ""}
+                    onChange={(e) => setAngle(img.id, e.target.value)}
+                    className="w-full rounded border border-zinc-800 bg-zinc-900 px-1 py-0.5 text-xs text-zinc-300"
+                    aria-label={`Angle de caméra de ${img.original_name}`}
+                    title={img.angle ? angleLabel(camera.data, img.angle) : "Angle de caméra de cette vue"}
+                    data-testid="image-angle"
+                  >
+                    <option value="">
+                      {index === 0 ? `Angle : non étiqueté (${angleLabel(camera.data, camera.data.main_view) || "de face"})` : "Angle : non étiqueté"}
+                    </option>
+                    {camera.data.angles.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.label}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
             </li>
           ))}

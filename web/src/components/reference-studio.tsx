@@ -5,6 +5,7 @@ import {
   api,
   engineUrl,
   fullErrorMessage,
+  type CameraLoras,
   type Job,
   type LibraryEntry,
   type LibraryKind,
@@ -16,7 +17,12 @@ import { useEngineData } from "@/lib/hooks";
 import { generationStep, MAX_VARIANTS } from "@/lib/generation";
 import { useJob } from "@/lib/jobs";
 import { LIBRARY_KINDS } from "@/lib/library";
+import { AngleFields, TierRestriction, angleInput, angleLabel, angleWeight, initialAngleForm, type AngleForm } from "./camera-angle";
+import { InfoTip } from "./info-tip";
 import { Alert, Button, Field, Input, Loading, ProgressBar, Select } from "./ui";
+
+/** `sheet` des variantes de « Nouvel angle » (pas un type de presets/reference_sheets/). */
+const ANGLE_SHEET = "nouvel-angle";
 
 /** Pastille du palier qui a produit la variante (Turbo, Rapide, Qualité). */
 function TierBadge({ tier }: { tier: string | null }) {
@@ -51,6 +57,7 @@ export function ReferenceStudio({
   const info = LIBRARY_KINDS[kind];
   const sheets = useEngineData(() => api.referenceSheets(kind), [kind]);
   const studio = useEngineData(() => api.referenceStudio(kind, entry.id), [kind, entry.id]);
+  const camera = useEngineData(() => api.cameraLoras());
   const [sheetId, setSheetId] = useState("");
   const [count, setCount] = useState(4);
   const [quality, setQuality] = useState(false);
@@ -132,6 +139,11 @@ export function ReferenceStudio({
     setFinished((f) => new Set(f).add(job.id));
     if (job.status === "failed") setError(`Variante ${String(job.params?.variant ?? "")} : ${job.error ?? "échec"}`);
     studio.reload();
+    // « Nouvel angle » : la vue est rangée d'office parmi les images de la fiche.
+    if (job.params?.mode === "angle" && job.status === "succeeded") {
+      api.getLibraryEntry(kind, entry.id).then(onEntryChange, () => undefined);
+      if (job.message) setNotice(job.message);
+    }
   }
 
   async function keep(variant: ReferenceVariant, acceptPeople = false) {
@@ -232,6 +244,24 @@ export function ReferenceStudio({
           <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={uploadStart} data-testid="start-image-upload" />
         </form>
       )}
+      {camera.data && (
+        <NewAngleSection
+          catalog={camera.data}
+          images={entry.reference_images}
+          full={full}
+          maxKept={maxKept}
+          onEnqueue={async (body, label) => {
+            setError(null);
+            setNotice(null);
+            try {
+              const newJobs = await api.newAngleView(kind, entry.id, body);
+              enqueued(newJobs, `Nouvel angle « ${label} » en file : la vue sera rangée parmi les images de référence de la fiche, étiquetée par son angle.`);
+            } catch (err) {
+              setError(fullErrorMessage(err));
+            }
+          }}
+        />
+      )}
       {error && <Alert>{error}</Alert>}
       {notice && !error && <Alert tone="info">{notice}</Alert>}
 
@@ -260,6 +290,84 @@ export function ReferenceStudio({
         </p>
       )}
     </div>
+  );
+}
+
+/** « Nouvel angle » : une vue de la fiche tournée jusqu'à l'angle choisi (LoRA Multiple-Angles, palier Qualité). */
+function NewAngleSection({
+  catalog,
+  images,
+  full,
+  maxKept,
+  onEnqueue,
+}: {
+  catalog: CameraLoras;
+  images: ReferenceImage[];
+  full: boolean;
+  maxKept: number;
+  onEnqueue: (body: ReturnType<typeof angleInput> & { start_image_id: number | null }, label: string) => Promise<void>;
+}) {
+  const [form, setForm] = useState<AngleForm>(() => initialAngleForm(catalog));
+  const [startId, setStartId] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
+  const start = images.find((i) => i.id === startId) ?? images[0] ?? null;
+  const problem = catalog.angle_problem;
+  const disabled = busy || !start || problem !== null || angleWeight(form) === null || !form.angle;
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (disabled || !start) return;
+    setBusy(true);
+    try {
+      await onEnqueue({ ...angleInput(form), start_image_id: start.id }, angleLabel(catalog, form.angle));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-3 rounded-lg border border-zinc-800 p-4" data-testid="new-angle">
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="flex items-center gap-1.5 text-sm font-medium text-zinc-200">
+          Nouvel angle
+          <InfoTip help="camera.new_angle" label="Nouvel angle" />
+        </h3>
+        {problem ? (
+          <TierRestriction label={problem === catalog.tier_label ? catalog.tier_label : `Indisponible : ${problem}`} />
+        ) : (
+          <span className="flex items-center gap-1.5 text-xs text-zinc-500">
+            Palier {catalog.workflow_tier ?? "Qualité"} (~1 min), quel que soit celui de la série
+            <InfoTip help="camera.tier" label="Palier des angles" />
+          </span>
+        )}
+      </div>
+      {images.length === 0 ? (
+        <p className="text-sm text-zinc-500">Ajoute ou garde d&apos;abord une image : c&apos;est elle qui tourne.</p>
+      ) : (
+        <>
+          <Field label="Vue de départ" htmlFor="angle-start" hint="L'image de la fiche que le modèle fait tourner (la principale par défaut).">
+            <Select id="angle-start" value={start?.id ?? ""} onChange={(e) => setStartId(Number(e.target.value))} data-testid="angle-start">
+              {images.map((img, i) => (
+                <option key={img.id} value={img.id}>
+                  Image {i + 1}
+                  {i === 0 ? " (principale)" : ""}
+                  {img.angle ? ` · ${angleLabel(catalog, img.angle)}` : ""} · {img.original_name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <AngleFields catalog={catalog} form={form} onChange={setForm} disabled={busy || problem !== null} />
+          <Button
+            type="submit"
+            disabled={disabled || full}
+            title={full ? `${maxKept} images de référence au plus : supprimes-en une` : undefined}
+            data-testid="new-angle-submit"
+          >
+            {busy ? "Mise en file…" : "Générer la nouvelle vue"}
+          </Button>
+        </>
+      )}
+    </form>
   );
 }
 
@@ -531,9 +639,11 @@ function VariantCard({
           >
             {kept ? "Gardée ✓" : blocked ? "Garder quand même" : "Garder comme référence"}
           </Button>
-          <Button type="button" variant="secondary" className="px-2 py-1 text-xs" disabled={busy} onClick={() => setRefining((r) => !r)} aria-expanded={refining}>
-            Affiner
-          </Button>
+          {v.sheet !== ANGLE_SHEET && (
+            <Button type="button" variant="secondary" className="px-2 py-1 text-xs" disabled={busy} onClick={() => setRefining((r) => !r)} aria-expanded={refining}>
+              Affiner
+            </Button>
+          )}
           <Button type="button" variant="ghost" className="px-2 py-1 text-xs" disabled={busy} onClick={() => run(onDelete)}>
             Supprimer
           </Button>

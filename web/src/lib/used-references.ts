@@ -26,6 +26,10 @@ export function describeUsedReference(
   kinds: Readonly<Record<string, UsedReferenceKindInfo>>,
 ): UsedReferenceBadge {
   const kind: string = ref.kind ?? "character";
+  if (kind === "panel") {
+    // « Changer l'angle » : la version de la case qui a tourné.
+    return { badge: UNKNOWN_REFERENCE_BADGE, name: ref.name ?? "version de départ", kindLabel: "vue à faire tourner" };
+  }
   if (kind === "style") {
     return { badge: STYLE_REFERENCE_BADGE, name: ref.name ?? "Référence de style", kindLabel: "style de la série" };
   }
