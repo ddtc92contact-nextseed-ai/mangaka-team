@@ -99,6 +99,8 @@ export function LetteringCanvas({
   const { width: W, height: H } = data;
   const border = (1.5 / 72) * data.dpi;
   const guide = Math.max(3, W / 600);
+  // Badge « croquis » (aperçu seulement) : lisible à l'écran quelle que soit la taille de la page.
+  const badge = W / 40;
   const warnedPanels = new Set(data.warnings.map((w) => w.panel_id).filter((id): id is number => id !== null));
   const families = new Map(
     [...Object.values(data.styles), ...Object.values(data.sfx_fonts ?? {})].map((s) => [s.family, s.url]),
@@ -338,12 +340,12 @@ export function LetteringCanvas({
             {p.image_kind === "croquis" && (
               // Aperçu seulement : jamais dans le rendu ni l'export (aplat « case manquante » + avertissement).
               <g pointerEvents="none" data-testid="lettering-sketch-badge" aria-label={`Case ${p.index + 1} : croquis seulement`}>
-                <rect x={p.box.x1 + guide * 3} y={p.box.y1 + guide * 3} width={guide * 22} height={guide * 7} rx={guide * 1.5} fill="#09090b" fillOpacity={0.75} />
+                <rect x={p.box.x1 + badge * 0.6} y={p.box.y1 + badge * 1.4} width={badge * 4.6} height={badge * 1.6} rx={badge * 0.3} fill="#09090b" fillOpacity={0.75} />
                 <text
-                  x={p.box.x1 + guide * 14}
-                  y={p.box.y1 + guide * 6.5}
+                  x={p.box.x1 + badge * 2.9}
+                  y={p.box.y1 + badge * 2.2}
                   fill="#e4e4e7"
-                  fontSize={guide * 4.2}
+                  fontSize={badge}
                   textAnchor="middle"
                   dominantBaseline="central"
                   fontFamily="system-ui, sans-serif"
