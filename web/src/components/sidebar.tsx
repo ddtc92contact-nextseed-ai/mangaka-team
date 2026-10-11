@@ -22,6 +22,7 @@ const NAV = [
   { href: "/equipe", label: "L'équipe", match: (p: string) => p.startsWith("/equipe") },
   { href: "/savoir-faire", label: "Savoir-faire", match: (p: string) => p.startsWith("/savoir-faire") },
   { href: "/banc-essai-qc", label: "Banc d'essai QC", match: (p: string) => p.startsWith("/banc-essai-qc") },
+  { href: "/reglages", label: "Réglages", match: (p: string) => p.startsWith("/reglages") },
 ];
 
 export function Sidebar() {
