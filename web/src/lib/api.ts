@@ -2048,6 +2048,7 @@ export const api = {
   deleteProject: (id: number) => request<void>(`/projects/${id}`, { method: "DELETE" }),
   cleanupProject: (id: number) => request<CleanupResult>(`/projects/${id}/cleanup`, { method: "POST" }),
   rebuildLibrary: (id: number) => request<LibraryResult>(`/projects/${id}/library`, { method: "POST" }),
+  rebuildAllLibraries: () => request<LibraryResult>("/library", { method: "POST" }),
   resetWorkshop: (confirm: string, all: boolean) => request<ResetResult>("/reset", json("POST", { confirm, all })),
 
   listLibrary: <T extends LibraryEntry = LibraryEntry>(kind: LibraryKind, projectId: number) =>

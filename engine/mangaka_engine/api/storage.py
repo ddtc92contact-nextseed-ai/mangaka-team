@@ -7,7 +7,8 @@ l'ancien : c'est une zone de transit, rien n'y est relu). Supprimer une série, 
 fiche supprime son dossier, strictement confiné à `mangaka/<série>/` (store/comfy_folders.py).
 
 Bibliothèque lisible (`output/mangaka/<série>/references/…`, `chapitre-01/…`, pipeline/comfy_library.py) : tenue à
-jour après chaque commit ; « Reconstruire la bibliothèque » (POST /projects/{id}/library) la régénère en entier.
+jour après chaque commit ; « Reconstruire la bibliothèque » (POST /projects/{id}/library, ou POST /library pour toutes
+les séries depuis les Réglages) la régénère en entier et convertit l'ancienne disposition à plat.
 """
 
 from __future__ import annotations
@@ -109,6 +110,33 @@ def rebuild_library(
         written=len(report.written),
         removed=len(report.removed),
         warning=warning,
+    )
+
+
+@router.post("/library", response_model=LibraryOut)
+def rebuild_all_libraries(session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)) -> LibraryOut:
+    """« Reconstruire la bibliothèque » des Réglages : toutes les séries, ancienne disposition convertie
+    (`output/mangaka/`, idempotent)."""
+    enabled = ctx.library is not None and ctx.library.enabled
+    if not enabled:
+        warning = ctx.folders.warning() or "dossier ComfyUI inconnu : bibliothèque non écrite (COMFYUI_DIR)"
+        return LibraryOut(enabled=False, warning=warning)
+    written = removed = 0
+    warnings: list[str] = []
+    for project in list(session.scalars(select(Project).order_by(Project.id))):
+        report = sync_library(ctx, session, project)
+        written += len(report.written)
+        removed += len(report.removed)
+        if report.warning:
+            warnings.append(f"{project.title} : {report.warning}")
+    folder = "output/mangaka"
+    return LibraryOut(
+        enabled=True,
+        folder=folder,
+        path=str(ctx.folders.root / folder) if ctx.folders.root else None,
+        written=written,
+        removed=removed,
+        warning=" ; ".join(warnings) or None,
     )
 
 

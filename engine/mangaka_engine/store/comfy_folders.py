@@ -9,7 +9,8 @@ images envoyées (`input/`) ; `transit(…)` du même chemin donne le préfixe d
     …/chapitre-01/page-01/case-01, case-01-croquis, case-01-controle, case-01-finition, case-01-reparation…
 
 Le reste de `output/mangaka/<série>/` est la **bibliothèque lisible** (copie rangée de ce qui est retenu,
-`store/comfy_library.py`) : `references/{personnages,objets,decors,style}/…`, `chapitre-01/page-01/…`.
+`pipeline/comfy_library.py`) : `references/{personnages,objets,decors,style}/…` (un sous-dossier par type de fiche),
+`chapitre-01/page-01/…`, et sa corbeille `trash/…` (ce qui est généré sans être retenu).
 
 Disque (`ComfyFolders`) : ComfyUI n'a pas d'API pour effacer un fichier, le moteur agit donc directement
 dans le dossier de ComfyUI (`COMFYUI_DIR`). Sans dossier valide, rien n'est jamais supprimé ni déplacé

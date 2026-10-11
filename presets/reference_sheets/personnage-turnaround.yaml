@@ -4,6 +4,8 @@ name: Plein pied face / profil / dos (turnaround)
 description: "Le même personnage en pied, vu de face, de profil et de dos, côte à côte."
 kinds: [character]
 order: 20
+# Sous-dossier de la bibliothèque lisible (references/personnages/<nom>/plein-pied/).
+folder: plein-pied
 width: 1536
 height: 864
 workflow: null

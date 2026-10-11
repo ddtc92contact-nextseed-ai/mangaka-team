@@ -59,11 +59,12 @@ export function SeriesFiles({ project }: { project: Project }) {
         <code className="rounded bg-zinc-800 px-1.5 py-0.5 text-zinc-200" data-testid="series-folder">
           mangaka/{project.slug}/
         </code>{" "}
-        — la bibliothèque lisible de la série : <code>references/</code> (personnages, objets, décors, style : les
-        fiches gardées, nommées d&apos;après leur nom et leur type, ex. <code>lucius-portrait.png</code>) et{" "}
+        — la bibliothèque lisible de la série : <code>references/</code> (un dossier par personnage, objet ou décor,
+        un sous-dossier par type de fiche, ex. <code>personnages/lucius/portrait/lucius-portrait.png</code>),{" "}
         <code>chapitre-01/page-01/</code> (croquis validés, versions choisies <code>case-01.png</code>, planches
-        rendues dans <code>chapitre-01/planches/</code>). Seul ce qui est retenu y figure ; les sorties brutes de
-        ComfyUI passent par <code>_transit/</code> et en sont effacées dès qu&apos;elles sont enregistrées.
+        rendues dans <code>chapitre-01/planches/</code>) et <code>trash/</code> (variantes non gardées, versions non
+        choisies, croquis non validés, rangés de la même façon). Les sorties brutes de ComfyUI passent par{" "}
+        <code>_transit/</code> et en sont effacées dès qu&apos;elles sont enregistrées.
       </p>
       {storage?.warning && (
         <div className="mt-3">

@@ -45,7 +45,7 @@ export function LibraryEntryForm({
   const [name, setName] = useState(initial?.name ?? "");
   const [description, setDescription] = useState(initial?.visual_description ?? "");
   const [keywords, setKeywords] = useState((initial?.prompt_keywords ?? []).join(", "));
-  // Personnages : autres noms reconnus par le scénario (« le petit dragon »).
+  // Personnages : autres noms reconnus par le scénario (« le vieux maître »).
   const [aliases, setAliases] = useState((initial?.aliases ?? []).join(", "));
   const [loraName, setLoraName] = useState(initial?.lora_name ?? "");
   const [loraWeight, setLoraWeight] = useState(String(initial?.lora_weight ?? 0.8));
@@ -117,13 +117,13 @@ export function LibraryEntryForm({
           label="Autres noms (alias)"
           htmlFor="aliases"
           error={errors.aliases ?? Object.entries(errors).find(([f]) => f.startsWith("aliases."))?.[1]}
-          hint="Séparés par des virgules. Le scénario qui écrit l’un de ces noms (« le petit dragon ») désigne cette fiche : ses références, sa description et son LoRA servent à la case."
+          hint="Séparés par des virgules. Le scénario qui écrit l’un de ces noms (« le vieux maître ») désigne cette fiche : ses références, sa description et son LoRA servent à la case."
         >
           <Input
             id="aliases"
             value={aliases}
             onChange={(e) => setAliases(e.target.value)}
-            placeholder="le petit dragon, Urus le Bleu"
+            placeholder="le vieux maître, Maître Kaï"
           />
         </Field>
       )}
