@@ -81,14 +81,24 @@ def render_layout(
         polygon = lp.get("polygon")
         extra: dict[str, Any] = {"polygon": [tuple(p) for p in polygon]} if polygon else {}
         panels.append(
-            PanelArt(i + 1, i, box, img, size, frame=lp.get("frame", "border"), inset=bool(lp.get("inset")), **extra)
+            PanelArt(
+                i + 1,
+                i,
+                box,
+                img,
+                size,
+                frame=lp.get("frame", "border"),
+                inset=bool(lp.get("inset")),
+                break_out=bool(lp.get("break_out")),
+                **extra,
+            )
         )
-        # Lettrage dans la zone utile (fond perdu : partie de la case dans la zone utile).
-        live = lp.get("live_polygon")
+        # Lettrage dans la case d'origine (débordement : `base_polygon`).
+        base = lp.get("base_polygon")
         lbox, lextra = box, extra
-        if live:
-            xs, ys = [p[0] for p in live], [p[1] for p in live]
-            lbox, lextra = Box(min(xs), min(ys), max(xs), max(ys)), {"polygon": [tuple(p) for p in live]}
+        if base:
+            xs, ys = [p[0] for p in base], [p[1] for p in base]
+            lbox, lextra = Box(min(xs), min(ys), max(xs), max(ys)), {"polygon": [tuple(p) for p in base]}
         zone = lp.get("bubble_zone")
         insets = [
             Box(q["x1"], q["y1"], q["x2"], q["y2"])
@@ -110,8 +120,9 @@ def render_layout(
                 **lextra,
             )
         )
-    page = Box(0, 0, fmt.width_px, fmt.height_px)
-    lettering = Letterer(fonts, presets.lettering, fmt.dpi).letter_page(specs, layout["direction"], page)
-    art = PageArt(number=layout["page_number"], fmt=fmt, panels=panels, lettering=lettering)
+    la = layout["live_area"]
+    live = Box(la["x1"], la["y1"], la["x2"], la["y2"])
+    lettering = Letterer(fonts, presets.lettering, fmt.dpi).letter_page(specs, layout["direction"], live)
+    art = PageArt(number=layout["page_number"], fmt=fmt, panels=panels, lettering=lettering, live=live)
     canvas = canvas_geometry(fmt, presets.lettering, bleed=True, crop_marks=crop_marks)
     return render_png(art, fonts, presets.lettering, canvas)

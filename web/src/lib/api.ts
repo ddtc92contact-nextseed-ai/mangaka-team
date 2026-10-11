@@ -256,7 +256,8 @@ export type FrameKind = "border" | "none" | "fade";
 /** Options de cadre d'une case : null = décidée par le style. */
 export interface PanelFrame {
   frame: FrameKind | null;
-  bleed: boolean | null;
+  /** Déborder sur les cases voisines (jamais sur la marge de la page). */
+  break_out: boolean | null;
   inset: boolean | null;
 }
 
@@ -358,13 +359,12 @@ export interface LayoutPanel extends Rect {
   slanted?: boolean;
   /** Options de cadre effectives (absentes dans une mise en page d'avant). */
   frame?: FrameKind;
-  bleed?: boolean;
-  /** La case touche un bord extérieur de la zone utile : le fond perdu est possible. */
-  bleed_possible?: boolean;
+  /** La case déborde sur ses voisines (dessinée par-dessus), toujours dans la zone utile. */
+  break_out?: boolean;
   inset?: boolean;
   host_index?: number | null;
-  /** Fond perdu : partie de la case dans la zone utile. */
-  live_polygon?: [number, number][];
+  /** Débordement : la case d'origine (où restent les bulles). */
+  base_polygon?: [number, number][];
 }
 
 export interface LayoutGutter extends Rect {
@@ -1333,6 +1333,8 @@ export interface PageLettering {
   width: number;
   height: number;
   bleed_mm: number;
+  /** Zone utile de la page : rien n'est dessiné au-delà. */
+  live_area?: { x1: number; y1: number; x2: number; y2: number } | null;
   layout_stale: boolean;
   styles: Record<BubbleKind, { family: string; name: string; url: string; size_pt: number }>;
   /** Polices proposées pour les onomatopées. */
@@ -1343,11 +1345,11 @@ export interface PageLettering {
     index: number;
     /** Cadre de la case dans la zone utile (où se posent bulles et onomatopées). */
     box: Rect;
-    /** Polygone de la case quand elle est en biais ou à fond perdu (null = son cadre). */
+    /** Polygone de la case quand elle est en biais ou déborde sur ses voisines (null = son cadre). */
     polygon?: [number, number][] | null;
     frame?: FrameKind;
     inset?: boolean;
-    bleed?: boolean;
+    break_out?: boolean;
     bubble_zone: Rect | null;
     image_url: string | null;
     faces: Rect[];

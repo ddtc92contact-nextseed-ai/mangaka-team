@@ -31,7 +31,7 @@ from .layout import (
 )
 from .layout_style import decide_frames, default_seed, styled_layout
 
-FRAME_KEYS = ("frame", "bleed", "inset")
+FRAME_KEYS = ("frame", "break_out", "inset")  # ancien « bleed » (fond perdu de case) : ignoré
 
 
 def frame_override(panel: Panel) -> dict[str, Any] | None:

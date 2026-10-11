@@ -18,9 +18,14 @@ la bordure suit les bords du polygone (bande intérieure, comme pour un rectangl
 garde exactement le rendu d'avant.
 
 Options de cadre (voir `layout.py`) : une case `none` n'a pas de bordure ; une case `fade` non plus, et
-son image se fond au papier sur `frames.fade_mm` (masque flou) ; une case à fond perdu atteint le bord
-de la page (et celui du fond perdu à l'export avec fond perdu), sans bordure sur ses bords posés au bord
-de la page ; une incrustation est dessinée **après** toutes les autres cases, sur un liseré blanc.
+son image se fond au papier sur `frames.fade_mm` (masque flou) ; une case qui déborde sur ses voisines
+(`break_out`) est dessinée après les autres cases de l'arbre ; une incrustation est dessinée **après**
+toutes les autres cases, sur un liseré blanc.
+
+Marge extérieure inviolable : rien n'est dessiné hors de la zone utile de la page (`PageArt.live`) —
+cases, images, bordures, liserés, bulles et onomatopées. Le PNG repeint la bande de marge à la couleur
+du papier, le SVG coupe son contenu à la zone utile. Seul un bord de zone utile posé sur le bord de la
+page (format sans marge) s'étend dans le fond perdu d'impression, qui reste celui du format.
 
 Onomatopées : texte de la police de l'onomatopée, halo puis contour épais puis remplissage, transformé
 (rotation · cisaillement) autour de son centre, posé après les bulles.
@@ -107,6 +112,7 @@ class PanelArt:
     polygon: list[geo.Point] | None = None  # px de la page finie ; None ou rectangle = case droite
     frame: str = "border"  # border | none | fade
     inset: bool = False  # incrustation : dessinée après les autres cases, sur un liseré blanc
+    break_out: bool = False  # déborde sur ses voisines : dessinée au-dessus des cases de l'arbre
 
     @property
     def slanted(self) -> bool:
@@ -137,8 +143,10 @@ class PanelArt:
 
 
 def draw_order(panels: Sequence[PanelArt]) -> list[PanelArt]:
-    """Ordre de dessin : les cases de l'arbre (ordre de lecture), puis les incrustations par-dessus."""
-    return [p for p in panels if not p.inset] + [p for p in panels if p.inset]
+    """Ordre de dessin : les cases de l'arbre (ordre de lecture), celles qui débordent sur leurs voisines,
+    puis les incrustations par-dessus."""
+    tree = [p for p in panels if not p.inset]
+    return [p for p in tree if not p.break_out] + [p for p in tree if p.break_out] + [p for p in panels if p.inset]
 
 
 @dataclass
@@ -148,6 +156,31 @@ class PageArt:
     panels: list[PanelArt]
     lettering: PageLettering
     warnings: list[LetteringWarning] = field(default_factory=list)
+    live: Box | None = None  # zone utile (px de la page finie) : rien n'est dessiné au-delà
+
+
+def live_sheet_box(art: PageArt, canvas: Canvas) -> Box | None:
+    """Zone utile dans la feuille. Un bord de zone utile posé sur le bord de la page (marge nulle)
+    s'étend jusqu'au bord du fond perdu d'impression."""
+    live = art.live
+    if live is None:
+        return None
+    x1 = live.x1 + canvas.ox if live.x1 > 0 else canvas.ox - canvas.bleed
+    y1 = live.y1 + canvas.oy if live.y1 > 0 else canvas.oy - canvas.bleed
+    x2 = live.x2 + canvas.ox if live.x2 < canvas.trim_w else canvas.ox + canvas.trim_w + canvas.bleed
+    y2 = live.y2 + canvas.oy if live.y2 < canvas.trim_h else canvas.oy + canvas.trim_h + canvas.bleed
+    return Box(x1, y1, x2, y2)
+
+
+def clear_margins(img: Image.Image, keep: Box, color: tuple[int, int, int]) -> None:
+    """Repeint à la couleur du papier tout ce qui sort de `keep` (bande de marge et fond perdu)."""
+    x1, y1 = max(0, math.floor(keep.x1)), max(0, math.floor(keep.y1))
+    x2, y2 = min(img.width, math.ceil(keep.x2)), min(img.height, math.ceil(keep.y2))
+    fill = (*color, 255) if img.mode == "RGBA" else color
+    draw = ImageDraw.Draw(img)
+    for box in ((0, 0, img.width, y1), (0, y2, img.width, img.height), (0, y1, x1, y2), (x2, y1, img.width, y2)):
+        if box[2] > box[0] and box[3] > box[1]:
+            draw.rectangle((box[0], box[1], box[2] - 1, box[3] - 1), fill=fill)
 
 
 def _hex(color: str) -> tuple[int, int, int]:
@@ -312,6 +345,9 @@ def render_png(art: PageArt, fonts: FontBook, settings: LetteringSettings, canva
             )
     for sfx in art.lettering.sfx:
         _draw_sfx(img, sfx, fonts, canvas.ox, canvas.oy, settings.supersampling)
+    keep = live_sheet_box(art, canvas)
+    if keep is not None:
+        clear_margins(img, keep, _hex(settings.page_background))
     stroke = max(1, round(pt_to_px(settings.crop_marks.stroke_pt, dpi)))
     for x1, y1, x2, y2 in crop_mark_lines(canvas, settings, dpi):
         draw.line((x1, y1, x2, y2), fill=(0, 0, 0), width=stroke)
@@ -514,8 +550,16 @@ def render_svg(art: PageArt, fonts: FontBook, settings: LetteringSettings, canva
         out.append(
             f'<clipPath id="case-{panel.id}"><rect x="{_f(r.x1)}" y="{_f(r.y1)}" width="{_f(r.w)}" height="{_f(r.h)}"/></clipPath>'
         )
+    keep = live_sheet_box(art, canvas)
+    if keep is not None:
+        out.append(
+            f'<clipPath id="zone-utile"><rect x="{_f(keep.x1)}" y="{_f(keep.y1)}" '
+            f'width="{_f(keep.x2 - keep.x1)}" height="{_f(keep.y2 - keep.y1)}"/></clipPath>'
+        )
     out.append("</defs>")
     out.append(f'<rect width="{canvas.width}" height="{canvas.height}" fill="{settings.page_background}"/>')
+    # Marge extérieure inviolable : cases, bulles et onomatopées coupées à la zone utile.
+    out.append('<g id="zone-utile-contenu" clip-path="url(#zone-utile)">' if keep is not None else "<g>")
 
     out.append('<g id="cases">')
     border = pt_to_px(settings.panel_border_pt, dpi)
@@ -529,7 +573,7 @@ def render_svg(art: PageArt, fonts: FontBook, settings: LetteringSettings, canva
                 f'<polygon class="liseré" points="{_points(ring)}" fill="{settings.frames.inset_outline_color}"/>'
             )
         masked = f' mask="url(#fondu-{panel.id})"' if panel.frame == "fade" else ""
-        kind = " incrustation" if panel.inset else ""
+        kind = " incrustation" if panel.inset else " debordement" if panel.break_out else ""
         out.append(
             f'<g id="case-{panel.index + 1}" class="case case-{panel.frame}{kind}" '
             f'clip-path="url(#case-{panel.id})"{masked}>'
@@ -586,6 +630,7 @@ def render_svg(art: PageArt, fonts: FontBook, settings: LetteringSettings, canva
         for sx in art.lettering.sfx:
             out.append(_svg_sfx(sx))
         out.append("</g>")
+    out.append("</g>")
 
     marks = crop_mark_lines(canvas, settings, dpi)
     if marks:

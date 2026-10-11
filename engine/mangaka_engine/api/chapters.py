@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session, object_session, selectinload
 
 from ..pipeline.finishing import panel_print_info
 from ..pipeline.knowledge import record_chapter_summary
-from ..pipeline.layout import LayoutError
+from ..pipeline.layout import LayoutError, clamp_to_live
 from ..pipeline.library import SeriesLibrary
 from ..pipeline.names import CharacterMatcher, name_key, relink_project
 from ..pipeline.pages import (
@@ -132,6 +132,13 @@ def last_generation_jobs(session: Session | None, panel_ids: list[int]) -> dict[
     return {j.panel_id: j for j in session.scalars(select(Job).where(Job.id.in_(latest))) if j.panel_id is not None}
 
 
+def _clamped_bbox(bbox: dict[str, Any] | None, layout_panel: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Boîte de la case, celle de la mise en page coupée à la zone utile quand elle existe."""
+    if bbox is None or not layout_panel or any(k not in layout_panel for k in ("x1", "y1", "x2", "y2")):
+        return bbox
+    return {k: layout_panel[k] for k in ("x1", "y1", "x2", "y2")}
+
+
 def page_out(
     page: Page,
     regen_threshold: float | None = None,
@@ -154,7 +161,9 @@ def page_out(
             else CharacterMatcher([])
         )
     chosen = {p.id: next((i for i in p.images if i.selected), None) for p in page.panels}
-    layout_panels = {lp.get("panel_id"): lp for lp in (page.layout or {}).get("panels", [])}
+    # Marge extérieure inviolable : une mise en page stockée avant le garde-fou est affichée coupée.
+    layout = clamp_to_live(page.layout) if page.layout else None
+    layout_panels = {lp.get("panel_id"): lp for lp in (layout or {}).get("panels", [])}
     return PageOut(
         id=page.id,
         chapter_id=page.chapter_id,
@@ -165,7 +174,7 @@ def page_out(
         layout_seed=page.layout_seed,
         rythme=page.rythme,  # type: ignore[arg-type]
         state=page.state.value,
-        layout=page.layout,
+        layout=layout,
         layout_stale=bool(page.panels) and is_stale(page),
         panels=[
             PanelOut(
@@ -192,7 +201,7 @@ def page_out(
                     if b.kind == BubbleKind.sfx
                 ],
                 frame=PanelFrameIn(**f) if (f := frame_override(p)) else None,
-                bbox=p.bbox,
+                bbox=_clamped_bbox(p.bbox, layout_panels.get(p.id)),
                 bubble_zone=p.bubble_zone,
                 state=p.state.value,
                 final_prompt=p.final_prompt,

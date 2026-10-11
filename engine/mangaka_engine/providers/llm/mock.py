@@ -236,7 +236,7 @@ def mock_art_direction(ctx: dict[str, Any]) -> dict[str, Any]:
                 plan = "gros plan" if seed % 2 else "contre-plongée"
             cadre = "normal"
             if intensity == "choc" and bold:
-                cadre = "sans bord" if bold == 1 else "fond perdu"
+                cadre = "sans bord" if bold == 1 else "débordement"
             if len(out_panels) >= 2 and out_panels[-1]["plan"] == out_panels[-2]["plan"] == plan:
                 plan = next(p for p in _DA_PLANS[(seed + i) % len(_DA_PLANS) :] + _DA_PLANS if p != plan)
             who = next(iter(pa.get("characters") or []), None)

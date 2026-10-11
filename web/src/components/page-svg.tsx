@@ -2,13 +2,15 @@
 
 // Aperçu SVG d'une page mise en page : cases (polygones), zones de bulles, gouttières et découpes
 // déplaçables / inclinables (écran Mise en page), ou miniature (`compact`).
-import { useState, type KeyboardEvent, type PointerEvent } from "react";
+import { useId, useState, type KeyboardEvent, type PointerEvent } from "react";
 import type { LayoutGutter, LayoutPanel, PageLayout } from "@/lib/api";
 import { centroid, outsetPolygon, panelPolygon, svgPoints, type Point } from "@/lib/layout";
 
-/** Ordre de dessin : les cases de l'arbre, puis les incrustations par-dessus (comme à l'export). */
+/** Ordre de dessin (comme à l'export) : les cases de l'arbre, celles qui débordent sur leurs voisines,
+ * puis les incrustations par-dessus. */
 function drawOrder(panels: LayoutPanel[]): LayoutPanel[] {
-  return [...panels.filter((p) => !p.inset), ...panels.filter((p) => p.inset)];
+  const tree = panels.filter((p) => !p.inset);
+  return [...tree.filter((p) => !p.break_out), ...tree.filter((p) => p.break_out), ...panels.filter((p) => p.inset)];
 }
 
 const KEY_STEP = 24; // ≈ 2 mm à 300 DPI
@@ -79,6 +81,7 @@ export function PageSvg({
 }) {
   // Le glissé en cours appartient à une mise en page : il disparaît dès qu'une nouvelle arrive.
   const [dragState, setDrag] = useState<Drag | null>(null);
+  const clipId = useId().replace(/:/g, "");
   const drag = dragState && dragState.layout === layout ? dragState : null;
   const { width: W, height: H } = layout.page;
   const live = layout.live_area;
@@ -181,6 +184,13 @@ export function PageSvg({
           strokeDasharray={`${stroke * 4} ${stroke * 3}`}
         />
       )}
+      <defs>
+        <clipPath id={`zone-utile-${clipId}`}>
+          <rect x={live.x1} y={live.y1} width={live.x2 - live.x1} height={live.y2 - live.y1} />
+        </clipPath>
+      </defs>
+      {/* Marge extérieure inviolable : les cases sont coupées à la zone utile. */}
+      <g clipPath={`url(#zone-utile-${clipId})`}>
       {drawOrder(layout.panels).map((p) => {
         const poly = panelPolygon(p);
         const [cx, cy] = centroid(poly);
@@ -194,7 +204,7 @@ export function PageSvg({
             data-testid={compact ? undefined : "layout-panel"}
             data-slanted={p.slanted ? "true" : undefined}
             data-frame={p.frame ?? "border"}
-            data-bleed={p.bleed ? "true" : undefined}
+            data-break-out={p.break_out ? "true" : undefined}
             data-inset={p.inset ? "true" : undefined}
           >
             {p.inset && <polygon points={svgPoints(outsetPolygon(poly, stroke * 3))} fill="#f4f4f5" />}
@@ -252,6 +262,7 @@ export function PageSvg({
           </g>
         );
       })}
+      </g>
       {!compact &&
         layout.gutters.map((g) => {
           const vertical = g.orientation === "vertical";

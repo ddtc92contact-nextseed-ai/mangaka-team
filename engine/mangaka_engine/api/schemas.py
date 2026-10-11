@@ -261,7 +261,8 @@ class PanelFrameIn(_In):
     """Options de cadre imposées à une case ; null (ou absent) = décidée par le style de mise en page."""
 
     frame: FrameKindName | None = None
-    bleed: bool | None = None
+    # Déborder sur les cases voisines (toujours dans la zone utile de la page).
+    break_out: bool | None = None
     inset: bool | None = None
 
 

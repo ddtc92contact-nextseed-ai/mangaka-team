@@ -16,10 +16,12 @@ du preset. Étapes, pour une page :
    facteur du rythme de la page ; l'angle est tiré dans la plage du style, puis réduit si une case
    voisine passerait sous la taille minimale ;
 6. options de cadre (`frames` du style, même règle intensité / importance) : case sans bord (bord
-   franc ou fondu), à fond perdu, incrustée dans sa voisine. Elles sont tirées **avant** le gabarit
-   (une incrustation ne prend pas de case dans l'arbre), par un générateur à part (`cadres:<graine>`) :
-   les tirages des étapes 1–5 ne changent pas. Une option imposée dans l'UI (`PanelSpec.frame`)
-   remplace le tirage.
+   franc ou fondu), incrustée dans sa voisine. Elles sont tirées **avant** le gabarit (une incrustation
+   ne prend pas de case dans l'arbre), par un générateur à part (`cadres:<graine>`) : les tirages des
+   étapes 1–5 ne changent pas. Une option imposée dans l'UI (`PanelSpec.frame`) remplace le tirage.
+   Le débordement sur les cases voisines (`break_out`) n'est jamais tiré : seulement imposé (atelier,
+   ou direction artistique sur une page choc / une case choc). Aucune case n'est tirée « à fond perdu » :
+   rien ne franchit la marge extérieure.
 
 La direction artistique (pipeline/art_direction.py) ne pilote la mise en page que par les champs
 structurés `importance`, `intensity` (case), `rythme` et « page choc » (page), et par le choix du
@@ -119,7 +121,7 @@ def _override(spec: PanelSpec, key: str) -> Any:
     return (spec.frame or {}).get(key)
 
 
-NO_FRAMES = FrameRule(frameless=0, bleed=0, inset=0)
+NO_FRAMES = FrameRule(frameless=0, inset=0)
 
 
 def decide_frames(
@@ -132,8 +134,9 @@ def decide_frames(
 ) -> list[dict[str, Any]]:
     """Options de cadre de chaque case : imposées dans l'UI, sinon tirées selon le style (aucune sans style).
 
-    Quatre tirages par case, toujours (incrustation, sans bord, fondu, fond perdu) : la suite aléatoire
-    ne dépend pas des décisions. Une incrustation demande une case hôte voisine non incrustée (la
+    Quatre tirages par case, toujours (incrustation, sans bord, fondu, et l'ancien tirage du fond perdu,
+    inutilisé) : la suite aléatoire ne dépend pas des décisions et les pages déjà tirées gardent leurs
+    options. `break_out` (déborder sur les cases voisines) n'est jamais tiré, seulement imposé. Une incrustation demande une case hôte voisine non incrustée (la
     précédente, sinon la suivante), une seule incrustation par hôte, et au moins une case dans l'arbre ;
     les incrustations tirées respectent `max_per_page`, `min_page_panels` et `shot_types` du style.
     Sans style, seules les options imposées comptent (géométrie d'incrustation : `inset_rule`).
@@ -146,16 +149,14 @@ def decide_frames(
     shots = {s.casefold() for s in (rule_in.shot_types if rule_in else [])}
     n = len(specs)
     out: list[dict[str, Any]] = []
-    for spec, (u_inset, u_frame, u_fade, u_bleed) in zip(specs, draws, strict=True):
+    for spec, (u_inset, u_frame, u_fade, _unused) in zip(specs, draws, strict=True):
         rule = frame_rule(style, spec) if style else NO_FRAMES
         kind = _override(spec, "frame")
         if kind not in FRAME_KINDS:
             kind = "border"
             if u_frame < rule.frameless:
                 kind = "fade" if style and u_fade < style.frames.fade else "none"
-        bleed = _override(spec, "bleed")
-        if not isinstance(bleed, bool):
-            bleed = u_bleed < rule.bleed
+        break_out = _override(spec, "break_out") is True
         inset = _override(spec, "inset")
         forced = isinstance(inset, bool)
         if not forced:
@@ -165,7 +166,7 @@ def decide_frames(
                 and (not shots or (spec.shot_type or "").casefold() in shots)
             )
             inset = eligible and u_inset < rule.inset
-        out.append({"frame": kind, "bleed": bleed, "inset": bool(inset and allow_insets), "forced": forced})
+        out.append({"frame": kind, "break_out": break_out, "inset": bool(inset and allow_insets), "forced": forced})
 
     hosts_used: set[int] = set()
     drawn = 0
@@ -188,7 +189,7 @@ def decide_frames(
             drawn += 1
         f.update(
             host=host,
-            bleed=False,
+            break_out=False,
             size=rule_in.size,
             margin_mm=rule_in.margin_mm,
             min_side_mm=rule_in.min_side_mm,

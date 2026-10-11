@@ -107,7 +107,8 @@ user: |
   - « intensity » : $intensities ;
   - « plan » : $plans ;
   - « angle » : $angles ;
-  - « cadre » : $cadres ;
+  - « cadre » : $cadres (« débordement » : la case empiète sur ses voisines, jamais sur la marge de la
+    page ; à réserver à une case « choc » ou à une page choc) ;
   - « ambiance » : une courte note de lumière et d'atmosphère, en français ;
   - « action » : une courte phrase en français qui décrit le mouvement ou la pose du corps du
     personnage principal (« bondit par-dessus la rambarde, manteau au vent », « se penche vers Kenji,

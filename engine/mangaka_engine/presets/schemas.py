@@ -553,6 +553,9 @@ class RegenerationSettings(_Strict):
 
 class LayoutSettings(_Strict):
     min_panel_mm: float = Field(default=20, gt=0)
+    # Case qui déborde sur ses voisines (option `break_out`) : ses bords franchissent la gouttière et
+    # avancent encore de cette distance sur les voisines, toujours bornés à la zone utile.
+    break_out_mm: float = Field(default=6, ge=0, le=50)
     generation: GenerationSize = Field(default_factory=GenerationSize)
     bubble_zone: BubbleZoneSettings = Field(default_factory=BubbleZoneSettings)
     regeneration: RegenerationSettings = Field(default_factory=RegenerationSettings)
@@ -624,7 +627,6 @@ class FrameRule(_Strict):
     """Probabilités des options de cadre d'une case (tirées par page, graine de la mise en page)."""
 
     frameless: float = Field(ge=0, le=1, description="Case sans bord")
-    bleed: float = Field(ge=0, le=1, description="Case au bord de la zone utile → fond perdu")
     inset: float = Field(ge=0, le=1, description="Case incrustée dans sa voisine (gros plan de réaction)")
 
 
@@ -679,7 +681,7 @@ class LayoutStyle(_Strict):
     rythme: dict[Rythme, RythmeRule]
     # « Page choc » (pleine page / splash) décidée par la direction artistique : s'ajoute au rythme.
     page_choc: RythmeRule
-    # Cases sans bord, à fond perdu, incrustées.
+    # Cases sans bord, incrustées.
     frames: FrameTable
 
     @model_validator(mode="after")

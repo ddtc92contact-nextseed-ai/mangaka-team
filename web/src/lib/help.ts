@@ -140,11 +140,11 @@ export const HELP = {
   "layout.reroll":
     "« Nouvelle mise en page » tire une autre variante du même style (nouvelle graine). « Recalculer » refait le calcul avec la même graine, par exemple après un changement de format ou de scénario.",
   "layout.panels":
-    "La taille et les biais de chaque case viennent de son importance et de son intensité, réglées dans le Scénario ou la Direction artistique. Bord, fond perdu et incrustation se forcent ici, case par case.",
+    "La taille et les biais de chaque case viennent de son importance et de son intensité, réglées dans le Scénario ou la Direction artistique. Bord, débordement et incrustation se forcent ici, case par case. Rien ne dépasse jamais la marge de la page.",
   "layout.frame":
     "Bordure classique, sans bord, ou fondu au papier (l'image s'efface vers le blanc). « Auto » laisse le style de mise en page décider.",
-  "layout.bleed":
-    "Fond perdu : l'image déborde jusqu'au bord de la feuille, sans marge blanche. Possible seulement pour une case qui touche un bord extérieur de la page.",
+  "layout.breakOut":
+    "La case passe par-dessus la gouttière et empiète sur ses voisines, pour un temps fort. Elle reste toujours à l'intérieur de la marge de la page : rien ne la franchit.",
   "layout.inset":
     "Incrustation : la case est posée par-dessus sa voisine, comme un médaillon. Utile pour un gros plan de réaction sur une grande case.",
   "croquis.croquer":

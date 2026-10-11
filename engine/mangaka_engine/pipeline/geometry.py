@@ -34,6 +34,17 @@ def clip(poly: Sequence[Point], a: float, b: float, c: float) -> Polygon:
     return _dedupe(out)
 
 
+def clip_rect(poly: Sequence[Point], x1: float, y1: float, x2: float, y2: float) -> Polygon:
+    """Partie du polygone dans le rectangle [x1, x2] × [y1, y2] ; les sommets coupés tombent exactement
+    sur ses bords (aucun dépassement, même d'un epsilon). Vide si rien ne reste."""
+    out: Polygon = list(poly)
+    for a, b, c in ((-1.0, 0.0, -x1), (1.0, 0.0, x2), (0.0, -1.0, -y1), (0.0, 1.0, y2)):
+        out = clip(out, a, b, c)
+        if len(out) < 3:
+            return []
+    return [(min(max(x, x1), x2), min(max(y, y1), y2)) for x, y in out]
+
+
 def _dedupe(poly: Polygon) -> Polygon:
     out: Polygon = []
     for p in poly:
