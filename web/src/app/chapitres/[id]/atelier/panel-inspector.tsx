@@ -172,6 +172,17 @@ export function PanelInspector({
     onChanged();
     toast(`Version ${img.version} choisie`);
   }
+  /** Valide n'importe quel croquis de la case : aperçu, mise en page, lettrage et « Passer au propre » en partent. */
+  async function validateSketch(img: PanelImage) {
+    detail.setData(await api.validateSketch(panelId, img.id));
+    onChanged();
+    toast(`Croquis v${img.version} validé`);
+  }
+  async function unvalidateSketch() {
+    detail.setData(await api.unvalidateSketch(panelId));
+    onChanged();
+    toast("Validation du croquis retirée");
+  }
   async function deleteImage(img: PanelImage) {
     await api.deletePanelImage(img.id);
     detail.reload();
@@ -687,7 +698,10 @@ export function PanelInspector({
             </h3>
             <VersionsStrip
               images={d.images}
+              validatedSketchId={d.sketch_image_id ?? null}
               onSelect={selectImage}
+              onValidateSketch={validateSketch}
+              onUnvalidateSketch={unvalidateSketch}
               onDelete={deleteImage}
               onAnnotated={annotated}
               onRepair={(image) => setRepair({ image })}
@@ -877,9 +891,15 @@ function SketchBlock({
         {sketches.length === 0
           ? "Aucun croquis : un brouillon en quelques secondes pour juger la composition."
           : validated
-            ? `Composition validée : croquis v${validated.version} (seed ${validated.seed ?? "—"}).`
+            ? `Croquis v${validated.version} validé (seed ${validated.seed ?? "—"}).`
             : `${sketches.length} croquis, aucun validé.`}
       </p>
+      {sketches.length > 1 && (
+        <p className="text-[11px] text-zinc-500" data-testid="sketch-change-hint">
+          {validated ? "Pour en changer" : "Pour un autre que le dernier"}, ouvre un croquis dans « Versions » ci-dessous puis « Valider
+          ce croquis ».
+        </p>
+      )}
       <div className="flex flex-wrap items-center gap-2">
         <Button
           variant="secondary"
@@ -894,7 +914,7 @@ function SketchBlock({
         >
           {sketches.length ? "Re-croquer" : "Croquer"}
         </Button>
-        {latest && !validated && (
+        {latest && latest.id !== validated?.id && (
           <Button
             variant="secondary"
             className="!px-2.5 !py-1 text-xs"

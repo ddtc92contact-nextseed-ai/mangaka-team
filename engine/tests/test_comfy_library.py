@@ -159,6 +159,15 @@ def test_panels_sketches_and_plates(c: TestClient, comfy_dir: Path) -> None:
     assert _lib_files(comfy_dir) == set()
     _ok(c.post(f"/panels/{p1['id']}/sketch/validate"))
     assert _lib_files(comfy_dir) == {"chapitre-01/page-01/case-01-croquis.png"}
+    # Valider un autre croquis (plus ancien que le dernier) remplace case-01-croquis.png.
+    _wait_jobs(c, [_ok(c.post(f"/panels/{p1['id']}/sketch"), 202)[0]])
+    s1, s2 = sorted(_ok(c.get(f"/panels/{p1['id']}/images")), key=lambda i: i["version"])
+    sketch_file = page_dir / "case-01-croquis.png"
+    _ok(c.post(f"/panels/{p1['id']}/sketch/validate", json={"image_id": s2["id"]}))
+    assert sketch_file.read_bytes() == c.get(s2["url"]).content
+    _ok(c.post(f"/panels/{p1['id']}/sketch/validate", json={"image_id": s1["id"]}))
+    assert sketch_file.read_bytes() == c.get(s1["url"]).content
+    assert _lib_files(comfy_dir) == {"chapitre-01/page-01/case-01-croquis.png"}
     _ok(c.delete(f"/panels/{p1['id']}/sketch/validate"))
     assert _lib_files(comfy_dir) == set()
 

@@ -224,7 +224,7 @@ export const HELP = {
   "atelier.control_carte":
     "Carte déjà prête : l'image importée est déjà une carte de contrôle (trait, profondeur ou pose) et est utilisée sans prétraitement.",
   "atelier.versions":
-    "Toutes les images générées pour la case. Clique pour agrandir, comparer, réparer ou choisir : seule la version choisie est assemblée dans la page.",
+    "Toutes les images générées pour la case. Clique pour agrandir, comparer, réparer ou choisir : seule la version choisie est assemblée dans la page. Pour un croquis, « Valider ce croquis » retient n'importe lequel (pas seulement le dernier) : l'aperçu de la case, la mise en page et « Passer au propre » en partent ; la pastille « Validé » le signale.",
   "atelier.repair":
     "Redessine une seule zone (visage, main…) d'une version ; le reste de l'image ne bouge pas au pixel près. Le résultat devient une nouvelle version, à choisir ou non.",
   "atelier.repair_grow":
