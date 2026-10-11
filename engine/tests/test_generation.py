@@ -222,7 +222,9 @@ def test_generate_panel_mock_end_to_end(make_client: Callable[..., TestClient]) 
     assert [lo["name"] for lo in params["loras"]] == ["encre.safetensors", "aiko-v3.safetensors"]
     assert params["loras"][1]["weight"] == 0.9
     assert len(params["reference_images"]) == 1 and params["reference_images"][0]["comfyui_name"] in comfy.uploads
-    assert "Aiko" in params["prompt"] and "kimono rouge" in params["prompt"] and "manga seinen" in params["prompt"]
+    # la référence citée par <image1>, la case, le style de la série
+    assert params["prompt"].startswith("<image1> is the identity reference for Aiko")
+    assert "Aiko" in params["prompt"] and "seinen manga" in params["prompt"]
     assert "speech bubble" in params["negative_prompt"] and "text" in params["negative_prompt"]
     assert "extra people" in params["negative_prompt"] and "collage" in params["negative_prompt"]
     assert params["cfg"] == 2.5 and params["negative_active"] is True  # vrai CFG : le négatif est lu
@@ -249,8 +251,9 @@ def test_generate_panel_mock_end_to_end(make_client: Callable[..., TestClient]) 
     panel = _ok(c.get(f"/panels/{p1['id']}"))
     # Prompt envoyé = prompt de la case encadré par les images de référence (nommées dans l'ordre).
     assert panel["state"] == "review" and panel["final_prompt"] == params["panel_prompt"]
-    assert params["prompt"].startswith("Image 1 : référence d'identité de Aiko. " + params["panel_prompt"])
-    assert "ne pas reproduire la mise en page des fiches de référence" in params["prompt"]
+    role = "<image1> is the identity reference for Aiko: keep the face, hair, outfit and colours; ignore its pose, "
+    assert params["prompt"].startswith(role + "framing and background. " + params["panel_prompt"])
+    assert "not a character sheet, not a turnaround, not a collage" in params["prompt"]
     assert panel["final_prompt_manual"] is False and panel["label"].endswith("p. 1 · case 1")
     pages = _ok(c.get(f"/chapters/{data['chapter']['id']}/pages"))
     assert pages[0]["panels"][0]["selected_image_url"] == img["url"] and pages[0]["panels"][0]["state"] == "review"
@@ -351,10 +354,15 @@ def test_manual_prompt_is_kept_until_rebuilt(make_client: Callable[..., TestClie
     _wait(c)
     [img] = _ok(c.get(f"/panels/{p1['id']}/images"))
     assert img["params"]["panel_prompt"] == "Ninja en contre-jour"
-    assert "Image 1 : référence d'identité de Aiko. Ninja en contre-jour. Les images" in img["params"]["prompt"]
+    # un prompt sans <imageN> (édité à la main, ou ancien prompt français) : les rôles sont ajoutés en tête
+    assert img["params"]["prompt"].startswith("<image1> is the identity reference for Aiko: keep the face")
+    assert (
+        "ignore its pose, framing and background. Ninja en contre-jour. Use the reference images"
+        in img["params"]["prompt"]
+    )
 
     panel = _ok(c.post(f"/panels/{p1['id']}/prompt/rebuild"))
-    assert panel["final_prompt_manual"] is False and panel["final_prompt"].startswith("Plan large. Aiko sur un toit.")
+    assert panel["final_prompt_manual"] is False and panel["final_prompt"].startswith("Wide shot. Aiko sur un toit.")
 
     _ok(c.post(f"/panels/{p1['id']}/generate", json={"prompt_override": "Toit vide"}), 202)
     _wait(c)

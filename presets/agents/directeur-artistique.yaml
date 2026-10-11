@@ -91,6 +91,7 @@ settings:
       - cadres
       - page_chocs
       - sfx_intensities
+      - variety_rules
       - context_json
       - bible
       - savoir_faire

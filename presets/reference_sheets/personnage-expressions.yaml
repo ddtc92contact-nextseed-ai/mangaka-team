@@ -8,12 +8,12 @@ width: 1024
 height: 1024
 workflow: null
 prompt:
-  - "Planche d'expressions de $name : grille de six visages du même personnage, de face — neutre, joie, colère, tristesse, surprise, peur."
+  - "Expression sheet of $name: a grid of six faces of the same character, front view — neutral, joy, anger, sadness, surprise, fear."
   - "$description."
-  - "Détails : $keywords."
-  - "Modification demandée : $instruction."
-  - "Image de départ ($start) : garder le sujet, son visage et sa coiffure, et le redessiner proprement dans chaque expression demandée."
-  - "Style : $style."
-  - "Dernière image ($style_ref) : référence de style uniquement — trait, trames, encrage ; ne pas reprendre son personnage, sa scène ni sa composition."
-  - "Fond blanc uni, même coiffure et même visage sur chaque vignette, aucun texte."
+  - "Details: $keywords."
+  - "Requested change: $instruction."
+  - "$start is the starting image: keep the subject, the face and the hairstyle, and redraw them cleanly in each requested expression."
+  - "Style: $style."
+  - "The last image ($style_ref) is a style reference only (line work, screentones, inking): do not copy its character, scene or composition."
+  - "Plain white background, same hairstyle and same face in every vignette, no text."
 negative_prompt: "extra characters, background people, text, different faces, captions"

@@ -15,12 +15,12 @@ workflow: null
 # Variables : $name, $description, $keywords, $style, $instruction (consigne d'« Affiner »),
 # $start (image de départ, si choisie), $style_ref (référence de style jointe, toujours la dernière image).
 prompt:
-  - "Fiche de référence de personnage : portrait de face de $name, buste cadré à hauteur des épaules, regard vers le spectateur, expression neutre."
+  - "Character reference sheet: front portrait of $name, bust framed at shoulder height, looking at the viewer, neutral expression."
   - "$description."
-  - "Détails : $keywords."
-  - "Modification demandée : $instruction."
-  - "Image de départ ($start) : garder le sujet, sa silhouette et sa pose, et le redessiner proprement comme le demande la fiche."
-  - "Style : $style."
-  - "Dernière image ($style_ref) : référence de style uniquement — trait, trames, encrage ; ne pas reprendre son personnage, sa scène ni sa composition."
-  - "Fond blanc uni, éclairage neutre et régulier, un seul personnage, aucun texte."
+  - "Details: $keywords."
+  - "Requested change: $instruction."
+  - "$start is the starting image: keep the subject, the silhouette and the pose, and redraw it cleanly as the sheet requires."
+  - "Style: $style."
+  - "The last image ($style_ref) is a style reference only (line work, screentones, inking): do not copy its character, scene or composition."
+  - "Plain white background, even neutral lighting, a single character, no text."
 negative_prompt: "extra characters, background people, text, multiple characters, cluttered background, profile view, back view"

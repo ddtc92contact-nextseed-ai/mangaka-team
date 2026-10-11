@@ -158,7 +158,7 @@ export const HELP = {
   "croquis.denoise":
     "La part du croquis redessinée au passage au propre : bas, le résultat colle au croquis ; haut, le modèle corrige davantage. Vide : la valeur de la série.",
   "direction.lancer":
-    "Le directeur artistique (LLM) propose un rythme par page et, pour chaque case, intensité, plan, angle, cadre, ambiance et onomatopées. Rien ne bouge dans la mise en page tant que tu n'appliques pas.",
+    "Le directeur artistique (LLM) propose un rythme par page et, pour chaque case, intensité, plan, angle, cadre, ambiance, action et onomatopées. Il doit varier plans et angles (règles du preset) : ce qui reste répétitif après ses relances est signalé en avertissement. Rien ne bouge dans la mise en page tant que tu n'appliques pas.",
   "direction.appliquer":
     "Recalcule la mise en page des pages avec les choix retenus (rythme, page choc, style, gabarit, intensité des cases). À faire une fois la proposition relue et retouchée.",
   "direction.lock":
@@ -168,7 +168,7 @@ export const HELP = {
   "direction.page_choc":
     "Pleine page : une seule image occupe la page. Splash : une case géante domine les autres. À réserver aux révélations et aux scènes clés.",
   "direction.panel":
-    "Intensité, plan, angle et cadre guident la taille de la case et le prompt de l'image ; l'ambiance décrit la lumière. Le cadre et les onomatopées servent ensuite au lettrage.",
+    "Intensité, plan, angle et cadre guident la taille de la case et le prompt de l'image ; l'ambiance décrit la lumière ; l'action dit le mouvement ou la pose du corps (pas « regarde » ni « est debout »), repris par le prompt de l'image. Le cadre et les onomatopées servent ensuite au lettrage.",
   "atelier.generate_missing":
     "Seulement la page affichée : met en file ses cases sans version choisie, en version finale. Pour tout le chapitre, utilise « Générer le chapitre ». Suis l'avancement dans la file en haut à droite ou dans l'onglet Production.",
   "atelier.finish":

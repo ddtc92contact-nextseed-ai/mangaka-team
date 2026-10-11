@@ -13,6 +13,7 @@ from .schemas import (
     SplitNode,
     TreeNode,
     UpscalerPreset,
+    VarietyRules,
     WorkflowPreset,
 )
 from .workflow import (
@@ -46,6 +47,7 @@ __all__ = [
     "PresetIssue",
     "PresetRegistry",
     "UpscalerPreset",
+    "VarietyRules",
     "WorkflowPreset",
     "build_control_map_workflow",
     "build_upscale_workflow",

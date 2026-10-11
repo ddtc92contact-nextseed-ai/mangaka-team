@@ -1,13 +1,17 @@
 """Étape 3 — rédaction du prompt image d'une case par le LLM texte (agent Dessinateur).
 
 Qwen-Image 2.1 (encodeur Qwen3-VL) suit mieux un paragraphe descriptif cohérent que les fragments
-étiquetés de `prompt.build_prompt` : le LLM reçoit les données structurées de la case (`PromptBrief` :
-plan, angle, description, lieu, mise en scène, personnages et leurs traits, décor, objets, ambiance,
-repères de la bible, `$style`, images de référence et leur rôle) et rend UN paragraphe, dans la langue
-du preset (`presets/prompts/redacteur-image.yaml`).
+étiquetés de `prompt.build_prompt`, et il est réglé pour l'anglais (l'enhancer officiel écrit toujours
+en anglais) : le LLM reçoit les données structurées de la case (`PromptBrief` : plan, angle et leurs
+termes de cadrage anglais, action de la direction artistique, description, lieu, mise en scène,
+personnages et leurs traits, décor, objets, ambiance, repères de la bible, `$style`, images de
+référence et leur rôle) et rend UN long paragraphe mis en scène, traduit dans la langue du preset
+(`presets/prompts/redacteur-image.yaml`, anglais par défaut), qui cite chaque image de référence par
+`<imageN>` et définit leurs rôles en tête.
 
 Sortie JSON validée par Pydantic (`prompt`, `language`, `notes`) puis contre la case : chaque
-personnage de la case nommé, aucun personnage de la série absent de la case, longueur plausible ;
+personnage de la case nommé, aucun personnage de la série absent de la case, chaque image envoyée citée
+(`<image1>`…) et aucune autre, paragraphe anglais sans phrases françaises, longueur plausible ;
 invalide → nouvel essai avec l'erreur (`max_retries`) → sinon `PromptWriterError` (l'appelant retombe
 sur le prompt par fragments, avec un avertissement sur la case).
 
@@ -30,28 +34,75 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, StringConstraints, ValidationError, field_validator
 
-from ..presets import PromptPreset
+from ..presets import ImagePromptSettings, PromptPreset
 from ..providers.llm import ChatMessage, LLMError, LLMProvider
 from ..validation import format_errors
 from .names import _contains, name_key
-from .prompt import PromptCharacter, ReferenceSlot, strip_quoted
+from .prompt import PromptCharacter, ReferenceSlot, camera_term, image_tags, strip_quoted
 from .script import _render
 
 PROMPT_ID = "redacteur-image"  # presets/prompts/redacteur-image.yaml
 AGENT_ID = "dessinateur"  # presets/agents/dessinateur.yaml (son LLM rédige le prompt)
 TASK = "image_prompt"  # `task` du bloc <contexte> (reconnu par le LLM factice)
 
-LANGUAGE_NAMES = {"fr": "français", "en": "anglais"}
-DEFAULT_MIN_WORDS, DEFAULT_MAX_WORDS = 80, 160
+# $language_name des gabarits (écrits en anglais) ; LANGUAGE_LABELS : messages d'erreur (français).
+LANGUAGE_NAMES = {"fr": "French", "en": "English"}
+LANGUAGE_LABELS = {"fr": "français", "en": "anglais"}
+DEFAULT_LANGUAGE = "en"
+DEFAULT_MIN_WORDS, DEFAULT_MAX_WORDS = 180, 320
 # Tolérance sur la longueur visée : en deçà de 60 % du minimum ou au-delà de 150 % du maximum, la
 # réponse est refusée (un paragraphe un peu court ou un peu long reste utilisable).
 MIN_RATIO, MAX_RATIO = 0.6, 1.5
+# Rôle de chaque image envoyée ($references), à reprendre en tête du paragraphe.
 REFERENCE_ROLES = {
-    "character": "identité de {name} (visage, silhouette, costume)",
-    "decor": "le lieu {name}",
-    "object": "l'objet {name}",
-    "style": "style seulement (ne pas reprendre ses personnages ni sa scène)",
+    "character": "the identity reference for {name}: keep the face, hair, outfit and colours; ignore its pose, framing and background",
+    "decor": "the location reference for {name}: keep its layout, architecture and materials; show it from the new camera angle",
+    "object": "the design reference for the object {name}: keep its shape, colours and details",
+    "style": "a style reference only (line work, inking, screentones, colours): do not copy its characters, scene or composition",
 }
+# Mots-outils français : un paragraphe « anglais » qui en contient beaucoup n'a pas été traduit.
+_FRENCH_WORDS = frozenset(
+    [
+        "le",
+        "la",
+        "les",
+        "des",
+        "une",
+        "est",
+        "sont",
+        "dans",
+        "avec",
+        "sur",
+        "sous",
+        "qui",
+        "que",
+        "pour",
+        "du",
+        "au",
+        "aux",
+        "et",
+        "son",
+        "sa",
+        "ses",
+        "leur",
+        "leurs",
+        "elle",
+        "il",
+        "ils",
+        "elles",
+        "se",
+        "ce",
+        "cette",
+        "ces",
+        "un",
+        "en",
+        "par",
+        "vers",
+        "derrière",
+        "devant",
+    ]
+)
+FRENCH_MIN_HITS, FRENCH_MAX_SHARE = 6, 0.04
 _FENCE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.DOTALL)
 _SPACES = re.compile(r"\s+")
 
@@ -75,6 +126,11 @@ def _details(entry: PromptCharacter) -> str:
     return ", ".join(dict.fromkeys(p for p in parts if p))
 
 
+def image_tag(slot: int) -> str:
+    """Citation d'une image de référence dans le prompt Qwen-Image (`<image1>`)."""
+    return f"<image{slot}>"
+
+
 @dataclass
 class PromptBrief:
     """Ce que le rédacteur sait d'une case (déjà débarrassé des répliques)."""
@@ -84,7 +140,11 @@ class PromptBrief:
     staging: str = ""
     plan: str = ""
     angle: str = ""
+    # Plan et angle en termes de cadrage anglais (`camera_terms` d'image_prompt.yaml).
+    camera: str = ""
     ambiance: str = ""
+    # Mouvement ou pose du corps choisi par la direction artistique (français, à traduire).
+    action: str = ""
     characters: list[PromptCharacter] = field(default_factory=list)
     # Noms écrits par le scénario sans fiche (figurants) : décrits tels quels, sans obligation.
     extras: list[str] = field(default_factory=list)
@@ -96,7 +156,7 @@ class PromptBrief:
     style: str = ""
     bible: str = ""
     savoir_faire: str = ""
-    language: str = "fr"
+    language: str = DEFAULT_LANGUAGE
     min_words: int = DEFAULT_MIN_WORDS
     max_words: int = DEFAULT_MAX_WORDS
 
@@ -111,6 +171,7 @@ class PromptBrief:
         plan: str | None = None,
         angle: str | None = None,
         ambiance: str | None = None,
+        action: str | None = None,
         characters: Sequence[PromptCharacter] = (),
         extras: Sequence[str] = (),
         absent: Sequence[str] = (),
@@ -121,15 +182,20 @@ class PromptBrief:
         bible: str = "",
         savoir_faire: str = "",
         prompt: PromptPreset | None = None,
+        settings: ImagePromptSettings | None = None,
     ) -> PromptBrief:
         present = {name_key(c.name) for c in characters}
+        chosen = _text(plan) or _text(shot_type)
+        camera = [camera_term(v, settings) for v in (chosen, _text(angle)) if v]
         return cls(
             description=_text(description),
             setting=_text(setting),
             staging=_text(staging),
-            plan=_text(plan) or _text(shot_type),
+            plan=chosen,
             angle=_text(angle),
+            camera=", ".join(dict.fromkeys(camera)),
             ambiance=_text(ambiance),
+            action=_text(action),
             characters=list(characters),
             extras=list(dict.fromkeys(n for n in (_text(e) for e in extras) if n)),
             absent=list(dict.fromkeys(n for n in absent if n.strip() and name_key(n) not in present)),
@@ -139,7 +205,7 @@ class PromptBrief:
             style=_SPACES.sub(" ", style or "").strip().rstrip(" .;,"),
             bible=_text(bible),
             savoir_faire=_text(savoir_faire),
-            language=(prompt.language if prompt and prompt.language else "fr"),
+            language=(prompt.language if prompt and prompt.language else DEFAULT_LANGUAGE),
             min_words=(prompt.min_words if prompt and prompt.min_words else DEFAULT_MIN_WORDS),
             max_words=(prompt.max_words if prompt and prompt.max_words else DEFAULT_MAX_WORDS),
         )
@@ -148,6 +214,7 @@ class PromptBrief:
         return [
             {
                 "image": i,
+                "tag": image_tag(i),
                 "kind": slot.kind,
                 "name": slot.name,
                 "role": REFERENCE_ROLES.get(slot.kind, REFERENCE_ROLES["character"]).format(name=slot.name),
@@ -167,6 +234,8 @@ class PromptBrief:
             "panel": {
                 "plan": self.plan,
                 "angle": self.angle,
+                "camera": self.camera,
+                "action": self.action,
                 "description": self.description,
                 "setting": self.setting,
                 "staging": self.staging,
@@ -194,31 +263,34 @@ def _or(value: str, empty: str) -> str:
 
 
 def render_messages(prompt: PromptPreset, brief: PromptBrief) -> list[ChatMessage]:
-    chars = [f"- {c.name} : {_details(c) or '(sans description)'}" for c in brief.characters]
-    chars += [f"- {e} (figurant, sans fiche)" for e in brief.extras]
-    refs = [f"- image {r['image']} : {r['role']}" for r in brief.reference_lines()]
+    chars = [f"- {c.name}: {_details(c) or '(no description)'}" for c in brief.characters]
+    chars += [f"- {e} (extra, no character sheet)" for e in brief.extras]
+    refs = [f"- {r['tag']} is {r['role']}." for r in brief.reference_lines()]
     lib = ", ".join(f"{o.name} ({_details(o)})" if _details(o) else o.name for o in brief.objects)
     values = {
         "language": brief.language,
         "language_name": LANGUAGE_NAMES.get(brief.language, brief.language),
         "min_words": str(brief.min_words),
         "max_words": str(brief.max_words),
-        "plan": _or(brief.plan, "(libre)"),
-        "angle": _or(brief.angle, "(libre)"),
-        "ambiance": _or(brief.ambiance, "(libre)"),
-        "description": _or(brief.description, "(aucune)"),
-        "setting": _or(brief.setting, "(non précisé)"),
-        "staging": _or(brief.staging, "(non précisée)"),
-        "characters": "\n".join(chars) or "(aucun personnage : la case montre un lieu ou un objet)",
-        "character_names": ", ".join(c.name for c in brief.characters) or "(aucun)",
-        "absent_characters": ", ".join(brief.absent) or "(aucun)",
+        "plan": _or(brief.plan, "(free)"),
+        "angle": _or(brief.angle, "(free)"),
+        "camera": _or(brief.camera, "(free: pick a dynamic angle that serves the action)"),
+        "action": _or(brief.action, "(none given: invent a clear body movement that fits the description)"),
+        "ambiance": _or(brief.ambiance, "(free)"),
+        "description": _or(brief.description, "(none)"),
+        "setting": _or(brief.setting, "(not specified)"),
+        "staging": _or(brief.staging, "(not specified)"),
+        "characters": "\n".join(chars) or "(no character: the panel shows a place or an object)",
+        "character_names": ", ".join(c.name for c in brief.characters) or "(none)",
+        "absent_characters": ", ".join(brief.absent) or "(none)",
         "decor": (f"{brief.decor.name} ({_details(brief.decor)})" if brief.decor and _details(brief.decor) else "")
-        or (brief.decor.name if brief.decor else "(aucun)"),
-        "objects": lib or "(aucun)",
-        "references": "\n".join(refs) or "(aucune image de référence)",
-        "style": _or(brief.style, "(aucun)"),
-        "bible": _or(brief.bible, "(rien de particulier)"),
-        "savoir_faire": _or(brief.savoir_faire, "(aucun)"),
+        or (brief.decor.name if brief.decor else "(none)"),
+        "objects": lib or "(none)",
+        "references": "\n".join(refs) or "(no reference image)",
+        "image_tags": ", ".join(r["tag"] for r in brief.reference_lines()) or "(none)",
+        "style": _or(brief.style, "(none)"),
+        "bible": _or(brief.bible, "(nothing specific)"),
+        "savoir_faire": _or(brief.savoir_faire, "(none)"),
         "context_json": json.dumps(brief.as_json(), ensure_ascii=False, indent=2),
     }
     return [
@@ -257,6 +329,27 @@ def word_count(text: str) -> int:
     return len(text.split())
 
 
+def french_hits(text: str) -> int:
+    """Mots-outils français du texte (« le », « dans », « avec »…) : un paragraphe non traduit."""
+    return sum(1 for w in re.findall(r"[^\W\d_]+", text.lower().replace("’", "'")) if w in _FRENCH_WORDS)
+
+
+def reference_problems(paragraph: str, count: int) -> list[str]:
+    """Chaque image envoyée citée par `<imageN>`, et aucune autre."""
+    cited = image_tags(paragraph)
+    missing = [image_tag(i) for i in range(1, count + 1) if i not in cited]
+    extra = [image_tag(i) for i in cited if i < 1 or i > count]
+    problems = []
+    if missing:
+        problems.append(
+            f"images de référence non citées (définis leur rôle en tête du paragraphe) : {', '.join(missing)}"
+        )
+    if extra:
+        sent = ", ".join(image_tag(i) for i in range(1, count + 1)) or "aucune"
+        problems.append(f"images citées qui ne sont pas envoyées : {', '.join(extra)} (envoyées : {sent})")
+    return problems
+
+
 def clean_paragraph(text: str) -> str:
     """Un seul paragraphe, sans réplique ni guillemet."""
     return _SPACES.sub(" ", strip_quoted(text)).strip()
@@ -289,9 +382,14 @@ def parse_written(text: str, brief: PromptBrief) -> WrittenPrompt:
     problems: list[str] = []
     if out.language != brief.language:
         problems.append(
-            f"language : « {out.language} » au lieu de « {brief.language} » (écris le paragraphe en {LANGUAGE_NAMES.get(brief.language, brief.language)})"
+            f"language : « {out.language} » au lieu de « {brief.language} » (écris le paragraphe en {LANGUAGE_LABELS.get(brief.language, brief.language)})"
         )
     paragraph = clean_paragraph(out.prompt)
+    problems += reference_problems(paragraph, len(brief.references))
+    if brief.language == "en":
+        hits = french_hits(paragraph)
+        if hits >= FRENCH_MIN_HITS and hits > FRENCH_MAX_SHARE * word_count(paragraph):
+            problems.append(f"paragraphe pas en anglais ({hits} mots français) : traduis tout en anglais")
     missing = [c.name for c in brief.characters if not mentions(paragraph, c.name)]
     if missing:
         problems.append(f"personnages de la case non nommés : {', '.join(missing)}")

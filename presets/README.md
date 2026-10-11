@@ -212,11 +212,38 @@ pas se répéter) et son savoir-faire (`knowledge.yaml` › `art_direction`). Il
   `template` (null ou un gabarit possible), `page_choc` (null, `pleine page`, `splash`), `rationale`
   (justification en français montrée à l'auteur) ;
 - par case : `intensity`, `plan` (plan large / moyen / rapproché, gros plan, insert, plongée,
-  contre-plongée), `angle`, `cadre` (normal, sans bord, fond perdu, incrustation), `ambiance`, `sfx`
-  (onomatopées : texte + intensité).
+  contre-plongée), `angle`, `cadre` (normal, sans bord, fond perdu, incrustation), `ambiance`, `action`
+  (courte phrase en français : le mouvement ou la pose du corps — « bondit par-dessus la rambarde,
+  manteau au vent », jamais « regarde » ou « est debout » seuls ; reprise par le rédacteur de prompt),
+  `sfx` (onomatopées : texte + intensité).
 
 Réponse invalide (schéma, pages ou cases manquantes, gabarit impossible) → relance avec l'erreur
-(`max_retries`, 2 au maximum) → sinon erreur visible sur le job. `variety` (sobre, equilibree,
+(`max_retries`, 2 au maximum) → sinon erreur visible sur le job.
+
+**Mise en scène variée (`variety_rules`).** Test réel du 11/10 : 60-70 % des cases montraient un
+personnage de face, debout, sans mouvement. La variété ne dépend plus de la bonne volonté du LLM : chaque
+réponse est vérifiée contre les seuils du preset (aucun en dur dans le code) :
+
+```yaml
+variety_rules:
+  max_same_plan_in_a_row: 2       # par page : au plus 2 cases d'affilée au même plan
+  max_same_angle_in_a_row: 2      # par page : au plus 2 cases d'affilée au même angle
+  max_frontal_share: 0.35         # pages dirigées ensemble : au plus 35 % de cases « de face » (une au moins permise)
+  frontal_angles: [de face]
+  min_off_eye_level_per_page: 1   # au moins une case hors hauteur d'œil par page…
+  off_eye_level_min_panels: 2     # …dès 2 cases
+  off_eye_level: [en plongée, en contre-plongée, cadre penché, plongée, contre-plongée]   # angle ou plan
+  require_action: true            # `action` obligatoire et non vide
+  weak_actions: [regarde, observe, est debout, se tient, …]   # refusés dans une action courte…
+  weak_max_words: 4               # …d'au plus 4 mots (« Aiko regarde Kenji »)
+```
+
+Une règle enfreinte relance l'agent avec une erreur lisible (« page 2 : cases 1 à 3 au même plan « gros
+plan » (2 d'affilée au plus : varie le cadrage) »). Après les relances, la dernière proposition valide est
+**gardée** avec ses avertissements, affichés en tête de la page dans l'écran Direction artistique
+(`warnings` de la page ; « chapitre : … » pour la part de cases de face) ; ils sont recalculés quand
+l'auteur retouche la page. Les règles sont aussi écrites en clair dans le prompt (`$variety_rules`). Sans
+bloc `variety_rules`, aucune règle. Le LLM factice les respecte (angles en alternance, une action par case). `variety` (sobre, equilibree,
 audacieuse) règle l'audace, modifiable dans « L'équipe » (globalement ou par série), comme le modèle, la
 température et les consignes.
 
@@ -225,7 +252,7 @@ jusqu'à ce qu'il le déverrouille ; une page « acceptée » n'est pas remplac�
 chapitre. **« Appliquer à la mise en page »** recopie les choix : rythme de la page (calme et respiration →
 `lent`, montée → `normal`, climax → `rapide`), style suggéré, intensité des cases, gabarit suggéré et
 page choc ; seules les pages dont la mise en page change sont recalculées. Les choix appliqués
-alimentent aussi le prompt image (`$plan`, `$angle`, `$ambiance`). Le cadre devient une option de cadre
+alimentent aussi le prompt image (`$plan`, `$angle`, `$ambiance`, `$action`). Le cadre devient une option de cadre
 de la case (sans bord → `frame: none`, fond perdu → `bleed`, incrustation → `inset`) et les onomatopées
 des `sfx` du lettrage (léger → calme, moyen → normal, fort → choc) ; une option ou une onomatopée
 réglée par l'auteur n'est jamais écrasée, celles de l'application précédente sont remplacées. Si le découpage d'une page change, sa direction est marquée « à refaire ».
@@ -251,7 +278,7 @@ dans la fiche série), `prompt_keywords` (liste), `lang` (`fr` ou `en`, obligato
 mots-clés, voir « Calibrage »), `order` (ordre dans la liste déroulante).
 
 Un mot-clé qui évoque des personnes (« sourire », « determined young hero », « expression comique »)
-s'écrit `{text: sourire, people: true}` dans `prompt_keywords` (réglages fins compris). Il reste dans le
+s'écrit `{text: smiles, people: true}` dans `prompt_keywords` (réglages fins compris). Il reste dans le
 `$style` des cases et des fiches de personnage, mais il est **écarté des fiches d'objet et de décor** :
 sinon le modèle y invente un personnage, qui revient ensuite dans chaque case utilisant la fiche. Une description signale une
 **dominante** quand le pack prend le pas sur les autres (ex. franco-belge sur le rendu, humour sur le genre).
@@ -266,16 +293,23 @@ Tout nouveau pack s'écrit selon les mêmes règles, et se mesure de la même fa
   mots-clés disent ce qu'on veut voir. Une exclusion explicite (« pas de hachures ») est permise
   **en renfort** de mots-clés positifs ; un pack fait uniquement d'exclusions (« no color ») est refusé
   au chargement.
-- **La langue dépend du pack** : l'anglais marche mieux pour le trait et les trames, le français pour le
-  ton et le décor riche. `lang` documente le choix mesuré ; il ne traduit rien.
+- **Langue** : au calibrage du 10/10, l'anglais marchait mieux pour le trait et les trames, le français
+  pour le ton et le décor riche. Depuis le 11/10, tous les packs sont en anglais (voir « Tout en anglais »
+  ci-dessous). `lang` documente la langue des mots-clés ; il ne traduit rien.
 - **Trames : nommer les points** (« halftone screentone dots », « grey dot pattern ») : « screentone » seul sort des
   hachures.
 - **Franco-belge : cumuler** ligne claire + aplats + trait de contour uniforme **et exclure
-  explicitement l'anime** (« PAS de style anime japonais ») ; sans cela le modèle sort de l'anime
-  générique. Le français marche mieux.
-- **Niveaux « moyen » : nommer la position relative** (« entre fin et épais »), sinon ils ne se lisent
+  explicitement l'anime** (« not Japanese anime style ») ; sans cela le modèle sort de l'anime
+  générique.
+- **Niveaux « moyen » : nommer la position relative** (« between thin and thick »), sinon ils ne se lisent
   pas.
 - Le style ne change pas le temps de génération (médiane 9,7 s par image).
+
+**Tout en anglais (11/10/2026).** Le texte côté image passe en anglais (voir « Prompts en anglais »
+ci-dessous) : chaque pack a désormais `lang: en`, avec la traduction fidèle des mots-clés calibrés
+(franco-belge : `European ligne claire comic, flat colours, uniform outlines, not Japanese anime
+style`, puis `classic Franco-Belgian comic style`). Ces traductions n'ont pas encore été mesurées par un
+A/B à graine figée : à refaire sur la machine, comme ci-dessus.
 
 **A/B à référence figée (10/10/2026).** Après la planche de style, chaque pack a été rejoué en français
 et en anglais avec la **référence de style de la série figée** (graph `qwen-image-edit-ref-turbo`,
@@ -301,7 +335,7 @@ français et anglais mêlés) et noyaient sa description. `$style` est donc plaf
    2e, etc., **le rendu en premier à chaque tour** (sans planche de style jointe aux cases, c'est lui
    qui porte trait, encrage et trames : « halftone screentone dots » passe avant le reste) ;
 3. un pack s'arrête au premier mot-clé qui ne tient plus ; un mot-clé déjà dit par un pack précédent
-   (même texte, ou contenu mot pour mot : « manga » derrière « manga seinen ») est retiré.
+   (même texte, ou contenu mot pour mot : « manga » derrière « seinen manga ») est retiré.
 
 L'ordre d'affichage reste l'ordre fixe (LoRA, genre, rendu, ton, réglages fins). **Les mots-clés
 calibrés ne changent pas** : seul l'assemblage choisit les premiers de chaque pack. Écrire donc les
@@ -322,8 +356,10 @@ reading_direction: rtl        # rtl (manga) | ltr (BD)
 fonts: { dialogue: baloo2, shout: bowlby-one }   # polices de fonts.yaml
 llm_guidelines: >-            # consignes du scénariste et du directeur artistique
   Sport, public adolescent : 4 à 6 cases par page, grandes cases pour les actions décisives…
-scene_test: >-                # obligatoire : scène test de la planche de style (français, aucun personnage de la série)
+scene_test: >-                # obligatoire : scène test de la planche de style (français, affichée ; aucun personnage de la série)
   une joueuse anonyme smashe au filet dans un gymnase bondé, ballon flou de vitesse
+scene_prompt: >-              # la même en anglais : c'est elle qui entre dans le prompt image (absente : scene_test)
+  an anonymous player smashes at the net in a packed gym, ball blurred with speed
 allowed_tones: [lumineux, neutre, humour]        # facultatif (absent = tous les tons)
 style_lora: encre-seinen_v2.safetensors          # facultatif : LoRA conseillé (catalogue style_loras.yaml)
 ```
@@ -390,10 +426,10 @@ style_board:
   trials: 4                 # essais par demande (1 à 4)
   width: 1024               # taille du propre ; le croquis garde ce ratio (long_side du palier croquis)
   height: 1024
-  prompt:                   # morceaux ; variables $scene (scène test du genre) et $style
-    - "Planche de style, scène test : $scene."
-    - "Style : $style."
-  negative_prompt: "texte, bulles"   # ajouté au négatif du workflow
+  prompt:                   # morceaux ; variables $scene (scène test du genre, en anglais : scene_prompt) et $style
+    - "Style board, test scene: $scene."
+    - "Style: $style."
+  negative_prompt: "text, speech bubbles"   # ajouté au négatif du workflow
   reference_sheets:         # with_subject | always | never, une valeur pour toutes les sortes ou une par sorte
     character: with_subject
     object: never           # sorte absente = never
@@ -1023,9 +1059,9 @@ inpaint:
   feather_px: 16              # bords fondus (réglable)
   prompt_parts:               # prompt prérempli ; un morceau dont une variable est vide est omis
     - "$target."              # texte de `targets` selon la zone choisie
-    - "Personnage : $character."   # personnage concerné : description, mots-clés, mots déclencheurs du LoRA
-    - "Case : $description."
-    - "Style : $style."
+    - "Character: $character."    # personnage concerné : description, mots-clés, mots déclencheurs du LoRA
+    - "Panel: $description."
+    - "Style: $style."
   targets: { face: "…", hand: "…", zone: "…" }
 ```
 
@@ -1100,24 +1136,41 @@ height: 768
 workflow: null                   # null : `workflow_library` (Turbo), sinon palier de la série, ou Qualité si demandé ;
                                  # un id de workflows/ l'impose (le choix du palier est alors ignoré)
 prompt:                          # morceaux assemblés ; un morceau dont une variable est vide est omis
-  - "Vue éclatée de $name."
+  - "Exploded view of $name."     # en anglais, comme tout le texte côté image
   - "$description."
-  - "Détails : $keywords."       # mots-clés + mots déclencheurs du LoRA de la fiche
-  - "Modification demandée : $instruction."   # consigne d'« Affiner » (omis sinon)
-  - "Image de départ ($start) : garder l'objet et sa silhouette."   # « image 1 » si une image de départ est choisie
-  - "Style : $style."            # packs de style de la série + mots déclencheurs du LoRA de style
-  - "Dernière image ($style_ref) : référence de style uniquement."   # « image N » si la référence de style est jointe
+  - "Details: $keywords."        # mots-clés + mots déclencheurs du LoRA de la fiche
+  - "Requested change: $instruction."   # consigne d'« Affiner » (omis sinon)
+  - "$start is the starting image: keep the object and its silhouette."   # « <image1> » si une image de départ est choisie
+  - "Style: $style."             # packs de style de la série + mots déclencheurs du LoRA de style
+  - "The last image ($style_ref) is a style reference only."   # « <imageN> » si la référence de style est jointe
 negative_prompt: "person, people, text"   # en anglais ; remplace le négatif du workflow (termes « pas de texte » toujours ajoutés)
 ```
 
 ## Prompt final des cases (`image_prompt.yaml`)
 
+### Prompts en anglais
+
+Qwen-Image 2.1 est réglé pour l'anglais : son enhancer officiel écrit toujours le prompt texte → image
+en anglais (édition : anglais ou chinois, jamais une autre langue), et la doc et les exemples ComfyUI
+sont en anglais. Depuis le 11/10/2026, **tout le texte côté image est en anglais** : mots-clés des packs
+de style et des réglages fins (`lang: en`), gabarits de `image_prompt.yaml` (`parts`, `references`,
+`forbidden_text_terms`), fiches de référence, planche de style (`scene_prompt` des genres), réparation
+(`prompt_parts`, `targets`), prompts négatifs des workflows, et le paragraphe du rédacteur de prompt.
+**Ce que lit l'auteur reste en français** : interface, scénario, dialogues, lettrage, noms et
+descriptions des packs, scène test affichée (`scene_test`). Un test (`tests/test_english_prompts.py`)
+refuse tout mot français ou accent dans ces presets (seul « ligne claire », terme d'art, est admis).
+
+Le prompt par fragments (repli du rédacteur) a des gabarits anglais et des plans / angles traduits par
+`camera_terms` (« contre-plongée » → `low-angle shot`, « cadre penché » → `dutch angle (tilted
+frame)`…), mais la description, le lieu, la mise en scène et l'ambiance y entrent tels que le scénario
+les a écrits : seul le LLM traduit.
+
 `parts` est une liste de morceaux `string.Template` assemblés dans l'ordre (`$plan` = plan de la
-direction artistique appliquée, sinon celui du scénario, `$angle` et `$ambiance` de la direction
-artistique, `$shot` = plan du scénario,
+direction artistique appliquée, sinon celui du scénario, `$angle`, `$ambiance` et `$action` de la
+direction artistique, `$shot` = plan du scénario — plans et angles traduits par `camera_terms` —,
 `$description`, `$setting` (lieu de la case donné par le scénario : lieu, moment, éléments du décor —
 présent même sans décor de la bibliothèque), `$staging` (mise en scène : qui fait quoi, où dans le
-cadre), `$character_count` (« Un personnage », « Deux personnages »…), `$characters`, `$decor` et `$objects` = décor et objets de la bibliothèque cités par la
+cadre), `$character_count` (« One character », « Two characters »…), `$characters`, `$decor` et `$objects` = décor et objets de la bibliothèque cités par la
 case (présentés comme les personnages), `$style` (packs de style, voir « Packs de style »), `$bible` = notes de la bible sur les personnages de la
 case, `$savoir_faire` = passages du savoir-faire de l'agent `image_prompt`) ; un morceau dont une
 variable est vide est omis.
@@ -1132,19 +1185,27 @@ de la description. Le prompt est stocké sur la case ; une édition manuelle est
 `params.prompt` envoyé, `params.panel_prompt` de la case) :
 
 ```yaml
-references:
-  character: "Image $slot : référence d'identité de $name"   # une ligne par image, dans l'ordre des emplacements
-  decor: "Image $slot : référence du lieu $name"
-  object: "Image $slot : référence de l'objet $name"
-  style: "Image $slot : référence de style seulement (…)"
-  separator: " ; "
-  before: ["$images."]          # avant le prompt de la case ($images : les lignes, $count : nombre d'images)
-  after: ["Les images de référence ne servent qu'à l'identité et au design (…) : dessiner une scène nouvelle (…)"]
+references:   # syntaxe Qwen-Image 2.1 Edit : <image1>, <image2>…, rôle de chaque image défini en tête
+  character: "<image$slot> is the identity reference for $name: keep the face, hair, outfit and colours; ignore its pose, framing and background."
+  decor: "<image$slot> is the location reference for $name: keep its layout, architecture and materials; …"
+  object: "<image$slot> is the design reference for the object $name: …"
+  style: "<image$slot> is a style reference only (…): do not copy its characters, scene or composition."
+  separator: " "
+  before: ["$images"]           # avant le prompt de la case ($images : les lignes, $count : nombre d'images)
+  after: ["Use the reference images for identity and design only (…): draw a new scene with new poses, a new camera angle (…). Exactly one continuous scene in a single panel: not a character sheet, not a turnaround, not a collage (…)"]
 ```
 
-Exemple (deux personnages, une image principale chacun) : « Image 1 : référence d'identité de Urus ;
-Image 2 : référence d'identité de Kaël. Plan large. … Lieu : … Mise en scène : … Deux personnages : Urus
-(…) ; Kaël (…). Style : … Les images de référence ne servent qu'à l'identité … ni leur fond blanc. »
+Un modèle d'édition recopie la pose et le cadrage de la référence si on ne lui dit pas le contraire (une
+fiche de face donne des cases de face) : d'où « ignore its pose, framing and background » et « one
+continuous scene, not a character sheet ». Un prompt qui **commence** par `<image1>` et cite exactement
+les images envoyées, dans l'ordre (prompt rédigé par l'IA), ne reçoit pas les lignes de rôle une 2e fois,
+seulement `after`. Un ancien prompt (français, « Image 1 : … », ou édité à la main) est toujours envoyé,
+avec les lignes de rôle anglaises en tête.
+
+Exemple (deux personnages, une image principale chacun, prompt par fragments) : « <image1> is the
+identity reference for Urus: … <image2> is the identity reference for Kaël: … Wide shot. … Setting: …
+Staging: … Two characters: Urus (…); Kaël (…). Style: … Use the reference images for identity and design
+only … no plain white background. »
 
 ### Rédacteur de prompt (`prompts/redacteur-image.yaml`)
 
@@ -1154,33 +1215,51 @@ séries, `enabled` de ce fichier, réglable dans « L'équipe » › Dessinateur
 migration v21 restent en fragments), le LLM texte de l'agent Dessinateur (DeepSeek par défaut, factice
 en mode mock) écrit le prompt de chaque case :
 
-- il reçoit les données structurées de la case : plan, angle, description, lieu, mise en scène,
-  ambiance, personnages et leurs traits (description visuelle + mots-clés + déclencheurs LoRA),
-  figurants sans fiche, personnages de la série **absents** (à ne jamais nommer), décor, objets,
-  images de référence et leur rôle (« - image 1 : identité de Aiko »), `$style` (bloc court), repères
-  de la bible et savoir-faire — les répliques entre guillemets en sont retirées ;
+- il reçoit les données structurées de la case (en français) : plan et angle, et leurs termes de
+  cadrage anglais (`$camera`, via `camera_terms`), **action** de la direction artistique (`$action`),
+  description, lieu, mise en scène, ambiance, personnages et leurs traits (description visuelle +
+  mots-clés + déclencheurs LoRA), figurants sans fiche, personnages de la série **absents** (à ne jamais
+  nommer), décor, objets, images de référence et leur rôle (« - <image1> is the identity reference for
+  Aiko… », `$image_tags`), `$style` (bloc court), repères de la bible et savoir-faire — les répliques
+  entre guillemets en sont retirées ;
+- il **traduit** et écrit un long paragraphe anglais (180 à 320 mots ; l'enhancer officiel écrit ~20
+  phrases), mis en scène comme un plan de film et dans cet ordre : rôles des images de référence d'abord
+  (`<image1> is the identity reference for Aiko: keep her face, hair, outfit and colours; ignore its
+  pose, framing and background.`) → sujet avec un verbe d'action et la pose du corps (poids, membres,
+  mouvement, geste), place de chacun dans le cadre, regard et expression → caméra en termes de cinéma
+  (low-angle, over-the-shoulder, dutch angle, bird's-eye…) avec focale et profondeur → décor parcouru
+  avec des repères de position (foreground / background, left / right…) → une phrase de lumière (source,
+  direction, ombres) → une phrase de composition et d'ambiance, puis les mots-clés de style. Règles
+  dures : exactement les personnages de la case, « a single continuous scene, one panel », aucun texte
+  ni bulle ; jamais redécrire ce que montre une référence : la citer par `<imageN>` ;
 - il rend un objet JSON `{"prompt", "language", "notes"}` validé par Pydantic puis contre la case :
-  chaque personnage de la case nommé, aucun personnage absent nommé, langue du preset, longueur
-  plausible (entre 60 % de `min_words` et 150 % de `max_words`). Invalide → un nouvel essai avec
-  l'erreur (`max_retries: 1`, donc 2 tentatives au plus), puis **repli par fragments** avec un
-  avertissement visible sur la case (« Prompt rédigé par l'IA indisponible (…) ») ;
+  chaque personnage de la case nommé, aucun personnage absent nommé, chaque image envoyée citée par
+  `<imageN>` et aucune autre, langue du preset (en anglais : pas de paragraphe resté en français —
+  6 mots-outils français et plus de 4 % des mots), longueur plausible (entre 60 % de `min_words` et
+  150 % de `max_words`). Invalide → un nouvel essai avec l'erreur (`max_retries: 1`, donc 2 tentatives
+  au plus), puis **repli par fragments** avec un avertissement visible sur la case (« Prompt rédigé par
+  l'IA indisponible (…) ») ;
 - le paragraphe est nettoyé (guillemets et répliques retirés, une seule ligne) ; les mots-clés de
-  style y sont ajoutés tels quels, dans leur langue mesurée, s'il ne les contient pas déjà.
+  style y sont ajoutés tels quels s'il ne les contient pas déjà.
 
-`language` (`fr` par défaut, les A/B mesurés favorisant le français sur la plupart des packs, ou `en`)
-et `min_words` / `max_words` (80 à 160) sont des réglages du preset. Le prompt rédigé est stocké sur la
-case (`prompt_source: ia`) **une fois par case** : une nouvelle génération (variantes, « Régénérer en
-Qualité ») le reprend tel quel. Il n'est redemandé que sur « Reconstruire le prompt » ou quand les
-données de la case changent (description, lieu, mise en scène, personnages, direction artistique,
-style, images de référence ; la bible et le savoir-faire n'y comptent pas). Une édition manuelle est
-conservée jusqu'à « Reconstruire le prompt ». Le cadrage des références (`references` ci-dessus) et les
-termes « pas de texte » du prompt négatif sont ajoutés à l'envoi à ComfyUI, comme pour les fragments.
+`language` (`en` par défaut, ou `fr`) et `min_words` / `max_words` (180 à 320) sont des réglages du
+preset (« L'équipe » › Dessinateur). Le prompt rédigé est stocké sur la case (`prompt_source: ia`)
+**une fois par case** : une nouvelle génération (variantes, « Régénérer en Qualité ») le reprend tel
+quel. Il n'est redemandé que sur « Reconstruire le prompt » ou quand les données de la case changent
+(description, lieu, mise en scène, personnages, direction artistique, style, images de référence,
+langue ; la bible et le savoir-faire n'y comptent pas) — les prompts rédigés en français avant le
+passage à l'anglais sont donc réécrits à la génération suivante de leur case. Une édition manuelle est
+conservée jusqu'à « Reconstruire le prompt ». La consigne `references.after` et les termes « pas de
+texte » du prompt négatif sont ajoutés à l'envoi à ComfyUI, comme pour les fragments (les lignes de
+rôle ne sont pas répétées : le paragraphe les définit déjà).
 La rédaction a lieu dans le job de génération (message « Rédaction du prompt par l'IA… »), hors de
 toute transaction ; « Reconstruire le prompt » l'attend (le proxy web laisse 3 min à cette route).
 
 Repasser une série à « non » remet ses prompts rédigés (non retouchés) en fragments. Mode mock :
 `[mock:prompt-invalide:N]` dans la description d'une case rend les N premiers essais invalides,
-`[mock:prompt-intrus:N]` leur fait nommer un personnage absent. L'essai du Dessinateur montre le
+`[mock:prompt-intrus:N]` leur fait nommer un personnage absent. En anglais, le LLM factice n'écrit
+que des phrases anglaises (rôles `<imageN>`, poses tirées d'une liste, caméra, lumière) : il ne sait pas
+traduire, la description française de la case reste dans `notes`. L'essai du Dessinateur montre le
 prompt rédigé à côté du prompt par fragments.
 
 ## Lettrage (étape 5)
@@ -1205,7 +1284,7 @@ Le texte n'est **jamais** dessiné par le modèle d'image : il est posé au lett
 ### Onomatopées (type `sfx`)
 
 « CLIC », « BIIIP ! », « VROUM ! » : grand texte sans bulle, lui aussi vectoriel (jamais dessiné par
-le modèle d'image : « onomatopées » est dans `forbidden_text_terms` et le texte n'entre pas dans le
+le modèle d'image : « onomatopoeia » est dans `forbidden_text_terms` et le texte n'entre pas dans le
 prompt de la case).
 
 - `fonts.yaml` → `sfx` : police par intensité (`by_intensity` : Lilita One / Titan One / Bowlby One) et

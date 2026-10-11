@@ -175,13 +175,13 @@ def test_sheet_builds_prompt_size_and_lora_chain() -> None:
     entry = _entry("character", lora_name="aiko_v1.safetensors", lora_weight=0.7, lora_trigger_words="aiko_v1")
     series = _series(style_lora_name="encre-seinen_v2.safetensors", style_lora_weight=0.6)
     prompt = sheet_prompt(REG, sheet, entry, series)
-    assert prompt.startswith("Fiche de référence de personnage : portrait de face de Aiko")
+    assert prompt.startswith("Character reference sheet: front portrait of Aiko")
     assert "jeune femme, cheveux noirs courts, kimono rouge." in prompt
-    assert "Détails : katana, cicatrice, aiko_v1." in prompt
+    assert "Details: katana, cicatrice, aiko_v1." in prompt
     # Mots déclencheurs du catalogue (style_loras.yaml), puis genre, rendu et ton de la série.
-    assert "Style : ink seinen style, shonen manga, dynamic energetic style," in prompt
-    assert "black and white manga" in prompt and "ambiance lumineuse et joyeuse" in prompt
-    assert "Modification demandée" not in prompt  # pas de consigne : morceau omis
+    assert "Style: ink seinen style, shonen manga, dynamic energetic style," in prompt
+    assert "black and white manga" in prompt and "bright joyful atmosphere" in prompt
+    assert "Requested change" not in prompt  # pas de consigne : morceau omis
 
     preset_id = sheet_preset_id(REG, sheet, series)
     assert preset_id == "qwen-image-turbo"  # palier de la série
@@ -212,10 +212,9 @@ def test_sheet_without_lora_or_style_keeps_a_clean_prompt() -> None:
     # Série d'avant les packs, sans ancien texte : seul le rendu par défaut donne le style.
     legacy = _series(style_genre=None, style_rendering=None, style_tone=None)
     prompt = sheet_prompt(REG, sheet, entry, legacy)
-    assert "Le labo en plan large" in prompt and "Détails" not in prompt
+    assert "Le labo as an establishing wide shot" in prompt and "Details" not in prompt
     assert (
-        "Style : black and white manga, halftone screentone dots, regular grey dot pattern, no cross-hatching."
-        in prompt
+        "Style: black and white manga, halftone screentone dots, regular grey dot pattern, no cross-hatching." in prompt
     )
     assert sheet_loras(_series(), entry) == []
     loaded = REG.workflow(sheet_preset_id(REG, sheet, _series()))
@@ -232,7 +231,7 @@ def test_refine_uses_the_variant_as_reference_with_the_instruction() -> None:
     assert preset_id == "qwen-image-edit-ref-turbo"  # pendant « avec références » du palier de la série
     loaded = REG.workflow(preset_id)
     prompt = sheet_prompt(REG, sheet, entry, series, "cheveux plus courts")
-    assert "Modification demandée : cheveux plus courts." in prompt
+    assert "Requested change: cheveux plus courts." in prompt
     built = build_workflow(
         loaded,
         sheet_params(loaded, sheet, prompt, REG, seed=3),
@@ -336,7 +335,7 @@ def test_generate_refine_keep_reorder_then_used_by_panels(c: TestClient, comfy: 
     _idle(c)
     refined = _ok(c.get(f"/{segment}/{eid}/reference-variants"))["variants"][0]
     assert refined["parent_id"] == first["id"] and refined["instruction"] == "plus de détails"
-    assert "Modification demandée : plus de détails." in refined["prompt"]
+    assert "Requested change: plus de détails." in refined["prompt"]
     [sent] = refined["params"]["reference_images"]
     assert sent["variant_id"] == first["id"] and sent["comfyui_name"] in comfy.uploads
     wf = list(comfy.prompts.values())[-1]
@@ -573,12 +572,12 @@ def _client_with_detector(
 
 
 def test_object_and_decor_sheets_drop_people_keywords_and_use_their_own_negative() -> None:
-    # Shōnen + lumineux : « determined young hero » et « sourire » sont marqués `people` dans les packs.
+    # Shōnen + lumineux : « determined young hero » et « smiles » sont marqués `people` dans les packs.
     series = _series(style_genre="shonen", style_tone="lumineux")
     assert REG.style_genres["shonen"].people_keywords == ["determined young hero"]
-    assert REG.style_tones["lumineux"].people_keywords == ["sourire"]
+    assert REG.style_tones["lumineux"].people_keywords == ["smiles"]
     portrait = sheet_prompt(REG, REG.reference_sheet("personnage-portrait"), _entry("character"), series)
-    assert "determined young hero" in portrait or "sourire" in portrait  # un personnage les garde
+    assert "determined young hero" in portrait or "smiles" in portrait  # un personnage les garde
     for sheet_id, kind, negative in (
         ("objet-trois-quarts", "object", OBJECT_NEGATIVE),
         ("decor-plan-large", "decor", DECOR_NEGATIVE),
@@ -586,8 +585,8 @@ def test_object_and_decor_sheets_drop_people_keywords_and_use_their_own_negative
     ):
         sheet = REG.reference_sheet(sheet_id)
         prompt = sheet_prompt(REG, sheet, _entry(kind), series)
-        assert "determined young hero" not in prompt and "sourire" not in prompt, sheet_id
-        assert "shonen manga" in prompt and "ambiance lumineuse et joyeuse" in prompt  # le reste du style
+        assert "determined young hero" not in prompt and "smiles" not in prompt, sheet_id
+        assert "shonen manga" in prompt and "bright joyful atmosphere" in prompt  # le reste du style
         # Palier imposé : vrai CFG, non distillé — le négatif est lu par le modèle.
         loaded = REG.workflow(sheet_preset_id(REG, sheet, series))
         assert loaded.preset.id == "qwen-image-base-qualite"

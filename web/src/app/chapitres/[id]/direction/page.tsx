@@ -322,6 +322,19 @@ function PageEditor({
         </EmptyState>
       ) : (
         <>
+          {d.warnings.length > 0 && (
+            <Alert tone="info">
+              <span data-testid="direction-warnings">
+                Mise en scène encore répétitive après les relances de l&apos;agent : retouche les cases ou clique sur
+                « Proposer autre chose ».
+                <ul className="mt-1 list-disc pl-5">
+                  {d.warnings.map((w) => (
+                    <li key={w}>{capitalize(w)}</li>
+                  ))}
+                </ul>
+              </span>
+            </Alert>
+          )}
           {d.out_of_date && (
             <Alert tone="info">
               Les cases de cette page ont changé depuis la proposition : clique sur « Proposer autre chose » pour la
@@ -435,7 +448,7 @@ function PageEditor({
               <ol className="space-y-3">
                 {d.panels.map((pa) => (
                   <PanelRow
-                    key={`${pa.panel_id}:${pa.ambiance}`}
+                    key={`${pa.panel_id}:${pa.ambiance}:${pa.action}`}
                     d={d}
                     pa={pa}
                     description={page?.panels.find((p) => p.id === pa.panel_id)?.description ?? ""}
@@ -532,6 +545,7 @@ function PanelRow({
 }) {
   const n = pa.index + 1;
   const [ambiance, setAmbiance] = useState(pa.ambiance);
+  const [action, setAction] = useState(pa.action);
   const [sfxText, setSfxText] = useState("");
   const [sfxLevel, setSfxLevel] = useState("moyen");
   const set = (fields: Partial<Omit<DaPanel, "panel_id" | "index">>) => onEdit({ panels: [{ panel_id: pa.panel_id, ...fields }] });
@@ -603,7 +617,25 @@ function PanelRow({
             onBlur={() => ambiance !== pa.ambiance && set({ ambiance })}
           />
         </LockedField>
-        <div className="space-y-1">
+        <LockedField
+          label="Action (mouvement, pose)"
+          id={`da-${pa.panel_id}-action`}
+          locked={isLocked(d, panelKey(pa.panel_id, "action"))}
+          onToggle={() => onToggle(panelKey(pa.panel_id, "action"))}
+        >
+          <Input
+            id={`da-${pa.panel_id}-action`}
+            className="py-1.5"
+            value={action}
+            disabled={busy}
+            maxLength={200}
+            placeholder="bondit par-dessus la rambarde, manteau au vent"
+            onChange={(e) => setAction(e.target.value)}
+            onBlur={() => action !== pa.action && set({ action })}
+            data-testid="panel-action"
+          />
+        </LockedField>
+        <div className="space-y-1 sm:col-span-2">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-zinc-400">Onomatopées suggérées</span>
             <LockButton

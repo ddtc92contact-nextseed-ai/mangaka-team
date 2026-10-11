@@ -3,6 +3,6 @@ id: lumineux
 name: Lumineux
 description: Ambiance claire et joyeuse, lumière de jour.
 order: 10
-lang: fr
-prompt_keywords: [ambiance lumineuse et joyeuse, lumière chaude, {text: sourire, people: true}]
+lang: en
+prompt_keywords: [bright joyful atmosphere, warm light, {text: smiles, people: true}]
 llm_guidelines: Ton lumineux et optimiste ; les conflits se résolvent, l'espoir domine.

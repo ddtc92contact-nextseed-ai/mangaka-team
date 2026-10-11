@@ -5,11 +5,15 @@ prompt et renvoie un découpage plausible (nombre de pages visé, personnages de
 se passe dans un décor de la bibliothèque, à tour de rôle, et une case sur deux montre un objet).
 
 Pour la direction artistique (`"task": "art_direction"`), il renvoie des choix variés mais
-déterministes : même chapitre, même audace, même relance → mêmes choix (`mock_art_direction`).
+déterministes : même chapitre, même audace, même relance → mêmes choix (`mock_art_direction`), qui
+respectent les règles de variété du preset (angles en alternance, jamais 3 plans identiques d'affilée,
+une action par case).
 
 Pour la rédaction du prompt image d'une case (`"task": "image_prompt"`), il rend un paragraphe qui
-nomme chaque personnage avec ses traits, cite les images de référence par leur emplacement et finit par
-les mots-clés de style (`mock_image_prompt`). `[mock:prompt-invalide:N]` dans la description de la case :
+définit d'abord le rôle de chaque image de référence (`<image1>`…), nomme chaque personnage, le place
+dans le cadre avec une pose, décrit la caméra, la lumière, et finit par les mots-clés de style
+(`mock_image_prompt`). En anglais, il n'écrit que des phrases anglaises : il ne sait pas traduire, donc
+la description française de la case n'y entre pas (elle reste dans `notes`). `[mock:prompt-invalide:N]` dans la description de la case :
 les N premiers essais sont invalides ; `[mock:prompt-intrus:N]` : ils nomment un personnage absent.
 
 Pour tester les relances sans vrai LLM, les `invalid_attempts` premiers essais d'une conversation
@@ -151,15 +155,30 @@ def mock_script(ctx: dict[str, Any]) -> dict[str, Any]:
 # --- direction artistique ---------------------------------------------------------
 _DA_RYTHMES = ["montée", "respiration", "montée", "climax"]
 _DA_PLANS = ["plan large", "plan moyen", "plan rapproché", "gros plan", "contre-plongée", "insert", "plongée"]
+# Angles en alternance hauteur d'œil / hors hauteur d'œil, deux voisins jamais identiques (bouclage
+# compris) : jamais deux cases d'affilée au même angle, une case hors hauteur d'œil par paire de cases,
+# peu de cases de face (variety_rules de prompts/direction-artistique.yaml).
 _DA_ANGLES = [
-    "de face",
     "de trois quarts",
+    "en contre-plongée",
     "de profil",
+    "en plongée",
+    "de face",
+    "cadre penché",
     "de dos",
     "en contre-plongée",
-    "en plongée",
-    "vue subjective",
-    "cadre penché",
+]
+_DA_ANGLES_SOBRE = ["de trois quarts", "en plongée", "de profil", "en contre-plongée", "de face", "en plongée"]
+# Actions des cases (mouvement ou pose du corps), précédées du nom du premier personnage de la case.
+_DA_ACTIONS = [
+    "bondit en avant, le bras tendu vers le bord du cadre",
+    "se retourne brusquement, les épaules crispées et le manteau qui virevolte",
+    "s'accroupit pour ramasser un objet, une main au sol pour garder l'équilibre",
+    "court à travers le cadre, penché en avant, les cheveux fouettés par le vent",
+    "recule d'un pas, la main levée en garde devant le visage",
+    "se penche par-dessus la table, les deux poings serrés sur le bord",
+    "pivote sur un pied, le poids rejeté en arrière, prêt à frapper",
+    "tend la main vers son interlocuteur, le corps tourné à moitié vers lui",
 ]
 _DA_AMBIANCES = [
     "lumière froide du petit matin, ombres longues",
@@ -188,7 +207,7 @@ def mock_art_direction(ctx: dict[str, Any]) -> dict[str, Any]:
     pages = ctx.get("pages") or []
     previous = ctx.get("previous_direction") or {}
     prev_chocs = {p.get("page") for p in previous.get("pages") or [] if p.get("page_choc")}
-    angles = _DA_ANGLES if bold else _DA_ANGLES[:4]
+    angles = _DA_ANGLES if bold else _DA_ANGLES_SOBRE
     out = []
     last = max((int(p["page"]) for p in pages), default=1)
     for page in pages:
@@ -218,14 +237,19 @@ def mock_art_direction(ctx: dict[str, Any]) -> dict[str, Any]:
             cadre = "normal"
             if intensity == "choc" and bold:
                 cadre = "sans bord" if bold == 1 else "débordement"
+            if len(out_panels) >= 2 and out_panels[-1]["plan"] == out_panels[-2]["plan"] == plan:
+                plan = next(p for p in _DA_PLANS[(seed + i) % len(_DA_PLANS) :] + _DA_PLANS if p != plan)
+            who = next(iter(pa.get("characters") or []), None)
+            action = _DA_ACTIONS[(seed + i) % len(_DA_ACTIONS)]
             out_panels.append(
                 {
                     "panel": i + 1,
                     "intensity": intensity,
                     "plan": plan,
-                    "angle": angles[(seed + 2 * i) % len(angles)],
+                    "angle": angles[(seed + i) % len(angles)],
                     "cadre": cadre,
                     "ambiance": _DA_AMBIANCES[(seed + i) % len(_DA_AMBIANCES)],
+                    "action": f"{who} {action}" if who else action[:1].upper() + action[1:],
                     "sfx": [{"text": _DA_SFX[(seed + i) % len(_DA_SFX)], "intensity": "fort"}]
                     if intensity == "choc"
                     else [],
@@ -263,7 +287,23 @@ def mock_art_direction(ctx: dict[str, Any]) -> dict[str, Any]:
                 "panels": out_panels,
             }
         )
+    _limit_frontal(out)
     return {"pages": out}
+
+
+def _limit_frontal(pages: list[dict[str, Any]], share: float = 0.35) -> None:
+    """Pas plus de `share` des cases « de face » sur le chapitre (au moins une) : les dernières en trop
+    passent de trois quarts ou de profil, sans répéter l'angle d'une voisine."""
+    panels = [pa for p in pages for pa in p["panels"]]
+    allowed = max(1, int(share * len(panels) + 1e-9))
+    frontal = [pa for pa in panels if pa["angle"] == "de face"]
+    for p in pages:
+        for i, pa in enumerate(p["panels"]):
+            if len(frontal) <= allowed or pa not in frontal:
+                continue
+            near = {q["angle"] for q in p["panels"][max(0, i - 1) : i + 2]}
+            pa["angle"] = next(a for a in ("de trois quarts", "de profil", "de dos") if a not in near)
+            frontal.remove(pa)
 
 
 class MockLLMProvider:
@@ -327,7 +367,7 @@ class MockLLMProvider:
         intruder = _PROMPT_INTRUDER_MARK.search(description)
         absent = list(ctx.get("absent_characters") or [])
         if intruder and absent and attempt <= int(intruder.group(1)):
-            out["prompt"] = f"{absent[0]} observe la scène depuis le bord du cadre. {out['prompt']}"
+            out["prompt"] = f"{out['prompt']} {absent[0]} watches the scene from the edge of the frame."
         return json.dumps(out, ensure_ascii=False)
 
     def _direction_answer(self, messages: list[ChatMessage], ctx: dict[str, Any]) -> str:
@@ -350,54 +390,107 @@ _FILLERS = {
         "Le décor garde sa profondeur, avec des plans successifs bien séparés.",
     ],
     "en": [
-        "The composition leads the eye to the main action, with a readable foreground and a detailed background.",
-        "Silhouettes stand out clearly from the setting and proportions stay true to the character sheets.",
-        "Expressions are strong, gestures broad and readable, with nothing superfluous.",
-        "The setting keeps its depth, with clearly separated layers.",
+        "In the foreground, a few blurred props frame the action and give the shot depth.",
+        "Behind the characters, the background recedes in clearly separated layers, from mid-ground details to a hazy distance.",
+        "At the top of the frame, the space stays open so that the movement can breathe.",
+        "On the left and on the right, secondary elements of the setting lead the eye toward the main action.",
+        "Clothes and hair react to the motion, with folds and strands that follow the direction of the movement.",
+        "The silhouettes stand out clearly from the setting, and the proportions stay true to the reference sheets.",
+        "Hands and faces are drawn with care, each gesture readable at a glance.",
+        "Small details of the place, scattered at different depths, make the scene feel lived in.",
     ],
 }
+# Poses (anglais) et places dans le cadre, tirées de façon déterministe pour chaque personnage.
+_POSES = [
+    "lunges forward with the weight on the front leg, one arm thrust out toward the edge of the frame",
+    "twists around mid-step, shoulders turned against the hips, coat flaring behind",
+    "crouches low with one hand on the ground, ready to spring up",
+    "leans in over the table, both fists pressed down, the back arched with tension",
+    "steps back on one foot, a raised hand guarding the face",
+    "sprints across the frame, body tilted forward, hair whipped by the wind",
+    "pivots on the ball of one foot, the free arm swinging wide for balance",
+    "reaches out with an open hand, the torso half turned toward the other character",
+]
+_SPOTS = ["on the left of the frame", "on the right, slightly in the background", "in the centre foreground"]
+_LOOKS = [
+    "looking sharply toward the other side of the frame with a tense, determined expression",
+    "eyes narrowed and fixed on something out of frame, jaw clenched",
+    "glancing back over the shoulder, eyebrows raised in surprise",
+]
+
+
+def _seed(text: str) -> int:
+    return sum(ord(ch) for ch in text)
+
+
+def _mock_english(ctx: dict[str, Any]) -> list[str]:
+    """Phrases anglaises seulement (le mock ne traduit pas) : rôles des images, sujet et pose, caméra,
+    décor, lumière, composition."""
+    panel = ctx.get("panel") or {}
+    sentences = [f"{r['tag']} is {r['role']}." for r in ctx.get("references") or [] if r.get("tag") and r.get("role")]
+    seed = _seed(str(panel.get("description") or "") + str(panel.get("action") or ""))
+    for i, c in enumerate(ctx.get("characters") or []):
+        name = c.get("name", "")
+        pose = _POSES[(seed + i) % len(_POSES)]
+        spot = _SPOTS[i % len(_SPOTS)]
+        look = _LOOKS[(seed + i) % len(_LOOKS)]
+        sentences.append(f"{name}, {spot}, {pose}, {look}.")
+    if panel.get("camera"):
+        sentences.append(f"Camera: {panel['camera']}, with a slight wide-angle feel and a shallow depth of field.")
+    if (ctx.get("decor") or {}).get("name"):
+        sentences.append(f"The scene takes place in {ctx['decor']['name']}, seen from the new camera angle.")
+    sentences.append(
+        "The light comes from the upper left, casting long diagonal shadows across the ground and rim-lighting the figures."
+    )
+    sentences.append(
+        "A single continuous scene in one panel, with no text, speech bubbles or sound effects in the image."
+    )
+    return sentences
 
 
 def mock_image_prompt(ctx: dict[str, Any]) -> dict[str, Any]:
-    """Paragraphe déterministe : sujet → action → cadrage → décor → lumière → style, références citées."""
+    """Paragraphe déterministe : rôles des images → sujet et pose → caméra → décor → lumière → style."""
     lang = "en" if ctx.get("language") == "en" else "fr"
     panel = ctx.get("panel") or {}
-    refs = {r.get("name"): r.get("image") for r in ctx.get("references") or [] if r.get("kind") == "character"}
-    subjects = []
-    for c in ctx.get("characters") or []:
-        name, details = c.get("name", ""), c.get("details", "")
-        slot = refs.get(name)
-        who = (
-            (f"{name}, the person from image {slot}" if lang == "en" else f"{name}, la personne de l'image {slot}")
-            if slot
-            else name
-        )
-        subjects.append(f"{who} ({details})" if details else who)
-    sentences = []
-    if subjects:
-        sentences.append(("Featuring " if lang == "en" else "On voit ") + ", ".join(subjects) + ".")
     description = _ANY_MARK.sub(" ", str(panel.get("description") or "")).strip()
-    if description:
-        sentences.append(description.rstrip(".") + ".")
-    framing = ", ".join(v for v in (panel.get("plan"), panel.get("angle")) if v)
-    if framing:
-        sentences.append(("Framing: " if lang == "en" else "Cadrage : ") + framing + ".")
-    if panel.get("staging"):
-        sentences.append(str(panel["staging"]).rstrip(".") + ".")
-    place = ", ".join(v for v in (panel.get("setting"), (ctx.get("decor") or {}).get("name")) if v)
-    if place:
-        sentences.append(("The scene takes place in " if lang == "en" else "La scène se passe : ") + place + ".")
-    if panel.get("ambiance"):
-        sentences.append(("Lighting: " if lang == "en" else "Lumière : ") + str(panel["ambiance"]).rstrip(".") + ".")
-    sentences.append(
-        "No text or speech bubbles in the image." if lang == "en" else "Aucun texte ni bulle dans l'image."
-    )
-    target = int(ctx.get("min_words") or 80)
+    if lang == "en":
+        sentences = _mock_english(ctx)
+    else:
+        refs = {r.get("name"): r.get("tag") for r in ctx.get("references") or [] if r.get("kind") == "character"}
+        subjects = []
+        for c in ctx.get("characters") or []:
+            name, details = c.get("name", ""), c.get("details", "")
+            who = f"{name}, la personne de {refs[name]}" if refs.get(name) else name
+            subjects.append(f"{who} ({details})" if details else who)
+        sentences = [f"{r['tag']} : {r['name']}." for r in ctx.get("references") or [] if r.get("tag")]
+        if subjects:
+            sentences.append("On voit " + ", ".join(subjects) + ".")
+        if description:
+            sentences.append(description.rstrip(".") + ".")
+        if panel.get("action"):
+            sentences.append(str(panel["action"]).rstrip(".") + ".")
+        framing = ", ".join(v for v in (panel.get("plan"), panel.get("angle")) if v)
+        if framing:
+            sentences.append("Cadrage : " + framing + ".")
+        if panel.get("staging"):
+            sentences.append(str(panel["staging"]).rstrip(".") + ".")
+        place = ", ".join(v for v in (panel.get("setting"), (ctx.get("decor") or {}).get("name")) if v)
+        if place:
+            sentences.append("La scène se passe : " + place + ".")
+        if panel.get("ambiance"):
+            sentences.append("Lumière : " + str(panel["ambiance"]).rstrip(".") + ".")
+        sentences.append("Aucun texte ni bulle dans l'image.")
+    target = int(ctx.get("min_words") or 180)
     fillers = _FILLERS[lang]
     i = 0
     while len(" ".join(sentences).split()) + len(str(ctx.get("style") or "").split()) < target:
         sentences.insert(len(sentences) - 1, fillers[i % len(fillers)])
         i += 1
+    if lang == "en":
+        sentences.append("The composition is tense and dynamic, built on strong diagonals that carry the movement.")
     if ctx.get("style"):
         sentences.append(str(ctx["style"]).rstrip(".") + ".")
-    return {"prompt": " ".join(sentences), "language": lang, "notes": "Paragraphe du LLM factice (mode mock)."}
+    notes = "Paragraphe du LLM factice (mode mock)."
+    if lang == "en" and description:
+        notes += f" Case (non traduite) : {description[:600]}"
+    return {"prompt": " ".join(sentences), "language": lang, "notes": notes}

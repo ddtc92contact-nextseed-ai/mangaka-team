@@ -100,6 +100,8 @@ def test_every_genre_has_a_french_scene_test() -> None:
     assert REG.style_genres and not [i for i in REG.issues if i.file.startswith("style_genres")]
     for genre in REG.style_genres.values():
         assert len(genre.scene_test) > 30, genre.id
+        # Même scène en anglais pour le prompt image (scene_prompt).
+        assert genre.scene_prompt and genre.scene_prompt.startswith(("an ", "two ")), genre.id
     settings = REG.defaults.style_board  # type: ignore[union-attr]
     assert settings is not None and settings.trials == 4
     # Cases : jamais (10/10/2026, la planche faisait apparaître ses propres sujets dans la case).
@@ -149,7 +151,9 @@ def test_four_sketch_trials_with_distinct_seeds_and_the_series_style(c: TestClie
     style = series_style(REG, _project(c, s["id"]))
     prompt = jobs[0]["params"]["prompt"]
     assert {j["params"]["prompt"] for j in jobs} == {prompt}
-    assert f"scène test : {scene}." in prompt and f"Style : {style}." in prompt
+    # La scène test entre dans le prompt en anglais (scene_prompt) ; la française reste affichée.
+    english = REG.style_genres["shonen"].scene_prompt
+    assert f"test scene: {english}." in prompt and f"Style: {style}." in prompt and scene not in prompt
     # Chaque essai est un job visible dans la file de production.
     queue = _ok(c.get("/queue"))
     labels = [i["label"] for i in ([queue["running"]] if queue["running"] else []) + queue["pending"]]
@@ -247,7 +251,7 @@ def test_errors_series_without_pack_and_engine_offline(make_settings: Callable[.
 
 
 # --- fiches de référence : la référence de style seulement après l'image du sujet -----------
-STYLE_ROLE = "référence de style uniquement — trait, trames, encrage ; ne pas reprendre son personnage"
+STYLE_ROLE = "is a style reference only (line work, screentones, inking): do not copy its character"
 
 
 def _sheet_client(
@@ -311,7 +315,7 @@ def test_sheet_from_scratch_is_text_to_image_despite_the_style_board(
         assert job["params"]["style_asset_id"] is None and job["params"]["start_image_id"] is None
         assert variant["params"]["reference_images"] == []
         assert "petit dragon vert, ventre rond." in variant["prompt"]
-        assert "Image de départ" not in variant["prompt"] and "Dernière image" not in variant["prompt"]
+        assert "starting image" not in variant["prompt"] and "The last image" not in variant["prompt"]
         sent = list(c.app.state.ctx.providers.comfyui.prompts.values())[-1]  # type: ignore[attr-defined]
         assert not [n for n in sent.values() if n["class_type"] == "LoadImage"]
 
@@ -330,8 +334,8 @@ def test_starting_image_then_style_reference(make_settings: Callable[..., Settin
         refs = variant["params"]["reference_images"]
         assert [r["kind"] for r in refs] == ["start", "style"]
         assert refs[0]["image_id"] == sketch["id"] and refs[1]["asset_id"] == style["id"]
-        assert "Image de départ (image 1) : garder le sujet, sa silhouette et sa pose" in variant["prompt"]
-        assert f"Dernière image (image 2) : {STYLE_ROLE}" in variant["prompt"]
+        assert "<image1> is the starting image: keep the subject, the silhouette and the pose" in variant["prompt"]
+        assert f"The last image (<image2>) {STYLE_ROLE}" in variant["prompt"]
         assert "petit dragon vert, ventre rond." in variant["prompt"]
         wf = list(c.app.state.ctx.providers.comfyui.prompts.values())[-1]  # type: ignore[attr-defined]
         assert wf["20"]["inputs"]["image"] == refs[0]["comfyui_name"]
@@ -342,8 +346,8 @@ def test_starting_image_then_style_reference(make_settings: Callable[..., Settin
         _idle(c)
         refined = _ok(c.get(f"/characters/{entry['id']}/reference-variants"))["variants"][0]
         assert [r["kind"] for r in refined["params"]["reference_images"]] == ["variant", "style"]
-        assert f"Dernière image (image 2) : {STYLE_ROLE}" in refined["prompt"]
-        assert "Image de départ" not in refined["prompt"]
+        assert f"The last image (<image2>) {STYLE_ROLE}" in refined["prompt"]
+        assert "starting image" not in refined["prompt"]
 
         # Une image d'une autre fiche n'est pas une image de départ.
         other = _ok(c.post(f"/projects/{_s['id']}/characters", json={"name": "Autre", "visual_description": "x"}), 201)
@@ -363,7 +367,7 @@ def test_starting_image_without_style_board(make_settings: Callable[..., Setting
         )
         _job, variant = _sheet(c, entry["id"], start_image_id=updated["reference_images"][0]["id"])
         assert [r["kind"] for r in variant["params"]["reference_images"]] == ["start"]
-        assert "Dernière image" not in variant["prompt"]
+        assert "The last image" not in variant["prompt"]
 
 
 @pytest.mark.parametrize(
@@ -391,9 +395,9 @@ def test_reference_sheets_setting_never_and_always(
                 job["params"]["preset"] == "qwen-image-edit-ref-turbo"
                 and job["params"]["style_asset_id"] == style["id"]
             )
-            assert f"Dernière image (image 1) : {STYLE_ROLE}" in variant["prompt"]
+            assert f"The last image (<image1>) {STYLE_ROLE}" in variant["prompt"]
         else:
-            assert job["params"]["preset"] == "qwen-image-turbo" and "Dernière image" not in variant["prompt"]
+            assert job["params"]["preset"] == "qwen-image-turbo" and "The last image" not in variant["prompt"]
         _ok(c.post(f"/reference-variants/{variant['id']}/refine", json={"instruction": "plus sombre", "count": 1}), 202)
         _idle(c)
         refined = _ok(c.get(f"/characters/{entry['id']}/reference-variants"))["variants"][0]
@@ -479,8 +483,9 @@ def test_style_board_is_never_sent_with_a_panel(c: TestClient, comfy: MockComfyU
     loads = [n["inputs"]["image"] for n in sent.values() if n["class_type"] == "LoadImage"]
     assert len(loads) == 2 and not [name for name in loads if "style" in name]
     positive = sent["6"]["inputs"]["prompt"]
-    assert "Image 1 : référence d'identité de Aiko" in positive and "Image 2 : référence du lieu Le labo" in positive
-    assert "référence de style" not in positive and "Image 3" not in positive
+    assert "<image1> is the identity reference for Aiko" in positive
+    assert "<image2> is the location reference for Le labo" in positive
+    assert "style reference" not in positive and "<image3>" not in positive
     with c.app.state.ctx.db.session_scope() as session:  # type: ignore[attr-defined]
         image = session.scalars(select(PanelImage).where(PanelImage.panel_id == panel_id)).one()
         assert [r["kind"] for r in image.params["reference_images"]] == ["character", "decor"]

@@ -14,6 +14,7 @@
 #   $variety             (audace demandée, réglage « variety » ci-dessous)
 #   $request             (ce qui est demandé : tout le chapitre, ou une autre proposition pour une page)
 #   $rythmes $intensities $plans $angles $cadres $page_chocs $sfx_intensities (valeurs autorisées)
+#   $variety_rules       (règles de mise en scène variée ci-dessous, en clair)
 #   $context_json        (le même contexte, en JSON)
 #   $bible               (bible de la série) · $savoir_faire (passages du savoir-faire de l'agent « art_direction »)
 # Gabarit de relance après une réponse invalide : $error (erreurs de validation).
@@ -23,13 +24,32 @@ max_retries: 2            # nouveaux essais après une réponse invalide (2 au m
 temperature: 0.6
 variety: equilibree       # audace : sobre, equilibree ou audacieuse
 
+# Mise en scène variée, vérifiée sur chaque réponse (pipeline/art_direction.py `check_variety`) : une
+# règle enfreinte relance l'agent avec l'erreur ; après les relances, la proposition est gardée avec un
+# avertissement visible dans l'écran Direction artistique. Sans ce bloc, aucune règle.
+# (Test réel du 11/10 : 60-70 % des cases de face, debout, sans mouvement.)
+variety_rules:
+  max_same_plan_in_a_row: 2       # par page : au plus 2 cases d'affilée au même plan
+  max_same_angle_in_a_row: 2      # par page : au plus 2 cases d'affilée au même angle
+  max_frontal_share: 0.35         # pages dirigées ensemble : au plus 35 % de cases « de face » (1 permise au moins)
+  frontal_angles: [de face]       # angles comptés « de face / à hauteur d'œil »
+  min_off_eye_level_per_page: 1   # au moins 1 case hors hauteur d'œil par page…
+  off_eye_level_min_panels: 2     # …dès 2 cases sur la page
+  off_eye_level: [en plongée, en contre-plongée, cadre penché, plongée, contre-plongée]   # angles ou plans
+  require_action: true            # « action » obligatoire et non vide pour chaque case
+  # Action courte (au plus weak_max_words mots) refusée si elle contient l'un de ces verbes statiques.
+  weak_actions: [regarde, observe, est debout, se tient, attend, écoute, parle, est assis, est assise, sourit]
+  weak_max_words: 4
+
 system: |
   Tu es directeur artistique de manga et de bande dessinée. À partir d'un scénario déjà découpé en
   pages et en cases, tu décides du rythme de chaque page, de l'intensité et du cadrage de chaque case,
   comme un mangaka expérimenté prépare son storyboard. Tu ne dessines jamais la mise en page : tu
   choisis uniquement parmi les options proposées, et la mise en page en tire les découpes.
   Tu varies les plans et les angles, tu gardes les temps forts pour les moments qui le méritent, et tu
-  évites de répéter les choix du chapitre précédent.
+  évites de répéter les choix du chapitre précédent. Une case n'est jamais un personnage debout, de
+  face, qui regarde le lecteur : tu choisis pour chacune un mouvement ou une pose du corps lisible
+  (élan, torsion, appui, geste) et un angle qui le sert.
   Tu réponds UNIQUEMENT par un objet JSON valide, sans texte autour ni bloc de code.
 
 user: |
@@ -68,6 +88,9 @@ user: |
   Consignes du genre et du ton de la série (rythme, cadrage, public) :
   $style_guidelines
 
+  Règles de mise en scène (vérifiées : une réponse qui les enfreint est refusée) :
+  $variety_rules
+
   Scénario des pages :
   $pages
 
@@ -87,6 +110,9 @@ user: |
   - « cadre » : $cadres (« débordement » : la case empiète sur ses voisines, jamais sur la marge de la
     page ; à réserver à une case « choc » ou à une page choc) ;
   - « ambiance » : une courte note de lumière et d'atmosphère, en français ;
+  - « action » : une courte phrase en français qui décrit le mouvement ou la pose du corps du
+    personnage principal (« bondit par-dessus la rambarde, manteau au vent », « se penche vers Kenji,
+    poing serré sur la table ») — jamais « regarde » ou « est debout » seuls ;
   - « sfx » : onomatopées suggérées (0 à 4), chacune {"text": "…", "intensity": l'une de $sfx_intensities} ;
   - « decor » (facultatif) : null pour garder le décor du scénario, sinon l'id d'un décor de la
     bibliothèque ci-dessus — jamais un id absent de la liste ;
@@ -97,7 +123,7 @@ user: |
   {"pages": [{"page": 1, "rythme": "montée", "layout_style": null, "template": null, "page_choc": null,
      "rationale": "…",
      "panels": [{"panel": 1, "intensity": "normal", "plan": "plan moyen", "angle": "de trois quarts",
-       "cadre": "normal", "ambiance": "…", "sfx": [], "decor": null, "objets": null}]}]}
+       "cadre": "normal", "ambiance": "…", "action": "…", "sfx": [], "decor": null, "objets": null}]}]}
 
   <contexte>
   $context_json

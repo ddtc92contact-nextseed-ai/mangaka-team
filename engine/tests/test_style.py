@@ -93,14 +93,18 @@ def test_v1_packs_carry_the_calibrated_keywords_and_their_language() -> None:
     ]
     assert len(packs) == 7 + 4 + 4 + 9
     for pack in packs:
-        assert pack.lang in ("fr", "en") and pack.prompt_keywords and all(pack.prompt_keywords), pack
-    # Calibrage du 10/10/2026 : trames = points nommés (en anglais depuis l'A/B à référence figée) ;
-    # franco-belge = exclusion explicite de l'anime.
+        # Tout le texte côté image est en anglais depuis le 11/10/2026 (langue de Qwen-Image 2.1).
+        assert pack.lang == "en" and pack.prompt_keywords and all(pack.prompt_keywords), pack
+    # Calibrage du 10/10/2026 : trames = points nommés ; franco-belge = ligne claire, aplats, trait
+    # uniforme et exclusion explicite de l'anime.
     assert "halftone" in ", ".join(REG.style_renderings["nb-trames"].prompt_keywords)
-    assert "PAS de style anime japonais" in REG.style_genres["franco-belge"].prompt_keywords
-    assert (REG.style_genres["franco-belge"].lang, REG.style_renderings["nb-trames"].lang) == ("fr", "en")
-    assert REG.style_options.options["trait"].choices["moyen"].lang == "fr"
-    assert "entre fin et épais" in ", ".join(REG.style_options.options["trait"].choices["moyen"].prompt_keywords)
+    assert REG.style_genres["franco-belge"].prompt_keywords[:4] == [
+        "European ligne claire comic",
+        "flat colours",
+        "uniform outlines",
+        "not Japanese anime style",
+    ]
+    assert "between thin and thick" in ", ".join(REG.style_options.options["trait"].choices["moyen"].prompt_keywords)
 
 
 def test_lang_is_required_and_closed(tmp_path: Path) -> None:
@@ -216,7 +220,7 @@ def test_style_block_cap_is_configurable(tmp_path: Path) -> None:
     reg = PresetRegistry.load(root)
     assert reg.image_prompt.style_max_chars == 80
     style = series_style(reg, _series(style_options={"detail": "riche"}))
-    assert len(style) <= 80 and style.startswith("manga seinen, black and white manga")
+    assert len(style) <= 80 and style.startswith("seinen manga, black and white manga")
 
 
 def test_simple_backgrounds_keep_the_described_place() -> None:
@@ -228,7 +232,7 @@ def test_simple_backgrounds_keep_the_described_place() -> None:
         style=series_style(REG, series),
         settings=REG.image_prompt,
     )
-    assert "Lieu : une ruelle de Kyoto la nuit, lanternes." in prompt
+    assert "Setting: une ruelle de Kyoto la nuit, lanternes." in prompt
     assert "uncluttered background" in prompt
     assert not re.search(r"\b(plain|minimal)\b", prompt, re.IGNORECASE)
 
@@ -236,7 +240,7 @@ def test_simple_backgrounds_keep_the_described_place() -> None:
 def test_style_combinations_lora_out_of_catalog_and_color() -> None:
     # Hors catalogue : appliqué sans mots déclencheurs.
     plain = series_style(REG, _series(style_lora_name="perso/inconnu.safetensors"))
-    assert plain.startswith("manga seinen, style réaliste et mature")
+    assert plain.startswith("seinen manga, realistic mature style")
     # Couleur : les trames (réservées au N&B) n'ajoutent rien, même si elles traînent en base.
     color = series_style(REG, _series(style_rendering="couleur", style_options={"trames": "denses"}))
     assert "color manga" in color and "screentone" not in color
