@@ -54,6 +54,8 @@ from ..presets import LoadedWorkflow, LoraSpec, PresetRegistry, build_workflow
 from ..presets.schemas import QCSettings, ReferenceSheet
 from ..providers.comfyui import ComfyUIClient, ComfyUIError, ComfyUIInterruptedError, ComfyUITimeoutError
 from ..providers.qc import DetectorProvider, QCProviderError
+from ..store.comfy_folders import ComfyFolders
+from ..store.comfy_folders import entry_folder as comfy_entry_folder
 from ..store.db import Database
 from ..store.files import FileStore
 from ..store.models import (
@@ -68,7 +70,7 @@ from ..store.models import (
     SeriesAssetImage,
 )
 from .camera import CameraError, angle_prompt, camera_plan, merge_loras
-from .generation import UPLOAD_SUBFOLDER, GenerationError, split_trigger_words
+from .generation import GenerationError, split_trigger_words
 from .jobs import JobReporter
 from .library import active_style, style_for
 from .prompt import build_negative_prompt
@@ -537,6 +539,62 @@ def variant_angle(variant: ReferenceVariant) -> str | None:
     return str(angle["id"]) if isinstance(angle, dict) and angle.get("id") else None
 
 
+def protected_variant_ids(session: Session, project_id: int) -> set[int]:
+    """Variantes dont un job en attente ou en cours a besoin (« Affiner » depuis elle, essai qui passe au
+    propre) : jamais effacées par le ménage."""
+    rows = session.scalars(
+        select(Job).where(Job.project_id == project_id, Job.status.in_(ACTIVE), Job.step.in_((STEP, "style_board")))
+    )
+    out: set[int] = set()
+    for job in rows:
+        for key in ("parent_id", "trial_id"):
+            value = (job.params or {}).get(key)
+            if isinstance(value, int):
+                out.add(value)
+    return out
+
+
+def prune_variants(
+    session: Session, project_id: int, entry_kind: str, entry_id: int, sheet: str, keep: int
+) -> list[str]:
+    """Garde les `keep` dernières variantes non gardées d'une fiche pour ce type de fiche, efface les plus
+    anciennes (sans commit) ; renvoie les fichiers à effacer après le commit. Les variantes gardées comme
+    référence et celles dont un job a besoin restent toujours."""
+    rows = list(
+        session.scalars(
+            select(ReferenceVariant)
+            .where(
+                ReferenceVariant.project_id == project_id,
+                ReferenceVariant.entry_kind == entry_kind,
+                ReferenceVariant.entry_id == entry_id,
+                ReferenceVariant.sheet == sheet,
+                ReferenceVariant.kept_image_id.is_(None),
+            )
+            .order_by(ReferenceVariant.id.desc())
+        )
+    )
+    protected = protected_variant_ids(session, project_id)
+    paths: list[str] = []
+    for variant in rows[max(keep, 0) :]:
+        if variant.id in protected:
+            continue
+        paths.append(variant.path)
+        session.delete(variant)
+    return paths
+
+
+def unkept_variants(session: Session, project_id: int) -> list[ReferenceVariant]:
+    """Variantes non gardées de la série (fiches et essais de la planche de style), hors celles dont un job a
+    besoin : ce que « Nettoyer les variantes non retenues » efface."""
+    protected = protected_variant_ids(session, project_id)
+    rows = session.scalars(
+        select(ReferenceVariant).where(
+            ReferenceVariant.project_id == project_id, ReferenceVariant.kept_image_id.is_(None)
+        )
+    )
+    return [v for v in rows if v.id not in protected]
+
+
 def delete_entry_variants(session: Session, kind: str, entry_id: int) -> list[str]:
     """Supprime l'historique d'une fiche (sans commit) ; renvoie les fichiers à effacer après le commit."""
     rows = list(
@@ -583,8 +641,14 @@ class ReferenceExecutor:
         presets_for: Callable[[int | None], PresetRegistry] | None = None,
         detectors: DetectorProvider | None = None,
         detectors_error: str = "",
+        folders: ComfyFolders | None = None,
+        variants_kept: int | None = None,
     ) -> None:
         self.db = db
+        # Dossiers de ComfyUI (sortie effacée une fois copiée dans data/) ; variantes non gardées conservées
+        # par fiche et type de fiche (None : toutes).
+        self.folders = folders
+        self.variants_kept = variants_kept
         self.presets_for = presets_for or (lambda _project_id: presets)
         self.files = files
         self.comfyui = comfyui
@@ -628,6 +692,7 @@ class ReferenceExecutor:
                 raise GenerationError(camera.skipped[0] if camera.skipped else "angle de caméra indisponible")
             references: list[dict[str, Any]] = []
             reference_data: list[bytes] = []
+            folder = comfy_entry_folder(entry, series)
             parent_id = params.get("parent_id")
             if parent_id is not None:
                 parent = session.get(ReferenceVariant, int(parent_id))
@@ -641,7 +706,8 @@ class ReferenceExecutor:
                     {
                         "kind": "variant",
                         "variant_id": parent.id,
-                        "filename": f"{FOLDERS[entry_kind(entry)][:-1]}{entry.id}_variante{parent.id}{ext}",
+                        "subfolder": folder,
+                        "filename": f"variante-{parent.id}{ext}",
                     }
                 )
                 reference_data.append(path.read_bytes())
@@ -658,7 +724,8 @@ class ReferenceExecutor:
                     {
                         "kind": "start",
                         "image_id": start.id,
-                        "filename": f"{FOLDERS[entry_kind(entry)][:-1]}{entry.id}_depart{start.id}{ext}",
+                        "subfolder": folder,
+                        "filename": f"depart-{start.id}{ext}",
                     }
                 )
                 reference_data.append(start_path.read_bytes())
@@ -671,15 +738,12 @@ class ReferenceExecutor:
                         "kind": "style",
                         "asset_id": style.id,
                         "image_id": image.id,
-                        "filename": f"style{style.id}_img{image.id}{ext}",
+                        "subfolder": comfy_entry_folder(style, series),
+                        "filename": f"reference-{image.id}{ext}",
                     }
                 )
                 reference_data.append(self.files.absolute(image.path).read_bytes())
-            slug = f"{FOLDERS[entry_kind(entry)][:-1]}-{entry.id}"
-            prefix = (
-                f"mangaka/serie-{entry.project_id}/references/{slug}/{params.get('sheet')}"
-                f"/variante-{params.get('variant', 1)}"
-            )
+            prefix = f"{folder}/{params.get('sheet')}/variante-{params.get('variant', 1)}"
             if sheet is not None:
                 mapped = sheet_params(
                     loaded,
@@ -737,7 +801,7 @@ class ReferenceExecutor:
         for ref, data in zip(plan.references, plan.reference_data, strict=True):
             what = UPLOAD_LABELS.get(ref["kind"], "la référence de style")
             report(4, f"Envoi de {what} à ComfyUI…")
-            uploaded.append(comfy.upload_image(data, ref["filename"], subfolder=UPLOAD_SUBFOLDER))
+            uploaded.append(comfy.upload_image(data, ref["filename"], subfolder=ref["subfolder"]))
         built = build_workflow(plan.loaded, plan.params, reference_images=uploaded, loras=plan.loras)
         if cancel.is_set():
             raise ComfyUIInterruptedError("génération annulée")
@@ -780,6 +844,8 @@ class ReferenceExecutor:
             report(95, "Recherche de personnages dans la fiche…")
             check = people_check(self.detectors, plan.qc, data, error=self.detectors_error)
         stored = self.files.save_image(data, plan.folder)
+        if self.folders is not None:
+            self.folders.discard_output(refs[0])
         duration_ms = int((time.monotonic() - t0) * 1000)
 
         with self.db.session_scope() as session:
@@ -815,7 +881,7 @@ class ReferenceExecutor:
                     "loras": [lo.as_dict() for lo in built.loras],
                     **({"camera": plan.camera} if plan.camera else {}),
                     "reference_images": [
-                        {**{k: v for k, v in ref.items() if k != "filename"}, "comfyui_name": name}
+                        {**{k: v for k, v in ref.items() if k not in ("filename", "subfolder")}, "comfyui_name": name}
                         for ref, name in zip(plan.references, uploaded, strict=True)
                     ],
                     "removed_nodes": built.removed_nodes,
@@ -831,12 +897,20 @@ class ReferenceExecutor:
             stored_view = ""
             if params.get("mode") == "angle":
                 stored_view = self._store_view(session, entry, variant)
+            pruned: list[str] = []
+            if self.variants_kept is not None:
+                pruned = prune_variants(
+                    session, variant.project_id, variant.entry_kind, variant.entry_id, variant.sheet, self.variants_kept
+                )
+                session.flush()
             n = session.scalar(
                 select(func.count()).where(
                     ReferenceVariant.entry_kind == variant.entry_kind, ReferenceVariant.entry_id == variant.entry_id
                 )
             )
             session.commit()
+        for path in pruned:
+            self.files.delete(path)
         warning = f" — {PEOPLE_WARNING}" if check is not None and check["detected"] else ""
         if params.get("mode") == "angle":
             return f"{params.get('sheet_name')} — {stored.width}×{stored.height}, seed {built.params['seed']}{stored_view}{warning}"

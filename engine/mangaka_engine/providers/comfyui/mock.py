@@ -1,10 +1,10 @@
 """ComfyUI factice : sans GPU ni réseau.
 
 Renvoie une image à la taille demandée, avec le libellé de la case (dernier segment du
-`filename_prefix` du nœud SaveImage, ex. « case 3 ») et la seed dessinés dessus ; simule une
+`filename_prefix` du nœud SaveImage, ex. « case 03 ») et la seed dessinés dessus ; simule une
 progression par étapes ; vérifie que les images des `LoadImage` / `LoadImageMask` ont été envoyées.
 
-Palier croquis : un croquis (libellé « croquis case N ») est un crayonné gris sur papier dont la
+Palier croquis : un croquis (libellé « case NN croquis ») est un crayonné gris sur papier dont la
 composition (formes) dépend de la graine ; un workflow image → image sans masque (`VAEEncode` d'une
 image chargée) repart de l'image envoyée, agrandie à la taille demandée et « encrée » : même composition.
 
@@ -17,6 +17,10 @@ Composition verrouillée (ControlNet, patch de modèle) : un nœud qui reçoit u
 de contrôle (workflow sans latent avec un prétraitement : classe `…Preprocessor` ou `Canny`) : contours
 de l'image guide, trait noir sur blanc.
 
+Rangement : comme ComfyUI, la sortie est rangée selon le `filename_prefix` (sous-dossier + `<nom>_00001_.png`) et
+une image envoyée selon son `subfolder` ; avec `root` (dossier d'un faux ComfyUI, tests), les fichiers sont
+réellement écrits dans `root/output/` et `root/input/`.
+
 Agrandissement (finition d'impression) : un autre workflow sans latent vide (`Empty…`) qui charge une image
 envoyée renvoie cette image redimensionnée (Pillow, lanczos) à la taille demandée — celle du nœud de
 taille finale — sans GPU ni modèle.
@@ -25,10 +29,12 @@ taille finale — sans GPU ni modèle.
 from __future__ import annotations
 
 import io
+import itertools
 import threading
 import time
 import uuid
 from collections.abc import Callable, Sequence
+from pathlib import Path
 from typing import Any
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
@@ -77,13 +83,16 @@ def _first_int(workflow: dict[str, Any], key: str) -> int | None:
     return None
 
 
-def _label(workflow: dict[str, Any]) -> str:
+def _prefix(workflow: dict[str, Any]) -> str:
     for node in workflow.values():
         if isinstance(node, dict) and node.get("class_type") == "SaveImage":
-            prefix = str(node.get("inputs", {}).get("filename_prefix") or "")
-            last = prefix.rstrip("/").rsplit("/", 1)[-1]
-            return last.replace("-", " ").replace("_", " ").strip()
+            return str(node.get("inputs", {}).get("filename_prefix") or "")
     return ""
+
+
+def _label(workflow: dict[str, Any]) -> str:
+    last = _prefix(workflow).rstrip("/").rsplit("/", 1)[-1]
+    return last.replace("-", " ").replace("_", " ").strip()
 
 
 def source_upload(workflow: dict[str, Any], uploads: dict[str, bytes]) -> bytes | None:
@@ -286,8 +295,11 @@ class MockComfyUIClient:
         seconds_per_image: float = 0.0,
         sleep: Callable[[float], None] = time.sleep,
         loras: Sequence[str] = MOCK_LORAS,
+        root: Path | None = None,
     ) -> None:
         self.online = online
+        self.root = root  # faux dossier ComfyUI : sorties et envois écrits sur disque
+        self._counter = itertools.count(1)
         self.loras = list(loras)
         self.seconds_per_image = seconds_per_image
         self._sleep = sleep
@@ -325,6 +337,10 @@ class MockComfyUIClient:
         self._check_online()
         name = f"{subfolder}/{filename}" if subfolder else filename
         self.uploads[name] = data
+        if self.root is not None:
+            path = self.root / "input" / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
         return name
 
     def queue_prompt(self, workflow: dict[str, Any]) -> str:
@@ -344,7 +360,8 @@ class MockComfyUIClient:
         self._interrupted.clear()
         prompt_id = uuid.uuid4().hex
         self.prompts[prompt_id] = workflow
-        filename = f"mock_{prompt_id}.png"
+        subfolder, _, stem = _prefix(workflow).strip("/").rpartition("/")
+        filename = f"{stem or 'mock'}_{next(self._counter):05d}_.png"
         seed, label = _first_int(workflow, "seed") or 0, _label(workflow)
         inpaint = self._inpaint_inputs(workflow)
         sketch_source = source_image_name(workflow) if inpaint is None else None
@@ -373,14 +390,18 @@ class MockComfyUIClient:
             data = render_mock_from_image(
                 self.uploads[sketch_source], width, height, seed, _first_float(workflow, "denoise")
             )
-        elif label.startswith("croquis"):
+        elif "croquis" in label.split():
             data = render_mock_sketch(*requested_size(workflow), seed, label)
         else:
             data = render_mock_image(*requested_size(workflow), seed, label)
         self._images[filename] = data
+        if self.root is not None:
+            path = self.root / "output" / subfolder / filename
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
         output_nodes = [k for k, n in workflow.items() if isinstance(n, dict) and n.get("class_type") == "SaveImage"]
         outputs = {
-            node: {"images": [{"filename": filename, "subfolder": "", "type": "output"}]}
+            node: {"images": [{"filename": filename, "subfolder": subfolder, "type": "output"}]}
             for node in output_nodes or ["output"]
         }
         self._history[prompt_id] = {"outputs": outputs, "status": {"status_str": "success", "completed": True}}

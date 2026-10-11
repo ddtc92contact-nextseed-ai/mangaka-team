@@ -63,6 +63,7 @@ from .schemas import (
     PanelOut,
     SfxOut,
 )
+from .storage import remove_chapter_folders, remove_page_folders
 
 router = APIRouter(tags=["chapitres"])
 
@@ -350,9 +351,15 @@ def update_chapter(chapter_id: int, body: ChapterUpdate, session: Session = Depe
 
 
 @router.delete("/chapters/{chapter_id}", status_code=204)
-def delete_chapter(chapter_id: int, session: Session = Depends(get_session)) -> Response:
-    session.delete(get_chapter_or_404(session, chapter_id))
+def delete_chapter(
+    chapter_id: int, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
+) -> Response:
+    chapter = get_chapter_or_404(session, chapter_id)
+    series, project_id = chapter.project.slug, chapter.project_id
+    session.delete(chapter)
     session.commit()
+    ctx.files.delete_tree(f"projects/{project_id}/chapters/{chapter_id}")
+    remove_chapter_folders(ctx, series, chapter)  # mangaka/<série>/chapitre-NN dans ComfyUI
     return Response(status_code=204)
 
 
@@ -482,6 +489,7 @@ def replace_pages(
     chapter = get_chapter_or_404(session, chapter_id)
     pages = _load_pages(session, chapter_id)
     pages_by_id = {p.id: p for p in pages}
+    numbers = {p.id: p.number for p in pages}  # avant renumérotation : dossiers des pages retirées
     panels_by_id = {pa.id: pa for p in pages for pa in p.panels}
     matcher = CharacterMatcher.for_project(session, chapter.project_id)
     library = SeriesLibrary.load(session, chapter.project_id)
@@ -593,9 +601,9 @@ def replace_pages(
         page.panels = ordered  # les cases retirées deviennent orphelines → supprimées
         result.append(page)
 
-    for p in pages:
-        if p.id not in seen_pages:
-            session.delete(p)
+    removed_pages = [p for p in pages if p.id not in seen_pages]
+    for p in removed_pages:
+        session.delete(p)
     session.flush()
 
     for page in sorted(result, key=lambda p: p.number):
@@ -608,6 +616,8 @@ def replace_pages(
         elif not page.panels:
             page.layout = None
     session.commit()
+    # Pages retirées : leur dossier dans ComfyUI (mangaka/<série>/chapitre-NN/page-NN).
+    remove_page_folders(ctx, chapter.project.slug, chapter, [numbers[p.id] for p in removed_pages])
     return pages_out(session, ctx, _load_pages(session, chapter_id))
 
 

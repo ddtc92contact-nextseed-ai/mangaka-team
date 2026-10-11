@@ -296,7 +296,7 @@ def test_mock_image_shows_panel_number(make_client: Callable[..., TestClient]) -
     _ok(c.post(f"/panels/{p2['id']}/generate"), 202)
     _wait(c)
     [wf] = comfy.prompts.values()
-    assert wf["11"]["inputs"]["filename_prefix"].endswith("/page-1/case-2")
+    assert wf["11"]["inputs"]["filename_prefix"].endswith("/chapitre-01/page-01/case-02")
     [img] = _ok(c.get(f"/panels/{p2['id']}/images"))
     pixels = Image.open(io.BytesIO(c.get(img["url"]).content)).convert("RGB")
     # le libellé est écrit en blanc sur un fond uni (cadre blanc exclu)

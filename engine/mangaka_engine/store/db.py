@@ -8,6 +8,7 @@ from pathlib import Path
 from sqlalchemy import Engine, create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
+from . import slugs  # noqa: F401 — slug donné aux séries et fiches créées sans (avant chaque flush)
 from .migrations import migrate
 
 

@@ -785,12 +785,12 @@ def test_v22_database_gets_untagged_views_and_no_anime_consistency(make_settings
     assert _columns(settings.database_path) == _columns(fresh)
 
 
-def test_v23_database_gets_the_panel_dialog_with_nothing_imposed(make_settings: Callable[..., Settings]) -> None:
-    """v23 → v24 : dialogue avec l'IA par case (historique, direction et référence propres à la case) ; rien
+def test_v24_database_gets_the_panel_dialog_with_nothing_imposed(make_settings: Callable[..., Settings]) -> None:
+    """v24 → v25 : dialogue avec l'IA par case (historique, direction et référence propres à la case) ; rien
     d'imposé aux cases existantes."""
     settings = make_settings()
     with TestClient(create_app(settings)) as c:
-        project = c.post("/projects", json={**STYLE, "title": "Série v23"}).json()
+        project = c.post("/projects", json={**STYLE, "title": "Série v24"}).json()
         chapter = c.post(f"/projects/{project['id']}/chapters", json={"title": "Un"}).json()
         pages = c.put(
             f"/chapters/{chapter['id']}/pages", json={"pages": [{"panels": [{"description": "Une rue."}]}]}
@@ -800,7 +800,7 @@ def test_v23_database_gets_the_panel_dialog_with_nothing_imposed(make_settings: 
     con.execute("DROP TABLE panel_dialog_turns")
     con.execute("ALTER TABLE panels DROP COLUMN dialog_direction")
     con.execute("ALTER TABLE panels DROP COLUMN reference_choice")
-    con.execute("PRAGMA user_version = 23")
+    con.execute("PRAGMA user_version = 24")
     con.commit()
     con.close()
 

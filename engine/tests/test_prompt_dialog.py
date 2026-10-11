@@ -159,7 +159,6 @@ def test_apply_and_generate_sends_the_portrait_and_touches_only_this_panel(env: 
     c = env.c
     data = _setup(c)
     pid, other = data["panels"][0]["id"], data["panels"][1]["id"]
-    lucius = data["lucius"]["id"]
     turn = _ok(c.post(f"/panels/{pid}/dialog", json={"instruction": CLOSE_UP}), 201)
     out = _ok(c.post(f"/panel-dialog/{turn['id']}/apply", json={"generate": True}))
     assert len(out["jobs"]) == 1 and out["jobs"][0]["panel_id"] == pid
@@ -171,8 +170,9 @@ def test_apply_and_generate_sends_the_portrait_and_touches_only_this_panel(env: 
     # le workflow envoyé à ComfyUI charge le portrait de Lucius, plus sa planche en pied
     [wf] = env.comfy.prompts.values()
     loaded = [n["inputs"]["image"] for n in wf.values() if n["class_type"] == "LoadImage"]
-    assert f"mangaka/perso{lucius}_img{data['portrait']}.png" in loaded
-    assert not any(f"_img{data['full_body']}." in name for name in loaded)
+    lucius_dir = f"personnages/{data['lucius']['slug']}"
+    assert any(name.endswith(f"{lucius_dir}/reference-{data['portrait']}.png") for name in loaded)
+    assert not any(f"{lucius_dir}/reference-{data['full_body']}." in name for name in loaded)
     assert img["params"]["reference_images"][0]["image_id"] == data["portrait"]
 
     # une 2e génération garde le choix ; la version 1 reste

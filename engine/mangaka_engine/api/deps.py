@@ -19,6 +19,7 @@ from ..pipeline.qc import QCExecutor
 from ..pipeline.queue import SerialJobQueue
 from ..presets import PresetRegistry
 from ..providers.factory import Providers
+from ..store.comfy_folders import ComfyFolders
 from ..store.db import Database
 from ..store.files import FileStore
 
@@ -35,6 +36,8 @@ class AppContext:
     qc: QCExecutor
     agents: AgentService  # profils des agents (écran « L'équipe ») : presets effectifs par série
     knowledge: KnowledgeBase  # savoir-faire et bible injectés dans les agents
+    # Dossiers de la série dans ComfyUI (rangement, renommage, nettoyage) ; désactivé sans COMFYUI_DIR valide.
+    folders: ComfyFolders = field(default_factory=lambda: ComfyFolders(None, mock=True))
     lora_catalog: LoraCatalog = field(default_factory=LoraCatalog)  # LoRA vus par ComfyUI (cache court)
     # Verrouillage de composition (ControlNet) disponible dans ComfyUI ? (cache court)
     control_catalog: ControlCatalog = field(default_factory=ControlCatalog)
