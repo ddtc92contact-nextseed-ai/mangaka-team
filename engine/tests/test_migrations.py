@@ -812,3 +812,27 @@ def test_v24_database_gets_the_panel_dialog_with_nothing_imposed(make_settings: 
     fresh = settings.database_path.parent / "fresh.db"
     create_db_engine(fresh).dispose()
     assert _columns(settings.database_path) == _columns(fresh)
+
+
+def test_v25_database_gets_the_panel_crop_with_panels_centred(make_settings: Callable[..., Settings]) -> None:
+    """v25 → v26 : cadrage manuel de l'image par case ; les cases existantes restent centrées."""
+    settings = make_settings()
+    with TestClient(create_app(settings)) as c:
+        project = c.post("/projects", json={**STYLE, "title": "Série v25"}).json()
+        chapter = c.post(f"/projects/{project['id']}/chapters", json={"title": "Un"}).json()
+        pages = c.put(
+            f"/chapters/{chapter['id']}/pages", json={"pages": [{"panels": [{"description": "Une rue."}]}]}
+        ).json()
+    con = sqlite3.connect(settings.database_path)
+    con.execute("ALTER TABLE panels DROP COLUMN crop")
+    con.execute("PRAGMA user_version = 25")
+    con.commit()
+    con.close()
+
+    with TestClient(create_app(settings)) as c:
+        [page] = c.get(f"/chapters/{chapter['id']}/pages").json()
+        assert page["panels"][0]["id"] == pages[0]["panels"][0]["id"] and page["panels"][0]["crop"] is None
+    assert _version(settings.database_path) == SCHEMA_VERSION
+    fresh = settings.database_path.parent / "fresh.db"
+    create_db_engine(fresh).dispose()
+    assert _columns(settings.database_path) == _columns(fresh)

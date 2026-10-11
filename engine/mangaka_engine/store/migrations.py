@@ -42,6 +42,7 @@
   chapitres et les pages (tables reconstruites, données et ids gardés).
 - 25 : dialogue avec l'IA par case (historique des échanges, direction et référence imposées à la case) ;
   rien d'imposé sur les cases existantes.
+- 26 : cadrage manuel de l'image par case (centre + zoom) ; les cases existantes restent centrées.
 
 Une base neuve est créée directement à la dernière version. Chaque migration tourne dans une
 transaction unique, clés étrangères désactivées (recette « 12 étapes » de SQLite pour reconstruire
@@ -86,7 +87,7 @@ from .slugs import RESERVED_ENTRIES, RESERVED_SERIES, slugify, unique_slug
 
 log = logging.getLogger("mangaka_engine")
 
-SCHEMA_VERSION = 25
+SCHEMA_VERSION = 26
 
 
 class MigrationError(RuntimeError):
@@ -402,6 +403,11 @@ def _v24_to_v25(cur: sqlite3.Cursor) -> None:
             cur.execute(f"ALTER TABLE panels ADD COLUMN {column} JSON")
 
 
+def _v25_to_v26(cur: sqlite3.Cursor) -> None:
+    if "crop" not in {row[1] for row in cur.execute("PRAGMA table_info(panels)")}:
+        cur.execute("ALTER TABLE panels ADD COLUMN crop JSON")
+
+
 MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     # version de départ → (version d'arrivée, fonction)
     0: (2, _v0_to_v2),
@@ -429,6 +435,7 @@ MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     22: (23, _v22_to_v23),
     23: (24, _v23_to_v24),
     24: (25, _v24_to_v25),
+    25: (26, _v25_to_v26),
 }
 
 

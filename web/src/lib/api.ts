@@ -177,6 +177,13 @@ export interface Rect {
   y2: number;
 }
 
+/** Cadrage manuel : centre de la fenêtre (fraction de l'image, 0–1) et zoom sur le remplissage (≥ 1). */
+export interface PanelCrop {
+  x: number;
+  y: number;
+  zoom: number;
+}
+
 export interface PanelData {
   id: number;
   index: number;
@@ -200,6 +207,10 @@ export interface PanelData {
   sfx?: PanelSfx[];
   /** Options de cadre imposées à la case (null = décidées par le style de mise en page). */
   frame?: PanelFrame | null;
+  /** Cadrage manuel de l'image dans la case (null = centrée au remplissage). */
+  crop?: PanelCrop | null;
+  /** Zoom maximal du cadrage permis par l'image montrée (null = aucune image à cadrer). */
+  crop_max_zoom?: number | null;
   bbox: Rect | null;
   bubble_zone: Rect | null;
   state: PanelState;
@@ -1519,6 +1530,10 @@ export interface PageLettering {
     break_out?: boolean;
     bubble_zone: Rect | null;
     image_url: string | null;
+    /** Sorte de l'image montrée : version propre, ou croquis à défaut (aperçu seulement, jamais exporté). */
+    image_kind?: "final" | "croquis" | null;
+    /** Où l'image entière tombe sur la page une fois cadrée (la case n'en montre que la fenêtre). */
+    image_rect?: Rect | null;
     faces: Rect[];
   }[];
   bubbles: LetteredBubble[];
@@ -2108,6 +2123,8 @@ export const api = {
   layoutStyles: () => request<LayoutStyle[]>("/layout/styles"),
   setPanelFrame: (panelId: number, body: Partial<PanelFrame>) =>
     request<PageData>(`/panels/${panelId}/frame`, json("PUT", body)),
+  setPanelCrop: (panelId: number, body: PanelCrop) => request<PageData>(`/panels/${panelId}/crop`, json("PUT", body)),
+  resetPanelCrop: (panelId: number) => request<PageData>(`/panels/${panelId}/crop`, { method: "DELETE" }),
   moveGutter: (pageId: number, body: { path: number[]; index: number; position: number }) =>
     request<PageData>(`/pages/${pageId}/gutters`, json("POST", body)),
   layoutTemplates: () => request<LayoutTemplate[]>("/layout/templates"),

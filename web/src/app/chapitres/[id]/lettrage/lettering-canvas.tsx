@@ -248,6 +248,7 @@ export function LetteringCanvas({
             key={p.id}
             data-testid="lettering-panel"
             data-missing={p.image_url ? undefined : "true"}
+            data-image-kind={p.image_kind ?? undefined}
             data-frame={p.frame ?? "border"}
             data-inset={p.inset ? "true" : undefined}
             data-break-out={p.break_out ? "true" : undefined}
@@ -255,14 +256,16 @@ export function LetteringCanvas({
             {p.inset && <polygon points={svgPoints(outsetPolygon(polygonOf(p), outline))} fill="#ffffff" />}
             <g mask={p.frame === "fade" ? `url(#fondu-case-${p.id})` : undefined}>
             {p.image_url ? (
+              // Même cadrage que l'assemblage : l'image entière placée par le moteur, la case n'en garde que la fenêtre.
               <image
                 href={engineUrl(p.image_url)}
-                x={p.box.x1}
-                y={p.box.y1}
-                width={w}
-                height={h}
-                preserveAspectRatio="xMidYMid slice"
+                x={p.image_rect ? p.image_rect.x1 : p.box.x1}
+                y={p.image_rect ? p.image_rect.y1 : p.box.y1}
+                width={p.image_rect ? p.image_rect.x2 - p.image_rect.x1 : w}
+                height={p.image_rect ? p.image_rect.y2 - p.image_rect.y1 : h}
+                preserveAspectRatio={p.image_rect ? "none" : "xMidYMid slice"}
                 clipPath={`url(#clip-case-${p.id})`}
+                data-kind={p.image_kind ?? undefined}
               />
             ) : (
               <>
@@ -332,6 +335,23 @@ export function LetteringCanvas({
                   data-testid="face-box"
                 />
               ))}
+            {p.image_kind === "croquis" && (
+              // Aperçu seulement : jamais dans le rendu ni l'export (aplat « case manquante » + avertissement).
+              <g pointerEvents="none" data-testid="lettering-sketch-badge" aria-label={`Case ${p.index + 1} : croquis seulement`}>
+                <rect x={p.box.x1 + guide * 3} y={p.box.y1 + guide * 3} width={guide * 22} height={guide * 7} rx={guide * 1.5} fill="#09090b" fillOpacity={0.75} />
+                <text
+                  x={p.box.x1 + guide * 14}
+                  y={p.box.y1 + guide * 6.5}
+                  fill="#e4e4e7"
+                  fontSize={guide * 4.2}
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  fontFamily="system-ui, sans-serif"
+                >
+                  croquis
+                </text>
+              </g>
+            )}
           </g>
         );
       })}

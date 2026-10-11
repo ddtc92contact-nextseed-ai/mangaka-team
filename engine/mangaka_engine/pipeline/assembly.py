@@ -1,7 +1,8 @@
 """Étape 5 — assemblage de la planche et rendu PNG (300 DPI) / SVG (texte vectoriel).
 
 Pour chaque case, la version retenue est recadrée « au remplissage » (centrée, sans déformation)
-aux coordonnées du découpage ; une case sans image devient un aplat gris « case manquante ». Les
+aux coordonnées du découpage — ou selon le cadrage imposé à la main sur la case (`crop.py` : centre et
+zoom, bornés à la boîte) ; une case sans image devient un aplat gris « case manquante ». Les
 bordures de case viennent du preset de lettrage, les marges et gouttières du découpage (format de
 page). Les bulles (voir `lettering.py`) sont posées par-dessus.
 
@@ -31,7 +32,7 @@ Onomatopées : texte de la police de l'onomatopée, halo puis contour épais pui
 (rotation · cisaillement) autour de son centre, posé après les bulles.
 
 Le SVG reprend exactement la même géométrie : images embarquées (fichiers d'origine, recadrage
-par `preserveAspectRatio="xMidYMid slice"`), texte en vraies balises `<text>` sélectionnables avec
+par `preserveAspectRatio="xMidYMid slice"`, ou image placée et coupée à la case pour un cadrage manuel), texte en vraies balises `<text>` sélectionnables avec
 la police embarquée (sous-ensemble des caractères utilisés), formes de bulle en chemins ; une
 onomatopée reste du texte (`<text>` dans un `<g transform>`), contour et halo en `stroke`.
 """
@@ -50,6 +51,7 @@ from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 from ..presets.schemas import LetteringSettings, PageFormat, TextStyle
 from . import geometry as geo
+from .crop import PanelCrop, crop_window, image_placement
 from .fonts import FontBook, pt_to_px
 from .lettering import (
     MM_PER_INCH,
@@ -113,6 +115,7 @@ class PanelArt:
     frame: str = "border"  # border | none | fade
     inset: bool = False  # incrustation : dessinée après les autres cases, sur un liseré blanc
     break_out: bool = False  # déborde sur ses voisines : dessinée au-dessus des cases de l'arbre
+    crop: PanelCrop | None = None  # cadrage manuel de l'image (None = centrée au remplissage)
 
     @property
     def slanted(self) -> bool:
@@ -227,18 +230,16 @@ def polygon_mask(poly: Sequence[geo.Point], x0: int, y0: int, w: int, h: int, ss
     return mask.resize((w, h), Image.Resampling.BOX) if ss > 1 else mask
 
 
-def cover_crop(iw: int, ih: int, w: float, h: float) -> tuple[float, float, float, float]:
-    """Zone de l'image (x1, y1, x2, y2) qui remplit w × h sans déformation, centrée."""
-    scale = max(w / iw, h / ih)
-    cw, ch = min(iw, w / scale), min(ih, h / scale)
-    x1, y1 = max(0.0, (iw - cw) / 2), max(0.0, (ih - ch) / 2)  # bornés : arrondis flottants (−1e-13)
-    return x1, y1, x1 + cw, y1 + ch
+def cover_crop(
+    iw: int, ih: int, w: float, h: float, crop: PanelCrop | None = None
+) -> tuple[float, float, float, float]:
+    """Zone de l'image (x1, y1, x2, y2) qui remplit w × h sans déformation : centrée, ou selon `crop`."""
+    return crop_window(iw, ih, w, h, crop)
 
 
-def cover_transform(iw: int, ih: int, box: Box) -> tuple[float, float, float]:
+def cover_transform(iw: int, ih: int, box: Box, crop: PanelCrop | None = None) -> tuple[float, float, float]:
     """(échelle, x0, y0) : un point (u, v) de l'image va en (x0 + u × échelle, y0 + v × échelle)."""
-    scale = max(box.w / iw, box.h / ih)
-    return scale, box.x1 + (box.w - iw * scale) / 2, box.y1 + (box.h - ih * scale) / 2
+    return image_placement(iw, ih, box.x1, box.y1, box.w, box.h, crop)
 
 
 def crop_mark_lines(canvas: Canvas, settings: LetteringSettings, dpi: int) -> list[tuple[float, float, float, float]]:
@@ -311,7 +312,7 @@ def render_png(art: PageArt, fonts: FontBook, settings: LetteringSettings, canva
         if panel.image is not None:
             with Image.open(panel.image) as src:
                 src_rgb = src.convert("RGB")
-            crop = cover_crop(src_rgb.width, src_rgb.height, x2 - x1, y2 - y1)
+            crop = cover_crop(src_rgb.width, src_rgb.height, x2 - x1, y2 - y1, panel.crop)
             tile = src_rgb.resize((x2 - x1, y2 - y1), Image.Resampling.LANCZOS, box=crop)
             img.paste(tile, (x1, y1))
         else:
@@ -380,7 +381,7 @@ def _draw_slanted_panel(
     if panel.image is not None:
         with Image.open(panel.image) as src:
             src_rgb = src.convert("RGB")
-        crop = cover_crop(src_rgb.width, src_rgb.height, w, h)
+        crop = cover_crop(src_rgb.width, src_rgb.height, w, h, panel.crop)
         tile = src_rgb.resize((w, h), Image.Resampling.LANCZOS, box=crop)
     else:
         tile = Image.new("RGB", (w, h), _hex(settings.missing_panel_fill))
@@ -581,7 +582,14 @@ def render_svg(art: PageArt, fonts: FontBook, settings: LetteringSettings, canva
         if panel.image is not None:
             mime = _MIME.get(panel.image.suffix.lower(), "image/png")
             href = f"data:{mime};base64," + base64.b64encode(panel.image.read_bytes()).decode("ascii")
-            out.append(f'<image {geom} preserveAspectRatio="xMidYMid slice" href="{href}" xlink:href="{href}"/>')
+            if panel.crop is not None and panel.image_size is not None:
+                # Cadrage manuel : l'image entière est placée, la case (clip-path) n'en garde que la fenêtre.
+                iw, ih = panel.image_size
+                scale, x0, y0 = image_placement(iw, ih, r.x1, r.y1, r.w, r.h, panel.crop)
+                place = f'x="{_f(x0)}" y="{_f(y0)}" width="{_f(iw * scale)}" height="{_f(ih * scale)}"'
+                out.append(f'<image {place} preserveAspectRatio="none" href="{href}" xlink:href="{href}"/>')
+            else:
+                out.append(f'<image {geom} preserveAspectRatio="xMidYMid slice" href="{href}" xlink:href="{href}"/>')
         else:
             text, size = _fit_label(fonts, settings, r, dpi)
             cx, cy = geo.centroid(panel_polygon(panel, canvas)) if panel.slanted else (r.cx, r.cy)
