@@ -384,6 +384,13 @@ prompt_keywords: [sepia toned illustration, engraved hatching]
 # default: true       # un seul rendu par défaut (celui des séries d'avant les packs)
 ```
 
+Tonalité « papier blanc » (facultatif, anglais) : `tonality` est ajouté à la fin du prompt positif de
+chaque case du rendu (fragments, prompt rédigé par l'IA ou édité à la main) ; `tonality_negative` est
+ajouté au prompt négatif quand il est lu (vrai CFG > 1 : palier Qualité). Les rendus N&B livrés en ont
+une (« White paper dominant, clean line art, screentone only in the shadows, large white areas, no muddy
+grey fill ») : mesurées le 11/10/2026, les cases sortaient grises et bouchées (50 à 83 % de pixels
+sombres, contre 21,7 % sur une planche de référence). Le QC vérifie la tonalité (`detectors.tone`).
+
 Le rendu remplace toute mention de rendu en dur : `image_prompt.yaml` et les prompts de réparation
 ne parlent plus d'« encre » ni de « manga », sinon un rendu couleur serait contredit.
 
@@ -853,7 +860,13 @@ Avec `COMFYUI_PROVIDER=mock`, il répond « ComfyUI simulé ».
 
 ## Images de référence et LoRA (étape 3)
 
-Les six presets acceptent des LoRA ; les trois presets « avec images de référence » ont 3 emplacements
+Les presets acceptent des LoRA ; tous les presets « avec images de référence » (edit-ref de chaque palier :
+Turbo, Rapide, Qualité, Qualité max, croquis, passage au propre, ControlNet ; et les réparations) ont
+**5 emplacements**, branchés sur `images.image_1…5` de `TextEncodeQwenImage21`. L'encodeur en accepte
+jusqu'à 16 (entrée `images` de type autogrow, `image_1` à `image_16` dans
+`engine/tests/fixtures/comfyui/object_info.json`) : 5 couvre une case à 4-5 personnages sans alourdir
+l'encodage (chaque image ajoute ses latents à la séquence). `test_workflow_build.py` vérifie que tous
+les presets avec références déclarent le même nombre d'emplacements, dans la limite de l'encodeur
 (Qwen-Image 2.1 : l'édition / la référence est intégrée au modèle, pas de modèle « edit » séparé). Ils sont
 choisis automatiquement (selon le palier de la série) quand un personnage, le décor ou un objet de la
 case a une image de référence (bibliothèque de la série : onglets Personnages / Objets / Décors).
@@ -867,13 +880,19 @@ reference_images:
   - { node: "20", input: image }   # 1er emplacement → images.image_1 de l'encodeur (nœud 6)
   - { node: "21", input: image }
   - { node: "22", input: image }
+  - { node: "23", input: image }
+  - { node: "24", input: image }   # 5e emplacement → images.image_5
   # avec un redimensionnement propre à l'emplacement : { node: "20", input: image, remove: ["30"] }
 ```
 
 - Le moteur envoie les images de référence de la case à ComfyUI (`POST /upload/image`,
   sous-dossier `input/mangaka/`) et écrit le nom obtenu dans `workflow[node].inputs[input]`.
-  **Priorité** : les personnages de la case (dans l'ordre de la case), puis son décor, puis ses
-  objets. Les emplacements se remplissent par tours : 1re image de chaque fiche dans cet ordre, puis
+  **Priorité (par importance)** : une fiche par personnage de la case — ceux qui **parlent** d'abord
+  (ordre des bulles), puis l'ordre de la case —, puis son décor et ses objets, puis la planche de
+  style si elle est jointe aux cases. Un personnage présent n'est jamais écarté tant qu'un décor, un
+  objet ou le style occupe un emplacement. Les fiches qui avaient une image mais n'ont pas eu
+  d'emplacement sont notées sur le job et la version (`params.dropped_references` : sorte, id, nom) et
+  l'atelier affiche « Référence non envoyée : … » sous « Références utilisées ». Les emplacements se remplissent par tours : 1re image de chaque fiche dans cet ordre, puis
   2e image de chacune, etc. Exemple à 3 emplacements avec Aiko (2 images), le labo (2 images) et le
   robot (1 image) : Aiko n° 1, labo n° 1, robot n° 1 ; sans le robot : Aiko n° 1, labo n° 1, Aiko n° 2.
   `panel_references` de `defaults.yaml` : `principale` (livré) = un seul tour, l'**image principale**
@@ -886,7 +905,7 @@ reference_images:
   (« Références utilisées »).
 - Un emplacement **inutilisé est retiré** : son nœud et ceux listés dans `remove` (ex. son
   redimensionnement) sont supprimés, puis toute entrée d'un autre nœud qui pointait vers un nœud
-  retiré est effacée. Exemple : avec une seule référence, `images.image_2`/`images.image_3` disparaissent
+  retiré est effacée. Exemple : avec une seule référence, `images.image_2` à `images.image_5` disparaissent
   de l'encodeur `TextEncodeQwenImage21` (entrées optionnelles). L'encodeur redimensionne lui-même les
   références (`resolution: 1024`), d'où l'absence de nœud de redimensionnement.
 - `remove` doit donc lister **tous** les nœuds propres à l'emplacement : une entrée obligatoire
@@ -928,8 +947,8 @@ Les JSON livrés ont été construits d'après le sous-graphe « Image Edit (Qwe
 référence de la GX10, puis validés contre le ComfyUI 0.37 de la machine. Pour repartir d'un export :
 
 1. Ouvre le workflow dans ComfyUI. S'il contient un **sous-graphe**, déplie-le (clic droit → « Unpack
-   subgraph ») : le format API exporte les nœuds réels. Vérifie qu'il tourne (avec 3 `LoadImage` branchés
-   sur `images.image_1…3` de `TextEncodeQwenImage21` pour les presets « avec références ») et retire les
+   subgraph ») : le format API exporte les nœuds réels. Vérifie qu'il tourne (avec 5 `LoadImage` branchés
+   sur `images.image_1…5` de `TextEncodeQwenImage21` pour les presets « avec références ») et retire les
    LoRA (le moteur les insère).
 2. Exporte-le au **format API** (« Workflow → Export (API) », « Save (API Format) » selon les versions)
    et remplace `presets/workflows/<id>.json`. Pour l'autre palier, change seulement `unet_name`,
@@ -1197,7 +1216,12 @@ references:   # syntaxe Qwen-Image 2.1 Edit : <image1>, <image2>…, rôle de ch
 
 Un modèle d'édition recopie la pose et le cadrage de la référence si on ne lui dit pas le contraire (une
 fiche de face donne des cases de face) : d'où « ignore its pose, framing and background » et « one
-continuous scene, not a character sheet ». Un prompt qui **commence** par `<image1>` et cite exactement
+continuous scene, not a character sheet ». Il recopie aussi la **mise en page des planches** (grille de
+poses, règles, étiquettes, fond blanc) : `references.sorting` donne pour chaque image envoyée, selon sa
+sorte (`character`, `decor`, `object`, `style`), ce qu'il faut en prendre (« From <image1> take only the
+face, hair, body and outfit of Urus; ignore its layout, pose grid, rules, labels and white background. »).
+Ces consignes entrent par `$sorting` dans `after` : elles sont donc ajoutées même à un prompt rédigé par
+l'IA. Une sorte sans consigne (vide) n'en reçoit aucune ; aucun texte n'est codé dans le moteur. Un prompt qui **commence** par `<image1>` et cite exactement
 les images envoyées, dans l'ordre (prompt rédigé par l'IA), ne reçoit pas les lignes de rôle une 2e fois,
 seulement `after`. Un ancien prompt (français, « Image 1 : … », ou édité à la main) est toujours envoyé,
 avec les lignes de rôle anglaises en tête.
@@ -1361,8 +1385,9 @@ commenté sert de référence ; l'essentiel :
 | `verdict.ok_min` / `verdict.reject_below` | Score combiné ≥ `ok_min` → ok ; < `reject_below` → rejet ; entre les deux → à revoir |
 | `weights` | Poids des couches `detectors` / `identity` / `vision` (renormalisés sur celles qui ont tourné) |
 | `detectors.face\|hand\|text` | `min_confidence` (boîtes ignorées en dessous), `options` passées au détecteur deepghs, vérifiées au chargement (`level` : `n` ou `s` pour visages et mains ; `text.model` : modèle publié par deepghs ; liste dans `engine/mangaka_engine/providers/qc/dghs.py`) ; `hand.suspect_below` |
-| `detectors.rules` | `missing_face`, `extra_face` (+ `tolerance`), `text`, `suspect_hand` (+ `max_penalty`) : `penalty` (points retirés) et `at_least` (`review` / `reject` : verdict minimal imposé) |
+| `detectors.rules` | `missing_face`, `extra_face` (+ `tolerance`), `text`, `suspect_hand` (+ `max_penalty`), `too_dark` (facultative) : `penalty` (points retirés) et `at_least` (`review` / `reject` : verdict minimal imposé) |
 | `detectors.face_count_ignored_for_shots` | Types de plan où le nombre de visages n'est pas vérifié (insert…) |
+| `detectors.tone` | Tonalité (numpy sur l'image, CPU, sans modèle) : `dark_below` / `black_below` (niveaux de gris d'un pixel sombre / noir pur), `max_dark` / `max_black` (parts maximales, 0,45 / 0,25 au départ), `monochrome_only` (rendus N&B seulement), `skip_ambiance_keywords` (ambiance de la DA d'une scène de nuit ou sombre : non vérifiée). Au-delà, la règle `detectors.rules.too_dark` s'applique (« Case trop sombre : 68 % de pixels sombres, cible ≤ 45 % ») ; les deux parts s'affichent dans le panneau QC de l'atelier. Absent = jamais vérifiée |
 | `identity` | `min_similarity` (1 − différence CCIP), règle `below`, `max_references`, `crop_scale` |
 | `vision` | `mode` (`never` / `on_doubt` / `always`), `doubt_band` (score des couches 1-2 où la vision tranche), `max_retries`, `wait_idle_s`, `max_reasons`, `prompt` (`$description`, `$characters`, `$shot`) |
 | `bench` | Banc d'essai : `target_recall` (part des mauvaises cases que le QC doit attraper ; base du seuil suggéré), `annotation_goal.min` / `.max` (taille visée de l'ensemble annoté) |

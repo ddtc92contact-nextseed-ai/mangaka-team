@@ -67,11 +67,22 @@ references:
   decor: "<image$slot> is the location reference for $name: keep its layout, architecture and materials; show it from the new camera angle."
   object: "<image$slot> is the design reference for the object $name: keep its shape, colours and details."
   style: "<image$slot> is a style reference only (line work, inking, screentones, colours): do not copy its characters, scene or composition."
+  # Consigne de tri de chaque image envoyée ($sorting, dans l'ordre des emplacements) : ce qu'il faut en
+  # prendre, et ce qu'il faut ignorer de la planche (mise en page, grille de poses, règles, étiquettes,
+  # fond blanc), que le modèle recopie sinon. Toujours ajoutée, même à un prompt rédigé par l'IA
+  # (elle est dans `after`). $slot, $name comme ci-dessus ; vide = pas de consigne pour cette sorte.
+  sorting:
+    character: "From <image$slot> take only the face, hair, body and outfit of $name; ignore its layout, pose grid, rules, labels and white background."
+    decor: "From <image$slot> take only the shape, architecture, materials and details of the location $name; ignore its layout, framing, labels and any people."
+    object: "From <image$slot> take only the shape and details of the object $name; ignore its layout, rules, labels and white background."
+    style: "From <image$slot> take only the rendering (line work, inking, screentones, colours); never take its characters or its scene."
   separator: " "
-  # Morceaux avant / après le prompt de la case : $images (les lignes ci-dessus), $count (nombre d'images).
+  # Morceaux avant / après le prompt de la case : $images (les lignes ci-dessus), $count (nombre d'images),
+  # $sorting (les consignes de tri ci-dessus).
   before:
     - "$images"
   after:
+    - "$sorting"
     - "Use the reference images for identity and design only (face, hair, body shape, outfit, colours, materials): draw a new scene with new poses, a new camera angle and the whole background described above. Exactly one continuous scene in a single panel: not a character sheet, not a turnaround, not a collage, no side-by-side views, no multiple poses, no plain white background."
 
 # Plans et angles (direction artistique, scénario) → termes de cadrage anglais ($shot, $plan, $angle et

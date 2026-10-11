@@ -839,6 +839,10 @@ class StyleRendering(StylePack):
 
     monochrome: bool = Field(description="Rendu noir et blanc : seul à accepter le réglage « trames »")
     default: bool = False
+    # Tonalité « papier blanc » (anglais) : ajoutée au prompt positif de chaque case du rendu ; vide = aucune.
+    tonality: str = Field(default="", description="Consigne de tonalité ajoutée au prompt positif des cases")
+    # Termes ajoutés au prompt négatif des cases quand il est lu (vrai CFG, palier Qualité) ; vide = aucun.
+    tonality_negative: str = Field(default="", description="Termes négatifs de tonalité (lus à cfg > 1)")
 
 
 class StyleTone(StylePack):
@@ -1250,7 +1254,7 @@ IMAGE_PROMPT_VARIABLES = {
 }
 # Lignes d'images de référence (`references.character`…) et morceaux autour du prompt (`before`, `after`).
 REFERENCE_LINE_VARIABLES = {"slot", "name"}
-REFERENCE_PART_VARIABLES = {"images", "count"}
+REFERENCE_PART_VARIABLES = {"images", "count", "sorting"}
 
 
 def _check_templates(parts: list[str], allowed: set[str]) -> None:
@@ -1262,19 +1266,38 @@ def _check_templates(parts: list[str], allowed: set[str]) -> None:
             raise ValueError(f"variables inconnues : {', '.join(sorted(unknown))}")
 
 
+class ReferenceSorting(_Strict):
+    """Consigne de tri d'une image de référence, par sorte de fiche : ce qu'il faut en prendre et ce qu'il
+    faut ignorer (mise en page de la planche, grille de poses, règles, étiquettes, fond blanc). Variables :
+    $slot (numéro de l'image), $name (nom de la fiche). Vide : pas de consigne pour cette sorte."""
+
+    character: str = ""
+    decor: str = ""
+    object: str = ""
+    style: str = ""
+
+    @field_validator("character", "decor", "object", "style")
+    @classmethod
+    def _check_line(cls, value: str) -> str:
+        _check_templates([value], REFERENCE_LINE_VARIABLES)
+        return value
+
+
 class ReferencePromptSettings(_Strict):
     """Cadrage des images de référence dans le prompt envoyé (workflow avec références, voir
     pipeline/prompt.py `frame_references`) : quelle image est quel personnage, et ce qu'elles donnent.
 
     Une ligne par image envoyée, dans l'ordre des emplacements ($slot : numéro de l'image, $name : nom de
     la fiche), selon sa sorte ; `before` et `after` entourent le prompt de la case ($images : les lignes
-    jointes par `separator`, $count : nombre d'images).
+    jointes par `separator`, $count : nombre d'images, $sorting : la consigne de tri de chaque image,
+    `sorting`, jointe de même).
     """
 
     character: str = "<image$slot> is the identity reference for $name."
     decor: str = "<image$slot> is the location reference for $name."
     object: str = "<image$slot> is the design reference for the object $name."
     style: str = "<image$slot> is a style reference only."
+    sorting: ReferenceSorting = Field(default_factory=ReferenceSorting)
     separator: str = " "
     before: list[str] = Field(default_factory=lambda: ["$images"])
     after: list[str] = Field(default_factory=list)
@@ -1444,6 +1467,32 @@ class QCDetectorRules(_Strict):
     extra_face: QCExtraFaceRule
     text: QCRule
     suspect_hand: QCHandRule
+    # Case trop sombre (tonalité, voir `QCToneSettings`) ; absente = jamais pénalisée.
+    too_dark: QCRule | None = None
+
+
+class QCToneSettings(_Strict):
+    """Tonalité d'une case (numpy sur l'image, CPU, sans modèle) : part de pixels sombres et de noir pur.
+
+    Un pixel compte comme sombre sous `dark_below` (niveau de gris 0-255) et comme noir pur sous
+    `black_below` ; au-delà de `max_dark` ou de `max_black` (parts 0-1), la règle `too_dark` s'applique.
+    """
+
+    dark_below: int = Field(ge=1, le=255)
+    black_below: int = Field(ge=1, le=255)
+    max_dark: float = Field(ge=0, le=1)
+    max_black: float = Field(ge=0, le=1)
+    # Vrai : seulement pour les rendus noir et blanc (`monochrome` du pack de rendu de la série).
+    monochrome_only: bool = True
+    # Ambiance de la direction artistique qui marque une scène de nuit ou sombre (mots comparés sans
+    # casse ni accents) : la tonalité n'est pas vérifiée.
+    skip_ambiance_keywords: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _check(self) -> QCToneSettings:
+        if self.black_below > self.dark_below:
+            raise ValueError("black_below doit être inférieur ou égal à dark_below")
+        return self
 
 
 class QCDetectorsSettings(_Strict):
@@ -1453,6 +1502,8 @@ class QCDetectorsSettings(_Strict):
     rules: QCDetectorRules
     # Types de plan où les visages peuvent légitimement manquer (insert, dos…) : pas de comptage.
     face_count_ignored_for_shots: list[str] = Field(default_factory=list)
+    # Tonalité « papier blanc » (règle `too_dark`) ; absente = jamais vérifiée.
+    tone: QCToneSettings | None = None
 
 
 class QCIdentitySettings(_Strict):

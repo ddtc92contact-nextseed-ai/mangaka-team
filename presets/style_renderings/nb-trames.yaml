@@ -9,3 +9,8 @@ default: true
 monochrome: true
 lang: en
 prompt_keywords: [black and white manga, halftone screentone dots, regular grey dot pattern, no cross-hatching]
+# Tonalité « papier blanc » (11/10/2026) : les cases sortaient grises et bouchées (50 à 83 % de pixels
+# sombres contre 21,7 % sur une planche de référence). Ajoutée au prompt positif de chaque case ; le
+# négatif n'est lu qu'à vrai CFG (palier Qualité). Le QC vérifie la tonalité (`detectors.tone` de qc.yaml).
+tonality: "White paper dominant, clean line art, screentone only in the shadows, large white areas, no muddy grey fill"
+tonality_negative: "dark muddy image, grey overall, heavy black fill, underexposed"

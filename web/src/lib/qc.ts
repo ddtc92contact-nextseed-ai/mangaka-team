@@ -1,5 +1,14 @@
 // Libellés et petits calculs du contrôle qualité (étape 4).
-import type { AnnotationLabel, BenchLayerName, DefectId, PanelData, QCLayer, QCLayerName, QCVerdict } from "./api";
+import type {
+  AnnotationLabel,
+  BenchLayerName,
+  DefectId,
+  PanelData,
+  QCLayer,
+  QCLayerName,
+  QCTone,
+  QCVerdict,
+} from "./api";
 
 export const QC_VERDICT: Record<QCVerdict, string> = {
   ok: "OK",
@@ -8,7 +17,7 @@ export const QC_VERDICT: Record<QCVerdict, string> = {
 };
 
 export const QC_LAYERS: { id: QCLayerName; label: string; hint: string }[] = [
-  { id: "detectors", label: "Détecteurs", hint: "visages, mains, texte parasite" },
+  { id: "detectors", label: "Détecteurs", hint: "visages, mains, texte parasite, tonalité" },
   { id: "identity", label: "Cohérence des personnages", hint: "ressemblance aux fiches (CCIP)" },
   { id: "vision", label: "Vision", hint: "la case colle-t-elle à sa description ?" },
 ];
@@ -29,6 +38,20 @@ export const QC_SOURCE: Record<string, string> = {
 /** Case à relire par un humain : verdict « à revoir » ou « rejet » de la version choisie. */
 export function needsReview(panel: Pick<PanelData, "qc_verdict">): boolean {
   return panel.qc_verdict === "review" || panel.qc_verdict === "reject";
+}
+
+function pct(x: number): string {
+  return `${Math.round(x * 100)} %`;
+}
+
+/** « Tonalité : 68 % sombres (cible ≤ 45 %) · 30 % noir pur (cible ≤ 25 %) », ou pourquoi elle n'est pas vérifiée. */
+export function toneSummary(tone: QCTone | null | undefined): string | null {
+  if (!tone) return null;
+  if (!tone.checked || tone.dark === null || tone.black === null) {
+    return `Tonalité non vérifiée${tone.message ? ` : ${tone.message}` : ""}`;
+  }
+  const target = (max: number | null) => (max === null ? "" : ` (cible ≤ ${pct(max)})`);
+  return `Tonalité : ${pct(tone.dark)} de pixels sombres${target(tone.max_dark)} · ${pct(tone.black)} de noir pur${target(tone.max_black)}`;
 }
 
 /** « 120 ms », « 1,4 s ». */

@@ -150,7 +150,10 @@ def test_written_prompt_is_stored_on_the_panel_and_used_for_generation(env: Env)
     # consigne « identité seulement » ; négatif « pas de texte »
     [img] = panel["images"]
     assert img["params"]["panel_prompt"] == prompt
-    assert img["params"]["prompt"].startswith(prompt + " Use the reference images for identity and design only")
+    assert img["params"]["prompt"].startswith(
+        prompt + " From <image1> take only the face, hair, body and outfit of Aiko; ignore its layout, pose grid,"
+        " rules, labels and white background. Use the reference images for identity and design only"
+    )
     assert img["params"]["prompt"].count("<image1> is the identity reference") == 1
     assert "not a character sheet" in img["params"]["prompt"]
     assert "speech bubble" in img["params"]["negative_prompt"] and "text" in img["params"]["negative_prompt"]

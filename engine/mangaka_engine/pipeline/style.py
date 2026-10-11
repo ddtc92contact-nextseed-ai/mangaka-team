@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..presets import PresetRegistry
-from ..presets.schemas import StyleOptionChoice, StylePack
+from ..presets.schemas import StyleOptionChoice, StylePack, StyleRendering
 from ..store.models import Project
 
 log = logging.getLogger("mangaka_engine")
@@ -92,6 +92,14 @@ def lora_triggers(presets: PresetRegistry, series: Project) -> tuple[str, ...]:
     return tuple(w for w in (_clean(t) for t in entry.trigger_words) if w) if entry else ()
 
 
+def series_rendering(presets: PresetRegistry, series: Project) -> StyleRendering | None:
+    """Pack de rendu de la série. Pas de rendu choisi (ou disparu des presets) : le rendu par défaut,
+    jamais aucun rendu (None seulement sans aucun pack de rendu)."""
+    return presets.style_renderings.get(series.style_rendering or "") or presets.style_renderings.get(
+        presets.default_style_rendering or ""
+    )
+
+
 def _words(pack: StylePack | StyleOptionChoice, people: bool) -> list[str]:
     """Mots-clés d'un pack ; sans ceux qui évoquent des personnes si `people` est faux."""
     return [k for k in pack.prompt_keywords if people or k not in pack.people_keywords]
@@ -108,10 +116,7 @@ def style_groups(presets: PresetRegistry, series: Project, *, people: bool = Tru
     elif not series.style_genre:
         # Ancien texte libre : découpé aux virgules, comme des mots-clés.
         groups.append(("genre", (series.legacy_style or "").split(",")))
-    # Pas de rendu choisi (ou disparu des presets) : le rendu par défaut, jamais aucun rendu.
-    rendering = presets.style_renderings.get(series.style_rendering or "") or presets.style_renderings.get(
-        presets.default_style_rendering or ""
-    )
+    rendering = series_rendering(presets, series)
     if rendering is not None:
         groups.append(("rendering", _words(rendering, people)))
     tone = presets.style_tones.get(series.style_tone or "")

@@ -298,8 +298,21 @@ export interface QCLayer {
   without_references?: string[];
   counts?: { faces: number; hands: number; text: number };
   expected_faces?: number;
+  /** Tonalité « papier blanc » (couche détecteurs) : parts de pixels sombres et de noir pur. */
+  tone?: QCTone;
   attempts?: number;
   why?: string;
+}
+
+/** Tonalité d'une case (numpy) : parts 0-1, seuils du preset, ou pourquoi elle n'est pas vérifiée. */
+export interface QCTone {
+  checked: boolean;
+  dark: number | null;
+  black: number | null;
+  max_dark: number | null;
+  max_black: number | null;
+  too_dark: boolean;
+  message: string | null;
 }
 
 /** Détail du dernier QC d'une version. */
@@ -496,6 +509,8 @@ export interface PanelImage {
     loras?: unknown[];
     /** Emplacements de référence remplis (personnages, puis décor, puis objets). */
     reference_images?: UsedReference[];
+    /** Fiches qui avaient une image mais n'ont pas eu d'emplacement (priorité : personnages d'abord). */
+    dropped_references?: DroppedReference[];
     /** Réparation ciblée : version source et réglages (absent pour une génération). */
     repair?: RepairParams;
     /** CFG appliqué ; à 1 (ou modèle distillé), le prompt négatif n'a pas été lu (`negative_active` faux). */
@@ -577,6 +592,13 @@ export interface UsedReference {
   character_id?: number;
   image_id: number;
   comfyui_name?: string;
+}
+
+/** Fiche écartée faute d'emplacement de référence. */
+export interface DroppedReference {
+  kind?: LibraryKind | "style";
+  id?: number;
+  name?: string;
 }
 
 export type AnnotationLabel = "good" | "bad";

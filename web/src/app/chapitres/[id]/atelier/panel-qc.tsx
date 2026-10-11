@@ -6,7 +6,7 @@ import { DetectionLegend, DetectionOverlay, QCBadge } from "@/components/qc";
 import { Alert, Button, ProgressBar } from "@/components/ui";
 import { engineUrl, type PanelImage, type QCStatus, type QueueItem, type VisionMode } from "@/lib/api";
 import { isSketch, type RepairPreset } from "./repair-dialog";
-import { QC_LAYERS, QC_LAYER_STATUS, QC_SOURCE, QC_VERDICT, formatMs } from "@/lib/qc";
+import { QC_LAYERS, QC_LAYER_STATUS, QC_SOURCE, QC_VERDICT, formatMs, toneSummary } from "@/lib/qc";
 
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -132,6 +132,14 @@ export function PanelQC({
                       <dd className="text-[11px] text-zinc-500">
                         {layer.counts.faces} visage{layer.counts.faces > 1 ? "s" : ""} (attendu{(layer.expected_faces ?? 0) > 1 ? "s" : ""} : {layer.expected_faces ?? 0}) ·{" "}
                         {layer.counts.hands} main{layer.counts.hands > 1 ? "s" : ""} · {layer.counts.text} zone{layer.counts.text > 1 ? "s" : ""} de texte
+                      </dd>
+                    )}
+                    {layer.tone && (
+                      <dd
+                        className={`text-[11px] ${layer.tone.too_dark ? "text-amber-300" : "text-zinc-500"}`}
+                        data-testid="qc-tone"
+                      >
+                        {toneSummary(layer.tone)}
                       </dd>
                     )}
                     {layer.characters && layer.characters.length > 0 && (
