@@ -30,7 +30,7 @@ import { MAX_VARIANTS, PANEL_STATE, formatDuration, isValidSeed } from "@/lib/ge
 import { dpiLabel, dpiTitle } from "@/lib/finishing";
 import { useJob } from "@/lib/jobs";
 import { LIBRARY_KINDS } from "@/lib/library";
-import { describeUsedReference } from "@/lib/used-references";
+import { describeUsedReference, droppedReferencesNote } from "@/lib/used-references";
 import { useChapter } from "../chapter-context";
 import { ChangeAngleBlock } from "./change-angle";
 import { CompositionBlock, LockBadge } from "./composition-block";
@@ -769,9 +769,10 @@ function PrintSection({
   );
 }
 
-/** Images de référence envoyées au workflow pour une version : personnages, puis décor, puis objets. */
+/** Images de référence envoyées au workflow pour une version (personnages, puis décor, puis objets) et fiches écartées. */
 function UsedReferences({ image }: { image: PanelImage }) {
   const refs = image.params.reference_images ?? [];
+  const dropped = droppedReferencesNote(image.params.dropped_references, LIBRARY_KINDS);
   return (
     <div className="text-xs text-zinc-400" data-testid="used-references">
       <span className="text-zinc-500">Références utilisées (v{image.version}) : </span>
@@ -789,6 +790,11 @@ function UsedReferences({ image }: { image: PanelImage }) {
             );
           })}
         </ol>
+      )}
+      {dropped && (
+        <p className="mt-1 text-amber-300" data-testid="dropped-references">
+          {dropped} — pas assez d&apos;emplacements dans le workflow (personnages servis en premier).
+        </p>
       )}
     </div>
   );

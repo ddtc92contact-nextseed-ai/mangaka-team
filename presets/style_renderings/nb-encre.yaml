@@ -6,3 +6,7 @@ order: 20
 monochrome: true
 lang: en
 prompt_keywords: [black and white inked manga, cross-hatching, high contrast]
+# Tonalité « papier blanc » (11/10/2026) : aplats noirs en accents seulement, le papier reste dominant.
+# Ajoutée au prompt positif ; le négatif n'est lu qu'à vrai CFG (palier Qualité). Voir nb-trames.yaml.
+tonality: "White paper dominant, clean line art, solid black only as accents in the shadows, large white areas, no muddy grey fill"
+tonality_negative: "dark muddy image, grey overall, heavy black fill, underexposed"

@@ -317,7 +317,7 @@ def test_generate_refine_keep_reorder_then_used_by_panels(c: TestClient, comfy: 
     variant_ids = [j["params"]["variant_id"] for j in finished]
     assert variant_ids == sorted(variant_ids) and len(set(variant_ids)) == 4
     studio = _ok(c.get(f"/{segment}/{eid}/reference-variants"))
-    assert studio["active_jobs"] == [] and studio["max_kept"] == MAX_KEPT and studio["reference_slots"] == 3
+    assert studio["active_jobs"] == [] and studio["max_kept"] == MAX_KEPT and studio["reference_slots"] == 5
     variants = studio["variants"]
     assert [v["id"] for v in variants] == variant_ids[::-1]  # plus récentes d'abord
     first = variants[-1]

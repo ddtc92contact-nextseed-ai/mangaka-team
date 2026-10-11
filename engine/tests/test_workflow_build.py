@@ -1,4 +1,4 @@
-"""Construction des workflows : emplacements de référence (0/1/3) et chaîne LoRA (0/2), deux paliers."""
+"""Construction des workflows : emplacements de référence (0/1/3/4/5) et chaîne LoRA (0/2), tous les paliers."""
 
 from __future__ import annotations
 
@@ -24,7 +24,8 @@ EDIT_TIERS = [
     "qwen-image-edit-ref-turbo",
 ]
 PARAMS = {"positive_prompt": "Aiko sur un toit", "width": 832, "height": 1216, "seed": 1234}
-SLOTS = ["20", "21", "22"]  # LoadImage du preset, branchés sur images.image_1…3 de l'encodeur (nœud 6)
+SLOTS = ["20", "21", "22", "23", "24"]  # LoadImage du preset, branchés sur images.image_1…5 de l'encodeur (nœud 6)
+OBJECT_INFO = Path(__file__).parent / "fixtures" / "comfyui" / "object_info.json"
 LORAS = [LoraSpec("encre-seinen.safetensors", 0.7, "style"), LoraSpec("aiko-v3.safetensors", 0.9, "Aiko")]
 
 
@@ -46,7 +47,7 @@ def test_edit_preset_is_valid_and_declares_slots_and_chain() -> None:
 
 
 @pytest.mark.parametrize("preset_id", EDIT_TIERS)
-@pytest.mark.parametrize("n_refs", [0, 1, 3])
+@pytest.mark.parametrize("n_refs", [0, 1, 3, 4, 5])
 @pytest.mark.parametrize("n_loras", [0, 2])
 def test_reference_slots_and_lora_chain(preset_id: str, n_refs: int, n_loras: int) -> None:
     loaded = REG.workflow(preset_id)
@@ -99,9 +100,28 @@ def test_base_preset_supports_loras_but_no_references() -> None:
         build_workflow(BASE, PARAMS, reference_images=["x.png"])
 
 
+def test_every_reference_preset_declares_the_same_slots_wired_to_the_encoder() -> None:
+    """Tous les presets avec références (edit-ref : Turbo, Rapide, Qualité, croquis, propre, ControlNet ;
+    et les réparations) ont 5 emplacements, chacun branché sur images.image_N de TextEncodeQwenImage21,
+    dans la limite de l'encodeur réel (object_info enregistré)."""
+    info = json.loads(OBJECT_INFO.read_text())["TextEncodeQwenImage21"]
+    accepted = info["input"]["required"]["images"][1]["template"]["names"]
+    with_refs = {pid: lw for pid, lw in REG.workflows.items() if lw.preset.reference_images}
+    assert {pid for pid in REG.workflows if "edit-ref" in pid} <= set(with_refs)
+    assert {len(lw.preset.reference_images) for lw in with_refs.values()} == {len(SLOTS)}
+    assert len(SLOTS) <= len(accepted)
+    for pid, lw in with_refs.items():
+        assert [s.node for s in lw.preset.reference_images] == SLOTS, pid
+        encoder = next(n for n in lw.workflow.values() if n["class_type"] == "TextEncodeQwenImage21")
+        for i, node in enumerate(SLOTS, start=1):
+            assert f"image_{i}" in accepted
+            assert encoder["inputs"][f"images.image_{i}"] == [node, 0], pid
+        assert "jusqu'à 3" not in lw.preset.description, pid
+
+
 def test_too_many_references_or_no_lora_chain() -> None:
-    with pytest.raises(PresetError, match="au plus 3"):
-        build_workflow(EDIT, PARAMS, reference_images=["a", "b", "c", "d"])
+    with pytest.raises(PresetError, match="au plus 5"):
+        build_workflow(EDIT, PARAMS, reference_images=["a", "b", "c", "d", "e", "f"])
     no_chain = LoadedWorkflow(
         preset=BASE.preset.model_copy(update={"lora_chain": None}), workflow=BASE.workflow, source=BASE.source
     )

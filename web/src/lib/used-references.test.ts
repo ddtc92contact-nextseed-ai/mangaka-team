@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import type { UsedReference } from "./api.ts";
-import { STYLE_REFERENCE_BADGE, describeUsedReference } from "./used-references.ts";
+import { STYLE_REFERENCE_BADGE, describeUsedReference, droppedReferencesNote } from "./used-references.ts";
 
 const KINDS = {
   character: { singular: "personnage", badge: "bg-violet-500/15 text-violet-200" },
@@ -39,6 +39,23 @@ test("type inconnu venu du moteur : repli, pas de plantage", () => {
     assert.equal(d.name, "référence n° 9");
     assert.equal(d.kindLabel, kind);
   }
+});
+
+test("références écartées faute d'emplacement : note lisible", () => {
+  const kinds = { character: { singular: "personnage", badge: "x" }, object: { singular: "objet", badge: "y" } };
+  assert.equal(droppedReferencesNote([], kinds), null);
+  assert.equal(droppedReferencesNote(undefined, kinds), null);
+  assert.equal(droppedReferencesNote([{ kind: "character", id: 4, name: "Stan" }], kinds), "Référence non envoyée : Stan (personnage)");
+  assert.equal(
+    droppedReferencesNote(
+      [
+        { kind: "object", id: 8, name: "Épée" },
+        { kind: "style", id: 9, name: "Planche" },
+      ],
+      kinds,
+    ),
+    "Références non envoyées : Épée (objet), Planche (style de la série)",
+  );
 });
 
 test("« Changer l'angle » : la version de la case qui tourne", () => {

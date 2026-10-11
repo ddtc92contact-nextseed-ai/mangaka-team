@@ -115,7 +115,8 @@ def _font(size: int) -> ImageFont.ImageFont | ImageFont.FreeTypeFont:
 
 
 def render_mock_image(width: int, height: int, seed: int, label: str) -> bytes:
-    color = (seed * 37 % 200 + 30, seed * 91 % 200 + 30, seed * 53 % 200 + 30)
+    # Fond clair (papier) : une case factice passe le contrôle de tonalité du QC quelle que soit la seed.
+    color = (seed * 37 % 70 + 180, seed * 91 % 70 + 180, seed * 53 % 70 + 180)
     img = Image.new("RGB", (width, height), color)
     draw = ImageDraw.Draw(img)
     side = min(width, height)

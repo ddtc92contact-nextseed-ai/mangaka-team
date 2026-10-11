@@ -2,13 +2,17 @@
 
 - `enqueue_panel` : prépare le prompt final, choisit le workflow et crée `count` jobs
   `generation` (variantes) en attente ;
-- `pick_references` : emplacements d'images de référence du workflow (3 au plus), remplis par
-  ordre de priorité — personnages de la case, puis son décor, puis ses objets (leur image principale
-  seulement, `panel_references` de defaults.yaml), puis la référence de style de la série s'il reste un
-  emplacement libre et que la case a déjà une autre référence (voir la fonction et `panel_cast`) ;
-  les emplacements retenus sont notés sur le job (`params.references`) et sur la version produite ;
-  le prompt envoyé les nomme dans l'ordre (« Image 1 : référence d'identité de Urus… »,
-  `prompt.frame_references`) ;
+- `choose_references` : emplacements d'images de référence du workflow (5 dans les presets livrés),
+  remplis par ordre d'importance — une fiche par personnage de la case (ceux qui parlent d'abord, puis
+  l'ordre de la case), puis son décor et ses objets (leur image principale seulement, `panel_references`
+  de defaults.yaml), puis la référence de style de la série s'il reste un emplacement libre et que la
+  case a déjà une autre référence (voir la fonction et `panel_cast`) ; les emplacements retenus sont
+  notés sur le job (`params.references`) et sur la version produite, les fiches écartées faute
+  d'emplacement aussi (`params.dropped_references`, « Référence non envoyée » dans l'atelier) ; le
+  prompt envoyé les nomme dans l'ordre (« <image1> is the identity reference for Urus… ») et dit ce
+  qu'il faut prendre de chacune (`prompt.frame_references`, `references.sorting` d'image_prompt.yaml) ;
+- tonalité du rendu de la série (`tonality` du pack, prompt positif ; `tonality_negative`, prompt
+  négatif quand il est lu : vrai CFG) ;
 - `GenerationExecutor` : exécuté par la file sérielle (`pipeline/queue.py`) pour un job :
   envoi des images de référence, construction du workflow (références + LoRA via le preset),
   file ComfyUI, progression, récupération de l'image → nouvelle `PanelImage` (version n+1) ;
@@ -91,10 +95,18 @@ from .knowledge import KnowledgeBase
 from .layout import target_size
 from .library import panel_assets, style_for
 from .names import CharacterMatcher
-from .prompt import PromptCharacter, ReferenceSlot, build_negative_prompt, build_prompt, frame_references
+from .prompt import (
+    PromptCharacter,
+    ReferenceSlot,
+    append_instruction,
+    build_negative_prompt,
+    build_prompt,
+    frame_references,
+    merge_negative,
+)
 from .prompt_writer import PROMPT_ID as WRITER_PROMPT_ID
 from .prompt_writer import PromptBrief, PromptWriterError, WriteRun, write_prompt
-from .style import series_style
+from .style import series_rendering, series_style
 
 log = logging.getLogger("mangaka_engine")
 
@@ -137,6 +149,8 @@ class PanelCast:
     objects: list[SeriesAsset] = field(default_factory=list)
     # Référence de style de la série (planche de style), jointe seulement s'il reste un emplacement.
     style: SeriesAsset | None = None
+    # Personnages qui parlent dans la case (bulles, dans l'ordre de lecture) : premiers servis en références.
+    speakers: list[int] = field(default_factory=list)
 
     @property
     def entries(self) -> list[LibraryEntry]:
@@ -147,6 +161,20 @@ class PanelCast:
             *self.objects,
             *([self.style] if self.style is not None else []),
         ]
+
+    @property
+    def reference_entries(self) -> list[LibraryEntry]:
+        """Fiches dans l'ordre d'importance des images de référence : les personnages qui parlent (ordre
+        des bulles), les autres personnages (ordre de la case), puis décor, objets et style."""
+        rank = {cid: i for i, cid in enumerate(dict.fromkeys(self.speakers))}
+        characters = sorted(self.characters, key=lambda c: rank.get(c.id, len(rank)))  # tri stable
+        return [*characters, *self.entries[len(self.characters) :]]
+
+
+def panel_speakers(panel: Panel) -> list[int]:
+    """Personnages qui parlent dans la case, dans l'ordre des bulles."""
+    bubbles = sorted(panel.bubbles or [], key=lambda b: (b.order, b.id or 0))
+    return list(dict.fromkeys(b.speaker_id for b in bubbles if b.speaker_id is not None))
 
 
 def panel_cast(session: Session, panel: Panel, presets: PresetRegistry | None = None) -> PanelCast:
@@ -165,7 +193,7 @@ def panel_cast(session: Session, panel: Panel, presets: PresetRegistry | None = 
         subjects = [*characters, *([decor] if decor is not None else []), *objects]
         if board is not None and board.panels == "with_subject" and not any(e.reference_images for e in subjects):
             style = None
-    return PanelCast(characters=characters, decor=decor, objects=objects, style=style)
+    return PanelCast(characters=characters, decor=decor, objects=objects, style=style, speakers=panel_speakers(panel))
 
 
 def entry_kind(entry: LibraryEntry) -> str:
@@ -398,6 +426,36 @@ def guide_image(
     return info, path.read_bytes(), filename
 
 
+@dataclass
+class ReferenceChoice:
+    """Images de référence retenues (dans l'ordre des emplacements) et fiches écartées faute de place."""
+
+    sent: list[tuple[LibraryEntry, CharacterImage | SeriesAssetImage]] = field(default_factory=list)
+    dropped: list[LibraryEntry] = field(default_factory=list)
+
+
+def choose_references(
+    entries: Sequence[LibraryEntry],
+    slots: int,
+    per_entry: str = "toutes",
+    *,
+    target: AngleTarget | None = None,
+    catalog: CameraLoraCatalog | None = None,
+) -> ReferenceChoice:
+    """Images envoyées (`pick_references`) et fiches qui avaient une image mais n'ont eu aucun emplacement,
+    dans l'ordre d'importance. L'ordre garantit qu'un personnage présent n'est jamais écarté tant qu'un
+    décor, un objet ou le style occupe un emplacement."""
+    sent = pick_references(entries, slots, per_entry, target=target, catalog=catalog)
+    served = {id(entry) for entry, _ in sent}
+    dropped = [e for e in entries if e.reference_images and id(e) not in served]
+    return ReferenceChoice(sent=sent, dropped=dropped)
+
+
+def dropped_reference(entry: LibraryEntry) -> dict[str, Any]:
+    """Fiche écartée, telle que notée sur le job et la version (`dropped_references`)."""
+    return {"kind": entry_kind(entry), "id": entry.id, "name": entry.name}
+
+
 def pick_references(
     characters: Sequence[LibraryEntry],
     slots: int,
@@ -412,9 +470,9 @@ def pick_references(
     de chaque fiche, jamais une 2e image — souvent une planche multi-poses que le modèle recopierait) ;
     `toutes` = tours successifs comme ci-dessous.
 
-    Ordre de priorité (`PanelCast.entries`) : personnages de la case (dans l'ordre de la case), puis
-    son décor, puis ses objets. 1er tour : la 1re image de chaque fiche, dans cet ordre ; 2e tour :
-    la 2e image… jusqu'à remplir les emplacements (3 au plus dans les presets livrés). Ainsi chaque
+    Ordre de priorité (`PanelCast.reference_entries`) : personnages de la case (ceux qui parlent d'abord),
+    puis son décor, puis ses objets. 1er tour : la 1re image de chaque fiche, dans cet ordre ; 2e tour :
+    la 2e image… jusqu'à remplir les emplacements (5 dans les presets livrés). Ainsi chaque
     personnage passe avant le décor, qui passe avant les objets, et une fiche n'a une 2e image que si
     toutes les autres ont déjà leur 1re.
 
@@ -539,7 +597,9 @@ def panel_brief(
     loaded = presets.workflows.get(preset_id or resolve_preset_id(presets, panel, entries))
     slots = len(loaded.preset.reference_images) if loaded is not None else 0
     per_entry = presets.defaults.panel_references if presets.defaults else "toutes"
-    references = [ReferenceSlot(entry_kind(e), e.name) for e, _ in pick_references(entries, slots, per_entry)]
+    references = [
+        ReferenceSlot(entry_kind(e), e.name) for e, _ in pick_references(cast.reference_entries, slots, per_entry)
+    ]
     project = panel.page.chapter.project
     present = {c.id for c in cast.characters}
     series = list(session.scalars(select(Character).where(Character.project_id == project.id).order_by(Character.id)))
@@ -875,6 +935,7 @@ class _Plan:
     loaded: LoadedWorkflow
     params: dict[str, Any]
     references: list[dict[str, Any]]  # emplacements retenus : {kind, id, name, image_id, filename}, dans l'ordre
+    dropped_references: list[dict[str, Any]]  # fiches écartées faute d'emplacement : {kind, id, name}
     reference_data: list[bytes]
     loras: list[LoraSpec]
     folder: str
@@ -997,7 +1058,7 @@ class GenerationExecutor:
             chapter: Chapter = page.chapter
             presets = self.presets_for(chapter.project_id)
             cast = panel_cast(session, panel, presets)
-            entries = cast.entries
+            entries = cast.reference_entries
             preset_id = str(job.params.get("preset") or resolve_preset_id(presets, panel, entries))
             loaded = presets.workflow(preset_id)
             repair = job.params.get("repair") if isinstance(job.params.get("repair"), dict) else None
@@ -1044,6 +1105,7 @@ class GenerationExecutor:
                 raise GenerationError(camera.skipped[0] if camera.skipped else "angle de caméra indisponible")
             references: list[dict[str, Any]] = []
             reference_data: list[bytes] = []
+            dropped: list[dict[str, Any]] = []
             if angle_id:
                 # « Changer l'angle » : la version de départ est l'image à faire tourner (image 1, seule).
                 ref, data = self._angle_source(session, job, panel)
@@ -1052,10 +1114,11 @@ class GenerationExecutor:
             else:
                 per_entry = presets.defaults.panel_references if presets.defaults else "toutes"
                 target = panel_angle_target(presets, panel)
-                picked = pick_references(
+                choice = choose_references(
                     entries, len(loaded.preset.reference_images), per_entry, target=target, catalog=catalog
                 )
-                for entry, image in picked:
+                dropped = [dropped_reference(e) for e in choice.dropped]
+                for entry, image in choice.sent:
                     path = self.files.absolute(image.path)
                     if not path.is_file():
                         raise GenerationError(f"image de référence de {entry.name} absente de data/ ({image.path})")
@@ -1074,24 +1137,31 @@ class GenerationExecutor:
                         }
                     )
                     reference_data.append(path.read_bytes())
-            # « Références utilisées » : notées sur le job dès la préparation (visibles dans l'atelier).
-            job.params = {**(job.params or {}), "references": references}
+            # « Références utilisées » (et non envoyées) : notées sur le job dès la préparation (atelier).
+            job.params = {**(job.params or {}), "references": references, "dropped_references": dropped}
             panel_prompt = prompt
+            rendering = series_rendering(presets, chapter.project)
             if angle_id:
                 # Mot déclencheur et vocabulaire de caméra en tête, puis la scène de la version de départ.
                 prompt = angle_prompt(catalog.prompts.panel, camera, scene=prompt)
             elif repair is None:
-                # Chaque image nommée dans l'ordre des emplacements + « identité seulement, scène nouvelle ».
+                # Chaque image nommée dans l'ordre des emplacements + ce qu'il faut en prendre, puis
+                # « identité seulement, scène nouvelle » ; enfin la tonalité du rendu (papier blanc).
                 slots = [ReferenceSlot(r["kind"], r["name"]) for r in references]
                 prompt = frame_references(prompt, slots, presets.image_prompt)
+                prompt = append_instruction(prompt, rendering.tonality if rendering is not None else "")
+            negative = build_negative_prompt(
+                str(loaded.preset.defaults.get("negative_prompt", "")), presets.image_prompt
+            )
+            cfg = series_cfg(chapter.project, loaded)
+            if rendering is not None and loaded.preset.negative_active(cfg):
+                # Vrai CFG (palier Qualité) : le négatif est lu, la tonalité y a ses termes.
+                negative = merge_negative(negative, rendering.tonality_negative)
             params: dict[str, Any] = {
                 "positive_prompt": prompt,
-                "negative_prompt": build_negative_prompt(
-                    str(loaded.preset.defaults.get("negative_prompt", "")), presets.image_prompt
-                ),
+                "negative_prompt": negative,
                 "seed": job.params.get("seed"),
             }
-            cfg = series_cfg(chapter.project, loaded)
             if cfg is not None:
                 params["cfg"] = cfg
             if angle_id and catalog.steps and "steps" in loaded.preset.mapping:
@@ -1111,6 +1181,7 @@ class GenerationExecutor:
                 loaded=loaded,
                 params=params,
                 references=references,
+                dropped_references=dropped,
                 reference_data=reference_data,
                 loras=merge_loras(collect_loras(panel, entries), camera.loras),
                 camera=camera.as_dict(),
@@ -1387,6 +1458,7 @@ class GenerationExecutor:
                         }
                         for ref, name in zip(plan.references, uploaded, strict=True)
                     ],
+                    "dropped_references": plan.dropped_references,
                     "removed_nodes": built.removed_nodes,
                     "image_width": stored.width,
                     "image_height": stored.height,

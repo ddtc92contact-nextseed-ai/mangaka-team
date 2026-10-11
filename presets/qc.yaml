@@ -3,7 +3,7 @@
 # Le fichier est validé au démarrage ; invalide → QC indisponible, erreur visible dans GET /presets.
 #
 # Trois couches, de la plus rapide à la plus lente :
-#   1. detectors : visages, mains, texte parasite (détecteurs anime ONNX deepghs, CPU) ;
+#   1. detectors : visages, mains, texte parasite (détecteurs anime ONNX deepghs, CPU), tonalité (numpy) ;
 #   2. identity  : ressemblance de chaque personnage à sa fiche (CCIP deepghs) ;
 #   3. vision    : « la case colle-t-elle à sa description ? » (Qwen3-VL 4B via Ollama), seulement
 #                  si les couches 1-2 hésitent, ou à la demande. Jamais pendant une génération ComfyUI.
@@ -48,8 +48,21 @@ detectors:
     text: { penalty: 60, at_least: reject }
     # Main suspecte (par main, plafonné à max_penalty).
     suspect_hand: { penalty: 10, max_penalty: 30 }
+    # Case trop sombre (voir `tone`) : grise et bouchée au lieu du papier blanc dominant.
+    too_dark: { penalty: 25, at_least: review }
   # Plans où les visages peuvent manquer légitimement : le nombre de visages n'est pas vérifié.
   face_count_ignored_for_shots: [insert, plan d'ensemble]
+  # Tonalité « papier blanc » (numpy sur l'image, CPU, sans modèle). Mesures du 11/10/2026 : la planche de
+  # référence de l'auteur a 21,7 % de pixels sombres et 9,5 % de noir pur ; les cases de l'appli en
+  # avaient 50 à 83 % et 14 à 48 %. Seuils de départ, à affiner sur le banc d'essai.
+  tone:
+    dark_below: 128     # niveau de gris (0-255) sous lequel un pixel est « sombre »
+    black_below: 32     # … et « noir pur »
+    max_dark: 0.45      # part maximale de pixels sombres
+    max_black: 0.25     # part maximale de noir pur
+    monochrome_only: true   # rendus noir et blanc seulement (pas les packs couleur)
+    # Ambiance de la direction artistique d'une scène de nuit ou sombre : tonalité non vérifiée.
+    skip_ambiance_keywords: [nuit, nocturne, night, sombre, obscur, obscurite, tenebres, penombre, dark, darkness]
 
 # --- Couche 2 : cohérence des personnages (CCIP) --------------------------------
 identity:

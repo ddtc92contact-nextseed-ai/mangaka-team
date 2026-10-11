@@ -1,6 +1,8 @@
 """Étape 4 — contrôle qualité des cases, en trois couches, pour ne relire que les cases douteuses.
 
-1. **détecteurs** (rapide, CPU) : visages, mains, texte parasite → règles de `presets/qc.yaml` ;
+1. **détecteurs** (rapide, CPU) : visages, mains, texte parasite → règles de `presets/qc.yaml` ; et la
+   tonalité de la case (part de pixels sombres et de noir pur, numpy, sans modèle) pour les rendus noir
+   et blanc : une case grise et bouchée au lieu du papier blanc dominant est « à revoir » ;
 2. **cohérence des personnages** : similarité CCIP entre la case et les images de référence ;
 3. **vision** (lente) : « la case colle-t-elle à sa description ? » (Qwen3-VL via Ollama), seulement
    si les couches 1-2 hésitent (ou à la demande), jamais pendant une génération ComfyUI.
@@ -16,22 +18,33 @@ Les jobs `qc` passent par la file sérielle de la génération (`pipeline/queue.
 from __future__ import annotations
 
 import copy
+import io
 import json
 import logging
 import re
 import string
 import threading
 import time
+import unicodedata
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+import numpy as np
+from PIL import Image, UnidentifiedImageError
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..presets import PresetError, PresetRegistry, QCSettings
-from ..presets.schemas import QCDetectorsSettings, QCIdentitySettings, QCRule, QCVisionSettings, QCWeights
+from ..presets.schemas import (
+    QCDetectorsSettings,
+    QCIdentitySettings,
+    QCRule,
+    QCToneSettings,
+    QCVisionSettings,
+    QCWeights,
+)
 from ..providers.factory import Providers
 from ..providers.qc import Detections, QCProviderError
 from ..providers.vision import VisionError, VisionProvider, VisionResponseError
@@ -49,6 +62,7 @@ from ..store.models import (
     QCVerdict,
     utcnow,
 )
+from .art_direction import applied_panel_direction
 from .generation import (
     ACTIVE,
     GenerationError,
@@ -60,6 +74,7 @@ from .generation import (
 from .generation import QC_STEP as STEP
 from .generation import STEP as GENERATION_STEP
 from .jobs import JobReporter
+from .style import series_rendering
 
 log = logging.getLogger("mangaka_engine")
 
@@ -182,6 +197,112 @@ def evaluate_detections(
             "face_count_checked": count_faces,
         },
     )
+
+
+# --- couche 1 : tonalité (papier blanc) ----------------------------------------------------------
+@dataclass
+class ToneResult:
+    """Tonalité d'une case : parts (0-1) de pixels sombres et de noir pur, ou pourquoi elle n'est pas vérifiée."""
+
+    checked: bool
+    dark: float | None = None
+    black: float | None = None
+    max_dark: float | None = None
+    max_black: float | None = None
+    message: str | None = None  # non vérifiée : pourquoi
+
+    @property
+    def too_dark(self) -> bool:
+        return self.checked and (
+            (self.dark is not None and self.max_dark is not None and self.dark > self.max_dark)
+            or (self.black is not None and self.max_black is not None and self.black > self.max_black)
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "checked": self.checked,
+            "dark": None if self.dark is None else round(self.dark, 4),
+            "black": None if self.black is None else round(self.black, 4),
+            "max_dark": self.max_dark,
+            "max_black": self.max_black,
+            "too_dark": self.too_dark,
+            "message": self.message,
+        }
+
+
+def tone_stats(data: bytes, *, dark_below: int, black_below: int) -> tuple[float, float]:
+    """(part de pixels sombres, part de noir pur) de l'image, en niveaux de gris 0-255 (numpy, CPU)."""
+    with Image.open(io.BytesIO(data)) as img:
+        gray = np.asarray(img.convert("L"), dtype=np.uint8)
+    if gray.size == 0:
+        return 0.0, 0.0
+    return float(np.count_nonzero(gray < dark_below)) / gray.size, float(
+        np.count_nonzero(gray < black_below)
+    ) / gray.size
+
+
+def _plain(text: str) -> str:
+    """Minuscules sans accents (« Pénombre » → « penombre »), pour comparer des mots-clés."""
+    decomposed = unicodedata.normalize("NFKD", text.casefold())
+    return "".join(c for c in decomposed if not unicodedata.combining(c))
+
+
+def dark_scene_keyword(ambiance: str | None, keywords: list[str]) -> str | None:
+    """Mot-clé de scène de nuit ou sombre trouvé (mot entier) dans l'ambiance de la direction artistique."""
+    phrase = f" {_words(ambiance or '')} "
+    for keyword in keywords:
+        k = _words(keyword)
+        if k and f" {k} " in phrase:
+            return keyword
+    return None
+
+
+def _words(text: str) -> str:
+    return " ".join(re.findall(r"\w+", _plain(text)))
+
+
+def check_tone(data: bytes, cfg: QCToneSettings, *, skip: str | None = None) -> ToneResult:
+    """Mesure la tonalité d'une case (`skip` : raison de ne pas la vérifier — rendu couleur, scène de nuit)."""
+    limits = {"max_dark": cfg.max_dark, "max_black": cfg.max_black}
+    if skip:
+        return ToneResult(checked=False, message=skip, **limits)
+    try:
+        dark, black = tone_stats(data, dark_below=cfg.dark_below, black_below=cfg.black_below)
+    except (UnidentifiedImageError, OSError, ValueError) as exc:
+        return ToneResult(checked=False, message=f"image illisible ({exc.__class__.__name__})", **limits)
+    return ToneResult(checked=True, dark=dark, black=black, **limits)
+
+
+def _pct(x: float) -> str:
+    return f"{round(x * 100)} %"
+
+
+def tone_reason(tone: ToneResult) -> str | None:
+    """« Case trop sombre : 68 % de pixels sombres, cible ≤ 45 % » (et le noir pur s'il dépasse aussi)."""
+    if not tone.too_dark:
+        return None
+    parts = []
+    if tone.dark is not None and tone.max_dark is not None and tone.dark > tone.max_dark:
+        parts.append(f"{_pct(tone.dark)} de pixels sombres, cible ≤ {_pct(tone.max_dark)}")
+    if tone.black is not None and tone.max_black is not None and tone.black > tone.max_black:
+        parts.append(f"{_pct(tone.black)} de noir pur, cible ≤ {_pct(tone.max_black)}")
+    return "Case trop sombre : " + " ; ".join(parts)
+
+
+def apply_tone(res: LayerResult, tone: ToneResult | None, rule: QCRule | None) -> LayerResult:
+    """Ajoute la tonalité à la couche des détecteurs : mesures (`extra.tone`) et, si la case est trop
+    sombre, la règle `too_dark` (pénalité sur le score s'il y en a un, verdict minimal, raison lisible)."""
+    if tone is None:
+        return res
+    res.extra["tone"] = tone.as_dict()
+    reason = tone_reason(tone)
+    if reason is None or rule is None:
+        return res
+    res.reasons.append(reason)
+    res.at_least = _floor(res.at_least, rule)
+    if res.score is not None:
+        res.score = _clamp(res.score - rule.penalty)
+    return res
 
 
 # --- couche 2 : cohérence des personnages -------------------------------------------------------
@@ -438,6 +559,8 @@ class _Target:
     character_names: list[str]
     references: dict[str, list[bytes]]
     without_references: list[str]
+    # Tonalité non vérifiée pour cette case : pourquoi (rendu couleur, scène de nuit de la DA) ; None = vérifiée.
+    tone_skip: str | None = None
 
 
 def describe_error(exc: Exception) -> str | None:
@@ -556,7 +679,9 @@ class QCExecutor:
             return f"Verdict : {VERDICT_LABEL[verdict]}"
         return summary
 
-    def _load(self, session: Session, image_id: int, cfg: QCSettings) -> _Target | None:
+    def _load(
+        self, session: Session, image_id: int, cfg: QCSettings, presets: PresetRegistry | None = None
+    ) -> _Target | None:
         img = session.get(PanelImage, image_id)
         if img is None:
             return None
@@ -587,7 +712,23 @@ class QCExecutor:
             character_names=list(panel.character_names or []),
             references=references,
             without_references=without,
+            tone_skip=self._tone_skip(panel, cfg, presets or self.presets),
         )
+
+    @staticmethod
+    def _tone_skip(panel: Panel, cfg: QCSettings, presets: PresetRegistry) -> str | None:
+        """Pourquoi la tonalité de la case n'est pas vérifiée (None : elle l'est)."""
+        tone = cfg.detectors.tone
+        if tone is None:
+            return None
+        rendering = series_rendering(presets, panel.page.chapter.project)
+        if tone.monochrome_only and rendering is not None and not rendering.monochrome:
+            return f"rendu couleur (« {rendering.name} ») : tonalité non vérifiée"
+        ambiance = applied_panel_direction(panel).get("ambiance")
+        keyword = dark_scene_keyword(ambiance if isinstance(ambiance, str) else None, tone.skip_ambiance_keywords)
+        if keyword is not None:
+            return f"scène de nuit ou sombre (ambiance de la direction artistique : « {ambiance} »)"
+        return None
 
     def _set_panel_qc_state(self, panel_id: int) -> None:
         with self.db.session_scope() as session:
@@ -618,11 +759,20 @@ class QCExecutor:
         vision_provider = self.vision_provider(vision_model)
         layers: dict[str, LayerResult] = {}
         detections: Detections | None = None
+        tone_cfg = cfg.detectors.tone
+        # Tonalité : numpy sur l'image, même sans détecteurs (une couche indisponible garde son verdict minimal).
+        tone = check_tone(t.data, tone_cfg, skip=t.tone_skip) if tone_cfg is not None else None
 
         # 1. détecteurs
         if p.detectors is None:
-            layers["detectors"] = LayerResult(
-                "unavailable", message=p.errors.get("detectors", "non configurés"), provider=p.names.get("detectors")
+            layers["detectors"] = apply_tone(
+                LayerResult(
+                    "unavailable",
+                    message=p.errors.get("detectors", "non configurés"),
+                    provider=p.names.get("detectors"),
+                ),
+                tone,
+                cfg.detectors.rules.too_dark,
             )
         else:
             t0 = time.monotonic()
@@ -644,7 +794,7 @@ class QCExecutor:
                 res = LayerResult("error", message=str(exc))
             res.duration_ms = int((time.monotonic() - t0) * 1000)
             res.provider = p.detectors.name
-            layers["detectors"] = res
+            layers["detectors"] = apply_tone(res, tone, cfg.detectors.rules.too_dark)
 
         # 2. cohérence des personnages
         if not t.references:
@@ -735,7 +885,7 @@ class QCExecutor:
         ollama = presets.providers.ollama if presets.providers else None
         cancel = cancel or threading.Event()
         with self.db.session_scope() as session:
-            t = self._load(session, image_id, cfg)
+            t = self._load(session, image_id, cfg, presets)
         if t is None:
             return None
         self._set_panel_qc_state(t.panel_id)

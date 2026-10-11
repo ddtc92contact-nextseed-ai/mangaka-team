@@ -213,9 +213,50 @@ def frame_references(prompt: str, slots: Sequence[ReferenceSlot], settings: Imag
         string.Template(getattr(refs, slot.kind, refs.character)).substitute(slot=str(i), name=_clean(slot.name))
         for i, slot in enumerate(slots, start=1)
     ]
-    values = {"images": refs.separator.join(line.strip() for line in lines if line.strip()), "count": str(len(slots))}
-    body = prompt.strip()
-    if body and body[-1] not in ".!?…":
-        body += "."  # prompt édité à la main sans point final : la consigne suit en phrase distincte
+    values = {
+        "images": refs.separator.join(line.strip() for line in lines if line.strip()),
+        "count": str(len(slots)),
+        "sorting": refs.separator.join(sorting_lines(slots, settings)),
+    }
+    body = _sentence(prompt)
     before = "" if defines_references(body, len(slots)) else _join(refs.before, values)
     return " ".join(p for p in (before, body, _join(refs.after, values)) if p)
+
+
+def sorting_lines(slots: Sequence[ReferenceSlot], settings: ImagePromptSettings | None = None) -> list[str]:
+    """Consigne de tri de chaque image envoyée (« From <image1> take only the face… of Urus; ignore its
+    layout… »), dans l'ordre des emplacements, d'après `references.sorting` du preset (sorte inconnue :
+    celle des personnages) ; une sorte sans consigne n'en donne aucune."""
+    sorting = (settings or ImagePromptSettings()).references.sorting
+    lines = (
+        string.Template(getattr(sorting, slot.kind, sorting.character)).substitute(slot=str(i), name=_clean(slot.name))
+        for i, slot in enumerate(slots, start=1)
+    )
+    return [line.strip() for line in lines if line.strip()]
+
+
+def _sentence(text: str) -> str:
+    body = text.strip()
+    if body and body[-1] not in ".!?…":
+        body += "."  # prompt édité à la main sans point final : la consigne suit en phrase distincte
+    return body
+
+
+def append_instruction(prompt: str, instruction: str) -> str:
+    """Ajoute une consigne (tonalité du rendu…) en phrase distincte à la fin du prompt ; vide : inchangé."""
+    extra = _sentence(instruction)
+    if not extra:
+        return prompt
+    body = _sentence(prompt)
+    return f"{body} {extra}" if body else extra
+
+
+def merge_negative(base: str, extra: str) -> str:
+    """Ajoute au prompt négatif les termes de `extra` (séparés par des virgules) qui n'y sont pas déjà."""
+    terms = [t.strip() for t in (base or "").split(",") if t.strip()]
+    present = {t.casefold() for t in terms}
+    for term in (t.strip() for t in (extra or "").split(",")):
+        if term and term.casefold() not in present:
+            terms.append(term)
+            present.add(term.casefold())
+    return ", ".join(terms)

@@ -357,9 +357,12 @@ def test_manual_prompt_is_kept_until_rebuilt(make_client: Callable[..., TestClie
     # un prompt sans <imageN> (édité à la main, ou ancien prompt français) : les rôles sont ajoutés en tête
     assert img["params"]["prompt"].startswith("<image1> is the identity reference for Aiko: keep the face")
     assert (
-        "ignore its pose, framing and background. Ninja en contre-jour. Use the reference images"
-        in img["params"]["prompt"]
+        "ignore its pose, framing and background. Ninja en contre-jour. From <image1> take only the face, hair,"
+        " body and outfit of Aiko; ignore its layout, pose grid, rules, labels and white background. Use the"
+        " reference images" in img["params"]["prompt"]
     )
+    # tonalité « papier blanc » du rendu N&B de la série, en fin de prompt
+    assert img["params"]["prompt"].endswith("large white areas, no muddy grey fill.")
 
     panel = _ok(c.post(f"/panels/{p1['id']}/prompt/rebuild"))
     assert panel["final_prompt_manual"] is False and panel["final_prompt"].startswith("Wide shot. Aiko sur un toit.")
@@ -659,7 +662,7 @@ def test_workflow_presets_endpoint(make_client: Callable[..., TestClient]) -> No
     assert presets["qwen-image-edit-ref-qualite"]["is_reference_default"]
     assert not presets["qwen-image-turbo"]["is_default"]
     edit = presets["qwen-image-edit-ref"]
-    assert edit["reference_slots"] == 3 and edit["supports_lora"] and not edit["is_reference_default"]
+    assert edit["reference_slots"] == 5 and edit["supports_lora"] and not edit["is_reference_default"]
     assert edit["lora_loader"] == "LoraLoaderModelOnly" and edit["timeout_s"] == 1500
     assert presets["qwen-image-base"]["is_quality"] and presets["qwen-image-base"]["tier"] == "Qualité max"
     # cfg, étapes, distillation et négatif actif exposés pour la fiche série et l'atelier

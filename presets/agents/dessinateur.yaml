@@ -94,13 +94,22 @@ settings:
     source: image_prompt.yaml#references.character
     variables: [slot, name]
     help: Une ligne par image envoyée au workflow avec références, dans l'ordre des emplacements.
+  - key: reference_sorting
+    label: Tri d'une fiche de personnage (ce qu'il faut en prendre)
+    group: Prompt
+    type: prompt
+    source: image_prompt.yaml#references.sorting.character
+    variables: [slot, name]
+    help: >-
+      Une consigne par fiche de personnage envoyée ($sorting) : prendre l'identité seulement, jamais la
+      mise en page, la grille de poses, les règles, les étiquettes ni le fond blanc de la planche.
   - key: reference_rule
     label: Consigne sur les images de référence (après le prompt)
     group: Prompt
     type: prompt_list
     source: image_prompt.yaml#references.after
-    variables: [images, count]
-    help: Rappelle au modèle d'édition que les références ne donnent que l'identité.
+    variables: [images, count, sorting]
+    help: "Rappelle au modèle d'édition que les références ne donnent que l'identité ($sorting : tri de chaque image)."
   - key: forbidden_text_terms
     label: Termes « pas de texte » du prompt négatif
     group: Prompt
