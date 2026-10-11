@@ -4,6 +4,7 @@ import { useImperativeHandle, useRef, type KeyboardEvent, type Ref } from "react
 import { engineUrl, type Job, type LayoutPanel, type PageData, type PanelData, type QueueItem } from "@/lib/api";
 import { DpiBadge } from "@/components/print-dpi";
 import { DetectionOverlay, QCBadge } from "@/components/qc";
+import { ValidatedCheck } from "@/components/validated-check";
 import { dpiLabel } from "@/lib/finishing";
 import { generationStep, PANEL_STATE } from "@/lib/generation";
 import { needsReview } from "@/lib/qc";
@@ -258,6 +259,7 @@ export function PageCanvas({
                 )}
               </span>
             )}
+            {isSketch && panel.sketch_validated && !running && !queued && <ValidatedCheck />}
             {(running || queued) && (
               <span className="absolute inset-x-0 bottom-0 bg-zinc-950/80 px-1.5 py-1 text-left">
                 <span className="block text-[10px] font-medium text-zinc-100">

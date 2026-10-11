@@ -8,6 +8,7 @@ import { modalOpen } from "@/components/modal";
 import { ProductionLink } from "@/components/production-link";
 import { queueItems, useQueue } from "@/components/queue";
 import { useToast } from "@/components/toast";
+import { ValidatedCheck } from "@/components/validated-check";
 import { Alert, Button, ButtonLink, Card, EmptyState, Loading, ProgressBar, Select, Textarea } from "@/components/ui";
 import {
   api,
@@ -465,11 +466,7 @@ function SketchPage({
               {panel.index + 1}
               <span className="ml-1 font-normal text-zinc-300">· {STATUS_LABEL[status]}</span>
             </span>
-            {status === "validated" && (
-              <span aria-hidden className="absolute right-1 top-1 rounded-full bg-emerald-500 px-1.5 text-xs font-bold text-white">
-                ✓
-              </span>
-            )}
+            {status === "validated" && <ValidatedCheck />}
             {status === "running" && view?.running && (
               <span className="absolute inset-x-0 bottom-0 bg-zinc-950/80 px-1.5 py-1">
                 <span className="block text-[10px] text-zinc-100">{runningLabel(view.running)}</span>
