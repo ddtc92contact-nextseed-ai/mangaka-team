@@ -54,7 +54,7 @@ from ..presets import LoadedWorkflow, LoraSpec, PresetRegistry, build_workflow
 from ..presets.schemas import QCSettings, ReferenceSheet
 from ..providers.comfyui import ComfyUIClient, ComfyUIError, ComfyUIInterruptedError, ComfyUITimeoutError
 from ..providers.qc import DetectorProvider, QCProviderError
-from ..store.comfy_folders import ComfyFolders
+from ..store.comfy_folders import ComfyFolders, transit
 from ..store.comfy_folders import entry_folder as comfy_entry_folder
 from ..store.db import Database
 from ..store.files import FileStore
@@ -743,7 +743,7 @@ class ReferenceExecutor:
                     }
                 )
                 reference_data.append(self.files.absolute(image.path).read_bytes())
-            prefix = f"{folder}/{params.get('sheet')}/variante-{params.get('variant', 1)}"
+            prefix = transit(f"{folder}/{params.get('sheet')}/variante-{params.get('variant', 1)}")
             if sheet is not None:
                 mapped = sheet_params(
                     loaded,

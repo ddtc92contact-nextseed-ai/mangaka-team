@@ -42,6 +42,7 @@ from .api import (
 from .api.deps import AppContext
 from .api.errors import install_error_handlers
 from .config import Settings, get_settings
+from .pipeline.comfy_library import ComfyLibrary
 from .pipeline.comfy_trial import STEP as TRIAL_STEP
 from .pipeline.comfy_trial import TrialExecutor
 from .pipeline.composition import STEP as CONTROL_MAP_STEP
@@ -94,6 +95,9 @@ def build_context(settings: Settings, providers: Providers | None = None) -> App
     )
     if folders.problem:
         log.warning("dossiers ComfyUI : %s", folders.problem)
+    # Bibliothèque lisible (output/mangaka/<série>/) : mise à jour après chaque commit qui touche une série.
+    library = ComfyLibrary(folders, files)
+    library.watch(db)
     kb = KnowledgeBase(presets.knowledge, providers.embedding)
     # « Savoir-faire » des profils d'agents (écran « L'équipe ») : prime sur knowledge.yaml.
     kb.profile_lookup = agents_service.knowledge_collections
@@ -227,6 +231,7 @@ def build_context(settings: Settings, providers: Providers | None = None) -> App
         agents=agents_service,
         knowledge=kb,
         folders=folders,
+        library=library,
     )
 
 

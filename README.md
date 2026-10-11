@@ -177,33 +177,71 @@ configuration incomplète (ex. clé absente) y apparaît en rouge sans empêcher
 | `COMFYUI_TIMEOUT_S` | `5` | Délai d'une requête HTTP vers ComfyUI (la durée max d'une génération est `timeout_s` du preset de workflow) |
 | `COMFYUI_POLL_S` | `1` | Intervalle de sondage de `/history` pendant une génération |
 | `MOCK_COMFYUI_SECONDS` | `4` | Mode mock : durée simulée d'une génération (progression factice) |
-| `COMFYUI_DIR` | `~/ComfyUI` (vrai ComfyUI) | Dossier d'installation de ComfyUI, transmis par le lanceur : rangement et nettoyage des fichiers de la série (voir « Rangement des fichiers ») ; vide ou introuvable = rien n'est supprimé hors de `data/` (avertissement sur la fiche série) |
+| `COMFYUI_DIR` | `~/ComfyUI` (vrai ComfyUI) | Dossier d'installation de ComfyUI, transmis par le lanceur : rangement et nettoyage des fichiers de la série, bibliothèque lisible (voir « Où sont mes fichiers ? ») ; vide ou introuvable = rien n'est supprimé hors de `data/` (avertissement sur la fiche série) |
 | `REFERENCE_VARIANTS_KEPT` | `4` | Variantes non gardées de « Créer des références » conservées par fiche et type de fiche |
 | `MANGAKA_DATA_DIR` | `./data` | Dossier de la base et des images |
 | `MAX_UPLOAD_MB` | `20` | Taille max d'une image de référence |
 | `MOCK_LLM_INVALID_ATTEMPTS` | `0` | Mode mock : nombre de réponses invalides du LLM factice avant une valide (test des relances ; `[mock:invalide:N]` dans un synopsis fait de même pour un chapitre) |
 
+### Où sont mes fichiers ?
+
+Ton travail se parcourt dans l'explorateur de fichiers, dans **`<COMFYUI_DIR>/output/mangaka/<série>/`** :
+la **bibliothèque lisible**, une copie rangée de tout ce qui est **validé ou retenu**, avec des noms clairs.
+
+```
+mangaka/lucius-et-stan/
+  references/
+    personnages/lucius/      lucius-portrait.png, lucius-turnaround.png, lucius-expressions.png,
+                             lucius-angle-<angle>.png, lucius-reference.png (image envoyée à la main)…
+    objets/epee/             epee-trois-quarts.png…
+    decors/la-foret/         la-foret-plan-large.png, la-foret-autre-angle.png…
+    style/                   planche-de-style.png (+ planche-de-style-2.png… : autres images de la référence active)
+  chapitre-01/
+    page-01/                 case-01-croquis.png (croquis validé), case-01.png (version choisie)
+    planches/                page-01.png + page-01.svg (page rendue ou chapitre exporté)
+  _transit/                  sorties brutes de ComfyUI, effacées dès leur enregistrement : à ignorer
+```
+
+- Les dossiers `references/{personnages,objets,decors,style}` sont créés avec la série ; un dossier par
+  personnage, objet ou décor dès sa création ; un dossier par chapitre et par page à leur création.
+- Le suffixe d'une référence est son type de fiche (`-portrait`, `-turnaround`…), `-angle-<angle>` pour une
+  vue étiquetée, `-reference` pour une image envoyée ; `-2`, `-3`… s'il y en a plusieurs du même type.
+- `case-01.png` est la version choisie de la case (sa version finalisée si elle a été agrandie) : choisir une
+  autre version le remplace. Les variantes non retenues, essais et fichiers de travail n'y sont jamais.
+- Tout suit l'atelier : renommer une série, un personnage, un objet ou un décor renomme dossier et fichiers ;
+  supprimer une fiche, une image, une case, une page ou un chapitre retire ses fichiers.
+- **Reconstruire la bibliothèque** (fiche série, carte « Fichiers de la série », ou
+  `POST /projects/{id}/library`) régénère toute l'arborescence d'une série depuis `data/` : utile pour une
+  série créée avant cette bibliothèque, ou après avoir déplacé ou effacé des fichiers à la main. Rejouer ne
+  duplique rien.
+- C'est une copie : `data/` reste le stockage de l'application. Ne range pas tes propres fichiers dans ces
+  dossiers (un fichier au nom de la bibliothèque, `case-03.png`, `lucius-portrait.png`…, qui n'est plus
+  retenu en est retiré).
+- Sans `COMFYUI_DIR` valide, rien n'est écrit et la fiche série dit pourquoi.
+
 ### Rangement des fichiers
 
 Chaque série reçoit à sa création un nom de dossier tiré de son titre (« Lucius et Stan » →
 `lucius-et-stan`, accents retirés, unique : `-2`, `-3`… en cas de doublon), chaque fiche de la bibliothèque
-un nom tiré du sien. Dans ComfyUI, sorties (`output/`) et images envoyées (`input/`) suivent le même
-arbre :
+un nom tiré du sien. Dans ComfyUI, les images envoyées (`input/`) et les sorties brutes (`output/…/_transit/`)
+suivent le même arbre :
 
 ```
-mangaka/<série>/personnages/<nom>/<fiche>/variante-1…   mangaka/<série>/objets/<nom>/…
-mangaka/<série>/decors/<nom>/…                          mangaka/<série>/style/essais/…
-mangaka/<série>/chapitre-01/page-01/case-01, case-01-croquis, case-01-controle, case-01-finition, case-01-reparation…
+input/mangaka/<série>/personnages/<nom>/reference-12.png        input/mangaka/<série>/chapitre-01/page-01/…
+output/mangaka/<série>/_transit/personnages/<nom>/<fiche>/variante-1…   …/_transit/objets/<nom>/…
+output/mangaka/<série>/_transit/decors/<nom>/…                          …/_transit/style/essais/…
+output/mangaka/<série>/_transit/chapitre-01/page-01/case-01, case-01-croquis, case-01-controle, case-01-finition…
 ```
 
 - la sortie de ComfyUI est un transit : dès qu'une image est enregistrée dans `data/`, sa copie dans
   `output/` est effacée ;
-- renommer une série ou une fiche renomme son dossier (dans `output/` et `input/`) ;
+- renommer une série ou une fiche renomme son dossier (envois, transit et bibliothèque) ;
 - supprimer une série, un chapitre, une page ou une fiche supprime son dossier, strictement dans
   `mangaka/<série>/` — jamais `mangaka/old/`, jamais une autre série ;
 - les variantes non gardées de « Créer des références » sont limitées à `REFERENCE_VARIANTS_KEPT` par fiche
   et type de fiche ; « Nettoyer les variantes non retenues » (fiche série) efface les autres et les essais
-  de style non choisis. Les références gardées et toutes les versions des cases restent ;
+  de style non choisis, et vide le transit (envois, `_transit/`, anciennes sorties d'avant `_transit/`). Les
+  références gardées, toutes les versions des cases et la bibliothèque lisible restent ;
 - les ids des séries, chapitres et pages ne sont jamais réutilisés : une série recréée après une
   suppression a un nouvel id et un nouveau dossier.
 
@@ -246,8 +284,9 @@ cp "$SAUVEGARDE/mangaka.db" mangaka.db
 tar -xzf "$SAUVEGARDE/data.tar.gz"      # remet projects/, exports/… à leur place dans data/
 ```
 
-puis relancer l'application. Les fichiers effacés de ComfyUI ne sont pas sauvegardés (zone de transit :
-tout ce qui compte est déjà copié dans `data/`).
+puis relancer l'application. Les fichiers effacés de ComfyUI ne sont pas sauvegardés (transit et bibliothèque
+lisible : tout ce qui compte est déjà copié dans `data/`) ; après une restauration, « Reconstruire la
+bibliothèque » sur chaque série la régénère.
 
 ## Commandes
 
@@ -267,6 +306,7 @@ Documentation interactive : `http://127.0.0.1:8765/docs` quand le moteur tourne.
 
 - `GET /health` — état du moteur, de ComfyUI et des fournisseurs (`storage` : dossiers de ComfyUI gérés)
 - `POST /projects/{id}/cleanup` — « Nettoyer les variantes non retenues » de la série
+- `POST /projects/{id}/library` — « Reconstruire la bibliothèque » : copie lisible de la série dans `COMFYUI_DIR/output/mangaka/<série>/` (voir « Où sont mes fichiers ? »)
 - `GET /presets` — formats de page, workflows, erreurs de presets
 - `GET|POST /projects`, `GET|PATCH|DELETE /projects/{id}`
 - `GET|POST /projects/{id}/characters`, `GET|PATCH|DELETE /characters/{id}`

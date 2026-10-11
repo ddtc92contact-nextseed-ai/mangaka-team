@@ -34,7 +34,7 @@ from sqlalchemy.orm import Session, selectinload
 from ..presets import LoadedWorkflow, LoraSpec, PresetRegistry, build_workflow
 from ..presets.schemas import StyleBoardSettings
 from ..providers.comfyui import ComfyUIClient, ComfyUIError, ComfyUIInterruptedError, ComfyUITimeoutError
-from ..store.comfy_folders import STYLE_TRIALS, ComfyFolders
+from ..store.comfy_folders import STYLE_TRIALS, ComfyFolders, transit
 from ..store.comfy_folders import style_folder as comfy_style_folder
 from ..store.db import Database
 from ..store.files import FileStore
@@ -341,7 +341,7 @@ class StyleBoardExecutor:
                     if mode == "trial"
                     else f"reference-{params.get('batch')}-{params.get('variant')}"
                 )
-                wf_params["filename_prefix"] = f"{folder}/{name}"
+                wf_params["filename_prefix"] = transit(f"{folder}/{name}")
             return _Plan(
                 mode=mode,
                 loaded=loaded,

@@ -127,6 +127,19 @@ export interface CleanupResult {
   warning: string | null;
 }
 
+/** Résultat de « Reconstruire la bibliothèque » (copie lisible de la série dans ComfyUI/output/mangaka/). */
+export interface LibraryResult {
+  /** Faux : dossier ComfyUI inconnu, rien d'écrit (voir `warning`). */
+  enabled: boolean;
+  /** output/mangaka/<série> (relatif au dossier de ComfyUI). */
+  folder: string | null;
+  /** Chemin complet sur le disque. */
+  path: string | null;
+  written: number;
+  removed: number;
+  warning: string | null;
+}
+
 /** Dossiers de ComfyUI gérés par le moteur (COMFYUI_DIR) ; `warning` : rien n'est supprimé hors de data/. */
 export interface StorageStatus {
   enabled: boolean;
@@ -2019,6 +2032,7 @@ export const api = {
   relayoutProject: (id: number) => request<RelayoutResult>(`/projects/${id}/relayout`, { method: "POST" }),
   deleteProject: (id: number) => request<void>(`/projects/${id}`, { method: "DELETE" }),
   cleanupProject: (id: number) => request<CleanupResult>(`/projects/${id}/cleanup`, { method: "POST" }),
+  rebuildLibrary: (id: number) => request<LibraryResult>(`/projects/${id}/library`, { method: "POST" }),
   resetWorkshop: (confirm: string, all: boolean) => request<ResetResult>("/reset", json("POST", { confirm, all })),
 
   listLibrary: <T extends LibraryEntry = LibraryEntry>(kind: LibraryKind, projectId: number) =>

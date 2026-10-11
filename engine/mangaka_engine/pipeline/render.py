@@ -2,7 +2,8 @@
 
 Fichiers produits (jamais commités) :
 
-- `data/renders/page-<id>/page-<NNN>.png|svg` + `render.json` : dernier rendu d'une page ;
+- `data/renders/page-<id>/page-<NNN>.png|svg` + `render.json` : dernier rendu d'une page (rendu seul ou export du
+  chapitre ; copié dans la bibliothèque lisible, `chapitre-NN/planches/`, voir `comfy_library.py`) ;
 - `data/exports/chapter-<id>/<série>-ch<NNN>-<job>.zip` : export d'un chapitre (pages numérotées).
 
 Boîtes de visages : le lettrage évite les visages détectés par le contrôle qualité sur la version
@@ -413,6 +414,13 @@ def render_page_to_files(
     rendered = render_art(
         presets, fonts, page_inputs(presets, files, page, fonts).art, bleed=bleed, crop_marks=crop_marks
     )
+    return store_render(files, page, rendered, bleed=bleed, crop_marks=crop_marks)
+
+
+def store_render(
+    files: FileStore, page: Page, rendered: RenderedPage, *, bleed: bool, crop_marks: bool
+) -> dict[str, Any]:
+    """Range un rendu comme dernier rendu de la page (`data/renders/page-<id>/`) et renvoie sa description."""
     folder = render_folder(page.id)
     files.delete_tree(folder)
     stem = page_file_stem(page.number)
@@ -495,8 +503,10 @@ def export_job(
     *,
     bleed: bool,
     crop_marks: bool,
+    on_done: Callable[[int], object] | None = None,
 ) -> Callable[[JobReporter], str]:
-    """Job « Exporter le chapitre » : chaque page mise en page → PNG + SVG numérotés dans un ZIP."""
+    """Job « Exporter le chapitre » : chaque page mise en page → PNG + SVG numérotés dans un ZIP (et dernier
+    rendu de chaque page) ; `on_done(id de la série)` ensuite (bibliothèque lisible)."""
 
     def run(report: JobReporter) -> str:
         fonts = FontBook(presets)
@@ -525,6 +535,7 @@ def export_job(
                     stem = page_file_stem(page.number)
                     zf.writestr(f"{stem}.png", rendered.png)
                     zf.writestr(f"{stem}.svg", rendered.svg)
+                    store_render(files, page, rendered, bleed=bleed, crop_marks=crop_marks)
                     warnings += [{**w.to_json(), "page_number": page.number} for w in rendered.warnings]
             target.write_bytes(buf.getvalue())
             job = session.get(Job, job_id)
@@ -532,6 +543,9 @@ def export_job(
             params.update({"file": rel, "filename": name, "pages": len(pages), "warnings": warnings})
             session.execute(update(Job).where(Job.id == job_id).values(params=params))
             session.commit()
+            project_id = chapter.project_id
+        if on_done is not None:
+            on_done(project_id)
         n = len(pages)
         tail = f" · {len(warnings)} avertissement{'s' if len(warnings) > 1 else ''}" if warnings else ""
         return f"{n} page{'s' if n > 1 else ''} exportée{'s' if n > 1 else ''}{tail}"

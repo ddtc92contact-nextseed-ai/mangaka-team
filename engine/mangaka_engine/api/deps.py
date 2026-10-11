@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from ..agents import AgentService
 from ..config import Settings
+from ..pipeline.comfy_library import ComfyLibrary
 from ..pipeline.comfy_loras import LoraCatalog
 from ..pipeline.composition import ControlCatalog, unavailable_control
 from ..pipeline.jobs import JobRunner
@@ -38,6 +39,8 @@ class AppContext:
     knowledge: KnowledgeBase  # savoir-faire et bible injectés dans les agents
     # Dossiers de la série dans ComfyUI (rangement, renommage, nettoyage) ; désactivé sans COMFYUI_DIR valide.
     folders: ComfyFolders = field(default_factory=lambda: ComfyFolders(None, mock=True))
+    # Bibliothèque lisible de la série dans ComfyUI (output/mangaka/<série>/) ; None : jamais écrite.
+    library: ComfyLibrary | None = None
     lora_catalog: LoraCatalog = field(default_factory=LoraCatalog)  # LoRA vus par ComfyUI (cache court)
     # Verrouillage de composition (ControlNet) disponible dans ComfyUI ? (cache court)
     control_catalog: ControlCatalog = field(default_factory=ControlCatalog)

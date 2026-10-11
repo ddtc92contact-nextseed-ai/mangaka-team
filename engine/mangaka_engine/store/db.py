@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import Any
 
 from sqlalchemy import Engine, create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
@@ -35,6 +36,10 @@ class Database:
     def session_scope(self) -> Session:
         """Session à utiliser dans un `with` (threads des jobs)."""
         return self._sessions()
+
+    def listen(self, name: str, fn: Callable[..., Any]) -> None:
+        """Écoute un évènement des sessions de cette base (`after_flush`, `after_commit`…)."""
+        event.listen(self._sessions, name, fn)
 
     def session(self) -> Iterator[Session]:
         with self._sessions() as session:

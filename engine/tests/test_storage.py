@@ -178,10 +178,10 @@ def test_reference_sheet_files_go_under_the_series_and_character_names(
         if "filename_prefix" in wf[k]["inputs"]
     ]
     assert prefixes == [
-        "mangaka/lucius-et-stan/personnages/lucius/personnage-portrait/variante-1",
-        "mangaka/lucius-et-stan/personnages/lucius/personnage-portrait/variante-2",
+        "mangaka/lucius-et-stan/_transit/personnages/lucius/personnage-portrait/variante-1",
+        "mangaka/lucius-et-stan/_transit/personnages/lucius/personnage-portrait/variante-2",
     ]
-    # Résultat copié dans data/ : la copie de ComfyUI (zone de transit) est effacée.
+    # Résultat copié dans data/ : la copie de ComfyUI (zone de transit `_transit/`) est effacée.
     assert all(_ok(c.get(f"/jobs/{j['id']}"))["status"] == "succeeded" for j in jobs)
     assert _files(comfy_dir / "output" / "mangaka" / "lucius-et-stan") == set()
     assert (comfy_dir / "output" / "mangaka" / "old" / "garde.png").exists()
@@ -222,8 +222,8 @@ def test_panel_files_go_in_the_page_folder_with_readable_names(c: TestClient, co
         if "filename_prefix" in wf[k]["inputs"]
     )
     assert prefixes == [
-        "mangaka/lucius-et-stan/chapitre-01/page-02/case-01",
-        "mangaka/lucius-et-stan/chapitre-01/page-02/case-02",
+        "mangaka/lucius-et-stan/_transit/chapitre-01/page-02/case-01",
+        "mangaka/lucius-et-stan/_transit/chapitre-01/page-02/case-02",
     ]
     [image] = _ok(c.get(f"/characters/{lucius['id']}"))["reference_images"]
     assert f"mangaka/lucius-et-stan/personnages/lucius/reference-{image['id']}.png" in comfy.uploads
