@@ -56,6 +56,22 @@ Langue de l'interface : **français**.
 - `providers/` : `llm`, `vision`, `comfyui` — chacun avec une implémentation réelle et un `mock`.
 - `store/` : SQLite + fichiers dans `data/` (jamais commité).
 - `presets/` : fichiers YAML/JSON validés au chargement.
+- Bibliothèque lisible (`pipeline/comfy_library.py`) : copie rangée de chaque série dans
+  `ComfyUI/output/mangaka/<série>/`, tenue à jour après chaque commit, jamais relue par l'appli :
+
+```
+mangaka/<série>/
+  references/personnages/<nom>/<type>/<nom>-<type>.png   un sous-dossier par preset de reference_sheets/
+                                                         (portrait, plein-pied, expressions…) + angles/, imports/
+  references/objets/<nom>/…  references/decors/<nom>/…  references/style/planche-de-style.png
+  chapitre-XX/page-YY/case-ZZ.png, case-ZZ-croquis.png   version choisie, croquis validé
+  chapitre-XX/planches/page-YY.png + .svg
+  trash/…                                                même rangement : variantes non gardées (-vN),
+                                                         versions non choisies, croquis non validés
+```
+
+  Créée dès la création de la série, des fiches, chapitres et pages (dossiers vides compris) ; renommer déplace,
+  supprimer retire ; « Reconstruire la bibliothèque » (Réglages) refait tout et convertit l'ancienne disposition.
 
 ## 3. Modèle de données
 

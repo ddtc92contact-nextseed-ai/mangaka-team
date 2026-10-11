@@ -1477,6 +1477,8 @@ class ImagePromptSettings(_Strict):
 
 # --- Fiches de référence (« Créer des références » de la bibliothèque) ---------
 REFERENCE_SHEET_VARIABLES = {"name", "description", "keywords", "style", "instruction", "start", "style_ref"}
+# Sous-dossiers de la bibliothèque lisible tenus par l'appli (vues de « Nouvel angle », images envoyées).
+REFERENCE_SHEET_RESERVED_FOLDERS = frozenset({"angles", "imports"})
 
 
 class ReferenceSheet(_Strict):
@@ -1502,6 +1504,16 @@ class ReferenceSheet(_Strict):
     # impose ce workflow.
     workflow: str | None = None
     order: int = Field(default=100, description="Ordre dans la liste déroulante")
+    # Sous-dossier de la fiche dans la bibliothèque lisible (`references/personnages/<nom>/<dossier>/`, voir
+    # pipeline/comfy_library.py) ; absent : l'id sans la sorte (`personnage-portrait` → `portrait`).
+    folder: str | None = Field(default=None, pattern=r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
+
+    @field_validator("folder")
+    @classmethod
+    def _free_folder(cls, value: str | None) -> str | None:
+        if value in REFERENCE_SHEET_RESERVED_FOLDERS:
+            raise ValueError(f"« {value} » est réservé (vues étiquetées, images envoyées)")
+        return value
 
     @field_validator("prompt")
     @classmethod

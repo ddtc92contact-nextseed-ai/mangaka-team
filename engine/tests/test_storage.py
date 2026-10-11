@@ -183,7 +183,11 @@ def test_reference_sheet_files_go_under_the_series_and_character_names(
     ]
     # Résultat copié dans data/ : la copie de ComfyUI (zone de transit `_transit/`) est effacée.
     assert all(_ok(c.get(f"/jobs/{j['id']}"))["status"] == "succeeded" for j in jobs)
-    assert _files(comfy_dir / "output" / "mangaka" / "lucius-et-stan") == set()
+    # Non gardées : seulement leur copie dans la corbeille de la bibliothèque (pipeline/comfy_library.py).
+    assert _files(comfy_dir / "output" / "mangaka" / "lucius-et-stan") == {
+        "trash/personnages/lucius/portrait/lucius-portrait-v1.png",
+        "trash/personnages/lucius/portrait/lucius-portrait-v2.png",
+    }
     assert (comfy_dir / "output" / "mangaka" / "old" / "garde.png").exists()
 
     # « Affiner » : la variante de départ est envoyée dans le dossier du personnage.
