@@ -106,10 +106,16 @@ def active_style(session: Session, project_id: int) -> SeriesAsset | None:
     return asset if asset is not None and asset.reference_images else None
 
 
-def style_for(session: Session, presets: PresetRegistry, project_id: int, use: str) -> SeriesAsset | None:
+def style_for(
+    session: Session, presets: PresetRegistry, project_id: int, use: str, kind: str | None = None
+) -> SeriesAsset | None:
     """Référence de style à joindre, selon `style_board` de defaults.yaml (`use` : `reference_sheets`
-    ou `panels`) : None sans planche de style, sans réglage, ou si le réglage dit « jamais »."""
+    — réglage de la sorte `kind` — ou `panels`) : None sans planche de style, sans réglage, ou si le
+    réglage dit « jamais »."""
     settings = presets.defaults.style_board if presets.defaults else None
-    if settings is None or getattr(settings, use) == "never":
+    if settings is None:
+        return None
+    mode = settings.sheets_mode(kind or "character") if use == "reference_sheets" else getattr(settings, use)
+    if mode == "never":
         return None
     return active_style(session, project_id)

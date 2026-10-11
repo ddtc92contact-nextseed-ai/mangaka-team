@@ -14,7 +14,7 @@ from ..pipeline.layout import LayoutError
 from ..pipeline.pages import change_reading_direction, layout_page
 from ..pipeline.style import StyleError, check_style, lora_triggers, series_style, style_names
 from ..presets import PresetError
-from ..presets.schemas import AgentPreset
+from ..presets.schemas import AgentPreset, check_cfg
 from ..store.models import (
     Chapter,
     Character,
@@ -72,6 +72,7 @@ def project_out(
         clean_mode=project.clean_mode or "img2img",
         clean_control=project.clean_control,
         upscaler=project.upscaler,
+        cfg=project.cfg,
         ai_prompt=project.ai_prompt,
         character_count=character_count,
         chapter_count=chapter_count,
@@ -191,6 +192,18 @@ def _check_presets(
         raise FieldError("clean_control", f"type de contrôle inconnu : « {clean_control} » (possibles : {known})")
 
 
+def _check_cfg(ctx: AppContext, workflow: str, cfg: float | None) -> None:
+    """CFG de la série : refusé au-delà de 1 si le palier est distillé (Turbo : le négatif n'y est jamais lu)."""
+    loaded = ctx.presets.workflows.get(workflow)
+    if cfg is None or loaded is None:
+        return
+    try:
+        check_cfg(cfg, distilled=loaded.preset.distilled)
+    except ValueError as exc:
+        name = loaded.preset.tier.name if loaded.preset.tier else loaded.preset.id
+        raise FieldError("cfg", f"Palier {name} : {exc}") from None
+
+
 @router.get("", response_model=list[ProjectOut])
 def list_projects(session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)) -> list[ProjectOut]:
     chars = dict(session.execute(select(Character.project_id, func.count()).group_by(Character.project_id)).all())
@@ -217,6 +230,7 @@ def create_project(
     genre = ctx.presets.style_genres[body.style_genre]
     layout_style = body.layout_style or ctx.agents.presets_for(None).genre_layout_style(body.style_genre)
     _check_presets(ctx, page_format, workflow, layout_style, body.upscaler, body.clean_control)
+    _check_cfg(ctx, workflow, body.cfg)
     lora = ctx.presets.style_loras.get(body.style_lora_name)
     weight = body.style_lora_weight if body.style_lora_weight is not None else (lora.weight if lora else 0.8)
     project = Project(
@@ -240,6 +254,7 @@ def create_project(
         clean_mode=body.clean_mode,
         clean_control=body.clean_control,
         upscaler=body.upscaler,
+        cfg=body.cfg,
         # Prompt rédigé par l'IA : réglage global de l'écran « L'équipe » (dessinateur), oui par défaut.
         ai_prompt=body.ai_prompt if body.ai_prompt is not None else ai_prompt_default(ctx.agents.presets_for(None)),
     )
@@ -297,6 +312,8 @@ def update_project(
         changes.get("upscaler"),
         changes.get("clean_control"),
     )
+    if {"cfg", "workflow_preset"} & set(changes):
+        _check_cfg(ctx, changes.get("workflow_preset", project.workflow_preset), changes.get("cfg", project.cfg))
     if "style_options" in changes:
         changes["style_options"] = dict(changes["style_options"] or {})
     if {"style_genre", "style_rendering", "style_tone", "style_options"} & set(changes):

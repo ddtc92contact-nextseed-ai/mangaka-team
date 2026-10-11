@@ -149,7 +149,7 @@ def test_image_prompt_never_asks_to_draw_sfx(client: TestClient) -> None:
     assert "VROUM" not in prompt.upper()
     assert "Aucun texte ni bulle" in prompt
     negative = client.app.state.ctx.presets.image_prompt.forbidden_text_terms  # type: ignore[attr-defined]
-    assert "onomatopées" in negative
+    assert "onomatopoeia" in negative
     with client.app.state.ctx.db.session_scope() as session:  # type: ignore[attr-defined]
         sfx = session.query(Bubble).filter(Bubble.kind == BubbleKind.sfx).all()
         assert [b.text for b in sfx] == ["VROUM !"]

@@ -6,7 +6,8 @@ kinds: [object]
 order: 10
 width: 1024
 height: 1024
-workflow: null
+# Palier Qualité (vrai CFG, non distillé) : le prompt négatif « aucune personne » est lu par le modèle.
+workflow: qwen-image-base-qualite
 prompt:
   - "Fiche de référence d'objet : $name en vue de trois quarts, entier et centré, avec deux ou trois vues de détail en médaillon autour."
   - "$description."
@@ -16,4 +17,4 @@ prompt:
   - "Style : $style."
   - "Dernière image ($style_ref) : référence de style uniquement — trait, trames, encrage ; ne pas reprendre son personnage, sa scène ni sa composition."
   - "Fond blanc uni, éclairage de studio neutre, aucun personnage, aucun texte."
-negative_prompt: "personnage, main, décor chargé"
+negative_prompt: "person, people, human, character, face, hands, figure, crowd, text, cluttered background"

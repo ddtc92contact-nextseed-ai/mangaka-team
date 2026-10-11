@@ -111,7 +111,12 @@ def board_out(session: Session, presets: PresetRegistry, series: Project) -> Sty
         style=style,
         style_names=style_names(presets, series),
         trials_per_batch=settings.trials if settings is not None else 0,
-        use_reference_sheets=settings.reference_sheets if settings is not None else None,
+        # Réglage des fiches de personnage ; sortes de fiches qui reçoivent la référence (jamais les
+        # objets ni les décors avec les presets livrés).
+        use_reference_sheets=settings.sheets_mode("character") if settings is not None else None,
+        reference_sheet_kinds=[k for k in ("character", "object", "decor") if settings.sheets_mode(k) != "never"]
+        if settings is not None
+        else [],
         use_panels=settings.panels if settings is not None else None,
         active=reference_out(active, style, trial_ids) if active is not None else None,
         history=[reference_out(a, style, trial_ids) for a in assets if a is not active],

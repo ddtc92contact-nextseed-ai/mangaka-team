@@ -14,6 +14,7 @@ import {
 import { HELP, type HelpId } from "@/lib/help";
 import { useEngineData } from "@/lib/hooks";
 import { InfoTip } from "./info-tip";
+import { NegativeBadge, formatCfg } from "./negative-badge";
 import { Modal } from "./modal";
 import { LoraPicker } from "./lora-picker";
 import { DIRECTIONS, DirectionPicker } from "./reading-direction";
@@ -84,6 +85,7 @@ export function ProjectForm({
     clean_mode: initial?.clean_mode ?? "img2img",
     clean_control: initial?.clean_control ?? null,
     upscaler: initial?.upscaler ?? null,
+    cfg: initial?.cfg ?? null,
     ai_prompt: initial?.ai_prompt,
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -111,6 +113,10 @@ export function ProjectForm({
     recommendedTier !== undefined &&
     currentWorkflow?.tier_order != null &&
     currentWorkflow.tier_order < (recommendedTier.tier_order ?? 0);
+  // Vrai CFG : celui de la série, sinon celui du palier ; un palier distillé (Turbo) reste à 1.
+  const distilled = currentWorkflow?.distilled ?? false;
+  const tierCfg = currentWorkflow?.cfg ?? 1;
+  const effectiveCfg = distilled ? 1 : (form.cfg ?? tierCfg);
   const sketchEnabled = form.sketch_enabled ?? defaults?.sketch_enabled ?? true;
   // Prompt rédigé par l'IA : réglage global du dessinateur (« L'équipe ») pour une nouvelle série.
   const aiPrompt = form.ai_prompt ?? presets.data?.ai_prompt_default ?? true;
@@ -221,6 +227,7 @@ export function ProjectForm({
       layout_style: layoutStyle || undefined,
       sketch_enabled: sketchEnabled,
       sketch_denoise: form.sketch_denoise ?? null,
+      cfg: distilled ? null : (form.cfg ?? null),
       ai_prompt: aiPrompt,
       style_lora_name: loraName || null,
     };
@@ -533,7 +540,7 @@ export function ProjectForm({
           htmlFor="workflow_preset"
           help="serie.tier"
           error={errors.workflow_preset}
-          hint="Chaque case peut ensuite être régénérée en Qualité depuis l'atelier."
+          hint="Chaque case peut ensuite être régénérée en Qualité max depuis l'atelier."
         >
           <Select
             id="workflow_preset"
@@ -561,9 +568,40 @@ export function ProjectForm({
               <Button type="button" variant="secondary" onClick={() => set("workflow_preset", recommendedTier.id)}>
                 Passer en {recommendedTier.tier ?? recommendedTier.name}
               </Button>
-              <p className="text-xs text-zinc-400">recommandé pour la qualité, ~1 min par case (puis Enregistrer)</p>
+              <p className="text-xs text-zinc-400">
+                recommandé : prompt négatif actif, ~3 min par case (puis Enregistrer)
+              </p>
             </div>
           )}
+        </Field>
+        <Field
+          label="CFG des cases"
+          htmlFor="cfg"
+          help="serie.cfg"
+          error={errors.cfg}
+          hint={
+            distilled
+              ? "Palier distillé (Turbo) : cfg 1 imposé, le prompt négatif n'est jamais lu."
+              : `De 1 à 3. Vide : celui du palier (${formatCfg(tierCfg)}). Au-dessus de 1, chaque étape coûte environ deux fois plus.`
+          }
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              id="cfg"
+              type="number"
+              min={1}
+              max={3}
+              step={0.1}
+              className="!w-32"
+              value={distilled ? "" : (form.cfg ?? "")}
+              placeholder={formatCfg(distilled ? 1 : tierCfg)}
+              disabled={!presets.data || distilled}
+              onChange={(e) => set("cfg", e.target.value === "" ? null : Number(e.target.value))}
+              aria-invalid={Boolean(errors.cfg)}
+              data-testid="series-cfg"
+            />
+            <NegativeBadge cfg={effectiveCfg} />
+          </div>
         </Field>
       </div>
       <fieldset className="min-w-0 space-y-2 rounded-lg border border-zinc-800 p-4" data-testid="ai-prompt-settings">

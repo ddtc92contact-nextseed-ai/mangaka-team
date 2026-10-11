@@ -63,7 +63,12 @@ def _version(path: Path) -> int:
     return v
 
 
+def _drop_v22_cfg(con: sqlite3.Connection) -> None:
+    con.execute("ALTER TABLE projects DROP COLUMN cfg")
+
+
 def _drop_v21_ai_prompt(con: sqlite3.Connection) -> None:
+    _drop_v22_cfg(con)
     con.execute("ALTER TABLE projects DROP COLUMN ai_prompt")
     for column in ("prompt_source", "prompt_key", "prompt_warning"):
         con.execute(f"ALTER TABLE panels DROP COLUMN {column}")
@@ -723,6 +728,31 @@ def test_v20_database_keeps_fragment_prompts(make_settings: Callable[..., Settin
         assert panel["final_prompt"] == prompt and panel["prompt_source"] == "fragments"
         assert panel["prompt_pending"] is False and panel["prompt_warning"] is None
         assert c.post("/projects", json={**STYLE, "title": "Neuve"}).json()["ai_prompt"] is True
+    assert _version(settings.database_path) == SCHEMA_VERSION
+    fresh = settings.database_path.parent / "fresh.db"
+    create_db_engine(fresh).dispose()
+    assert _columns(settings.database_path) == _columns(fresh)
+
+
+def test_v21_database_keeps_its_tier_and_gets_no_series_cfg(make_settings: Callable[..., Settings]) -> None:
+    """v21 → v22 : CFG par série ajouté (vide = celui du palier) ; une série existante garde son palier
+    (Rapide ici), seules les nouvelles passent au palier Qualité."""
+    settings = make_settings()
+    with TestClient(create_app(settings)) as c:
+        project = c.post(
+            "/projects", json={**STYLE, "title": "Série v21", "workflow_preset": "qwen-image-base-rapide"}
+        ).json()
+    con = sqlite3.connect(settings.database_path)
+    _drop_v22_cfg(con)
+    con.execute("PRAGMA user_version = 21")
+    con.commit()
+    con.close()
+
+    with TestClient(create_app(settings)) as c:
+        old = c.get(f"/projects/{project['id']}").json()
+        assert (old["workflow_preset"], old["cfg"]) == ("qwen-image-base-rapide", None)
+        new = c.post("/projects", json={**STYLE, "title": "Neuve"}).json()
+        assert (new["workflow_preset"], new["cfg"]) == ("qwen-image-base-qualite", None)
     assert _version(settings.database_path) == SCHEMA_VERSION
     fresh = settings.database_path.parent / "fresh.db"
     create_db_engine(fresh).dispose()

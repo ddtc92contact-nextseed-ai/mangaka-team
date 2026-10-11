@@ -37,9 +37,11 @@ REFERENCES = ["mangaka/perso1_img1.png", "mangaka/perso2_img4.png"]
 
 PRESETS = [
     "qwen-image-base",
+    "qwen-image-base-qualite",
     "qwen-image-base-rapide",
     "qwen-image-turbo",
     "qwen-image-edit-ref",
+    "qwen-image-edit-ref-qualite",
     "qwen-image-edit-ref-rapide",
     "qwen-image-edit-ref-turbo",
     # Palier croquis et passage au propre (image → image depuis le croquis validé).
@@ -49,6 +51,8 @@ PRESETS = [
     "qwen-image-edit-ref-turbo-from-sketch",
     "qwen-image-base-rapide-from-sketch",
     "qwen-image-edit-ref-rapide-from-sketch",
+    "qwen-image-base-qualite-from-sketch",
+    "qwen-image-edit-ref-qualite-from-sketch",
     "qwen-image-base-from-sketch",
     "qwen-image-edit-ref-from-sketch",
     # Composition verrouillée (ControlNet Union : patch de modèle, image guide, prétraitement).
@@ -56,14 +60,17 @@ PRESETS = [
     "qwen-image-edit-ref-turbo-controlnet",
     "qwen-image-base-rapide-controlnet",
     "qwen-image-edit-ref-rapide-controlnet",
+    "qwen-image-base-qualite-controlnet",
+    "qwen-image-edit-ref-qualite-controlnet",
     "qwen-image-base-controlnet",
     "qwen-image-edit-ref-controlnet",
 ]
 SOURCE = "mangaka/croquis_case1_v1.png"
 CONTROL = ControlInput(image="mangaka/guide_case1_v2.png", type="lineart", strength=0.85)
-# Paliers (texte → image, avec références) : Qualité, Rapide, Turbo.
+# Paliers (texte → image, avec références) : Qualité max (bf16), Qualité, Rapide, Turbo.
 TIERS = {
     "": ("qwen-image-base", "qwen-image-edit-ref"),
+    "-qualite": ("qwen-image-base-qualite", "qwen-image-edit-ref-qualite"),
     "-rapide": ("qwen-image-base-rapide", "qwen-image-edit-ref-rapide"),
     "-turbo": ("qwen-image-turbo", "qwen-image-edit-ref-turbo"),
 }
@@ -119,16 +126,20 @@ def _diff(a: dict, b: dict) -> set[tuple[str, str]]:
 
 @pytest.mark.parametrize("tier", list(TIERS))
 def test_tiers_share_the_graph_and_differ_by_files_and_steps(tier: str) -> None:
-    """Rapide et Turbo = mêmes nœuds et liaisons que Qualité ; seuls les fichiers modèle / encodeur et les
-    étapes changent (Turbo : mêmes encodeur int8 et VAE que Rapide, seul le modèle distillé diffère)."""
+    """Qualité, Rapide et Turbo = mêmes nœuds et liaisons que Qualité max ; seuls les fichiers modèle /
+    encodeur, les étapes et le cfg changent (Qualité : fichiers de Rapide, 35 étapes à cfg 2,5 ; Turbo : mêmes
+    encodeur int8 et VAE que Rapide, seul le modèle distillé diffère)."""
     for i, other in enumerate(TIERS[tier]):
         qualite, wf = REG.workflow(TIERS[""][i]).workflow, REG.workflow(other).workflow
         assert {k: n["class_type"] for k, n in qualite.items()} == {k: n["class_type"] for k, n in wf.items()}
-        assert _diff(qualite, wf) == (set() if not tier else {("1", "unet_name"), ("2", "clip_name"), ("9", "steps")})
+        expected = set() if not tier else {("1", "unet_name"), ("2", "clip_name"), ("9", "steps")}
+        assert _diff(qualite, wf) == expected | ({("9", "cfg")} if tier == "-qualite" else set())
         if tier == "-turbo":
             assert _diff(REG.workflow(TIERS["-rapide"][i]).workflow, wf) == {("1", "unet_name"), ("9", "steps")}
-    steps = [REG.workflow(TIERS[t][0]).preset.defaults["steps"] for t in ("-turbo", "-rapide", "")]
-    assert steps == sorted(steps) and len(set(steps)) == 3
+        if tier == "-qualite":
+            assert _diff(REG.workflow(TIERS["-rapide"][i]).workflow, wf) == {("9", "steps"), ("9", "cfg")}
+    steps = [REG.workflow(TIERS[t][0]).preset.defaults["steps"] for t in ("-turbo", "-rapide", "-qualite", "")]
+    assert steps == sorted(steps) and len(set(steps)) == 4
     built = _build(TIERS[tier][1])
     assert built["6"]["inputs"]["images.image_1"] == ["20", 0] and "images.image_3" not in built["6"]["inputs"]
 
@@ -160,9 +171,10 @@ def test_turbo_presets_sampler_and_files(preset_id: str) -> None:
 
 
 def test_tier_pairing_and_defaults() -> None:
-    # Rapide par défaut (10/10/2026) ; Turbo pour les fiches de référence et la planche de style
-    assert REG.defaults is not None and REG.defaults.workflow == "qwen-image-base-rapide"
-    assert REG.defaults.workflow_with_references == "qwen-image-edit-ref-rapide"
+    # Qualité (vrai CFG) par défaut (11/10/2026) ; Turbo pour les fiches de personnage et la planche de style
+    assert REG.defaults is not None and REG.defaults.workflow == "qwen-image-base-qualite"
+    assert REG.defaults.workflow_with_references == "qwen-image-edit-ref-qualite"
+    assert REG.workflow(REG.defaults.workflow).preset.from_sketch == "qwen-image-base-qualite-from-sketch"
     assert REG.defaults.workflow_library == "qwen-image-turbo"
     assert REG.defaults.workflow_sketch == "qwen-image-croquis"
     assert REG.defaults.workflow_quality == "qwen-image-base"
@@ -172,8 +184,8 @@ def test_tier_pairing_and_defaults() -> None:
         if REG.workflow(preset_id).preset.role not in ("propre", "controle"):  # demandent une image source
             assert REG.workflow(preset_id).preset.trial["positive_prompt"]
     # ordre des listes
-    assert list(REG.workflows)[:3] == ["qwen-image-base", "qwen-image-base-rapide", "qwen-image-turbo"]
-    # trois paliers proposés dans la fiche série, dans l'ordre Turbo, Rapide, Qualité
+    assert list(REG.workflows)[:3] == ["qwen-image-base", "qwen-image-base-qualite", "qwen-image-base-rapide"]
+    # quatre paliers proposés dans la fiche série, dans l'ordre Turbo, Rapide, Qualité, Qualité max
     choices = sorted(
         (w.preset.tier.order, w.preset.tier.choice)
         for w in REG.workflows.values()
@@ -181,11 +193,13 @@ def test_tier_pairing_and_defaults() -> None:
     )
     assert [c for _, c in choices] == [
         "Turbo (production en volume, ~35 s par case)",
-        "Rapide (recommandé pour la qualité, ~1 min par case)",
-        "Qualité (finitions)",
+        "Rapide (~1 min par case, négatif inactif)",
+        "Qualité (recommandé, négatif actif, ~3 min par case)",
+        "Qualité max (bf16, 50 étapes, finitions)",
     ]
-    # estimations des presets (s / case) : Turbo 20, Rapide 60, Qualité 70, ×4 avec références
-    for (base, edit), seconds in zip(TIERS.values(), (70, 60, 20), strict=True):
+    # estimations des presets (s / case) : Turbo 20, Rapide 60, Qualité 168 (≈ 2× Rapide par étape, 35 étapes),
+    # Qualité max 70, ×4 avec références
+    for (base, edit), seconds in zip(TIERS.values(), (70, 168, 60, 20), strict=True):
         assert REG.workflow(base).preset.estimated_s == seconds
         assert REG.workflow(edit).preset.estimated_s == seconds * 4
 

@@ -21,6 +21,7 @@ from ..pipeline.reference_sheets import (
     ENTRY_KINDS,
     FOLDERS,
     MAX_KEPT,
+    PEOPLE_WARNING,
     LibraryEntry,
     active_jobs,
     enqueue_sheet,
@@ -44,6 +45,7 @@ from .schemas import (
     ImageOrderIn,
     JobOut,
     ReferenceGenerateIn,
+    ReferenceKeepIn,
     ReferenceRefineIn,
     ReferenceSheetOut,
     ReferenceStudioOut,
@@ -80,6 +82,7 @@ def _presets(ctx: AppContext, project_id: int) -> PresetRegistry:
 def variant_out(variant: ReferenceVariant, entry: LibraryEntry | None) -> ReferenceVariantOut:
     params = variant.params or {}
     kept = entry is not None and kept_image(entry, variant) is not None
+    check = params.get("people_check") if isinstance(params.get("people_check"), dict) else {}
     return ReferenceVariantOut(
         id=variant.id,
         entry_kind=variant.entry_kind,  # type: ignore[arg-type]
@@ -98,6 +101,8 @@ def variant_out(variant: ReferenceVariant, entry: LibraryEntry | None) -> Refere
         kept=kept,
         kept_image_id=variant.kept_image_id if kept else None,
         job_id=variant.job_id,
+        people_warning=PEOPLE_WARNING if check.get("detected") else None,
+        people_accepted=bool(check.get("detected") and check.get("accepted")),
         params=params,
         created_at=variant.created_at,
     )
@@ -277,13 +282,17 @@ def refine_variant(
 
 @router.post("/reference-variants/{variant_id}/keep", response_model=AssetOut | CharacterOut, status_code=201)
 def keep(
-    variant_id: int, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
+    variant_id: int,
+    body: ReferenceKeepIn | None = None,
+    session: Session = Depends(get_session),
+    ctx: AppContext = Depends(get_ctx),
 ) -> CharacterOut | AssetOut:
-    """« Garder comme référence » : copie la variante parmi les images de référence de la fiche (à la fin)."""
+    """« Garder comme référence » : copie la variante parmi les images de référence de la fiche (à la fin).
+    Personnage détecté dans une fiche d'objet ou de décor : 409, sauf `accept_people` (« Garder quand même »)."""
     variant = _variant_or_404(session, variant_id)
     entry = _entry_or_404(session, variant.entry_kind, variant.entry_id)
     try:
-        keep_variant(session, ctx.files, entry, variant)
+        keep_variant(session, ctx.files, entry, variant, accept_people=body is not None and body.accept_people)
     except GenerationError as exc:
         session.rollback()
         raise HTTPException(status_code=409, detail=_capitalize(str(exc))) from None

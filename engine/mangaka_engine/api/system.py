@@ -197,6 +197,11 @@ def list_presets(ctx: AppContext = Depends(get_ctx)) -> dict[str, Any]:
                 "role": w.preset.role,
                 "from_sketch": w.preset.from_sketch,
                 "denoise": w.preset.defaults.get("denoise"),
+                # Vrai CFG : à cfg 1 (et toujours pour un modèle distillé), le prompt négatif n'est pas lu.
+                "steps": w.preset.defaults.get("steps"),
+                "cfg": w.preset.cfg,
+                "distilled": w.preset.distilled,
+                "negative_active": w.preset.negative_active(),
             }
             for w in reg.workflows.values()
         ],
