@@ -1173,6 +1173,10 @@ class TailSettings(_Strict):
     length_mm: float = Field(default=7, gt=0, description="Longueur par défaut (sans visage détecté)")
     max_length_mm: float = Field(default=18, gt=0)
     base_mm: float = Field(default=4, gt=0, description="Largeur de la queue à sa base")
+    # Forme de la queue (parole, hors-champ) : biseau effilé aux flancs courbes, fondu dans le contour.
+    bend: float = Field(default=0.12, ge=-0.5, le=0.5, description="Courbure (fraction de la longueur, 0 = droite)")
+    tip_angle_deg: float = Field(default=16, ge=4, le=60, description="Angle de la pointe : petit = plus effilée")
+    shout_zigzag: float = Field(default=0.18, ge=0, le=0.5, description="Cri : décrochement en éclair (× longueur)")
     # Sans visage détecté : vers le centre de la case, ou droit vers le bas.
     default_direction: Literal["panel_center", "down"] = "panel_center"
     face_gap_mm: float = Field(default=1.5, ge=0, description="La pointe s'arrête à cette distance du visage")

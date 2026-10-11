@@ -384,7 +384,14 @@ export function LetteringCanvas({
             onPointerUp={onPointerUp}
             onKeyDown={(e) => onKeyDown(e, b)}
           >
-            <path d={b.shape.path} fill="none" stroke={b.shape.stroke} strokeWidth={2 * b.shape.stroke_px} strokeLinejoin="round" />
+            <path
+              d={b.shape.path}
+              fill="none"
+              stroke={b.shape.stroke}
+              strokeWidth={2 * b.shape.stroke_px}
+              strokeLinejoin="miter"
+              strokeMiterlimit={b.shape.miter_limit}
+            />
             <path d={b.shape.path} fill={b.shape.fill} />
             <text
               fontFamily={`"${b.font.family}", sans-serif`}

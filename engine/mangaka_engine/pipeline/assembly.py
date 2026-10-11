@@ -62,6 +62,7 @@ from .lettering import (
     SfxLayout,
     Shape,
     normalize_text,
+    stroke_outline,
 )
 
 
@@ -260,9 +261,13 @@ def crop_mark_lines(canvas: Canvas, settings: LetteringSettings, dpi: int) -> li
 
 # --- PNG ---------------------------------------------------------------------------------
 def _draw_shape(base: Image.Image, shape: Shape, dx: float, dy: float, ss: int) -> None:
-    """Dessine une bulle anticrénelée : contour épais (centré) puis remplissage, sur une tuile sur-échantillonnée."""
-    pts = [p for poly in shape.polygons for p in poly]
-    pad = shape.stroke_px + 2
+    """Dessine une bulle anticrénelée : contour épais (centré) puis remplissage, sur une tuile sur-échantillonnée.
+
+    Le trait est le contour extérieur décalé en onglet (pointes vives, comme le SVG) ; le tracé à joints
+    ronds par-dessus ne fait que boucher les creux où le décalage se replie sur lui-même."""
+    outer = [stroke_outline(poly, shape.stroke_px, shape.miter_limit) for poly in shape.polygons]
+    pts = [p for poly in (*shape.polygons, *outer) for p in poly]
+    pad = 2
     x0 = math.floor(min(p[0] for p in pts) + dx - pad)
     y0 = math.floor(min(p[1] for p in pts) + dy - pad)
     x1 = math.ceil(max(p[0] for p in pts) + dx + pad)
@@ -276,8 +281,9 @@ def _draw_shape(base: Image.Image, shape: Shape, dx: float, dy: float, ss: int) 
 
     width = max(1, round(2 * shape.stroke_px * ss))
     stroke = (*_hex(shape.stroke), 255)
-    for poly in shape.polygons:
+    for poly, out in zip(shape.polygons, outer, strict=True):
         p = scaled(poly)
+        draw.polygon(scaled(out), fill=stroke)
         draw.line([*p, p[0], p[1]], fill=stroke, width=width, joint="curve")
     fill = (*_hex(shape.fill), 255)
     for poly in shape.polygons:
@@ -659,7 +665,7 @@ def _svg_bubble(b: BubbleLayout) -> str:
     return (
         f'<g class="bulle bulle-{b.kind}" data-bulle="{b.id}" aria-label={label}>'
         f'<path d="{d}" fill="none" stroke="{s.stroke}" stroke-width="{_f(round(2 * s.stroke_px, 2))}" '
-        f'stroke-linejoin="round"/>'
+        f'stroke-linejoin="miter" stroke-miterlimit="{_f(s.miter_limit)}"/>'
         f'<path d="{d}" fill="{s.fill}"/>'
         f'<text font-family="{b.family}" font-size="{_f(round(b.size_px, 2))}" fill="{b.style.color}" '
         f'text-anchor="middle" xml:space="preserve">{lines}</text>'

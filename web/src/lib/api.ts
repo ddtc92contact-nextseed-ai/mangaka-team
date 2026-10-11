@@ -1503,7 +1503,8 @@ export interface LetteredBubble {
   overflow: boolean;
   font: { family: string; size_pt: number; size_px: number; color: string };
   lines: { text: string; x: number; y: number }[];
-  shape: { path: string; fill: string; stroke: string; stroke_px: number };
+  // miter_limit : joints en onglet (pointes vives des queues et des cris), jamais biseautés.
+  shape: { path: string; fill: string; stroke: string; stroke_px: number; miter_limit: number };
 }
 
 export interface LetteringWarning {
