@@ -13,6 +13,12 @@
 - `keep_variant` : « Garder comme référence » copie la variante parmi les images de référence de la
   fiche (en dernière position ; l'ordre se règle ensuite à la main).
 
+Fiches d'objet et de décor sans personne : jamais de référence de style (`reference_sheets` par sorte),
+palier à vrai CFG (`workflow` du type de fiche) pour que le négatif « person, people… » soit lu, style
+sans les mots-clés marqués `people`, et après la génération le détecteur de visages du QC passe sur
+l'image (`people_check`). Un visage trouvé : avertissement sur la variante, et « Garder comme référence »
+refusé tant qu'elle n'est pas acceptée à la main — elle ne peut donc pas servir de référence aux cases.
+
 Référence de style (planche de style de la série), selon `style_board.reference_sheets` de defaults.yaml :
 `with_subject` (défaut) = jointe seulement quand une image du sujet est déjà envoyée (image de départ ou
 variante d'« Affiner »), toujours après elle et s'il reste un emplacement — jamais seule, sinon le
@@ -38,8 +44,9 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from ..presets import LoadedWorkflow, LoraSpec, PresetRegistry, build_workflow
-from ..presets.schemas import ReferenceSheet
+from ..presets.schemas import QCSettings, ReferenceSheet
 from ..providers.comfyui import ComfyUIClient, ComfyUIError, ComfyUIInterruptedError, ComfyUITimeoutError
+from ..providers.qc import DetectorProvider, QCProviderError
 from ..store.db import Database
 from ..store.files import FileStore
 from ..store.models import (
@@ -73,6 +80,40 @@ ENTRY_KINDS = ("character", "object", "decor")
 FOLDERS = {"character": "characters", "object": "objects", "decor": "decors"}
 KIND_LABELS = {"character": "personnage", "object": "objet", "decor": "décor"}
 UPLOAD_LABELS = {"variant": "la variante de départ", "start": "l'image de départ", "style": "la référence de style"}
+# Sortes de fiches qui ne doivent montrer personne : visages cherchés après chaque génération.
+PEOPLE_CHECK_KINDS = ("object", "decor")
+PEOPLE_WARNING = "Personnage détecté dans la fiche : régénérer avant de l'utiliser"
+
+
+def people_check(detectors: DetectorProvider | None, qc: QCSettings | None, data: bytes, *, error: str = "") -> dict:
+    """Visages trouvés par le détecteur du QC (seuil `detectors.face.min_confidence` de qc.yaml) dans une
+    fiche d'objet ou de décor : {status, detected, faces, provider[, message]}. Détecteur absent ou en
+    erreur : rien n'est bloqué (status `unavailable` / `error`)."""
+    if detectors is None:
+        return {
+            "status": "unavailable",
+            "detected": False,
+            "faces": [],
+            "message": error or "détecteurs non configurés",
+        }
+    try:
+        raw = detectors.detect(
+            data,
+            face=qc.detectors.face.options if qc else None,
+            hand=qc.detectors.hand.options if qc else None,
+            text=qc.detectors.text.options if qc else None,
+        )
+    except QCProviderError as exc:
+        return {"status": "error", "detected": False, "faces": [], "message": str(exc), "provider": detectors.name}
+    threshold = qc.detectors.face.min_confidence if qc else 0.5
+    faces = [b.as_dict() for b in raw.faces if b.score >= threshold]
+    return {"status": "done", "detected": bool(faces), "faces": faces, "provider": detectors.name}
+
+
+def people_blocked(variant: ReferenceVariant) -> bool:
+    """Personnage détecté dans une fiche d'objet ou de décor, et pas accepté à la main."""
+    check = (variant.params or {}).get("people_check")
+    return isinstance(check, dict) and bool(check.get("detected")) and not check.get("accepted")
 
 
 def entry_kind(entry: LibraryEntry) -> str:
@@ -123,7 +164,8 @@ def sheet_prompt(
         "name": _clean(entry.name),
         "description": _clean(entry.visual_description),
         "keywords": ", ".join(keywords),
-        "style": _clean(series_style(presets, series)),
+        # Objets et décors : sans les mots-clés de style qui évoquent des personnes (« jeune héros »…).
+        "style": _clean(series_style(presets, series, people=entry_kind(entry) == "character")),
         "instruction": _clean(instruction),
         "start": "image 1" if start else "",
         "style_ref": f"image {style_slot}" if style_slot else "",
@@ -189,9 +231,13 @@ def sheet_params(
     seed: int | None = None,
     filename_prefix: str | None = None,
 ) -> dict[str, Any]:
-    """Paramètres mappés du workflow : prompts, seed, taille du type de fiche."""
-    base_negative = str(loaded.preset.defaults.get("negative_prompt", ""))
-    negative = ", ".join(t for t in (base_negative.strip(), sheet.negative_prompt.strip()) if t)
+    """Paramètres mappés du workflow : prompts, seed, taille du type de fiche.
+
+    Prompt négatif : celui du type de fiche (« person, people… » pour un objet ou un décor), sinon celui
+    du workflow — jamais les deux : le négatif des cases exclut « character sheet, white background »,
+    soit exactement ce qu'est une fiche de personnage. Termes « pas de texte » toujours ajoutés.
+    """
+    negative = sheet.negative_prompt.strip() or str(loaded.preset.defaults.get("negative_prompt", "")).strip()
     params: dict[str, Any] = {
         "positive_prompt": prompt,
         "negative_prompt": build_negative_prompt(negative, presets.image_prompt),
@@ -247,9 +293,9 @@ def enqueue_sheet(
     if start is not None and all(img.id != start.id for img in entry.reference_images):
         raise GenerationError("image de départ introuvable parmi les images de référence de la fiche")
     subject = parent is not None or start is not None
-    style = style_for(session, presets, series.id, "reference_sheets")
+    style = style_for(session, presets, series.id, "reference_sheets", kind)
     settings = presets.defaults.style_board if presets.defaults else None
-    if style is not None and not subject and settings is not None and settings.reference_sheets == "with_subject":
+    if style is not None and not subject and settings is not None and settings.sheets_mode(kind) == "with_subject":
         style = None  # à partir de zéro : la description seule, jamais le personnage de la planche
     try:
         preset_id = sheet_preset_id(presets, sheet, series, quality=quality, refine=subject or style is not None)
@@ -319,10 +365,22 @@ def next_position(entry: LibraryEntry) -> int:
     return max((img.position for img in entry.reference_images), default=-1) + 1
 
 
-def keep_variant(session: Session, files: FileStore, entry: LibraryEntry, variant: ReferenceVariant) -> ReferenceImage:
-    """Copie la variante parmi les images de référence de la fiche (dernière position) ; sans commit."""
+def keep_variant(
+    session: Session, files: FileStore, entry: LibraryEntry, variant: ReferenceVariant, *, accept_people: bool = False
+) -> ReferenceImage:
+    """Copie la variante parmi les images de référence de la fiche (dernière position) ; sans commit.
+
+    Fiche d'objet ou de décor où un personnage a été détecté : refusé, sauf acceptation à la main
+    (`accept_people`, notée sur la variante) — sinon ce personnage apparaîtrait dans chaque case.
+    """
     if kept_image(entry, variant) is not None:
         raise GenerationError("cette variante est déjà gardée comme référence")
+    if people_blocked(variant):
+        if not accept_people:
+            raise GenerationError(f"{PEOPLE_WARNING} (ou accepte-la à la main : « Garder quand même »)")
+        params = dict(variant.params or {})
+        params["people_check"] = {**params["people_check"], "accepted": True}
+        variant.params = params
     if len(entry.reference_images) >= MAX_KEPT:
         raise GenerationError(
             f"{MAX_KEPT} images de référence au plus par fiche : supprimes-en une avant d'en garder une autre"
@@ -381,6 +439,8 @@ class _Plan:
     references: list[dict[str, Any]]
     reference_data: list[bytes]
     folder: str
+    kind: str = "character"  # sorte de la fiche (objet et décor : visages cherchés après génération)
+    qc: QCSettings | None = None
 
 
 class ReferenceExecutor:
@@ -396,12 +456,17 @@ class ReferenceExecutor:
         comfyui_error: str | None = None,
         poll_s: float = 1.0,
         presets_for: Callable[[int | None], PresetRegistry] | None = None,
+        detectors: DetectorProvider | None = None,
+        detectors_error: str = "",
     ) -> None:
         self.db = db
         self.presets_for = presets_for or (lambda _project_id: presets)
         self.files = files
         self.comfyui = comfyui
         self.comfyui_error = comfyui_error
+        # Détecteur de visages du QC : fiches d'objet et de décor (personne ne doit y apparaître).
+        self.detectors = detectors
+        self.detectors_error = detectors_error
         self.poll_s = poll_s
         self._prompt_ids: dict[int, str] = {}
 
@@ -489,6 +554,8 @@ class ReferenceExecutor:
                 references=references,
                 reference_data=reference_data,
                 folder=f"{entry_folder(entry)}/variantes",
+                kind=entry_kind(entry),
+                qc=presets.qc,
             )
 
     def _style(self, session: Session, project_id: int, asset_id: int) -> SeriesAsset:
@@ -551,6 +618,10 @@ class ReferenceExecutor:
 
         report(92, "Récupération de l'image…")
         data = comfy.fetch_image(refs[0])
+        check: dict[str, Any] | None = None
+        if plan.kind in PEOPLE_CHECK_KINDS:
+            report(95, "Recherche de personnages dans la fiche…")
+            check = people_check(self.detectors, plan.qc, data, error=self.detectors_error)
         stored = self.files.save_image(data, plan.folder)
         duration_ms = int((time.monotonic() - t0) * 1000)
 
@@ -593,6 +664,7 @@ class ReferenceExecutor:
                     "duration_ms": duration_ms,
                     "comfyui_prompt_id": prompt_id,
                     "comfyui": comfy.name,
+                    **({"people_check": check} if check is not None else {}),
                 },
             )
             session.add(variant)
@@ -604,4 +676,5 @@ class ReferenceExecutor:
                 )
             )
             session.commit()
-        return f"Variante {params.get('variant', 1)}/{params.get('count', 1)} — {stored.width}×{stored.height}, seed {built.params['seed']} ({n} dans l'historique)"
+        warning = f" — {PEOPLE_WARNING}" if check is not None and check["detected"] else ""
+        return f"Variante {params.get('variant', 1)}/{params.get('count', 1)} — {stored.width}×{stored.height}, seed {built.params['seed']} ({n} dans l'historique){warning}"

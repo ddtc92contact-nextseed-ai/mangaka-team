@@ -1,4 +1,4 @@
-# Qwen-Image 2.1 · Qualité (texte → image) — propre depuis un croquis validé (image → image).
+# Qwen-Image 2.1 · Qualité max (texte → image) — propre depuis un croquis validé (image → image).
 # Passage au propre du palier croquis : le croquis validé de la case est agrandi à la taille finale
 # (nœud 31, ImageScale), encodé par le VAE (nœud 32) puis débruité partiellement (`denoise`, nœud 9)
 # avec la même graine et le même prompt que le croquis → même cadrage, mêmes poses, détails propres.
@@ -7,16 +7,17 @@
 # Graphe provisoire, À REMPLACER par l'export réel de Morigane (~/mangaka-comfy-exports/).
 # Voir presets/README.md (palier croquis, réglage du denoise).
 id: qwen-image-base-from-sketch
-name: "Qwen-Image 2.1 · Qualité — propre depuis croquis (sans référence)"
+name: "Qwen-Image 2.1 · Qualité max — propre depuis croquis (sans référence)"
 description: >-
-  Passage au propre au palier Qualité (50 étapes) à partir du croquis validé de la case (image → image, denoise réglable) ; LoRA de la série conservés.
+  Passage au propre au palier Qualité max (50 étapes) à partir du croquis validé de la case (image → image, denoise réglable) ; LoRA de la série conservés.
+distilled: false   # modèle de base (non distillé) : cfg > 1 permis (négatif lu), cfg 1 par défaut
 workflow_file: qwen-image-base-from-sketch.json
 output_node: "11"
 timeout_s: 1200   # au-delà, la génération est interrompue et le job passe en échec
 role: propre
 with_references: qwen-image-edit-ref-from-sketch   # même palier pour les cases avec références
 tier:
-  name: Qualité
+  name: Qualité max
 # Durée d'une case (s) tant qu'il y a moins de 3 générations terminées avec ce preset.
 estimated_s: 50
 # Image de composition (croquis validé) : envoyée à ComfyUI puis écrite dans ce LoadImage.
@@ -41,7 +42,7 @@ lora_chain:
   name_input: lora_name
   strength_input: strength_model
 defaults:
-  negative_prompt: "texte, lettres, bulles, filigrane, signature, flou, mains déformées"
+  negative_prompt: "text, letters, speech bubble, caption, watermark, signature, multiple panels, comic page layout, collage, split screen, character sheet, turnaround, model sheet, white background, duplicate character, extra people, extra limbs, deformed hands, blurry, low quality"
   steps: 50
   cfg: 1
   # Part du croquis redessinée : 0 = croquis inchangé, 1 = image neuve (composition perdue).

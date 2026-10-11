@@ -108,6 +108,10 @@ class LoraChain(_Strict):
 
 
 REQUIRED_WORKFLOW_PARAMS = ("positive_prompt", "negative_prompt", "seed", "width", "height")
+# CFG de Qwen-Image 2.1 : 1 = chemin officiel (une seule passe, prompt négatif ignoré) ; au-delà de 3,
+# l'image est surexposée et trop contrastée. Un modèle distillé (Turbo) n'accepte que 1.
+MIN_CFG = 1.0
+MAX_CFG = 3.0
 WorkflowRole = Literal["generation", "croquis", "propre", "controle"]
 # Un preset de réparation (inpainting) part de l'image source : pas de taille, mais un débruitage partiel.
 REQUIRED_INPAINT_PARAMS = ("positive_prompt", "negative_prompt", "seed", "denoise")
@@ -259,10 +263,24 @@ class WorkflowPreset(_Strict):
     inpaint_with: str | None = Field(default=None, description="Id du preset de réparation (bloc `inpaint`)")
     # Présent = ce workflow est un preset de réparation (jamais proposé pour générer une case).
     inpaint: InpaintSettings | None = None
+    # Modèle distillé (Turbo, croquis) : cfg 1 imposé, le prompt négatif n'est jamais lu. Un modèle de
+    # base accepte un vrai CFG (1 à 3) : au-dessus de 1, le prompt négatif est lu (et le coût double).
+    distilled: bool = False
 
     @property
     def is_inpaint(self) -> bool:
         return self.inpaint is not None
+
+    @property
+    def cfg(self) -> float:
+        """CFG par défaut du preset (1 s'il n'en déclare pas)."""
+        value = self.defaults.get("cfg", MIN_CFG)
+        return float(value) if isinstance(value, int | float) and not isinstance(value, bool) else MIN_CFG
+
+    def negative_active(self, cfg: float | None = None) -> bool:
+        """Le prompt négatif est-il lu par le modèle ? Seulement à cfg > 1 (sinon ComfyUI saute sa passe)."""
+        value = self.cfg if cfg is None else cfg
+        return "negative_prompt" in self.mapping and "cfg" in self.mapping and value > MIN_CFG
 
     @model_validator(mode="after")
     def _check_mapping(self) -> WorkflowPreset:
@@ -302,7 +320,22 @@ class WorkflowPreset(_Strict):
         nodes = [s.node for s in self.reference_images]
         if len(set(nodes)) != len(nodes):
             raise ValueError("reference_images : un même nœud est déclaré deux fois")
+        if "cfg" in self.defaults:
+            cfg = self.defaults["cfg"]
+            if isinstance(cfg, bool) or not isinstance(cfg, int | float):
+                raise ValueError("defaults.cfg : nombre attendu")
+            check_cfg(cfg, distilled=self.distilled)
         return self
+
+
+def check_cfg(cfg: float, *, distilled: bool) -> None:
+    """CFG accepté par un preset : 1 à 3, et exactement 1 pour un modèle distillé (ValueError sinon)."""
+    if distilled and cfg != MIN_CFG:
+        raise ValueError(
+            f"cfg {cfg:g} refusé : modèle distillé (Turbo), cfg 1 obligatoire (le prompt négatif n'y est jamais lu)"
+        )
+    if not MIN_CFG <= cfg <= MAX_CFG:
+        raise ValueError(f"cfg {cfg:g} hors limites ({MIN_CFG:g} à {MAX_CFG:g} : au-delà de 3, l'image se dégrade)")
 
 
 REQUIRED_UPSCALER_PARAMS = ("image", "width", "height")
@@ -416,6 +449,8 @@ class Defaults(_Strict):
 
 
 STYLE_BOARD_VARIABLES = {"scene", "style"}
+SheetStyleMode = Literal["with_subject", "always", "never"]
+LibraryKindName = Literal["character", "object", "decor"]
 
 
 class StyleBoardSettings(_Strict):
@@ -432,14 +467,21 @@ class StyleBoardSettings(_Strict):
     height: int = Field(ge=256, le=2048, multiple_of=16)
     prompt: list[str] = Field(min_length=1)
     negative_prompt: str = Field(default="", description="Ajouté au prompt négatif du workflow")
-    # Fiches de référence (personnages, objets, décors) : `with_subject` = jointe seulement après une
-    # image du sujet (image de départ ou variante d'« Affiner »), `always` = jointe à chaque fiche (seule
-    # image sans sujet), `never` = jamais.
-    reference_sheets: Literal["with_subject", "always", "never"]
+    # Fiches de référence : `with_subject` = jointe seulement après une image du sujet (image de départ ou
+    # variante d'« Affiner »), `always` = jointe à chaque fiche (seule image sans sujet), `never` = jamais.
+    # Une valeur pour toutes les sortes, ou une par sorte ({character: with_subject, object: never, …} ;
+    # sorte absente = never) : la planche montre des personnages, qui fuiraient dans un objet ou un décor.
+    reference_sheets: SheetStyleMode | dict[LibraryKindName, SheetStyleMode]
     # Cases : `with_subject` = jointe s'il reste un emplacement, et seulement si la case a déjà une image
     # de référence d'un personnage, du décor ou d'un objet (jamais seule : une case sans référence passe
     # par le workflow texte) ; `free_slot` = jointe s'il reste un emplacement, même seule ; `never` = jamais.
     panels: Literal["with_subject", "free_slot", "never"]
+
+    def sheets_mode(self, kind: str) -> SheetStyleMode:
+        """Réglage `reference_sheets` d'une sorte de fiche (character, object, decor)."""
+        if isinstance(self.reference_sheets, str):
+            return self.reference_sheets
+        return self.reference_sheets.get(kind, "never")  # type: ignore[call-overload]
 
     @field_validator("prompt")
     @classmethod
@@ -719,6 +761,27 @@ def _check_keywords(value: list[str]) -> list[str]:
     return list(dict.fromkeys(out))
 
 
+def _split_people(data: Any) -> Any:
+    """`prompt_keywords` du YAML : un mot-clé est un texte, ou `{text: …, people: true}` s'il évoque des
+    personnes (« sourire », « jeune héros ») ; ces derniers sont recopiés dans `people_keywords`."""
+    if not isinstance(data, dict) or not isinstance(data.get("prompt_keywords"), list):
+        return data
+    words: list[Any] = []
+    people = list(data.get("people_keywords") or [])
+    for item in data["prompt_keywords"]:
+        if isinstance(item, dict):
+            unknown = set(item) - {"text", "people"}
+            if unknown or not isinstance(item.get("text"), str) or not isinstance(item.get("people", False), bool):
+                raise ValueError("mot-clé : un texte, ou {text: « … », people: true|false}")
+            text = " ".join(item["text"].split())
+            words.append(text)
+            if item.get("people"):
+                people.append(text)
+        else:
+            words.append(item)
+    return {**data, "prompt_keywords": words, "people_keywords": list(dict.fromkeys(people))}
+
+
 class StylePack(_Strict):
     """Champs communs à un genre, un rendu et un ton."""
 
@@ -726,8 +789,16 @@ class StylePack(_Strict):
     name: str = Field(min_length=1, description="Nom affiché (français)")
     description: str = Field(min_length=1, description="Description affichée sous la liste (français)")
     prompt_keywords: list[str] = Field(min_length=1, description="Mots-clés du prompt image (prompt positif)")
+    # Mots-clés qui évoquent des personnes, écartés des fiches d'objet et de décor (sinon des personnages
+    # inventés apparaissent dans la fiche). Dans le YAML : `{text: sourire, people: true}` dans prompt_keywords.
+    people_keywords: list[str] = Field(default_factory=list)
     lang: StyleLang = Field(description="Langue des mots-clés, choisie au calibrage (informatif)")
     order: int = Field(default=100, description="Ordre dans la liste déroulante")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _people(cls, data: Any) -> Any:
+        return _split_people(data)
 
     @field_validator("prompt_keywords")
     @classmethod
@@ -775,7 +846,13 @@ class StyleTone(StylePack):
 class StyleOptionChoice(_Strict):
     name: str = Field(min_length=1)
     prompt_keywords: list[str] = Field(min_length=1)
+    people_keywords: list[str] = Field(default_factory=list)  # voir StylePack
     lang: StyleLang = Field(description="Langue des mots-clés, choisie au calibrage (informatif)")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _people(cls, data: Any) -> Any:
+        return _split_people(data)
 
     @field_validator("prompt_keywords")
     @classmethod
@@ -1202,7 +1279,15 @@ class ImagePromptSettings(_Strict):
     character_separator: str = " ; "
     # Toujours présents dans le prompt négatif : le texte est posé au lettrage, jamais dessiné.
     forbidden_text_terms: list[str] = Field(
-        default_factory=lambda: ["texte", "lettres", "bulles", "phylactères", "onomatopées", "filigrane", "signature"]
+        default_factory=lambda: [
+            "text",
+            "letters",
+            "speech bubble",
+            "caption",
+            "onomatopoeia",
+            "watermark",
+            "signature",
+        ]
     )
     strip_quotes: bool = Field(default=True, description="Retire les répliques entre guillemets de la description")
     # Longueur maximale de `$style` (caractères) : les packs y entrent tour à tour (pipeline/style.py).
@@ -1220,7 +1305,6 @@ class ImagePromptSettings(_Strict):
 
 # --- Fiches de référence (« Créer des références » de la bibliothèque) ---------
 REFERENCE_SHEET_VARIABLES = {"name", "description", "keywords", "style", "instruction", "start", "style_ref"}
-LibraryKindName = Literal["character", "object", "decor"]
 
 
 class ReferenceSheet(_Strict):

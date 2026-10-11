@@ -29,6 +29,7 @@ from mangaka_engine.presets import PresetRegistry, build_workflow
 from mangaka_engine.providers.comfyui import MockComfyUIClient
 from mangaka_engine.providers.factory import Providers
 from mangaka_engine.providers.llm import MockLLMProvider
+from mangaka_engine.providers.qc import Box, Detections
 from mangaka_engine.store.db import create_db_engine
 from mangaka_engine.store.models import AssetKind, Character, Project, SeriesAsset
 from tests.conftest import PRESETS_DIR, STYLE, png_bytes
@@ -194,8 +195,11 @@ def test_sheet_builds_prompt_size_and_lora_chain() -> None:
     wf = built.workflow
     assert wf["8"]["inputs"]["width"] == 1024 and wf["8"]["inputs"]["height"] == 1024
     assert wf["6"]["inputs"]["prompt"] == prompt
-    assert "plusieurs personnages" in wf["6"]["inputs"]["negative_prompt"]  # négatif du type de fiche
-    assert "texte" in wf["6"]["inputs"]["negative_prompt"]  # toujours : jamais de texte dessiné
+    negative = wf["6"]["inputs"]["negative_prompt"]
+    assert negative.startswith("extra characters, background people, text")  # négatif du type de fiche
+    assert "speech bubble" in negative  # toujours : jamais de texte dessiné
+    # jamais le négatif des cases, qui exclut justement « character sheet, white background »
+    assert "character sheet" not in negative and "white background" not in negative
     chain = [n for n in wf.values() if n["class_type"] == "LoraLoaderModelOnly"]
     assert [n["inputs"]["lora_name"] for n in chain] == ["encre-seinen_v2.safetensors", "aiko_v1.safetensors"]
     assert chain[0]["inputs"]["model"] == ["1", 0]  # style d'abord, branché sur le modèle
@@ -246,7 +250,7 @@ def test_refine_uses_the_variant_as_reference_with_the_instruction() -> None:
 
 
 def test_quality_tier_and_imposed_workflow() -> None:
-    sheet = REG.reference_sheet("objet-trois-quarts")
+    sheet = REG.reference_sheet("personnage-portrait")
     series = _series(workflow_preset="qwen-image-base-rapide")
     # Fiches au palier `workflow_library` (Turbo), quel que soit celui de la série…
     assert sheet_preset_id(REG, sheet, series) == "qwen-image-turbo"
@@ -303,7 +307,9 @@ def test_generate_refine_keep_reorder_then_used_by_panels(c: TestClient, comfy: 
     assert len(jobs) == 4  # 4 variantes par défaut
     assert all(j["step"] == "reference" and j["status"] == "pending" for j in jobs)
     assert [j["params"]["variant"] for j in jobs] == [1, 2, 3, 4]
-    assert jobs[0]["params"]["preset"] == "qwen-image-turbo" and jobs[0]["params"]["tier"] == "Turbo"
+    # Personnage : palier des fiches (Turbo). Objet et décor : palier Qualité imposé (vrai CFG, négatif lu).
+    tier = ("qwen-image-turbo", "Turbo") if kind == "character" else ("qwen-image-base-qualite", "Qualité")
+    assert (jobs[0]["params"]["preset"], jobs[0]["params"]["tier"]) == tier
     _idle(c)
 
     finished = [_ok(c.get(f"/jobs/{j['id']}")) for j in jobs]
@@ -325,7 +331,7 @@ def test_generate_refine_keep_reorder_then_used_by_panels(c: TestClient, comfy: 
     refine = _ok(
         c.post(f"/reference-variants/{first['id']}/refine", json={"instruction": "plus de détails", "count": 1}), 202
     )
-    assert refine[0]["params"]["preset"] == "qwen-image-edit-ref-turbo"
+    assert refine[0]["params"]["preset"] == REG.workflow(tier[0]).preset.with_references
     assert refine[0]["params"]["parent_id"] == first["id"]
     _idle(c)
     refined = _ok(c.get(f"/{segment}/{eid}/reference-variants"))["variants"][0]
@@ -417,7 +423,8 @@ def test_quality_option_and_history_cleanup(c: TestClient) -> None:
         ),
         202,
     )
-    assert job["params"]["preset"] == REG.defaults.workflow_quality  # type: ignore[union-attr]
+    # Le type de fiche impose son workflow (décor : Qualité, vrai CFG), demande « Qualité » comprise.
+    assert job["params"]["preset"] == "qwen-image-base-qualite"
     _idle(c)
     [variant] = _ok(c.get(f"/decors/{entry['id']}/reference-variants"))["variants"]
     assert variant["tier"] == "Qualité"
@@ -529,3 +536,151 @@ def test_database_v11_keeps_reference_order(make_settings: Callable[..., Setting
         [(sql,)] = con.execute("SELECT sql FROM sqlite_master WHERE name = 'reference_variants'").fetchall()
         con.close()
         assert "AUTOINCREMENT" in sql
+
+
+# --- fiches d'objet et de décor : personne dedans -------------------------------------------------
+OBJECT_NEGATIVE = "person, people, human, character, face, hands, figure, crowd, text"
+DECOR_NEGATIVE = "person, people, human, character, figure, crowd, silhouette, animal, text, close-up"
+
+
+class _FaceDetector:
+    """Détecteur factice du QC : `faces` visages (score 0,9) sur chaque image."""
+
+    name = "faux"
+
+    def __init__(self, faces: int) -> None:
+        self.faces = faces
+        self.calls = 0
+
+    def detect(self, image: bytes, *, face: Any = None, hand: Any = None, text: Any = None) -> Detections:
+        self.calls += 1
+        boxes = [Box(10 * i, 10, 10 * i + 40, 50, 0.9, "face") for i in range(self.faces)]
+        return Detections(width=64, height=64, faces=boxes)
+
+
+def _client_with_detector(
+    make_settings: Callable[..., Settings], comfy: MockComfyUIClient, detector: Any
+) -> TestClient:
+    providers = Providers(
+        llm=MockLLMProvider(),
+        vision=None,
+        comfyui=comfy,
+        names={"llm": "mock", "vision": "mock", "comfyui": "mock"},
+        errors={},
+        detectors=detector,
+    )
+    return TestClient(create_app(make_settings(), providers=providers))
+
+
+def test_object_and_decor_sheets_drop_people_keywords_and_use_their_own_negative() -> None:
+    # Shōnen + lumineux : « determined young hero » et « sourire » sont marqués `people` dans les packs.
+    series = _series(style_genre="shonen", style_tone="lumineux")
+    assert REG.style_genres["shonen"].people_keywords == ["determined young hero"]
+    assert REG.style_tones["lumineux"].people_keywords == ["sourire"]
+    portrait = sheet_prompt(REG, REG.reference_sheet("personnage-portrait"), _entry("character"), series)
+    assert "determined young hero" in portrait or "sourire" in portrait  # un personnage les garde
+    for sheet_id, kind, negative in (
+        ("objet-trois-quarts", "object", OBJECT_NEGATIVE),
+        ("decor-plan-large", "decor", DECOR_NEGATIVE),
+        ("decor-autre-angle", "decor", DECOR_NEGATIVE),
+    ):
+        sheet = REG.reference_sheet(sheet_id)
+        prompt = sheet_prompt(REG, sheet, _entry(kind), series)
+        assert "determined young hero" not in prompt and "sourire" not in prompt, sheet_id
+        assert "shonen manga" in prompt and "ambiance lumineuse et joyeuse" in prompt  # le reste du style
+        # Palier imposé : vrai CFG, non distillé — le négatif est lu par le modèle.
+        loaded = REG.workflow(sheet_preset_id(REG, sheet, series))
+        assert loaded.preset.id == "qwen-image-base-qualite"
+        assert not loaded.preset.distilled and loaded.preset.negative_active()
+        wf = build_workflow(loaded, sheet_params(loaded, sheet, prompt, REG, seed=1)).workflow
+        assert wf["6"]["inputs"]["negative_prompt"].startswith(negative), sheet_id
+        assert "speech bubble" in wf["6"]["inputs"]["negative_prompt"]
+        assert wf["9"]["inputs"]["cfg"] == 2.5
+
+
+@pytest.mark.parametrize(("kind", "sheet"), [("object", "objet-trois-quarts"), ("decor", "decor-plan-large")])
+def test_object_and_decor_sheets_never_get_the_style_board(
+    make_settings: Callable[..., Settings], comfy: MockComfyUIClient, kind: str, sheet: str
+) -> None:
+    """Même avec une planche de style active et une image de départ (où un personnage la recevrait), une
+    fiche d'objet ou de décor n'envoie jamais la planche à ComfyUI."""
+    from tests.test_style_board import _make_style_reference
+
+    with _client_with_detector(make_settings, comfy, _FaceDetector(0)) as c:
+        s, entry = _create_entry(c, kind)
+        _make_style_reference(c, s["id"])
+        updated = _ok(
+            c.post(f"/{SEGMENTS[kind]}/{entry['id']}/images", files=[("files", ("a.png", png_bytes(), "image/png"))]),
+            201,
+        )
+        start = updated["reference_images"][0]["id"]
+        for body in ({}, {"start_image_id": start}):
+            [job] = _ok(
+                c.post(
+                    f"/{SEGMENTS[kind]}/{entry['id']}/reference-variants", json={"sheet": sheet, "count": 1, **body}
+                ),
+                202,
+            )
+            assert job["params"]["style_asset_id"] is None
+            _idle(c)
+            variant = _ok(c.get(f"/{SEGMENTS[kind]}/{entry['id']}/reference-variants"))["variants"][0]
+            assert "style" not in [r["kind"] for r in variant["params"]["reference_images"]]
+            assert "Dernière image" not in variant["prompt"]
+            sent = list(comfy.prompts.values())[-1]
+            loads = [n["inputs"]["image"] for n in sent.values() if n["class_type"] == "LoadImage"]
+            assert not [name for name in loads if name.startswith("mangaka/style")], loads
+            assert variant["people_warning"] is None and variant["params"]["people_check"]["status"] == "done"
+
+
+@pytest.mark.parametrize("kind", ["object", "decor"])
+def test_face_detected_in_an_object_or_decor_sheet_warns_and_blocks_panel_use(
+    make_settings: Callable[..., Settings], comfy: MockComfyUIClient, kind: str
+) -> None:
+    detector = _FaceDetector(1)
+    with _client_with_detector(make_settings, comfy, detector) as c:
+        s, entry = _create_entry(c, kind)
+        segment = SEGMENTS[kind]
+        [job] = _ok(
+            c.post(f"/{segment}/{entry['id']}/reference-variants", json={"sheet": FIRST_SHEET[kind], "count": 1}), 202
+        )
+        _idle(c)
+        assert detector.calls == 1
+        done = _ok(c.get(f"/jobs/{job['id']}"))
+        assert "Personnage détecté dans la fiche" in done["message"]
+        [variant] = _ok(c.get(f"/{segment}/{entry['id']}/reference-variants"))["variants"]
+        assert variant["people_warning"] == "Personnage détecté dans la fiche : régénérer avant de l'utiliser"
+        assert variant["params"]["people_check"]["detected"] and not variant["people_accepted"]
+
+        # Pas de « Garder comme référence » : la variante ne peut pas servir de référence aux cases.
+        refused = c.post(f"/reference-variants/{variant['id']}/keep")
+        assert refused.status_code == 409 and "Personnage détecté dans la fiche" in refused.json()["detail"]
+        assert _ok(c.get(f"/{segment}/{entry['id']}/reference-variants"))["kept_count"] == 0
+        ch = _ok(c.post(f"/projects/{s['id']}/chapters", json={"title": "Un"}), 201)
+        body: dict[str, Any] = {"description": "Une case"}
+        body.update({"decor": entry["id"]} if kind == "decor" else {"objets": [entry["id"]]})
+        [page] = _ok(c.put(f"/chapters/{ch['id']}/pages", json={"pages": [{"panels": [body]}]}))
+        [panel_job] = _ok(c.post(f"/panels/{page['panels'][0]['id']}/generate"), 202)
+        _idle(c)
+        assert _ok(c.get(f"/jobs/{panel_job['id']}"))["params"]["references"] == []
+
+        # Acceptée à la main (« Garder quand même ») : gardée, et l'acceptation est notée.
+        kept = _ok(c.post(f"/reference-variants/{variant['id']}/keep", json={"accept_people": True}), 201)
+        assert len(kept["reference_images"]) == 1
+        [variant] = _ok(c.get(f"/{segment}/{entry['id']}/reference-variants"))["variants"]
+        assert variant["kept"] and variant["people_accepted"]
+
+
+def test_character_sheets_are_not_checked_for_people(
+    make_settings: Callable[..., Settings], comfy: MockComfyUIClient
+) -> None:
+    detector = _FaceDetector(1)
+    with _client_with_detector(make_settings, comfy, detector) as c:
+        _s, entry = _create_entry(c, "character")
+        _ok(
+            c.post(f"/characters/{entry['id']}/reference-variants", json={"sheet": "personnage-portrait", "count": 1}),
+            202,
+        )
+        _idle(c)
+        [variant] = _ok(c.get(f"/characters/{entry['id']}/reference-variants"))["variants"]
+        assert detector.calls == 0 and variant["people_warning"] is None and "people_check" not in variant["params"]
+        _ok(c.post(f"/reference-variants/{variant['id']}/keep"), 201)

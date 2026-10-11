@@ -31,6 +31,8 @@ CleanModeName = Literal["img2img", "controlnet"]
 ControlTypeId = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=40)]
 # Force du patch ControlNet : 0 = contrôle ignoré, 1 = composition tenue (défaut), jusqu'à 2.
 ControlStrength = Annotated[float, Field(ge=0, le=2)]
+# CFG des cases (Qwen-Image 2.1) : 1 = négatif inactif ; au-delà de 3, l'image se dégrade.
+Cfg = Annotated[float, Field(ge=1, le=3)]
 
 
 class _In(BaseModel):
@@ -69,6 +71,8 @@ class ProjectCreate(_In):
     clean_control: ControlTypeId | None = None  # null : type par défaut du preset ControlNet
     # Agrandisseur de la finition d'impression (None : celui de defaults.yaml).
     upscaler: PresetId | None = None
+    # CFG des cases (1 à 3) ; absent : celui du palier. Refusé au-delà de 1 pour un palier distillé (Turbo).
+    cfg: Cfg | None = None
     # « Prompt rédigé par l'IA » ; absent : `enabled` de presets/prompts/redacteur-image.yaml (oui).
     ai_prompt: bool | None = None
 
@@ -93,6 +97,7 @@ class ProjectUpdate(_In):
     clean_mode: CleanModeName | None = None
     clean_control: ControlTypeId | None = None  # null : type par défaut du preset ControlNet
     upscaler: PresetId | None = None  # null : revient à l'agrandisseur de defaults.yaml
+    cfg: Cfg | None = None  # null : CFG du palier ; > 1 refusé pour un palier distillé (Turbo)
     ai_prompt: bool | None = None  # « Prompt rédigé par l'IA » (false : assemblage par fragments)
     # false : masque la note « série passée en sage par une ancienne mise à jour » (seule valeur admise).
     layout_style_notice: Literal[False] | None = None
@@ -127,6 +132,7 @@ class ProjectOut(BaseModel):
     clean_mode: CleanModeName = "img2img"
     clean_control: str | None = None
     upscaler: str | None = None
+    cfg: float | None = None  # null : celui du palier
     ai_prompt: bool = False
     character_count: int
     chapter_count: int
@@ -769,6 +775,10 @@ class WorkflowPresetOut(BaseModel):
     from_sketch: str | None = None  # workflow « propre depuis croquis » du même palier
     with_control: str | None = None  # workflow ControlNet (composition verrouillée) du même palier
     is_sketch: bool = False  # workflow des croquis (defaults.workflow_sketch)
+    steps: int | None = None
+    cfg: float = 1.0
+    distilled: bool = False  # modèle distillé (Turbo) : cfg 1 imposé
+    negative_active: bool = False  # cfg > 1 : le prompt négatif est lu par le modèle
 
 
 class PresetEstimateOut(BaseModel):
@@ -1012,6 +1022,11 @@ class ReferenceGenerateIn(_In):
     start_image_id: int | None = None
 
 
+class ReferenceKeepIn(_In):
+    # « Garder quand même » : accepte à la main une fiche d'objet ou de décor où un personnage a été détecté.
+    accept_people: bool = False
+
+
 class ReferenceRefineIn(_In):
     instruction: Instruction = Field(min_length=1)
     count: VariantCount = 4
@@ -1037,6 +1052,10 @@ class ReferenceVariantOut(BaseModel):
     kept: bool  # gardée parmi les images de référence de la fiche (et toujours présente)
     kept_image_id: int | None
     job_id: int | None
+    # Fiche d'objet ou de décor : personnage détecté (QC) → avertissement, et « Garder comme référence »
+    # refusé tant que la variante n'est pas acceptée à la main (`people_accepted`).
+    people_warning: str | None = None
+    people_accepted: bool = False
     params: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
 
@@ -1094,6 +1113,7 @@ class StyleBoardOut(BaseModel):
     style_names: str
     trials_per_batch: int
     use_reference_sheets: Literal["with_subject", "always", "never"] | None
+    reference_sheet_kinds: list[LibraryKindName] = Field(default_factory=list)
     use_panels: Literal["with_subject", "free_slot", "never"] | None
     active: StyleReferenceOut | None
     history: list[StyleReferenceOut]

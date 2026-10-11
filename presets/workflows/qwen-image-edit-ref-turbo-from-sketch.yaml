@@ -10,6 +10,7 @@ id: qwen-image-edit-ref-turbo-from-sketch
 name: "Qwen-Image 2.1 · Turbo — propre depuis croquis (avec références)"
 description: >-
   Passage au propre au palier Turbo (8 étapes) à partir du croquis validé de la case (image → image, denoise réglable), guidé par jusqu'à 3 images de référence ; LoRA de la série conservés.
+distilled: true   # modèle distillé (Turbo) : cfg 1 imposé, le prompt négatif n'est jamais lu
 workflow_file: qwen-image-edit-ref-turbo-from-sketch.json
 output_node: "11"
 timeout_s: 600   # au-delà, la génération est interrompue et le job passe en échec
@@ -45,7 +46,7 @@ lora_chain:
   name_input: lora_name
   strength_input: strength_model
 defaults:
-  negative_prompt: "texte, lettres, bulles, filigrane, signature, flou, mains déformées"
+  negative_prompt: "text, letters, speech bubble, caption, watermark, signature, multiple panels, comic page layout, collage, split screen, character sheet, turnaround, model sheet, white background, duplicate character, extra people, extra limbs, deformed hands, blurry, low quality"
   steps: 8
   cfg: 1
   # Part du croquis redessinée : 0 = croquis inchangé, 1 = image neuve (composition perdue).

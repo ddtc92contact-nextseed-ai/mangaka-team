@@ -401,7 +401,7 @@ def test_generation_records_references_used_on_job_and_version(c: TestClient, co
     )
     panel = page["panels"][0]
     [job] = _ok(c.post(f"/panels/{panel['id']}/generate"), 202)
-    assert job["params"]["preset"] == "qwen-image-edit-ref-rapide"
+    assert job["params"]["preset"] == "qwen-image-edit-ref-qualite"
     assert c.app.state.ctx.generation.wait_idle(10)  # type: ignore[attr-defined]
 
     done = _ok(c.get(f"/jobs/{job['id']}"))

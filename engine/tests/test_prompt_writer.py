@@ -145,7 +145,7 @@ def test_written_prompt_is_stored_on_the_panel_and_used_for_generation(env: Env)
     assert img["params"]["panel_prompt"] == prompt
     assert img["params"]["prompt"].startswith("Image 1 : référence d'identité de Aiko. " + prompt)
     assert "ne pas reproduire la mise en page des fiches de référence" in img["params"]["prompt"]
-    assert "bulles" in img["params"]["negative_prompt"] and "texte" in img["params"]["negative_prompt"]
+    assert "speech bubble" in img["params"]["negative_prompt"] and "text" in img["params"]["negative_prompt"]
 
 
 def test_written_once_per_panel_not_on_every_regeneration(env: Env) -> None:

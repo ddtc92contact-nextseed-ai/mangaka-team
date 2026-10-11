@@ -42,17 +42,17 @@ def test_prompt_uses_preset_template() -> None:
 
 
 def test_negative_prompt_always_forbids_text() -> None:
-    neg = build_negative_prompt("flou, Texte, mains déformées")
+    neg = build_negative_prompt("blurry, Text, deformed hands")
     terms = [t.strip() for t in neg.split(",")]
-    assert terms[:3] == ["flou", "Texte", "mains déformées"]
-    for term in ("lettres", "bulles", "onomatopées", "filigrane"):
+    assert terms[:3] == ["blurry", "Text", "deformed hands"]
+    for term in ("letters", "speech bubble", "onomatopoeia", "watermark"):
         assert term in terms
-    assert sum(t.casefold() == "texte" for t in terms) == 1
-    assert "bulles" in build_negative_prompt("")
+    assert sum(t.casefold() == "text" for t in terms) == 1
+    assert "speech bubble" in build_negative_prompt("")
 
 
 def test_repo_image_prompt_preset_is_loaded() -> None:
     reg = PresetRegistry.load(PRESETS_DIR)
     assert reg.issues == []
-    assert "texte" in reg.image_prompt.forbidden_text_terms
+    assert "text" in reg.image_prompt.forbidden_text_terms  # en anglais, comme les négatifs des presets
     assert any("$description" in p for p in reg.image_prompt.parts)

@@ -6,7 +6,8 @@ kinds: [decor]
 order: 20
 width: 1536
 height: 864
-workflow: null
+# Palier Qualité (vrai CFG, non distillé) : le prompt négatif « aucune personne » est lu par le modèle.
+workflow: qwen-image-base-qualite
 prompt:
   - "Fiche de référence de décor : $name vu sous un autre angle, depuis le côté opposé de la pièce ou de la rue (contrechamp), plan moyen large."
   - "$description."
@@ -16,4 +17,4 @@ prompt:
   - "Style : $style."
   - "Dernière image ($style_ref) : référence de style uniquement — trait, trames, encrage ; ne pas reprendre son personnage, sa scène ni sa composition."
   - "Aucun personnage, mêmes matériaux et même lumière que le plan d'ensemble, aucun texte."
-negative_prompt: "personnages, foule"
+negative_prompt: "person, people, human, character, figure, crowd, silhouette, animal, text, close-up"

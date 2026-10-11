@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..presets import PresetRegistry
+from ..presets.schemas import StyleOptionChoice, StylePack
 from ..store.models import Project
 
 log = logging.getLogger("mangaka_engine")
@@ -91,13 +92,19 @@ def lora_triggers(presets: PresetRegistry, series: Project) -> tuple[str, ...]:
     return tuple(w for w in (_clean(t) for t in entry.trigger_words) if w) if entry else ()
 
 
-def style_groups(presets: PresetRegistry, series: Project) -> list[tuple[str, list[str]]]:
+def _words(pack: StylePack | StyleOptionChoice, people: bool) -> list[str]:
+    """Mots-clés d'un pack ; sans ceux qui évoquent des personnes si `people` est faux."""
+    return [k for k in pack.prompt_keywords if people or k not in pack.people_keywords]
+
+
+def style_groups(presets: PresetRegistry, series: Project, *, people: bool = True) -> list[tuple[str, list[str]]]:
     """Mots-clés complets du style, par pack, dans l'ordre fixe : LoRA, genre (ou ancien texte), rendu,
-    ton, puis un groupe par réglage fin choisi — (sorte, mots-clés)."""
+    ton, puis un groupe par réglage fin choisi — (sorte, mots-clés). `people` faux : sans les mots-clés
+    marqués `people` (fiches d'objet et de décor)."""
     groups: list[tuple[str, list[str]]] = [("lora", list(lora_triggers(presets, series)))]
     genre = presets.style_genres.get(series.style_genre or "")
     if genre is not None:
-        groups.append(("genre", list(genre.prompt_keywords)))
+        groups.append(("genre", _words(genre, people)))
     elif not series.style_genre:
         # Ancien texte libre : découpé aux virgules, comme des mots-clés.
         groups.append(("genre", (series.legacy_style or "").split(",")))
@@ -106,16 +113,16 @@ def style_groups(presets: PresetRegistry, series: Project) -> list[tuple[str, li
         presets.default_style_rendering or ""
     )
     if rendering is not None:
-        groups.append(("rendering", list(rendering.prompt_keywords)))
+        groups.append(("rendering", _words(rendering, people)))
     tone = presets.style_tones.get(series.style_tone or "")
     if tone is not None:
-        groups.append(("tone", list(tone.prompt_keywords)))
+        groups.append(("tone", _words(tone, people)))
     chosen = series.style_options or {}
     for key, option in presets.style_options.options.items():
         choice = option.choices.get(chosen.get(key) or "")
         if choice is None or (option.monochrome_only and rendering is not None and not rendering.monochrome):
             continue
-        groups.append(("option", list(choice.prompt_keywords)))
+        groups.append(("option", _words(choice, people)))
     missing = [
         f"{field} « {value} »"
         for field, value, known in (
@@ -137,7 +144,7 @@ def _redundant(word: str, kept: list[str]) -> bool:
     return any(w in f" {k.casefold()} " for k in kept)
 
 
-def style_keywords(presets: PresetRegistry, series: Project) -> list[str]:
+def style_keywords(presets: PresetRegistry, series: Project, *, people: bool = True) -> list[str]:
     """Mots-clés retenus pour `$style`, dans l'ordre fixe des packs, sans doublon.
 
     Bloc court (`style_max_chars` de image_prompt.yaml) : les mots déclencheurs du LoRA d'abord, puis
@@ -151,7 +158,7 @@ def style_keywords(presets: PresetRegistry, series: Project) -> list[str]:
     # premier mot-clé utile (« manga » d'un réglage fin s'efface derrière « manga seinen » du genre).
     kinds: list[str] = []
     groups: list[list[str]] = []
-    for kind, group in style_groups(presets, series):
+    for kind, group in style_groups(presets, series, people=people):
         kinds.append(kind)
         earlier = [w for g in groups for w in g]
         groups.append([])
@@ -183,9 +190,9 @@ def style_keywords(presets: PresetRegistry, series: Project) -> list[str]:
     return [w for g in kept for w in g]
 
 
-def series_style(presets: PresetRegistry, series: Project) -> str:
-    """`$style` des prompts image de la série."""
-    return ", ".join(style_keywords(presets, series))
+def series_style(presets: PresetRegistry, series: Project, *, people: bool = True) -> str:
+    """`$style` des prompts image de la série (`people` faux : sans les mots-clés qui évoquent des personnes)."""
+    return ", ".join(style_keywords(presets, series, people=people))
 
 
 @dataclass(frozen=True)

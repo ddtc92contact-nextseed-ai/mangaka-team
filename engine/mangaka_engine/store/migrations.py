@@ -76,7 +76,7 @@ from .models import (
 
 log = logging.getLogger("mangaka_engine")
 
-SCHEMA_VERSION = 21
+SCHEMA_VERSION = 22
 
 
 class MigrationError(RuntimeError):
@@ -339,6 +339,12 @@ def _v20_to_v21(cur: sqlite3.Cursor) -> None:
     )
 
 
+def _v21_to_v22(cur: sqlite3.Cursor) -> None:
+    # CFG par série (None = celui du palier) : les séries existantes ne changent pas.
+    if "cfg" not in {row[1] for row in cur.execute("PRAGMA table_info(projects)")}:
+        cur.execute("ALTER TABLE projects ADD COLUMN cfg FLOAT")
+
+
 MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     # version de départ → (version d'arrivée, fonction)
     0: (2, _v0_to_v2),
@@ -362,6 +368,7 @@ MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     18: (19, _v18_to_v19),
     19: (20, _v19_to_v20),
     20: (21, _v20_to_v21),
+    21: (22, _v21_to_v22),
 }
 
 

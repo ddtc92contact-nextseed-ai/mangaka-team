@@ -16,4 +16,4 @@ prompt:
   - "Style : $style."
   - "Dernière image ($style_ref) : référence de style uniquement — trait, trames, encrage ; ne pas reprendre son personnage, sa scène ni sa composition."
   - "Fond blanc uni, éclairage neutre, aucun texte ni légende."
-negative_prompt: "personnages différents, vues coupées, décor"
+negative_prompt: "extra characters, background people, text, different characters, cropped views, background scenery"

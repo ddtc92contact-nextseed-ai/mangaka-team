@@ -881,6 +881,10 @@ def list_workflow_presets(ctx: AppContext = Depends(get_ctx)) -> list[WorkflowPr
             from_sketch=w.preset.from_sketch,
             with_control=w.preset.with_control,
             is_sketch=bool(defaults and defaults.workflow_sketch == w.preset.id),
+            steps=w.preset.defaults.get("steps"),
+            cfg=w.preset.cfg,
+            distilled=w.preset.distilled,
+            negative_active=w.preset.negative_active(),
         )
         for w in presets.workflows.values()
         if w.preset.inpaint is None  # presets de réparation : jamais proposés pour générer une case

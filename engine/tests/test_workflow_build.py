@@ -17,7 +17,12 @@ from tests.conftest import PRESETS_DIR
 REG = PresetRegistry.load(PRESETS_DIR)
 EDIT = REG.workflow("qwen-image-edit-ref")
 BASE = REG.workflow("qwen-image-base")
-EDIT_TIERS = ["qwen-image-edit-ref", "qwen-image-edit-ref-rapide", "qwen-image-edit-ref-turbo"]
+EDIT_TIERS = [
+    "qwen-image-edit-ref",
+    "qwen-image-edit-ref-qualite",
+    "qwen-image-edit-ref-rapide",
+    "qwen-image-edit-ref-turbo",
+]
 PARAMS = {"positive_prompt": "Aiko sur un toit", "width": 832, "height": 1216, "seed": 1234}
 SLOTS = ["20", "21", "22"]  # LoadImage du preset, branchés sur images.image_1…3 de l'encodeur (nœud 6)
 LORAS = [LoraSpec("encre-seinen.safetensors", 0.7, "style"), LoraSpec("aiko-v3.safetensors", 0.9, "Aiko")]
@@ -37,7 +42,7 @@ def test_edit_preset_is_valid_and_declares_slots_and_chain() -> None:
     assert all(not s.remove for s in preset.reference_images)
     assert preset.lora_chain is not None and preset.lora_chain.class_type == "LoraLoaderModelOnly"
     assert preset.timeout_s == 1500
-    assert REG.defaults is not None and REG.defaults.workflow_with_references == "qwen-image-edit-ref-rapide"
+    assert REG.defaults is not None and REG.defaults.workflow_with_references == "qwen-image-edit-ref-qualite"
 
 
 @pytest.mark.parametrize("preset_id", EDIT_TIERS)
@@ -139,8 +144,71 @@ def test_invalid_reference_slot_and_chain_are_reported(presets_copy: Path) -> No
     assert "référence 1 : nœud 99 absent" in msg
     assert "le nœud 6 est mappé" in msg
     assert "lora_chain.model_from : nœud 77 absent" in msg
-    # le défaut « avec références » (Rapide) n'est pas touché
-    assert reg.defaults is not None and reg.defaults.workflow_with_references == "qwen-image-edit-ref-rapide"
+    # le défaut « avec références » (Qualité) n'est pas touché
+    assert reg.defaults is not None and reg.defaults.workflow_with_references == "qwen-image-edit-ref-qualite"
     # le workflow Turbo qui l'appariait reste chargé, avec un avertissement (pas de repli)
     assert reg.workflow("qwen-image-turbo").preset.with_references == "qwen-image-edit-ref-turbo"
     assert any(i.file.endswith("qwen-image-turbo.yaml") and "with_references" in i.message for i in reg.issues)
+
+
+# --- vrai CFG : le prompt négatif n'est lu qu'au-dessus de cfg 1, jamais par un modèle distillé ----------
+PANEL_NEGATIVE = (
+    "text, letters, speech bubble, caption, watermark, signature, multiple panels, comic page layout, collage, "
+    "split screen, character sheet, turnaround, model sheet, white background, duplicate character, extra people, "
+    "extra limbs, deformed hands, blurry, low quality"
+)
+
+
+@pytest.mark.parametrize("preset_id", ["qwen-image-base-qualite", "qwen-image-edit-ref-qualite"])
+def test_quality_tier_sends_true_cfg_steps_and_the_panel_negative(preset_id: str) -> None:
+    """Palier Qualité : mêmes fichiers int8 que Rapide, cfg 2,5, 35 étapes, euler/simple, et le négatif des
+    cases arrive sur l'entrée négative de l'encodeur (TextEncodeQwenImage21, nœud 6)."""
+    loaded = REG.workflow(preset_id)
+    preset = loaded.preset
+    assert not preset.distilled and preset.cfg == 2.5 and preset.negative_active()
+    assert preset.tier is not None and preset.tier.name == "Qualité"
+    assert preset.defaults["negative_prompt"] == PANEL_NEGATIVE
+    refs = ["mangaka/perso1.png"] if preset.reference_images else []
+    wf = build_workflow(loaded, PARAMS, reference_images=refs).workflow
+    sampler = wf["9"]["inputs"]
+    assert (sampler["cfg"], sampler["steps"], sampler["sampler_name"], sampler["scheduler"]) == (
+        2.5,
+        35,
+        "euler",
+        "simple",
+    )
+    assert wf["6"]["class_type"] == "TextEncodeQwenImage21"
+    assert wf["6"]["inputs"]["negative_prompt"] == PANEL_NEGATIVE
+    rapide = REG.workflow(preset_id.replace("qualite", "rapide")).workflow
+    assert wf["1"]["inputs"]["unet_name"] == rapide["1"]["inputs"]["unet_name"]  # int8, non distillé
+    assert wf["2"]["inputs"]["clip_name"] == rapide["2"]["inputs"]["clip_name"]
+
+
+def test_every_preset_declares_distillation_and_cfg_one_means_negative_inactive() -> None:
+    for wf_id, loaded in REG.workflows.items():
+        preset = loaded.preset
+        is_turbo = "turbo" in loaded.workflow["1"]["inputs"].get("unet_name", "")
+        assert preset.distilled == is_turbo, wf_id  # Turbo et croquis : modèle distillé
+        assert preset.negative_active() == (preset.cfg > 1), wf_id
+        if preset.distilled:
+            assert preset.cfg == 1, wf_id
+
+
+def test_distilled_preset_refuses_cfg_above_one() -> None:
+    turbo = REG.workflow("qwen-image-turbo")
+    with pytest.raises(PresetError, match="distillé"):
+        build_workflow(turbo, {**PARAMS, "cfg": 2.5})
+    assert build_workflow(turbo, {**PARAMS, "cfg": 1}).params["cfg"] == 1
+    with pytest.raises(PresetError, match="hors limites"):
+        build_workflow(REG.workflow("qwen-image-base-qualite"), {**PARAMS, "cfg": 5})
+
+
+def test_preset_file_with_distilled_and_cfg_above_one_is_reported(presets_copy: Path) -> None:
+    path = presets_copy / "workflows" / "qwen-image-croquis.yaml"
+    data = yaml.safe_load(path.read_text())
+    data["defaults"]["cfg"] = 2
+    path.write_text(yaml.safe_dump(data, allow_unicode=True))
+    reg = PresetRegistry.load(presets_copy)
+    assert "qwen-image-croquis" not in reg.workflows
+    msg = next(i.message for i in reg.issues if i.file.endswith("qwen-image-croquis.yaml"))
+    assert "distillé" in msg and "cfg 1 obligatoire" in msg

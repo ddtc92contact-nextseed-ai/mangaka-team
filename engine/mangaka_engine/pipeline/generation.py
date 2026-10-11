@@ -70,6 +70,7 @@ from ..store.models import (
     Panel,
     PanelImage,
     PanelState,
+    Project,
     QCVerdict,
     SeriesAsset,
     SeriesAssetImage,
@@ -265,6 +266,14 @@ def quality_preset_id(presets: PresetRegistry, characters: Sequence[LibraryEntry
     return quality.preset.id
 
 
+def series_cfg(series: Project, loaded: LoadedWorkflow) -> float | None:
+    """CFG de la série pour ce preset (None : celui du preset). Jamais pour un preset distillé (Turbo,
+    croquis : cfg 1 imposé) ni pour un preset qui ne mappe pas `cfg`."""
+    if series.cfg is None or loaded.preset.distilled or "cfg" not in loaded.preset.mapping:
+        return None
+    return float(series.cfg)
+
+
 def preset_tier(presets: PresetRegistry, preset_id: str | None) -> str | None:
     """Nom du palier (« Turbo », « Rapide », « Qualité ») d'un preset, s'il en déclare un."""
     loaded = presets.workflows.get(preset_id) if preset_id else None
@@ -292,6 +301,10 @@ def sketch_size(target: dict[str, int], long_side: int, multiple: int) -> dict[s
         return max(multiple, round(v * scale / multiple) * multiple)
 
     return {"width": snap(w), "height": snap(h)}
+
+
+def _as_float(value: Any) -> float | None:
+    return float(value) if isinstance(value, int | float) and not isinstance(value, bool) else None
 
 
 # Clés d'un contrôle (verrou de composition) recopiées dans les paramètres d'un job.
@@ -963,6 +976,9 @@ class GenerationExecutor:
                 ),
                 "seed": job.params.get("seed"),
             }
+            cfg = series_cfg(chapter.project, loaded)
+            if cfg is not None:
+                params["cfg"] = cfg
             if repair is not None:
                 params["denoise"] = float(repair.get("denoise") or loaded.preset.defaults.get("denoise") or 0.45)
             else:
@@ -1214,6 +1230,9 @@ class GenerationExecutor:
                     "prompt": built.params["positive_prompt"],
                     **({"panel_prompt": plan.panel_prompt} if plan.panel_prompt != plan.prompt else {}),
                     "negative_prompt": built.params["negative_prompt"],
+                    # À cfg 1, ComfyUI saute la passe négative : le prompt négatif n'a pas été lu.
+                    "cfg": built.params.get("cfg"),
+                    "negative_active": preset.negative_active(_as_float(built.params.get("cfg"))),
                     "seed": built.params["seed"],
                     "width": built.params.get("width", stored.width),
                     "height": built.params.get("height", stored.height),

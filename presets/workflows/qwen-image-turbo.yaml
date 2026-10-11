@@ -8,6 +8,7 @@ id: qwen-image-turbo
 name: "Qwen-Image 2.1 · Turbo — texte → image"
 description: >-
   Palier Turbo (production) : modèle distillé officiel int8 « convrot », 8 étapes. Case générée à partir du prompt final, sans image de référence (LoRA possibles).
+distilled: true   # modèle distillé (Turbo) : cfg 1 imposé, le prompt négatif n'est jamais lu
 workflow_file: qwen-image-turbo.json
 output_node: "11"
 timeout_s: 300   # au-delà, la génération est interrompue et le job passe en échec
@@ -43,7 +44,7 @@ defaults:
   # À CONFIRMER avec le vrai export ComfyUI du manager (~/mangaka-comfy-exports/) : 8 étapes,
   # cfg 1, euler + simple, denoise 1 (ces deux derniers dans le JSON, nœud 9). Une correction ne
   # touche que ce preset (et son JSON), jamais le code.
-  negative_prompt: "texte, lettres, bulles, filigrane, signature, flou, mains déformées"
+  negative_prompt: "text, letters, speech bubble, caption, watermark, signature, multiple panels, comic page layout, collage, split screen, character sheet, turnaround, model sheet, white background, duplicate character, extra people, extra limbs, deformed hands, blurry, low quality"
   steps: 8
   cfg: 1
   width: 1024
