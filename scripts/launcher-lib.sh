@@ -92,8 +92,9 @@ load_config() {
   OPEN_BROWSER="${OPEN_BROWSER:-true}"
   MANGAKA_POLL_S="${MANGAKA_POLL_S:-1}"
   STOP_TIMEOUT="${STOP_TIMEOUT:-15}"
-  # Transmis à « npm run dev » : ils priment sur .env, relu par scripts/dev.mjs.
-  export PORT ENGINE_PORT COMFYUI_URL
+  # Transmis à « npm run dev » : ils priment sur .env, relu par scripts/dev.mjs. COMFYUI_DIR : le moteur range
+  # et nettoie les fichiers de la série dans ce ComfyUI-là (output/mangaka/, input/mangaka/).
+  export PORT ENGINE_PORT COMFYUI_URL COMFYUI_DIR
 }
 
 is_true() {
