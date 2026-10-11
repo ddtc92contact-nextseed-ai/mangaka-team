@@ -134,10 +134,10 @@ export function ReferenceStudio({
     studio.reload();
   }
 
-  async function keep(variant: ReferenceVariant) {
+  async function keep(variant: ReferenceVariant, acceptPeople = false) {
     setError(null);
     try {
-      onEntryChange(await api.keepReference(variant.id));
+      onEntryChange(await api.keepReference(variant.id, acceptPeople));
       setNotice("Image ajoutée aux références de la fiche (en dernière position : change l’ordre dans « Images de référence »).");
       studio.reload();
     } catch (err) {
@@ -245,7 +245,7 @@ export function ReferenceStudio({
               kept={v.kept_image_id !== null && keptIds.has(v.kept_image_id)}
               full={full}
               maxKept={maxKept}
-              onKeep={() => keep(v)}
+              onKeep={(acceptPeople) => keep(v, acceptPeople)}
               onRefine={(instruction) => refine(v, instruction)}
               onDelete={() => remove(v)}
             />
@@ -432,13 +432,16 @@ function VariantCard({
   kept: boolean;
   full: boolean;
   maxKept: number;
-  onKeep: () => Promise<void>;
+  /** `acceptPeople` : « Garder quand même » une fiche où un personnage a été détecté. */
+  onKeep: (acceptPeople?: boolean) => Promise<void>;
   onRefine: (instruction: string) => Promise<boolean>;
   onDelete: () => Promise<void>;
 }) {
   const [refining, setRefining] = useState(false);
   const [instruction, setInstruction] = useState("");
   const [busy, setBusy] = useState(false);
+  // Fiche d'objet ou de décor où le QC a vu un visage : la garder demande une acceptation explicite.
+  const blocked = Boolean(v.people_warning && !v.people_accepted);
 
   async function run(action: () => Promise<unknown>) {
     setBusy(true);
@@ -485,6 +488,20 @@ function VariantCard({
             </span>
           )}
         </div>
+        {v.people_warning && !v.people_accepted && (
+          <p
+            role="alert"
+            className="rounded border border-amber-600/60 bg-amber-950/40 px-2 py-1 text-amber-200"
+            data-testid="variant-people-warning"
+          >
+            ⚠ {v.people_warning}. Elle ne servira pas de référence aux cases tant que tu ne l&apos;as pas acceptée.
+          </p>
+        )}
+        {v.people_warning && v.people_accepted && (
+          <p className="text-amber-300/80" data-testid="variant-people-accepted">
+            Personnage détecté, accepté à la main.
+          </p>
+        )}
         {v.instruction && <p className="text-zinc-300">« {v.instruction} »</p>}
         <details>
           <summary className="cursor-pointer text-zinc-500 hover:text-zinc-300">Prompt · seed {String(v.seed ?? "—")}</summary>
@@ -498,10 +515,19 @@ function VariantCard({
             type="button"
             className="px-2 py-1 text-xs"
             disabled={busy || kept || full}
-            title={kept ? "Déjà parmi les références de la fiche" : full ? `${maxKept} images de référence au plus : supprimes-en une` : undefined}
-            onClick={() => run(onKeep)}
+            title={
+              kept
+                ? "Déjà parmi les références de la fiche"
+                : full
+                  ? `${maxKept} images de référence au plus : supprimes-en une`
+                  : blocked
+                    ? "Un personnage a été détecté : mieux vaut régénérer. Garder quand même l'accepte à la main, et elle servira de référence aux cases."
+                    : undefined
+            }
+            onClick={() => run(() => onKeep(blocked))}
+            data-testid={blocked ? "variant-keep-anyway" : undefined}
           >
-            {kept ? "Gardée ✓" : "Garder comme référence"}
+            {kept ? "Gardée ✓" : blocked ? "Garder quand même" : "Garder comme référence"}
           </Button>
           <Button type="button" variant="secondary" className="px-2 py-1 text-xs" disabled={busy} onClick={() => setRefining((r) => !r)} aria-expanded={refining}>
             Affiner
