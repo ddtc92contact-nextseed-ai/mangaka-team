@@ -16,6 +16,13 @@ dans le cadre avec une pose, décrit la caméra, la lumière, et finit par les m
 la description française de la case n'y entre pas (elle reste dans `notes`). `[mock:prompt-invalide:N]` dans la description de la case :
 les N premiers essais sont invalides ; `[mock:prompt-intrus:N]` : ils nomment un personnage absent.
 
+Pour le dialogue sur une case (`"task": "image_prompt_dialog"`), il lit la consigne de l'auteur : un plan
+(« gros plan », « plan large »…), un angle (« contre-plongée », « de dos »…), « en train de … » (action),
+« fond blanc » (ambiance) ; pour un gros plan il choisit l'image « portrait » ou « visage » d'un personnage
+qui en a une, pour un plan large une image « pied » ou « turnaround » ; puis il réécrit le paragraphe
+avec la nouvelle caméra (`mock_dialog`). `[mock:dialogue-invalide:N]` dans la consigne : les N premiers
+essais sont invalides (plan hors liste, puis JSON illisible).
+
 Pour tester les relances sans vrai LLM, les `invalid_attempts` premiers essais d'une conversation
 renvoient une réponse invalide (variable MOCK_LLM_INVALID_ATTEMPTS, ou `[mock:invalide:N]` dans le
 synopsis du chapitre ; `[mock:da-invalide:N]` pour la seule direction artistique ;
@@ -40,9 +47,10 @@ _DA_INVALID_MARK = re.compile(r"\[mock:da-invalide:(\d+)\]")
 _ID_INVALID_MARK = re.compile(r"\[mock:id-invalide:(\d+)\]")
 _PROMPT_INVALID_MARK = re.compile(r"\[mock:prompt-invalide:(\d+)\]")
 _PROMPT_INTRUDER_MARK = re.compile(r"\[mock:prompt-intrus:(\d+)\]")
+_DIALOG_INVALID_MARK = re.compile(r"\[mock:dialogue-invalide:(\d+)\]")
 _ANY_MARK = re.compile(r"\s*\[mock:[a-z-]+:\d+\]\s*")
 UNKNOWN_ID = 999_999  # id de décor cité par `[mock:id-invalide:N]` (absent de toute bibliothèque)
-TASKS = ("script", "art_direction", "image_prompt")
+TASKS = ("script", "art_direction", "image_prompt", "image_prompt_dialog")
 
 _SHOTS = ["plan large", "plan moyen", "gros plan", "plan américain", "contre-plongée", "plan rapproché", "plongée"]
 _PANELS_PER_PAGE = [5, 4, 6, 3, 5, 4]
@@ -328,6 +336,8 @@ class MockLLMProvider:
         if self._responder is not None:
             return LLMResult(text=self._responder(messages, json_mode), model="mock")
         ctx = _task_context(messages) if json_mode else None
+        if ctx is not None and ctx.get("task") == "image_prompt_dialog":
+            return LLMResult(text=self._dialog_answer(messages, ctx), model="mock")
         if ctx is not None and ctx.get("task") == "image_prompt":
             return LLMResult(text=self._image_prompt_answer(messages, ctx), model="mock")
         if ctx is not None and ctx.get("task") == "art_direction":
@@ -369,6 +379,18 @@ class MockLLMProvider:
         if intruder and absent and attempt <= int(intruder.group(1)):
             out["prompt"] = f"{out['prompt']} {absent[0]} watches the scene from the edge of the frame."
         return json.dumps(out, ensure_ascii=False)
+
+    def _dialog_answer(self, messages: list[ChatMessage], ctx: dict[str, Any]) -> str:
+        attempt = 1 + sum(1 for m in messages if m.role == "assistant")
+        mark = _DIALOG_INVALID_MARK.search(str(ctx.get("instruction") or ""))
+        invalid = int(mark.group(1)) if mark else self.invalid_attempts
+        if attempt <= invalid:
+            if attempt % 2:
+                out = mock_dialog(ctx)
+                out["direction"] = {"plan": "plan drone"}
+                return json.dumps(out, ensure_ascii=False)
+            return "Voici le nouveau prompt : plus serré…"
+        return json.dumps(mock_dialog(ctx), ensure_ascii=False)
 
     def _direction_answer(self, messages: list[ChatMessage], ctx: dict[str, Any]) -> str:
         attempt = 1 + sum(1 for m in messages if m.role == "assistant")
@@ -437,6 +459,7 @@ def _mock_english(ctx: dict[str, Any]) -> list[str]:
         sentences.append(f"{name}, {spot}, {pose}, {look}.")
     if panel.get("camera"):
         sentences.append(f"Camera: {panel['camera']}, with a slight wide-angle feel and a shallow depth of field.")
+    sentences += [str(x) for x in ctx.get("extra_sentences") or []]
     if (ctx.get("decor") or {}).get("name"):
         sentences.append(f"The scene takes place in {ctx['decor']['name']}, seen from the new camera angle.")
     sentences.append(
@@ -494,3 +517,77 @@ def mock_image_prompt(ctx: dict[str, Any]) -> dict[str, Any]:
     if lang == "en" and description:
         notes += f" Case (non traduite) : {description[:600]}"
     return {"prompt": " ".join(sentences), "language": lang, "notes": notes}
+
+
+# --- dialogue sur une case ------------------------------------------------------------------------
+_DIALOG_PLANS = ("gros plan", "plan large", "plan moyen", "plan rapproché", "insert")
+_DIALOG_ANGLES = {
+    "contre-plongée": "en contre-plongée",
+    "contre plongée": "en contre-plongée",
+    "plongée": "en plongée",
+    "de dos": "de dos",
+    "de profil": "de profil",
+    "de face": "de face",
+    "trois quarts": "de trois quarts",
+    "vue subjective": "vue subjective",
+    "penché": "cadre penché",
+}
+_CLOSE = ("gros plan", "plan rapproché", "insert")
+_ACTION = re.compile(r"en train de ([^,.;]+)")
+
+
+def _pick_reference(options: list[dict[str, Any]], words: tuple[str, ...]) -> dict[str, int]:
+    """Par personnage : l'image dont le nom contient un des `words` (si ce n'est pas déjà celle envoyée)."""
+    out: dict[str, int] = {}
+    for o in options:
+        label = str(o.get("label") or "").lower()
+        name = str(o.get("character") or "")
+        if name not in out and not o.get("current") and any(w in label for w in words):
+            out[name] = int(o["image_id"])
+    return out
+
+
+def mock_dialog(ctx: dict[str, Any]) -> dict[str, Any]:
+    """Réponse déterministe à une consigne : nouveaux plan / angle / action / ambiance lus dans la consigne,
+    référence adaptée au plan, paragraphe réécrit avec la nouvelle caméra."""
+    instruction = _ANY_MARK.sub(" ", str(ctx.get("instruction") or "")).strip()
+    text = instruction.lower()
+    direction: dict[str, Any] = {}
+    plan = next((p for p in _DIALOG_PLANS if p in text), None)
+    if plan:
+        direction["plan"] = plan
+    angle = next((v for k, v in _DIALOG_ANGLES.items() if k in text), None)
+    if angle:
+        direction["angle"] = angle
+    action = _ACTION.search(text)
+    if action:
+        direction["action"] = f"en train de {action.group(1).strip()}"
+    extra: list[str] = []
+    if "fond blanc" in text:
+        direction["ambiance"] = "fond blanc uni, sans décor"
+        extra.append("The background is plain white, with no setting at all.")
+    current = dict(ctx.get("current_direction") or {})
+    terms = dict(ctx.get("camera_terms") or {})
+    new_plan, new_angle = direction.get("plan") or current.get("plan"), direction.get("angle") or current.get("angle")
+    camera = ", ".join(terms.get(v, v) for v in (new_plan, new_angle) if v)
+    if new_plan in _CLOSE:
+        extra.append("The face fills most of the frame, every detail of the expression readable.")
+    options = list(ctx.get("reference_options") or [])
+    if new_plan in _CLOSE:
+        picks = _pick_reference(options, ("portrait", "visage", "face"))
+    elif new_plan == "plan large":
+        picks = _pick_reference(options, ("pied", "turnaround", "full"))
+    else:
+        picks = {}
+    panel = {**(ctx.get("panel") or {}), **({"camera": camera} if camera else {})}
+    written = mock_image_prompt({**ctx, "panel": panel, "extra_sentences": extra})
+    said = [f"{k} : {v}" for k, v in direction.items()] + [f"référence de {n} changée" for n in picks]
+    return {
+        "prompt": written["prompt"],
+        "language": written["language"],
+        "direction": direction or None,
+        "references": [{"character": n, "image_id": i} for n, i in picks.items()],
+        "explanation": ("J'ai changé " + ", ".join(said) + ".")
+        if said
+        else "J'ai réécrit le prompt selon la consigne.",
+    }

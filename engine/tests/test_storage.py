@@ -20,6 +20,7 @@ from mangaka_engine.providers.factory import Providers
 from mangaka_engine.providers.llm import MockLLMProvider
 from mangaka_engine.store.comfy_folders import ComfyFolders
 from mangaka_engine.store.db import create_db_engine
+from mangaka_engine.store.migrations import SCHEMA_VERSION
 from mangaka_engine.store.slugs import slugify, unique_slug
 from tests.conftest import STYLE, png_bytes
 from tests.test_migrations import _columns, _version
@@ -432,7 +433,7 @@ def test_v23_database_gets_slugs_and_never_reused_ids(make_settings: Callable[..
         assert _series(c, "Nouvelle")["id"] > b["id"]
         assert c.delete(f"/chapters/{ch['id']}").status_code == 204
         assert _ok(c.post(f"/projects/{a['id']}/chapters", json={"title": "Deux"}), 201)["id"] > ch["id"]
-    assert _version(settings.database_path) == 24
+    assert _version(settings.database_path) == SCHEMA_VERSION
     fresh = settings.database_path.parent / "fresh.db"
     create_db_engine(fresh).dispose()
     assert _columns(settings.database_path) == _columns(fresh)

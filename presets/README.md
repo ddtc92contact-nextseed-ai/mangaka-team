@@ -23,7 +23,7 @@ Après modification d'un preset, redémarre le moteur (`npm run dev`).
 | `style_options.yaml` | Réglages fins bornés du style : trait, trames (N&B seulement), détail des décors |
 | `style_loras.yaml` | Catalogue des LoRA de style : mots déclencheurs et poids conseillé |
 | `camera_loras.yaml` | LoRA Multiple-Angles (« Nouvel angle », « Changer l'angle ») et Cohérence anime, vocabulaire de caméra |
-| `prompts/*.yaml` | Prompts des étapes LLM (`script` : découpage d'un chapitre ; `direction-artistique` ; `redacteur-image` : prompt image de chaque case rédigé en un paragraphe) |
+| `prompts/*.yaml` | Prompts des étapes LLM (`script` : découpage d'un chapitre ; `direction-artistique` ; `redacteur-image` : prompt image de chaque case rédigé en un paragraphe ; `redacteur-image-dialogue` : dialogue sur une case dans l'atelier) |
 | `image_prompt.yaml` | Construction du prompt final des cases (étape 3) et termes « pas de texte » du prompt négatif |
 | `qc.yaml` | Contrôle qualité des cases (étape 4) : poids, seuils de verdict, règles des détecteurs, seuil CCIP, zone de doute de la vision, nouveaux essais automatiques |
 | `workflows/*.yaml` + `*.json` | Workflows ComfyUI : le JSON API exporté + le mapping des paramètres |
@@ -1319,6 +1319,23 @@ Repasser une série à « non » remet ses prompts rédigés (non retouchés) en
 que des phrases anglaises (rôles `<imageN>`, poses tirées d'une liste, caméra, lumière) : il ne sait pas
 traduire, la description française de la case reste dans `notes`. L'essai du Dessinateur montre le
 prompt rédigé à côté du prompt par fragments.
+
+### Dialogue sur une case (`prompts/redacteur-image-dialogue.yaml`)
+
+Dans l'atelier, « Demander à l'IA pour cette case » envoie une consigne en français (« plus serré, gros
+plan sur le visage de Lucius, en contre-plongée », « Stan doit être en train de courir », « enlève le
+décor, fond blanc ») au LLM du Dessinateur, avec le contexte de la case (scénario, direction artistique
+appliquée, personnages, images envoyées, prompt actuel), les images de référence au choix par personnage
+et l'historique des échanges sur la case. Réponse JSON validée (`max_retries`, puis erreur lisible ; la
+case ne change pas) : `prompt` (mêmes contrôles que le rédacteur), `direction` facultative (`plan` et
+`angle` parmi les valeurs de la direction artistique, `action`, `ambiance`), `references` facultatives
+(`{"character", "image_id"}` parmi les images gardées de la fiche) et `explanation` (une phrase en
+français). L'auteur voit l'ancien et le nouveau prompt et les champs changés, puis « Appliquer »,
+« Appliquer et générer » (une nouvelle version de cette case seulement) ou « Annuler ». Appliqué, le
+prompt est gardé comme une édition à la main et la direction / la référence restent propres à la case,
+jusqu'à « Reconstruire le prompt » (qui accepte aussi une consigne : même gabarit, sans historique).
+Variables : celles de `redacteur-image.yaml`, plus `$instruction`, `$current_prompt`,
+`$current_direction`, `$plans`, `$angles`, `$camera_terms`, `$reference_options`, `$history`.
 
 ## Lettrage (étape 5)
 

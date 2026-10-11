@@ -786,6 +786,8 @@ export interface PanelDetail {
   bbox: Rect | null;
   final_prompt: string | null;
   final_prompt_manual: boolean;
+  /** Ce que le dialogue avec l'IA impose à la case (« Plan : gros plan »…), jusqu'à « Reconstruire le prompt ». */
+  dialog_overrides?: string[];
   /** Origine du prompt automatique : rédigé par l'IA ou assemblé par fragments (null : jamais construit). */
   prompt_source?: "ia" | "fragments" | null;
   /** La série fait rédiger ses prompts par l'IA. */
@@ -807,6 +809,34 @@ export interface PanelDetail {
   upscaler?: string | null;
   /** Composition verrouillée (ControlNet) ; null : composition libre. */
   composition_lock?: CompositionLock | null;
+}
+
+/** Un champ changé par une proposition du dialogue (plan, angle, action, ambiance, référence d'un personnage). */
+export interface DialogChange {
+  field: string;
+  label: string;
+  before: string | null;
+  after: string | null;
+}
+
+/** Un échange du dialogue avec l'IA sur une case : consigne, proposition, sort de la proposition. */
+export interface PanelDialogTurn {
+  id: number;
+  panel_id: number;
+  instruction: string;
+  explanation: string;
+  status: "proposed" | "applied" | "cancelled";
+  prompt_before: string | null;
+  prompt_after: string;
+  changes: DialogChange[];
+  created_at: string;
+  applied_at: string | null;
+}
+
+export interface DialogApplyResult {
+  turn: PanelDialogTurn;
+  panel: PanelDetail;
+  jobs: Job[];
 }
 
 export type CompositionSource = "croquis" | "version" | "import";
@@ -2090,8 +2120,21 @@ export const api = {
   ) =>
     request<PanelDetail>(`/panels/${id}`, json("PATCH", body)),
   // Prompt rédigé par l'IA : jusqu'à 2 appels au LLM (le proxy laisse 3 min à cette route).
-  rebuildPrompt: (id: number) =>
-    request<PanelDetail>(`/panels/${id}/prompt/rebuild`, { method: "POST", signal: AbortSignal.timeout(180_000) }),
+  /** `instruction` : consigne passée au même pipeline que le dialogue sur la case (sans historique). */
+  rebuildPrompt: (id: number, instruction?: string) =>
+    request<PanelDetail>(`/panels/${id}/prompt/rebuild`, {
+      ...json("POST", instruction ? { instruction } : {}),
+      signal: AbortSignal.timeout(180_000),
+    }),
+  panelDialog: (id: number) => request<PanelDialogTurn[]>(`/panels/${id}/dialog`),
+  askPanelDialog: (id: number, instruction: string) =>
+    request<PanelDialogTurn>(`/panels/${id}/dialog`, {
+      ...json("POST", { instruction }),
+      signal: AbortSignal.timeout(180_000),
+    }),
+  applyPanelDialog: (turnId: number, generate = false) =>
+    request<DialogApplyResult>(`/panel-dialog/${turnId}/apply`, json("POST", { generate })),
+  cancelPanelDialog: (turnId: number) => request<PanelDialogTurn>(`/panel-dialog/${turnId}/cancel`, { method: "POST" }),
   controlStatus: (refresh = false) =>
     request<ControlStatus>(`/comfyui/control${refresh ? "?refresh=true" : ""}`, { signal: AbortSignal.timeout(30_000) }),
   lockComposition: (

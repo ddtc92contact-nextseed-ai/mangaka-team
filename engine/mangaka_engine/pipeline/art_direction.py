@@ -954,11 +954,20 @@ def edit_direction(
 
 # --- application à la mise en page ---------------------------------------------------
 def applied_panel_direction(panel: Panel) -> dict[str, Any]:
-    """Direction artistique appliquée à une case (plan, angle, ambiance…), {} sinon."""
+    """Direction artistique appliquée à une case (plan, angle, ambiance…), {} sinon. Les choix du dialogue
+    avec l'IA sur la case (`Panel.dialog_direction`) passent par-dessus ceux de la page."""
     applied = applied_values(panel.page)
-    if not applied:
-        return {}
-    return next((pa for pa in applied.get("panels") or [] if pa.get("panel_id") == panel.id), {})
+    page = next((pa for pa in (applied or {}).get("panels") or [] if pa.get("panel_id") == panel.id), {})
+    own = {
+        k: v
+        for k, v in (getattr(panel, "dialog_direction", None) or {}).items()
+        if k in DIALOG_FIELDS and v is not None
+    }
+    return {**page, **own} if own else page
+
+
+# Champs de direction artistique qu'un dialogue avec l'IA peut imposer à une case.
+DIALOG_FIELDS = ("plan", "angle", "action", "ambiance")
 
 
 @dataclass

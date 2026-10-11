@@ -34,6 +34,7 @@ import { describeUsedReference, droppedReferencesNote } from "@/lib/used-referen
 import { useChapter } from "../chapter-context";
 import { ChangeAngleBlock } from "./change-angle";
 import { CompositionBlock, LockBadge } from "./composition-block";
+import { DialogBlock } from "./dialog-block";
 import type { PanelView } from "./page-canvas";
 import { PanelQC } from "./panel-qc";
 import { RepairDialog, type RepairPreset } from "./repair-dialog";
@@ -465,6 +466,34 @@ export function PanelInspector({
               </div>
             )}
           </div>
+
+          <DialogBlock
+            panelId={panelId}
+            overrides={d.dialog_overrides ?? []}
+            disabled={busy || rebuilding}
+            onApplied={(panel, jobs) => {
+              detail.setData(panel);
+              setDraft(null);
+              setError(null);
+              onChanged();
+              if (jobs.length) {
+                refresh();
+                setGenerated(true);
+                setNotice("Proposition appliquée, nouvelle version de cette case mise en file : les autres cases et versions ne bougent pas.");
+                toast("Proposition appliquée, génération lancée");
+              } else {
+                setGenerated(false);
+                setNotice("Proposition appliquée : gardée comme une retouche jusqu'à « Reconstruire le prompt ».");
+                toast("Proposition appliquée");
+              }
+            }}
+            onRebuilt={(panel) => {
+              detail.setData(panel);
+              setDraft(null);
+              onChanged();
+              toast("Prompt reconstruit avec la consigne");
+            }}
+          />
 
           <div className="grid grid-cols-2 gap-3">
             <div className="col-span-2">

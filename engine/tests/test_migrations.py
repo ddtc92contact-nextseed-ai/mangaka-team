@@ -783,3 +783,32 @@ def test_v22_database_gets_untagged_views_and_no_anime_consistency(make_settings
     fresh = settings.database_path.parent / "fresh.db"
     create_db_engine(fresh).dispose()
     assert _columns(settings.database_path) == _columns(fresh)
+
+
+def test_v24_database_gets_the_panel_dialog_with_nothing_imposed(make_settings: Callable[..., Settings]) -> None:
+    """v24 → v25 : dialogue avec l'IA par case (historique, direction et référence propres à la case) ; rien
+    d'imposé aux cases existantes."""
+    settings = make_settings()
+    with TestClient(create_app(settings)) as c:
+        project = c.post("/projects", json={**STYLE, "title": "Série v24"}).json()
+        chapter = c.post(f"/projects/{project['id']}/chapters", json={"title": "Un"}).json()
+        pages = c.put(
+            f"/chapters/{chapter['id']}/pages", json={"pages": [{"panels": [{"description": "Une rue."}]}]}
+        ).json()
+        panel_id = pages[0]["panels"][0]["id"]
+    con = sqlite3.connect(settings.database_path)
+    con.execute("DROP TABLE panel_dialog_turns")
+    con.execute("ALTER TABLE panels DROP COLUMN dialog_direction")
+    con.execute("ALTER TABLE panels DROP COLUMN reference_choice")
+    con.execute("PRAGMA user_version = 24")
+    con.commit()
+    con.close()
+
+    with TestClient(create_app(settings)) as c:
+        panel = c.get(f"/panels/{panel_id}").json()
+        assert panel["dialog_overrides"] == [] and panel["description"] == "Une rue."
+        assert c.get(f"/panels/{panel_id}/dialog").json() == []
+    assert _version(settings.database_path) == SCHEMA_VERSION
+    fresh = settings.database_path.parent / "fresh.db"
+    create_db_engine(fresh).dispose()
+    assert _columns(settings.database_path) == _columns(fresh)

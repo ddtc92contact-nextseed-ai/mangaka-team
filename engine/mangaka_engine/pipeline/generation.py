@@ -85,10 +85,11 @@ from ..store.models import (
     PanelState,
     Project,
     QCVerdict,
+    ReferenceVariant,
     SeriesAsset,
     SeriesAssetImage,
 )
-from .art_direction import applied_panel_direction
+from .art_direction import DIALOG_FIELDS, applied_panel_direction
 from .camera import CameraError, angle_prompt, camera_plan, direction_target, merge_loras, ordered_views
 from .inpaint import png_bytes, recompose, soften_mask
 from .jobs import JobReporter
@@ -105,6 +106,16 @@ from .prompt import (
     frame_references,
     merge_negative,
 )
+from .prompt_dialog import (
+    DIRECTION_LABELS,
+    DialogBrief,
+    DialogRun,
+    DialogTurnBrief,
+    PromptDialogError,
+    ReferenceOption,
+    propose,
+)
+from .prompt_dialog import PROMPT_ID as DIALOG_PROMPT_ID
 from .prompt_writer import PROMPT_ID as WRITER_PROMPT_ID
 from .prompt_writer import PromptBrief, PromptWriterError, WriteRun, write_prompt
 from .style import series_rendering, series_style
@@ -442,11 +453,12 @@ def choose_references(
     *,
     target: AngleTarget | None = None,
     catalog: CameraLoraCatalog | None = None,
+    preferred: dict[int, int] | None = None,
 ) -> ReferenceChoice:
     """Images envoyées (`pick_references`) et fiches qui avaient une image mais n'ont eu aucun emplacement,
     dans l'ordre d'importance. L'ordre garantit qu'un personnage présent n'est jamais écarté tant qu'un
     décor, un objet ou le style occupe un emplacement."""
-    sent = pick_references(entries, slots, per_entry, target=target, catalog=catalog)
+    sent = pick_references(entries, slots, per_entry, target=target, catalog=catalog, preferred=preferred)
     served = {id(entry) for entry, _ in sent}
     dropped = [e for e in entries if e.reference_images and id(e) not in served]
     return ReferenceChoice(sent=sent, dropped=dropped)
@@ -464,6 +476,7 @@ def pick_references(
     *,
     target: AngleTarget | None = None,
     catalog: CameraLoraCatalog | None = None,
+    preferred: dict[int, int] | None = None,
 ) -> list[tuple[LibraryEntry, CharacterImage | SeriesAssetImage]]:
     """Remplit les emplacements par tours, dans l'ordre de priorité des fiches.
 
@@ -482,12 +495,20 @@ def pick_references(
 
     `target` (angle de la direction artistique de la case, voir `panel_angle_target`) : la vue de chaque
     fiche la plus proche de cet angle passe en tête (vues étiquetées, `catalog`) ; sinon la principale.
+
+    `preferred` (id du personnage → id de son image, choisi par le dialogue avec l'IA sur la case, voir
+    `Panel.reference_choice`) : cette image passe en tête de son personnage, avant la vue de l'angle.
     """
     fiches = [c for c in characters if not is_style(c)]
     views = {
-        id(c): ordered_views(c.reference_images, catalog, target) if catalog is not None else c.reference_images
+        id(c): ordered_views(c.reference_images, catalog, target) if catalog is not None else list(c.reference_images)
         for c in fiches
     }
+    for c in fiches:
+        image_id = (preferred or {}).get(c.id) if isinstance(c, Character) else None
+        chosen = next((img for img in c.reference_images if img.id == image_id), None)
+        if chosen is not None:
+            views[id(c)] = [chosen, *(img for img in views[id(c)] if img is not chosen)]
     out: list[tuple[LibraryEntry, CharacterImage | SeriesAssetImage]] = []
     depth = 0
     rounds = 1 if per_entry == "principale" else max((len(c.reference_images) for c in fiches), default=0)
@@ -517,6 +538,15 @@ def collect_loras(panel: Panel, characters: Sequence[LibraryEntry]) -> list[Lora
 def panel_angle_target(presets: PresetRegistry, panel: Panel) -> AngleTarget | None:
     """Angle demandé par la direction artistique appliquée à la case (None : aucun, vue principale)."""
     return direction_target(presets.camera_loras, applied_panel_direction(panel))
+
+
+def reference_preferences(panel: Panel) -> dict[int, int]:
+    """Image de référence choisie par personnage pour la case (dialogue avec l'IA), {} sinon."""
+    out: dict[int, int] = {}
+    for key, value in (panel.reference_choice or {}).items():
+        with contextlib.suppress(TypeError, ValueError):
+            out[int(key)] = int(value)
+    return out
 
 
 def panel_label(panel: Panel) -> str:
@@ -718,6 +748,144 @@ def apply_prompt_request(
             "« Reconstruire le prompt » pour réessayer."
         )
     panel.prompt_key = request.key
+
+
+# --- dialogue avec l'IA sur une case (pipeline/prompt_dialog.py) -------------------------------
+def image_labels(session: Session, presets: PresetRegistry, character: Character) -> dict[int, str]:
+    """Nom lisible de chaque image gardée d'un personnage : la fiche de référence qui l'a produite
+    (« Portrait de face »), sinon son angle, sinon le nom du fichier importé ; et sa place."""
+    ids = [img.id for img in character.reference_images]
+    sheets = {
+        v.kept_image_id: v.sheet
+        for v in session.scalars(
+            select(ReferenceVariant).where(
+                ReferenceVariant.entry_kind == "character", ReferenceVariant.kept_image_id.in_(ids)
+            )
+        )
+    }
+    out: dict[int, str] = {}
+    for i, img in enumerate(character.reference_images, start=1):
+        sheet = presets.reference_sheets.get(sheets.get(img.id) or "")
+        angle = presets.camera_loras.angle(img.angle) if img.angle else None
+        name = sheet.name if sheet is not None else (angle.label if angle is not None else img.original_name)
+        out[img.id] = f"{name} (image {i}{', principale' if i == 1 else ''})"
+    return out
+
+
+def reference_options(session: Session, presets: PresetRegistry, panel: Panel) -> list[ReferenceOption]:
+    """Images de référence au choix pour chaque personnage de la case qui en a plusieurs, avec celle
+    envoyée aujourd'hui (choix du dialogue, sinon la vue la plus proche de l'angle, sinon la principale)."""
+    target = panel_angle_target(presets, panel)
+    preferred = reference_preferences(panel)
+    options: list[ReferenceOption] = []
+    for character in panel_characters(session, panel):
+        images = list(character.reference_images)
+        if len(images) < 2:
+            continue
+        chosen = next((img for img in images if img.id == preferred.get(character.id)), None)
+        if chosen is None:
+            chosen = ordered_views(images, presets.camera_loras, target)[0]
+        labels = image_labels(session, presets, character)
+        options += [
+            ReferenceOption(character.id, character.name, img.id, labels[img.id], current=img is chosen)
+            for img in images
+        ]
+    return options
+
+
+def dialog_turns(panel: Panel) -> list[DialogTurnBrief]:
+    """Échanges précédents sur la case (historique envoyé au LLM)."""
+    return [DialogTurnBrief(t.instruction, t.explanation, t.status) for t in panel.dialog]
+
+
+@dataclass
+class DialogRequest:
+    """Consigne à soumettre au LLM pour une case (données rassemblées, aucune session ouverte ensuite)."""
+
+    panel_id: int
+    project_id: int
+    brief: DialogBrief
+
+
+def dialog_request(
+    presets: PresetRegistry,
+    session: Session,
+    panel: Panel,
+    instruction: str,
+    knowledge: KnowledgeBase | None = None,
+    *,
+    history: bool = True,
+    current_prompt: str | None = None,
+) -> DialogRequest:
+    """Contexte de la case pour une consigne : scénario, direction artistique appliquée, personnages,
+    références envoyées et au choix, prompt actuel, et (`history`) les échanges précédents."""
+    brief = panel_brief(presets, session, panel, knowledge)
+    da = applied_panel_direction(panel)
+    prompt = panel.final_prompt if current_prompt is None else current_prompt
+    return DialogRequest(
+        panel_id=panel.id,
+        project_id=panel.page.chapter.project_id,
+        brief=DialogBrief.build(
+            brief,
+            instruction,
+            current_prompt=prompt or "",
+            # Sans direction artistique appliquée, le plan est celui du scénario.
+            direction={**{k: da.get(k) for k in DIALOG_FIELDS}, "plan": da.get("plan") or panel.shot_type},
+            options=reference_options(session, presets, panel),
+            history=dialog_turns(panel) if history else (),
+            presets=presets,
+        ),
+    )
+
+
+def run_dialog_request(
+    presets: PresetRegistry,
+    llm: LLMProvider | None,
+    llm_error: str | None,
+    request: DialogRequest,
+) -> DialogRun:
+    """Appel du LLM (hors de toute session) ; `PromptDialogError` lisible en cas d'échec."""
+    if llm is None:
+        raise PromptDialogError(f"LLM indisponible : {llm_error or 'non configuré'}")
+    try:
+        return propose(llm, presets.prompt(DIALOG_PROMPT_ID), request.brief)
+    except PresetError as exc:
+        raise PromptDialogError(str(exc)) from None
+    except PromptDialogError:
+        raise
+    except Exception as exc:  # noqa: BLE001 — erreur lisible plutôt qu'une 500
+        log.exception("dialogue sur la case %s impossible", request.panel_id)
+        raise PromptDialogError(f"erreur interne ({exc.__class__.__name__})") from None
+
+
+def apply_dialog_proposal(panel: Panel, proposal: dict[str, Any], *, manual: bool = True) -> None:
+    """Applique une proposition à la case : prompt (gardé comme une édition à la main si `manual`, jusqu'à
+    « Reconstruire le prompt »), direction artistique et références propres à la case."""
+    direction = {k: v for k, v in (proposal.get("direction") or {}).items() if k in DIALOG_FIELDS and v}
+    if direction:
+        panel.dialog_direction = {**(panel.dialog_direction or {}), **direction}
+    references = {str(k): int(v) for k, v in (proposal.get("references") or {}).items()}
+    if references:
+        panel.reference_choice = {**(panel.reference_choice or {}), **references}
+    panel.final_prompt = str(proposal.get("prompt") or "").strip() or panel.final_prompt
+    panel.final_prompt_manual = manual
+    panel.prompt_source = "ia"
+    panel.prompt_warning = None
+
+
+def dialog_overrides(session: Session, presets: PresetRegistry, panel: Panel) -> list[str]:
+    """Ce que le dialogue impose à la case, en clair (« Plan : gros plan », « Référence de Lucius : … »)."""
+    out = [
+        f"{DIRECTION_LABELS[k]} : {v}" for k, v in (panel.dialog_direction or {}).items() if k in DIRECTION_LABELS and v
+    ]
+    preferred = reference_preferences(panel)
+    if preferred:
+        for character in panel_characters(session, panel):
+            image_id = preferred.get(character.id)
+            labels = image_labels(session, presets, character) if image_id is not None else {}
+            if image_id in labels:
+                out.append(f"Référence de {character.name} : {labels[image_id]}")
+    return out
 
 
 def enqueue_panel(
@@ -1123,7 +1291,12 @@ class GenerationExecutor:
                 per_entry = presets.defaults.panel_references if presets.defaults else "toutes"
                 target = panel_angle_target(presets, panel)
                 choice = choose_references(
-                    entries, len(loaded.preset.reference_images), per_entry, target=target, catalog=catalog
+                    entries,
+                    len(loaded.preset.reference_images),
+                    per_entry,
+                    target=target,
+                    catalog=catalog,
+                    preferred=reference_preferences(panel),
                 )
                 dropped = [dropped_reference(e) for e in choice.dropped]
                 for entry, image in choice.sent:

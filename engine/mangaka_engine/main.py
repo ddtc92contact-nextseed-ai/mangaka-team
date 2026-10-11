@@ -29,6 +29,7 @@ from .api import (
     lettering,
     production,
     projects,
+    prompt_dialog,
     qc,
     qc_bench,
     reference_sheets,
@@ -253,6 +254,7 @@ def create_app(settings: Settings | None = None, providers: Providers | None = N
     app.include_router(art_direction.router)
     app.include_router(jobs.router)
     app.include_router(generation.router)
+    app.include_router(prompt_dialog.router)
     app.include_router(sketch.router)
     app.include_router(production.router)
     app.include_router(composition.router)

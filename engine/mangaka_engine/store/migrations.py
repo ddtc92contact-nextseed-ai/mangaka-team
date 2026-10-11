@@ -40,6 +40,8 @@
 - 24 : rangement des fichiers : nom de dossier lisible (slug) des séries et des fiches de la bibliothèque,
   tiré du titre ou du nom (store/slugs.py) ; ids jamais réutilisés (AUTOINCREMENT) sur les séries, les
   chapitres et les pages (tables reconstruites, données et ids gardés).
+- 25 : dialogue avec l'IA par case (historique des échanges, direction et référence imposées à la case) ;
+  rien d'imposé sur les cases existantes.
 
 Une base neuve est créée directement à la dernière version. Chaque migration tourne dans une
 transaction unique, clés étrangères désactivées (recette « 12 étapes » de SQLite pour reconstruire
@@ -84,7 +86,7 @@ from .slugs import RESERVED_ENTRIES, RESERVED_SERIES, slugify, unique_slug
 
 log = logging.getLogger("mangaka_engine")
 
-SCHEMA_VERSION = 24
+SCHEMA_VERSION = 25
 
 
 class MigrationError(RuntimeError):
@@ -391,6 +393,15 @@ def _v23_to_v24(cur: sqlite3.Cursor) -> None:
         _rebuild(cur, model.__table__)  # type: ignore[arg-type]
 
 
+def _v24_to_v25(cur: sqlite3.Cursor) -> None:
+    # Dialogue par case : la table `panel_dialog_turns` est créée par `create_all` ; panels reconstruite par
+    # une migration antérieure depuis le modèle courant : colonnes déjà là.
+    existing = {row[1] for row in cur.execute("PRAGMA table_info(panels)")}
+    for column in ("dialog_direction", "reference_choice"):
+        if column not in existing:
+            cur.execute(f"ALTER TABLE panels ADD COLUMN {column} JSON")
+
+
 MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     # version de départ → (version d'arrivée, fonction)
     0: (2, _v0_to_v2),
@@ -417,6 +428,7 @@ MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     21: (22, _v21_to_v22),
     22: (23, _v22_to_v23),
     23: (24, _v23_to_v24),
+    24: (25, _v24_to_v25),
 }
 
 

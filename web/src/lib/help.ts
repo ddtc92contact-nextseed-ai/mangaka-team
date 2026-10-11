@@ -194,7 +194,9 @@ export const HELP = {
   "atelier.dpi":
     "La résolution réelle de la case une fois imprimée au format de la série. Sous le seuil, elle sera floue à l'impression : lance « Finaliser ».",
   "atelier.prompt":
-    "Le texte envoyé au modèle d'image, rédigé par l'IA (série en « Prompt rédigé par l'IA ») ou assemblé par fragments d'après la case, les personnages et le style de la série. Rédigé une fois par case, pas à chaque génération. Retouché à la main, il est gardé tel quel ; « Reconstruire le prompt » repart de zéro (et le redemande à l'IA).",
+    "Le texte envoyé au modèle d'image, rédigé par l'IA (série en « Prompt rédigé par l'IA ») ou assemblé par fragments d'après la case, les personnages et le style de la série. Rédigé une fois par case, pas à chaque génération. Retouché à la main ou par le dialogue avec l'IA, il est gardé ; « Reconstruire le prompt » repart de zéro.",
+  "atelier.dialog":
+    "Dis à l'IA ce que tu veux changer dans cette case seulement (« gros plan sur Lucius, en contre-plongée », « fond blanc »). Elle propose un nouveau prompt et, au besoin, un autre plan, angle, action ou image de référence, à comparer avant d'appliquer. Appliqué, c'est gardé jusqu'à « Reconstruire le prompt ».",
   "atelier.workflow":
     "Le workflow ComfyUI de la case. Automatique : celui de la série, ou sa variante avec références quand un personnage, un décor ou un objet a des images de référence.",
   "atelier.seed":
