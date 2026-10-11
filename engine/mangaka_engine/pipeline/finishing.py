@@ -36,7 +36,7 @@ from sqlalchemy.orm import Session
 
 from ..presets import LoadedUpscaler, PageFormat, PresetError, PresetRegistry, build_upscale_workflow
 from ..providers.comfyui import ComfyUIClient, ComfyUIError, ComfyUIInterruptedError, ComfyUITimeoutError
-from ..store.comfy_folders import ComfyFolders, page_folder, panel_name
+from ..store.comfy_folders import ComfyFolders, page_folder, panel_name, transit
 from ..store.db import Database
 from ..store.files import FileStore
 from ..store.models import Job, JobStatus, Page, Panel, PanelImage, Project
@@ -374,7 +374,7 @@ class FinishingExecutor:
                 data=path.read_bytes(),
                 filename=f"{panel_name(panel, 'finition')}-v{image.version}{ext}",
                 folder=f"projects/{chapter.project_id}/chapters/{chapter.id}/panels/{panel.id}/finitions",
-                prefix=f"{page_folder(chapter, page)}/{panel_name(panel, 'finition')}",
+                prefix=transit(f"{page_folder(chapter, page)}/{panel_name(panel, 'finition')}"),
                 upload_folder=page_folder(chapter, page),
                 box=(info["box_width"], info["box_height"]),
                 source=(info["source_width"], info["source_height"]),

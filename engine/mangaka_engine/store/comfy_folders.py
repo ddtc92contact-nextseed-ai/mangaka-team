@@ -1,14 +1,15 @@
 """Rangement des fichiers de la série dans ComfyUI (`output/mangaka/` et `input/mangaka/`).
 
-Noms (purs) : `series_folder`, `entry_folder`, `page_folder`, `panel_name` donnent les préfixes des
-`SaveImage` et les sous-dossiers des images envoyées, les mêmes dans `output/` et `input/` :
+Noms (purs) : `series_folder`, `entry_folder`, `page_folder`, `panel_name` donnent les sous-dossiers des
+images envoyées (`input/`) ; `transit(…)` du même chemin donne le préfixe des `SaveImage` (`output/`) :
 
-    mangaka/<série>/personnages/<nom>/<fiche>/variante-1_00001_.png   (sorties « Créer des références »)
-    mangaka/<série>/personnages/<nom>/reference-12.png                (image de référence envoyée)
-    mangaka/<série>/objets/<nom>/…  mangaka/<série>/decors/<nom>/…
-    mangaka/<série>/style/essais/…  mangaka/<série>/style/<référence>/…
-    mangaka/<série>/chapitre-01/page-01/case-01, case-01-croquis, case-01-controle, case-01-finition,
-    case-01-reparation…  (sorties et envois de la case, dans le dossier de sa page)
+    input/mangaka/<série>/personnages/<nom>/reference-12.png                  (image de référence envoyée)
+    output/mangaka/<série>/_transit/personnages/<nom>/<fiche>/variante-1_00001_.png   (sorties brutes)
+    …/objets/<nom>/…  …/decors/<nom>/…  …/style/essais/…  …/style/<référence>/…
+    …/chapitre-01/page-01/case-01, case-01-croquis, case-01-controle, case-01-finition, case-01-reparation…
+
+Le reste de `output/mangaka/<série>/` est la **bibliothèque lisible** (copie rangée de ce qui est retenu,
+`store/comfy_library.py`) : `references/{personnages,objets,decors,style}/…`, `chapitre-01/page-01/…`.
 
 Disque (`ComfyFolders`) : ComfyUI n'a pas d'API pour effacer un fichier, le moteur agit donc directement
 dans le dossier de ComfyUI (`COMFYUI_DIR`). Sans dossier valide, rien n'est jamais supprimé ni déplacé
@@ -16,8 +17,9 @@ dans le dossier de ComfyUI (`COMFYUI_DIR`). Sans dossier valide, rien n'est jama
 confinée à `mangaka/<série>/…` : segments validés (slugs), jamais `old/`, jamais un lien symbolique au
 niveau de la série ou en dessous, chemin résolu vérifié.
 
-La sortie de ComfyUI est une zone de transit : dès qu'un résultat est copié dans data/, sa copie dans
-`output/` est effacée (`discard_output`).
+La sortie brute de ComfyUI est une zone de transit (`_transit/`) : dès qu'un résultat est copié dans data/,
+sa copie dans `output/` est effacée (`discard_output`). Les anciennes sorties (avant `_transit/`, directement
+sous la série) restent suivies par le renommage, la suppression et le nettoyage.
 """
 
 from __future__ import annotations
@@ -37,6 +39,8 @@ log = logging.getLogger("mangaka_engine")
 
 ROOT = "mangaka"  # sous-dossier de ComfyUI/output et ComfyUI/input
 STYLE_TRIALS = "essais"  # essais de la planche de style : mangaka/<série>/style/essais/
+TRANSIT = "_transit"  # sorties brutes de ComfyUI : output/mangaka/<série>/_transit/… (jamais un slug : « _ »)
+REFERENCES = "references"  # bibliothèque lisible : output/mangaka/<série>/references/<sorte>/<nom>/
 AREAS = ("output", "input")
 DEFAULT_DIR = "~/ComfyUI"
 
@@ -77,6 +81,27 @@ def panel_name(panel: Panel, suffix: str = "") -> str:
 
 def style_folder(series: Project) -> str:
     return f"{series_folder(series)}/{KIND_FOLDERS['style']}"
+
+
+def transit(folder: str) -> str:
+    """`mangaka/<série>/<reste>` → `mangaka/<série>/_transit/<reste>` (préfixe des sorties brutes de ComfyUI)."""
+    root, series, *rest = folder.split("/")
+    return "/".join([root, series, TRANSIT, *rest])
+
+
+def locations(segments: Sequence[str]) -> list[tuple[str, list[str]]]:
+    """Emplacements `(area, segments)` d'une série, d'un chapitre, d'une page ou d'une fiche : la série entière
+    dans `output/` et `input/` ; en dessous, l'envoi (`input/`), la sortie brute (`output/…/_transit/…`), la
+    bibliothèque (`output/…` pour un chapitre ou une page, `output/…/references/…` pour une fiche) et
+    l'ancienne sortie d'avant `_transit/` (`output/…`, même chemin que dans `input/`)."""
+    segs = list(segments)
+    if len(segs) <= 1:
+        return [(area, segs) for area in AREAS]
+    series, rest = segs[0], segs[1:]
+    out = [("output", segs), ("input", segs), ("output", [series, TRANSIT, *rest])]
+    if rest[0] in KIND_FOLDERS.values():
+        out.append(("output", [series, REFERENCES, *rest]))
+    return out
 
 
 # --- disque -----------------------------------------------------------------------------
@@ -150,7 +175,7 @@ class ComfyFolders:
 
     def _target(self, area: str, segments: Sequence[str]) -> Path | None:
         """Chemin confiné à `<area>/mangaka/<série>/…`, ou None s'il sort de la série ou passe par un lien."""
-        if not segments or not all(is_segment(s) for s in segments):
+        if not segments or not all(is_segment(s) or (i == 1 and s == TRANSIT) for i, s in enumerate(segments)):
             return None
         base = self._series_dir(area, segments[0])
         if base is None:
@@ -169,49 +194,80 @@ class ComfyFolders:
             return None
         return path
 
+    def target(self, area: str, segments: Sequence[str]) -> Path | None:
+        """`<ComfyUI>/<area>/mangaka/<segments…>` confiné à une série (None si refusé) — bibliothèque lisible."""
+        return self._target(area, segments)
+
     def existing_series(self) -> set[str]:
         """Dossiers de séries déjà présents dans ComfyUI (un nouveau slug les évite)."""
         return self._children(())
 
     def existing_entries(self, series: str, kind: str) -> set[str]:
-        return self._children((series, KIND_FOLDERS[kind]))
+        folder = KIND_FOLDERS[kind]
+        out = self._children((series, folder))
+        for prefix in (TRANSIT, REFERENCES):
+            out |= self._children((series, prefix, folder), areas=("output",))
+        return out
 
-    def _children(self, segments: Sequence[str]) -> set[str]:
+    def _children(self, segments: Sequence[str], *, areas: Sequence[str] = AREAS) -> set[str]:
         out: set[str] = set()
         if self.root is None:
             return out
-        for area in AREAS:
+        for area in areas:
             folder = self.root / area / ROOT if not segments else self._target(area, segments)
             if folder is not None and folder.is_dir():
                 out |= {p.name for p in folder.iterdir() if p.is_dir()}
         return out
 
     def remove(self, *segments: str) -> CleanupReport:
-        """Supprime `mangaka/<segments…>` dans `output/` et `input/` (série, chapitre, page ou fiche)."""
+        """Supprime `mangaka/<segments…>` (série, chapitre, page ou fiche) à tous ses emplacements
+        (`locations` : envoi, sortie brute, bibliothèque)."""
         if self.root is None:
             return CleanupReport([], self.warning())
+        if not segments or not all(is_segment(s) for s in segments):
+            log.warning("ComfyUI : suppression refusée hors d'une série (%s)", "/".join(segments))
+            return CleanupReport([], "chemin refusé")
         removed: list[str] = []
-        for area in AREAS:
-            path = self._target(area, segments)
+        for area, segs in locations(segments):
+            path = self._target(area, segs)
             if path is None:
-                log.warning("ComfyUI : suppression refusée hors d'une série (%s)", "/".join(segments))
+                log.warning("ComfyUI : suppression refusée hors d'une série (%s)", "/".join(segs))
                 return CleanupReport(removed, "chemin refusé")
             if path.is_dir():
                 shutil.rmtree(path, ignore_errors=True)
-                removed.append(f"{area}/{ROOT}/{'/'.join(segments)}")
+                removed.append(f"{area}/{ROOT}/{'/'.join(segs)}")
             elif path.is_file():
                 path.unlink(missing_ok=True)
-                removed.append(f"{area}/{ROOT}/{'/'.join(segments)}")
+                removed.append(f"{area}/{ROOT}/{'/'.join(segs)}")
+        return CleanupReport(removed)
+
+    def clear_transit(self, series: str) -> CleanupReport:
+        """« Nettoyer » : vide les envois (`input/mangaka/<série>`), les sorties brutes (`_transit/`) et les
+        anciennes sorties d'avant `_transit/` (`personnages/`, `objets/`, `decors/`, `style/` sous la série) ;
+        la bibliothèque lisible reste (les fichiers de transit d'avant restés dans un chapitre sont retirés par
+        `ComfyLibrary.sync(…, purge=True)`)."""
+        if self.root is None:
+            return CleanupReport([], self.warning())
+        removed: list[str] = []
+        targets = [("input", [series]), ("output", [series, TRANSIT])]
+        targets += [("output", [series, folder]) for folder in KIND_FOLDERS.values()]
+        for area, segs in targets:
+            path = self._target(area, segs)
+            if path is None:
+                return CleanupReport(removed, "chemin refusé")
+            if path.is_dir():
+                shutil.rmtree(path, ignore_errors=True)
+                removed.append(f"{area}/{ROOT}/{'/'.join(segs)}")
         return CleanupReport(removed)
 
     def move(self, source: Sequence[str], target: Sequence[str]) -> CleanupReport:
-        """Renomme un dossier (série ou fiche renommée) dans `output/` et `input/`. Si la cible existe déjà,
-        le dossier d'origine reste en place (rien n'est fusionné ni écrasé)."""
+        """Renomme un dossier (série ou fiche renommée) à tous ses emplacements (`locations`). Si la cible
+        existe déjà, le dossier d'origine reste en place (rien n'est fusionné ni écrasé)."""
         if self.root is None:
             return CleanupReport([], self.warning())
         moved: list[str] = []
-        for area in AREAS:
-            src, dst = self._target(area, source), self._target(area, target)
+        for (area, src_segs), (_, dst_segs) in zip(locations(source), locations(target), strict=True):
+            src, dst = self._target(area, src_segs), self._target(area, dst_segs)
             if src is None or dst is None:
                 return CleanupReport(moved, "chemin refusé")
             if not src.is_dir():
@@ -221,7 +277,7 @@ class ComfyFolders:
                 continue
             dst.parent.mkdir(parents=True, exist_ok=True)
             src.rename(dst)
-            moved.append(f"{area}/{ROOT}/{'/'.join(target)}")
+            moved.append(f"{area}/{ROOT}/{'/'.join(dst_segs)}")
         return CleanupReport(moved)
 
     def discard_output(self, ref: ImageRef) -> bool:

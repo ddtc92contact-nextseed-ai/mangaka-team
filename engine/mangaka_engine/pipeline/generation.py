@@ -66,7 +66,7 @@ from ..providers.comfyui import (
     ComfyUIWorkflowError,
 )
 from ..providers.llm import LLMProvider
-from ..store.comfy_folders import ComfyFolders, entry_folder, page_folder, panel_name
+from ..store.comfy_folders import ComfyFolders, entry_folder, page_folder, panel_name, transit
 from ..store.db import Database
 from ..store.files import FileStore, InvalidImageError
 from ..store.models import (
@@ -1363,7 +1363,7 @@ class GenerationExecutor:
                     if angle_id
                     else ""
                 )
-                params["filename_prefix"] = f"{page_folder(chapter, page)}/{panel_name(panel, suffix)}"
+                params["filename_prefix"] = transit(f"{page_folder(chapter, page)}/{panel_name(panel, suffix)}")
             plan = _Plan(
                 loaded=loaded,
                 params=params,

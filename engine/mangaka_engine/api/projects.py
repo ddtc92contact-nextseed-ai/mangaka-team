@@ -30,7 +30,7 @@ from ..store.models import (
 from .deps import AppContext, get_ctx, get_session
 from .errors import FieldError
 from .schemas import ProjectCreate, ProjectOut, ProjectUpdate, RelayoutOut
-from .storage import move_folders, remove_series_folders, rename_series, set_series_slug
+from .storage import move_folders, remove_series_folders, rename_series, set_series_slug, sync_library
 
 router = APIRouter(prefix="/projects", tags=["projets"])
 
@@ -354,6 +354,8 @@ def update_project(
         change_reading_direction(ctx.agents.presets_for(project.id), project, ReadingDirection(direction))
     session.commit()
     move_folders(ctx, ([renamed[0]], [renamed[1]]) if renamed else None)
+    if renamed:
+        sync_library(ctx, session, project)  # remise d'accord après le déplacement du dossier de la série
     _save_fonts(ctx, session, project, fonts)
     return project_out(ctx, project, *_counts(session, project_id))
 

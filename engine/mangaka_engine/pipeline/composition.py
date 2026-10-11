@@ -30,7 +30,7 @@ from sqlalchemy.orm import Session
 from ..presets import PresetRegistry, build_control_map_workflow
 from ..presets.schemas import ControlSettings
 from ..providers.comfyui import ComfyUIClient, ComfyUIError, ComfyUIInterruptedError, ComfyUITimeoutError
-from ..store.comfy_folders import ComfyFolders, page_folder, panel_name
+from ..store.comfy_folders import ComfyFolders, page_folder, panel_name, transit
 from ..store.db import Database
 from ..store.files import FileStore
 from ..store.models import ImageKind, Job, JobStatus, Panel, PanelImage
@@ -342,7 +342,7 @@ class ControlMapExecutor:
             chapter = panel.page.chapter
             folder = f"projects/{chapter.project_id}/chapters/{chapter.id}/panels/{panel.id}/guides"
             upload_folder = page_folder(chapter, panel.page)
-            prefix = f"{upload_folder}/{panel_name(panel, 'controle')}"
+            prefix = transit(f"{upload_folder}/{panel_name(panel, 'controle')}")
             type_id = str(lock.get("type"))
 
         report(5, "Envoi de l'image guide à ComfyUI…")

@@ -28,6 +28,7 @@ from .deps import AppContext, get_ctx, get_session
 from .errors import FieldError
 from .jobs import job_out
 from .schemas import BubbleUpdate, ExportIn, JobOut, RenderIn, SfxCreate
+from .storage import sync_library
 
 SFX_MAX_CHARS = 60
 SFX_PER_PANEL = 8
@@ -251,6 +252,7 @@ def render_page(
         info = render_page_to_files(_presets(ctx, page), ctx.files, page, bleed=body.bleed, crop_marks=body.crop_marks)
     except (LetteringError, PresetError) as exc:
         raise FieldError("render", str(exc)) from None
+    sync_library(ctx, session, page.chapter.project)  # planches/page-NN.png|svg de la bibliothèque lisible
     return _render_out(info)
 
 
@@ -326,7 +328,16 @@ def export_chapter(
     session.commit()
     ctx.jobs.submit(
         job.id,
-        make_export_job(ctx.db, presets, ctx.files, chapter_id, job.id, bleed=body.bleed, crop_marks=body.crop_marks),
+        make_export_job(
+            ctx.db,
+            presets,
+            ctx.files,
+            chapter_id,
+            job.id,
+            bleed=body.bleed,
+            crop_marks=body.crop_marks,
+            on_done=ctx.library.sync_project if ctx.library is not None else None,
+        ),
     )
     return job_out(job)
 

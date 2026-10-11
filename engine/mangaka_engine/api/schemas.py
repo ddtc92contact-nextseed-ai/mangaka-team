@@ -153,6 +153,17 @@ class ProjectOut(BaseModel):
     updated_at: datetime
 
 
+class LibraryOut(BaseModel):
+    """Résultat de « Reconstruire la bibliothèque » (copie lisible de la série dans ComfyUI/output/mangaka/)."""
+
+    enabled: bool  # False : dossier ComfyUI inconnu, rien d'écrit (voir `warning`)
+    folder: str | None = None  # output/mangaka/<série> (relatif au dossier de ComfyUI)
+    path: str | None = None  # chemin complet sur le disque
+    written: int = 0  # fichiers écrits ou remplacés
+    removed: int = 0  # fichiers retirés (plus retenus)
+    warning: str | None = None
+
+
 class CleanupOut(BaseModel):
     """Résultat de « Nettoyer les variantes non retenues »."""
 

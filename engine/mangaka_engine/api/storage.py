@@ -5,6 +5,9 @@ Renommer une série ou une fiche renomme son dossier dans ComfyUI (`output/` et 
 nouveau titre, le dossier est déplacé tout de suite (une génération en cours peut encore finir dans
 l'ancien : c'est une zone de transit, rien n'y est relu). Supprimer une série, un chapitre, une page ou une
 fiche supprime son dossier, strictement confiné à `mangaka/<série>/` (store/comfy_folders.py).
+
+Bibliothèque lisible (`output/mangaka/<série>/references/…`, `chapitre-01/…`, pipeline/comfy_library.py) : tenue à
+jour après chaque commit ; « Reconstruire la bibliothèque » (POST /projects/{id}/library) la régénère en entier.
 """
 
 from __future__ import annotations
@@ -15,12 +18,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..pipeline.comfy_library import LibraryReport
 from ..pipeline.reference_sheets import unkept_variants
 from ..store.comfy_folders import KIND_FOLDERS, CleanupReport, chapter_name, page_name
 from ..store.models import Chapter, Character, Job, JobStatus, Project, SeriesAsset
 from ..store.slugs import entry_kind_of, entry_slug, series_slug
 from .deps import AppContext, get_ctx, get_session
-from .schemas import CleanupOut
+from .schemas import CleanupOut, LibraryOut
 
 log = logging.getLogger("mangaka_engine")
 router = APIRouter(tags=["rangement"])
@@ -75,6 +79,39 @@ def move_folders(ctx: AppContext, move: tuple[list[str], list[str]] | None) -> N
         _report(ctx.folders.move(*move))
 
 
+# --- bibliothèque lisible ------------------------------------------------------------------
+def sync_library(ctx: AppContext, session: Session, project: Project, *, purge: bool = False) -> LibraryReport:
+    """Met la bibliothèque de la série à jour (après un renommage de série, un rendu de page…)."""
+    if ctx.library is None:
+        return LibraryReport(warning=ctx.folders.warning())
+    report = ctx.library.sync(session, project, purge=purge)
+    if report.warning:
+        log.warning("bibliothèque : %s", report.warning)
+    return report
+
+
+@router.post("/projects/{project_id}/library", response_model=LibraryOut)
+def rebuild_library(
+    project_id: int, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
+) -> LibraryOut:
+    """« Reconstruire la bibliothèque » : régénère `output/mangaka/<série>/` depuis data/ (idempotent)."""
+    project = session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Série introuvable")
+    report = sync_library(ctx, session, project)
+    warning = report.warning
+    if ctx.library is None or not ctx.library.enabled:
+        warning = ctx.folders.warning() or "dossier ComfyUI inconnu : bibliothèque non écrite (COMFYUI_DIR)"
+    return LibraryOut(
+        enabled=ctx.library is not None and ctx.library.enabled,
+        folder=report.folder,
+        path=str(ctx.folders.root / report.folder) if ctx.folders.root and report.folder else None,
+        written=len(report.written),
+        removed=len(report.removed),
+        warning=warning,
+    )
+
+
 # --- suppressions --------------------------------------------------------------------------
 def remove_series_folders(ctx: AppContext, slug: str) -> None:
     if slug:
@@ -106,7 +143,8 @@ def cleanup_project(
 ) -> CleanupOut:
     """Efface les variantes non gardées de la série (fiches de référence et essais de la planche de style),
     sauf celles dont un job a besoin, puis vide ses dossiers de transit dans ComfyUI si rien ne tourne pour
-    elle. Restent : références gardées, versions des cases (retenues ou non) et leur historique."""
+    elle. Restent : références gardées, versions des cases (retenues ou non) et leur historique, et la
+    bibliothèque lisible (régénérée : les fichiers de transit d'avant `_transit/` qui y traînaient sont retirés)."""
     project = session.get(Project, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="Série introuvable")
@@ -124,8 +162,10 @@ def cleanup_project(
     if busy is not None:
         warning = "Des générations sont en cours pour cette série : dossiers de ComfyUI laissés en place"
     elif ctx.folders.enabled and project.slug:
-        report = ctx.folders.remove(project.slug)
+        # Transit seulement (envois, sorties brutes) : la bibliothèque lisible reste, remise d'accord.
+        report = ctx.folders.clear_transit(project.slug)
         removed, warning = report.removed, report.warning
+        sync_library(ctx, session, project, purge=True)
     return CleanupOut(
         variants_deleted=len(variants),
         comfyui_folders_removed=removed,
