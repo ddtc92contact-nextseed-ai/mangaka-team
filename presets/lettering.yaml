@@ -32,7 +32,10 @@ shout:                      # cri : contour en pointes
 tail:                       # queue orientée vers le locuteur (visage détecté) ou par défaut
   length_mm: 7
   max_length_mm: 18
-  base_mm: 4
+  base_mm: 4                # largeur à la base, prise sur le contour de la bulle
+  bend: 0.12                # courbure (fraction de la longueur ; 0 = droite, < 0 = dans l'autre sens)
+  tip_angle_deg: 16         # angle de la pointe (petit = plus effilée) ; jamais de biseau
+  shout_zigzag: 0.18        # cri : décrochement en éclair (fraction de la longueur)
   default_direction: panel_center   # panel_center | down
   face_gap_mm: 1.5
 

@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
+import math
+
 import pytest
 
 from mangaka_engine.pipeline.fonts import NBSP, FontBook
 from mangaka_engine.pipeline.lettering import (
     Box,
+    BubbleLayout,
     BubbleSpec,
     Letterer,
     PanelSpec,
+    miter_ratio,
     normalize_text,
     split_options,
+    stroke_outline,
     wrap_text,
 )
 from mangaka_engine.presets import PresetRegistry
@@ -187,6 +192,94 @@ def test_tail_default_direction_and_kinds(letterer: Letterer) -> None:
     assert off.tail is not None
     p = panel.box
     assert off.tail[0] in (p.x1, p.x2) or off.tail[1] in (p.y1, p.y2)  # hors-champ : au bord de la case
+
+
+# --- queues ----------------------------------------------------------------------------------
+def _manual(letterer: Letterer, kind: str, tip: tuple[float, float], box: Box | None = None) -> BubbleLayout:
+    box = box or Box(500, 400, 900, 640)
+    spec = BubbleSpec(1, kind, "Ici !", "Aiko", 0, manual_box=box, manual_tail=tip)
+    return letterer.letter_panel(_panel([spec]), "ltr").bubbles[0]
+
+
+def _turn(a: tuple[float, float], b: tuple[float, float], c: tuple[float, float]) -> float:
+    """Changement de direction du contour au sommet b (degrés, 0 = tout droit)."""
+    d = math.atan2(c[1] - b[1], c[0] - b[0]) - math.atan2(b[1] - a[1], b[0] - a[0])
+    return abs(math.degrees((d + math.pi) % (2 * math.pi) - math.pi))
+
+
+@pytest.mark.parametrize("tip", [(700, 900), (380, 760), (1050, 300), (560, 180)])
+def test_speech_tail_is_one_closed_outline_with_a_sharp_mitered_tip(
+    letterer: Letterer, tip: tuple[float, float]
+) -> None:
+    b = _manual(letterer, "speech", tip)
+    shape, box = b.shape, b.box
+    assert len(shape.polygons) == 1  # corps + queue : un seul contour, pas de trait à la base
+    poly = shape.polygons[0]
+    assert len(poly) > 96
+    # Aucun sommet dans l'ellipse : rien ne traverse la base de la queue.
+    for x, y in poly:
+        assert ((x - box.cx) / (box.w / 2)) ** 2 + ((y - box.cy) / (box.h / 2)) ** 2 >= 0.98
+    # La pointe du remplissage est le sommet le plus éloigné, et le contour s'y retourne (pointe vive).
+    center = (box.cx, box.cy)
+    i = max(range(len(poly)), key=lambda k: math.dist(poly[k], center))
+    assert _turn(poly[i - 1], poly[i], poly[(i + 1) % len(poly)]) > 150
+    # Joint en onglet à la pointe : le contour du trait n'est pas biseauté (un seul sommet par sommet) et
+    # son onglet tombe exactement sur la pointe voulue, point le plus éloigné de toute la bulle.
+    assert shape.miter_limit >= miter_ratio(poly)
+    outer = stroke_outline(poly, shape.stroke_px, shape.miter_limit)
+    assert len(outer) == len(poly)
+    apex = max(outer, key=lambda p: math.dist(p, center))
+    assert math.dist(apex, tip) < 1.5
+    # La queue coule du contour : pas d'angle vif à la jonction avec la bulle (seule la pointe en a un).
+    turns = sorted(_turn(poly[k - 1], poly[k], poly[(k + 1) % len(poly)]) for k in range(len(poly)))
+    assert turns[-2] < 45
+
+
+def test_tail_shape_comes_from_the_preset(presets: PresetRegistry) -> None:
+    def tail_of(**changes: float) -> tuple[tuple[float, float], ...]:
+        settings = presets.lettering.model_copy(update={"tail": presets.lettering.tail.model_copy(update=changes)})
+        return _manual(Letterer(FontBook(presets), settings, 300), "speech", (720, 740)).shape.polygons[0]
+
+    def tip_angle(poly: tuple[tuple[float, float], ...]) -> float:
+        i = max(range(len(poly)), key=lambda k: poly[k][1])
+        return 180 - _turn(poly[i - 1], poly[i], poly[i + 1])
+
+    default = tail_of()
+    assert tail_of(bend=0.0) != default and tail_of(bend=-0.3) != tail_of(bend=0.3)
+    assert tip_angle(tail_of(tip_angle_deg=40)) > tip_angle(default) + 10
+    narrow = tail_of(base_mm=2)
+    wide = tail_of(base_mm=8)
+    xs = [x for x, y in wide if y > 645]
+    assert max(xs) - min(xs) > max(x for x, y in narrow if y > 645) - min(x for x, y in narrow if y > 645)
+
+
+def test_other_kinds_keep_their_tails(letterer: Letterer) -> None:
+    shout = _manual(letterer, "shout", (700, 950))
+    assert len(shout.shape.polygons) == 1  # cri : queue en éclair fondue dans les pointes
+    poly = shout.shape.polygons[0]
+    outer = stroke_outline(poly, shout.shape.stroke_px, shout.shape.miter_limit)
+    assert len(outer) == len(poly)  # aucune pointe biseautée, ni sur la queue ni sur le contour
+    assert math.dist(max(outer, key=lambda p: p[1]), (700, 950)) < 1.5
+    thought = _manual(letterer, "thought", (700, 950))
+    circles = thought.shape.polygons[1:]
+    assert len(circles) == letterer.s.cloud.tail_bubbles  # pensée : bulles décroissantes
+    radii = [max(x for x, _ in c) - min(x for x, _ in c) for c in circles]
+    assert radii == sorted(radii, reverse=True)
+    inside = _manual(letterer, "speech", (700, 520))
+    assert len(inside.shape.polygons) == 1 and len(inside.shape.polygons[0]) == 96  # pointe dans la bulle
+
+
+def test_off_panel_tail_touches_the_panel_edge(letterer: Letterer) -> None:
+    panel = _panel([BubbleSpec(1, "off", "Hé !", "Voix", 0)], zone=None)
+    b = letterer.letter_panel(panel, "ltr").bubbles[0]
+    assert b.tail is not None
+    shape = b.shape
+    assert len(shape.polygons) == 1
+    outer = stroke_outline(shape.polygons[0], shape.stroke_px, shape.miter_limit)
+    apex = min(outer, key=lambda p: math.dist(p, b.tail))  # onglet de la pointe
+    assert math.dist(apex, b.tail) < 1.5
+    p = panel.box
+    assert min(abs(apex[0] - p.x1), abs(apex[0] - p.x2), abs(apex[1] - p.y1), abs(apex[1] - p.y2)) < 1.0
 
 
 def test_too_much_text_is_flagged_never_cut(letterer: Letterer) -> None:

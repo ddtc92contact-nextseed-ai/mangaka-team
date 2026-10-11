@@ -41,7 +41,7 @@ from typing import Any, Literal
 
 import pyphen
 
-from ..presets.schemas import FontsPreset, LetteringSettings, SfxSettings, TextStyle
+from ..presets.schemas import FontsPreset, LetteringSettings, SfxSettings, TailSettings, TextStyle
 from . import geometry as geo
 from .fonts import NBSP, NNBSP, FontBook, pt_to_px
 
@@ -50,6 +50,7 @@ Point = tuple[float, float]
 MM_PER_INCH = 25.4
 ELLIPSE_POINTS = 96
 CIRCLE_POINTS = 24
+TAIL_SAMPLES = 24  # points par flanc de queue (courbe de Bézier échantillonnée)
 
 
 class LetteringError(ValueError):
@@ -264,12 +265,15 @@ class TextBlock:
 # --- formes -------------------------------------------------------------------------------
 @dataclass(frozen=True)
 class Shape:
-    """Polygones fermés d'une bulle : contour épais puis remplissage (union propre corps + queue)."""
+    """Polygones fermés d'une bulle : contour épais puis remplissage. Corps et queue (parole, cri,
+    hors-champ) ne font qu'un seul polygone ; la pensée ajoute ses petites bulles à part.
+    `miter_limit` : joints en onglet (pointes vives), limite assez grande pour qu'aucun ne soit biseauté."""
 
     polygons: tuple[tuple[Point, ...], ...]
     fill: str
     stroke: str
     stroke_px: float
+    miter_limit: float = 4.0
 
     def path(self) -> str:
         parts = []
@@ -345,48 +349,212 @@ def ellipse_boundary(box: Box, angle: float, scale: float = 1.0) -> Point:
     return box.cx + rx * math.cos(phi), box.cy + ry * math.sin(phi)
 
 
-def tail_polygons(kind: str, box: Box, tip: Point, base: float, cloud_bubbles: int) -> list[list[Point]]:
-    """Queue : triangle effilé (parole, cri, hors-champ) ou bulles décroissantes (pensée)."""
+def thought_tail(box: Box, tip: Point, base: float, cloud_bubbles: int) -> list[list[Point]]:
+    """Queue de pensée : bulles décroissantes du bord du nuage vers la pointe."""
     angle = math.atan2(tip[1] - box.cy, tip[0] - box.cx)
     edge = ellipse_boundary(box, angle)
     if math.dist(edge, (box.cx, box.cy)) >= math.dist(tip, (box.cx, box.cy)) - 1:
         return []  # pointe dans la bulle : pas de queue
-    if kind == "thought":
-        out = []
-        n = max(1, cloud_bubbles)
-        for i in range(n):
-            f = (i + 1) / (n + 0.4)
-            x, y = edge[0] + (tip[0] - edge[0]) * f, edge[1] + (tip[1] - edge[1]) * f
-            r = base / 2 * (1 - i / (n + 1))
-            out.append(
-                [
-                    (
-                        _r(x + r * math.cos(2 * math.pi * j / CIRCLE_POINTS)),
-                        _r(y + r * math.sin(2 * math.pi * j / CIRCLE_POINTS)),
-                    )
-                    for j in range(CIRCLE_POINTS)
-                ]
-            )
-        return out
-    radius = (box.w + box.h) / 4
-    delta = min(math.pi / 4, base / 2 / max(radius, 1))
-    b1 = ellipse_boundary(box, angle - delta, 0.85)
-    b2 = ellipse_boundary(box, angle + delta, 0.85)
-    # Légère courbure : un point intermédiaire décalé donne une queue effilée plutôt qu'un triangle.
+    out = []
+    n = max(1, cloud_bubbles)
+    for i in range(n):
+        f = (i + 1) / (n + 0.4)
+        x, y = edge[0] + (tip[0] - edge[0]) * f, edge[1] + (tip[1] - edge[1]) * f
+        r = base / 2 * (1 - i / (n + 1))
+        out.append(
+            [
+                (
+                    _r(x + r * math.cos(2 * math.pi * j / CIRCLE_POINTS)),
+                    _r(y + r * math.sin(2 * math.pi * j / CIRCLE_POINTS)),
+                )
+                for j in range(CIRCLE_POINTS)
+            ]
+        )
+    return out
+
+
+def _ray_hit(poly: Sequence[Point], cx: float, cy: float, angle: float) -> tuple[Point, int] | None:
+    """Point où le rayon (centre, angle) sort du polygone, et l'indice de l'arête traversée."""
+    dx, dy = math.cos(angle), math.sin(angle)
+    best: tuple[float, int] | None = None
+    n = len(poly)
+    for i in range(n):
+        (x1, y1), (x2, y2) = poly[i], poly[(i + 1) % n]
+        ex, ey = x2 - x1, y2 - y1
+        den = dx * ey - dy * ex
+        if abs(den) < 1e-12:
+            continue
+        wx, wy = x1 - cx, y1 - cy
+        t = (wx * ey - wy * ex) / den
+        u = (wx * dy - wy * dx) / den
+        if t > 1e-9 and -1e-9 <= u <= 1 + 1e-9 and (best is None or t > best[0]):
+            best = (t, i)
+    if best is None:
+        return None
+    return (cx + dx * best[0], cy + dy * best[0]), best[1]
+
+
+def _unit(x: float, y: float) -> Point:
+    n = math.hypot(x, y) or 1.0
+    return x / n, y / n
+
+
+def _speech_sides(
+    b1: Point, d1: Point, b2: Point, d2: Point, t: Point, bend: float, tip_angle: float, stroke: float
+) -> tuple[list[Point], list[Point]]:
+    """Flancs d'une queue de parole, de la base (exclue) à la pointe `t` (exclue).
+
+    Chaque flanc est une courbe de Bézier cubique : elle part de la base dans le prolongement du contour
+    de la bulle (`d1`, `d2` : direction du contour vers la queue — la queue « coule » de la bulle, sans
+    angle), et arrive à la pointe avec un demi-angle `tip_angle` / 2 de part et d'autre de l'axe (moins
+    si la base est trop étroite pour la longueur ; plus pour une queue si courte que l'onglet du trait
+    `stroke` la dépasserait). L'axe est bombé de `bend` × la longueur : la queue
+    part plus verticale puis s'incline vers le locuteur. Échantillons serrés à la base (arrondi de la
+    jonction), espacés à la pointe (son angle ne dépend pas de l'arrondi au dixième).
+    """
     mx, my = (b1[0] + b2[0]) / 2, (b1[1] + b2[1]) / 2
-    bend = (tip[0] - mx, tip[1] - my)
-    side = (-bend[1] * 0.08, bend[0] * 0.08)
-    mid1 = (b1[0] + bend[0] * 0.55 + side[0], b1[1] + bend[1] * 0.55 + side[1])
-    mid2 = (b2[0] + bend[0] * 0.5 + side[0], b2[1] + bend[1] * 0.5 + side[1])
-    return [
-        [
-            (_r(b1[0]), _r(b1[1])),
-            (_r(mid1[0]), _r(mid1[1])),
-            (_r(tip[0]), _r(tip[1])),
-            (_r(mid2[0]), _r(mid2[1])),
-            (_r(b2[0]), _r(b2[1])),
-        ]
-    ]
+    hb = math.dist(b1, b2) / 2
+    vx, vy = t[0] - mx, t[1] - my
+    length = math.hypot(vx, vy) or 1.0
+    ux, uy = vx / length, vy / length
+    down = 1.0 if vy >= 0 else -1.0
+    dot = down * uy
+    px, py = -dot * ux, down - dot * uy  # composante de la verticale perpendiculaire à l'axe
+    cx, cy = (mx + t[0]) / 2 + px * bend * length, (my + t[1]) / 2 + py * bend * length
+    e = _unit(t[0] - cx, t[1] - cy)  # direction de l'axe à la pointe
+    n = (-e[1], e[0])
+    along = 0.45 * length
+    half = max(math.radians(tip_angle) / 2, math.asin(min(1.0, 3 * stroke / length)))
+    side = min(along * math.tan(min(half, math.radians(60))), 0.8 * hb)
+    sides = []
+    for b, d in ((b1, d1), (b2, d2)):
+        sign = 1.0 if (b[0] - mx) * n[0] + (b[1] - my) * n[1] >= 0 else -1.0
+        p1 = (b[0] + d[0] * 0.9 * hb, b[1] + d[1] * 0.9 * hb)
+        p2 = (t[0] - e[0] * along + sign * n[0] * side, t[1] - e[1] * along + sign * n[1] * side)
+        pts = []
+        for j in range(1, TAIL_SAMPLES):
+            s = 1 - (1 - j / TAIL_SAMPLES) ** 0.6
+            k0, k1, k2, k3 = (1 - s) ** 3, 3 * s * (1 - s) ** 2, 3 * s * s * (1 - s), s**3
+            pts.append(
+                (
+                    _r(k0 * b[0] + k1 * p1[0] + k2 * p2[0] + k3 * t[0]),
+                    _r(k0 * b[1] + k1 * p1[1] + k2 * p2[1] + k3 * t[1]),
+                )
+            )
+        sides.append(pts)
+    return sides[0], sides[1]
+
+
+def _shout_sides(b1: Point, b2: Point, t: Point, zigzag: float) -> tuple[list[Point], list[Point]]:
+    """Flancs d'une queue de cri : biseau droit décroché en éclair à mi-longueur, pointe vive."""
+    mx, my = (b1[0] + b2[0]) / 2, (b1[1] + b2[1]) / 2
+    hb = math.dist(b1, b2) / 2
+    ux, uy = _unit(t[0] - mx, t[1] - my)
+    length = math.dist((mx, my), t)
+    nx, ny = -uy, ux
+    kx, ky = mx + ux * length * 0.5 + nx * zigzag * length, my + uy * length * 0.5 + ny * zigzag * length
+    a = _unit(kx - mx, ky - my)
+    b = _unit(t[0] - kx, t[1] - ky)
+    kn = _unit(-(a[1] + b[1]), a[0] + b[0])
+    sides = []
+    for p in (b1, b2):
+        sign = 1.0 if (p[0] - mx) * nx + (p[1] - my) * ny >= 0 else -1.0
+        sides.append([(_r(kx + sign * kn[0] * hb * 0.45), _r(ky + sign * kn[1] * hb * 0.45))])
+    return sides[0], sides[1]
+
+
+def _miter_apex(a: Point, v: Point, c: Point, width: float) -> Point:
+    """Pointe de l'onglet du contour (décalé de `width`) au sommet saillant v entre a et c."""
+    u1, u2 = _unit(a[0] - v[0], a[1] - v[1]), _unit(c[0] - v[0], c[1] - v[1])
+    bis = _unit(-(u1[0] + u2[0]), -(u1[1] + u2[1]))
+    sin_half = math.sqrt(max((1 - (u1[0] * u2[0] + u1[1] * u2[1])) / 2, 1e-12))
+    return v[0] + bis[0] * width / sin_half, v[1] + bis[1] * width / sin_half
+
+
+def tail_outline(
+    kind: str, body: Sequence[Point], center: Point, tip: Point, base: float, stroke: float, settings: TailSettings
+) -> list[Point] | None:
+    """Contour unique corps + queue (parole, cri, hors-champ) : l'arc du corps qui fait face à la
+    pointe est remplacé par les deux flancs de la queue, qui partent du contour lui-même — pas de
+    trait à la base, une seule épaisseur tout autour. La pointe du remplissage recule pour que
+    l'onglet du trait (pointe vive) tombe exactement sur `tip`. None si la pointe est dans la bulle."""
+    cx, cy = center
+    angle = math.atan2(tip[1] - cy, tip[0] - cx)
+    hit = _ray_hit(body, cx, cy, angle)
+    if hit is None or math.dist(hit[0], center) >= math.dist(tip, center) - 1:
+        return None
+    delta = min(math.pi / 4, base / 2 / max(math.dist(hit[0], center), 1))
+    h1, h2 = _ray_hit(body, cx, cy, angle - delta), _ray_hit(body, cx, cy, angle + delta)
+    if h1 is None or h2 is None:
+        return None
+    (b1, i1), (b2, i2) = h1, h2
+    b1, b2 = (_r(b1[0]), _r(b1[1])), (_r(b2[0]), _r(b2[1]))
+    n = len(body)
+    (ax, ay), (bx, by) = body[i1], body[(i1 + 1) % n]
+    (ex, ey), (fx, fy) = body[i2], body[(i2 + 1) % n]
+    d1, d2 = _unit(bx - ax, by - ay), _unit(ex - fx, ey - fy)
+
+    def sides(t: Point) -> tuple[list[Point], list[Point]]:
+        if kind == "shout":
+            return _shout_sides(b1, b2, t, settings.shout_zigzag)
+        return _speech_sides(b1, d1, b2, d2, t, settings.bend, settings.tip_angle_deg, stroke)
+
+    mid = ((b1[0] + b2[0]) / 2, (b1[1] + b2[1]) / 2)
+    t = (_r(tip[0]), _r(tip[1]))
+    for _ in range(8):
+        side1, side2 = sides(t)
+        apex = _miter_apex(side1[-1], t, side2[-1], stroke)
+        if math.dist(apex, tip) < 0.2:
+            break
+        nt = (_r(t[0] + tip[0] - apex[0]), _r(t[1] + tip[1] - apex[1]))
+        if math.dist(nt, mid) < 0.4 * math.dist(tip, mid) or nt == t:
+            break  # queue trop courte pour reculer davantage : la pointe dépasse un peu
+        t = nt
+    # Sommets gardés : de l'arête de b2 (exclue) jusqu'à celle de b1 (incluse), dans le sens du contour.
+    kept = [body[(i2 + 1 + j) % n] for j in range((i1 - i2 - 1) % n + 1)]
+    return [*kept, b1, *side1, t, *reversed(side2), b2]
+
+
+def _signed_area(poly: Sequence[Point]) -> float:
+    return sum(x1 * y2 - x2 * y1 for (x1, y1), (x2, y2) in zip(poly, [*poly[1:], poly[0]], strict=True)) / 2
+
+
+def _joins(poly: Sequence[Point]) -> list[tuple[Point, Point, Point, bool]]:
+    """Pour chaque sommet : (sommet, normale sortante de l'arête entrante, de l'arête sortante, saillant ?)."""
+    orient = 1.0 if _signed_area(poly) >= 0 else -1.0
+    pts = [p for i, p in enumerate(poly) if p != poly[i - 1]]
+    out = []
+    n = len(pts)
+    for i in range(n):
+        (ax, ay), (bx, by), (cx, cy) = pts[i - 1], pts[i], pts[(i + 1) % n]
+        e1, e2 = _unit(bx - ax, by - ay), _unit(cx - bx, cy - by)
+        n1, n2 = (orient * e1[1], -orient * e1[0]), (orient * e2[1], -orient * e2[0])
+        convex = orient * (e1[0] * e2[1] - e1[1] * e2[0]) > 0
+        out.append(((bx, by), n1, n2, convex))
+    return out
+
+
+def miter_ratio(poly: Sequence[Point]) -> float:
+    """Plus grand rapport longueur d'onglet / demi-épaisseur aux sommets saillants (1 = contour lisse)."""
+    best = 1.0
+    for _, n1, n2, convex in _joins(poly):
+        if convex:
+            best = max(best, math.sqrt(2 / max(1 + n1[0] * n2[0] + n1[1] * n2[1], 1e-9)))
+    return best
+
+
+def stroke_outline(poly: Sequence[Point], width: float, limit: float) -> list[Point]:
+    """Contour extérieur du trait (décalé de `width` vers l'extérieur), joints en onglet comme
+    `stroke-linejoin="miter"` du SVG : biseau seulement au-delà de `limit`."""
+    out: list[Point] = []
+    for (x, y), n1, n2, _ in _joins(poly):
+        dot = n1[0] * n2[0] + n1[1] * n2[1]
+        if math.sqrt(2 / max(1 + dot, 1e-9)) <= limit:
+            f = width / (1 + dot)
+            out.append((x + (n1[0] + n2[0]) * f, y + (n1[1] + n2[1]) * f))
+        else:
+            out += [(x + n1[0] * width, y + n1[1] * width), (x + n2[0] * width, y + n2[1] * width)]
+    return out
 
 
 # --- entrées / sorties --------------------------------------------------------------------
@@ -500,6 +668,7 @@ class BubbleLayout:
                 "fill": self.shape.fill,
                 "stroke": self.shape.stroke,
                 "stroke_px": round(self.shape.stroke_px, 2),
+                "miter_limit": self.shape.miter_limit,
             },
         }
 
@@ -730,11 +899,17 @@ class Letterer:
             body = rect_points(box, self.mm(s.rounded_radius_mm))
         else:
             body = ellipse_points(box.cx, box.cy, box.w / 2, box.h / 2)
+        stroke = self.pt(s.stroke_pt)
         polys: list[tuple[Point, ...]] = [tuple(body)]
-        if tail is not None:
-            inner = box.inset(self._extra(kind)) if kind in ("thought", "shout") else box
-            polys += [tuple(p) for p in tail_polygons(kind, inner, tail, self.mm(s.tail.base_mm), s.cloud.tail_bubbles)]
-        return Shape(tuple(polys), s.bubble_fill, s.bubble_stroke, self.pt(s.stroke_pt))
+        if tail is not None and kind == "thought":
+            tails = thought_tail(box.inset(self._extra(kind)), tail, self.mm(s.tail.base_mm), s.cloud.tail_bubbles)
+            polys += [tuple(p) for p in tails]
+        elif tail is not None:
+            outline = tail_outline(kind, body, (box.cx, box.cy), tail, self.mm(s.tail.base_mm), stroke, s.tail)
+            if outline is not None:
+                polys = [tuple(outline)]
+        limit = max(4.0, math.ceil(max(miter_ratio(p) for p in polys) * 2 + 1) / 2)
+        return Shape(tuple(polys), s.bubble_fill, s.bubble_stroke, stroke, limit)
 
     def lines(self, kind: str, block: TextBlock, box: Box) -> list[TextLine]:
         st = self.fonts.style(kind)

@@ -94,7 +94,7 @@ interface BubblesData {
   height: number;
   bubbles: {
     id: number;
-    shape: { path: string; fill: string; stroke: string; stroke_px: number };
+    shape: { path: string; fill: string; stroke: string; stroke_px: number; miter_limit?: number };
     font: { family: string; size_px: number; color: string };
     lines: { text: string; x: number; y: number }[];
   }[];
@@ -110,7 +110,14 @@ function BubblesPreview({ data }: { data: BubblesData }) {
     >
       {data.bubbles.map((b) => (
         <g key={b.id}>
-          <path d={b.shape.path} fill={b.shape.fill} stroke={b.shape.stroke} strokeWidth={b.shape.stroke_px} />
+          <path
+            d={b.shape.path}
+            fill={b.shape.fill}
+            stroke={b.shape.stroke}
+            strokeWidth={b.shape.stroke_px}
+            strokeLinejoin="miter"
+            strokeMiterlimit={b.shape.miter_limit ?? 4}
+          />
           {b.lines.map((ln, i) => (
             <text
               key={i}
