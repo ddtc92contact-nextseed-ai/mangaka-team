@@ -55,6 +55,7 @@ SERIES_TABLES = (
     "bubbles",
     "page_directions",
     "panel_images",
+    "panel_dialog_turns",
     "panels",
     "pages",
     "chapters",
