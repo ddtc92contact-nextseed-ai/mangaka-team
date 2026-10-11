@@ -28,7 +28,9 @@ export const HELP = {
   "serie.page_format":
     "La taille des pages à l'impression (B4 manga, A4…) en 300 dpi. Il fixe le ratio de la mise en page et la résolution visée à l'export.",
   "serie.tier":
-    "Rapide (par défaut) est recommandé pour la qualité : 25 pas, ~1 min par case, des cases plus fidèles à la scène et aux références. Turbo génère plus vite (~35 s) pour avancer en volume. Qualité est plus lent mais plus fin : régénère en Qualité les cases importantes depuis l'atelier. Les croquis restent au palier rapide du croquis.",
+    "Qualité (par défaut) : vrai CFG (2,5, 35 pas), le prompt négatif (pas de texte, de collage, de personnage en trop…) est enfin lu ; ~3 min par case. Rapide (~1 min) et Turbo (~35 s) vont plus vite, négatif inactif. Qualité max (bf16, 50 pas) sert aux finitions. Les croquis restent au palier croquis.",
+  "serie.cfg":
+    "Force avec laquelle le modèle suit le prompt (1 à 3). À 1, ComfyUI saute la passe négative : le prompt négatif est ignoré (« négatif inactif »). Au-dessus de 1, il est lu, et chaque étape coûte environ deux fois plus. Au-delà de 3, l'image se dégrade (trop contrastée). Les paliers distillés (Turbo, croquis) restent à 1. Vide : la valeur du palier.",
   "serie.ai_prompt":
     "Oui : le LLM du dessinateur rédige le prompt image de chaque case en un vrai paragraphe (sujet, action, cadrage, décor, lumière, style), comme l'attend Qwen-Image. Il est écrit une fois par case, visible et modifiable dans l'atelier. Non : l'assemblage par fragments, sans LLM. Consignes, langue et longueur : écran « L'équipe », Dessinateur.",
   "serie.sketch":

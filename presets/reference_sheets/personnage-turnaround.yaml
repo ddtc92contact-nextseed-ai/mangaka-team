@@ -16,4 +16,4 @@ prompt:
   - "Style: $style."
   - "The last image ($style_ref) is a style reference only (line work, screentones, inking): do not copy its character, scene or composition."
   - "Plain white background, neutral lighting, no text or captions."
-negative_prompt: "different characters, cropped views, background"
+negative_prompt: "extra characters, background people, text, different characters, cropped views, background scenery"

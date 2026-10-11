@@ -1,4 +1,4 @@
-# Qwen-Image 2.1 · Qualité (texte → image) — composition verrouillée (ControlNet Union).
+# Qwen-Image 2.1 · Qualité max (texte → image) — composition verrouillée (ControlNet Union).
 # Même graphe que « qwen-image-base » (mêmes ids : 1 modèle, 2 encodeur, 6 prompts, 8 latent, 9 échantillonneur,
 # 11 sortie) ; le patch ControlNet est inséré entre le modèle (après les LoRA) et le cache / l'échantillonneur.
 # Modèle : Qwen-Image-2.1-Fun-Controlnet-Union (Alibaba PAI), un seul fichier pour 8 conditions.
@@ -6,16 +6,17 @@
 # feu vert du manager) — tant qu'ils manquent, « Tester la connexion » le signale et l'atelier masque
 # le verrouillage ; les autres paliers ne changent pas. Voir presets/README.md (verrouillage de composition).
 id: qwen-image-base-controlnet
-name: "Qwen-Image 2.1 · Qualité — composition verrouillée (sans références)"
+name: "Qwen-Image 2.1 · Qualité max — composition verrouillée (sans références)"
 description: >-
-  Palier Qualité (50 étapes) dont la composition (cadrage, poses) suit une image guide : croquis validé, version de la case ou image importée ; LoRA de la série conservés.
+  Palier Qualité max (50 étapes) dont la composition (cadrage, poses) suit une image guide : croquis validé, version de la case ou image importée ; LoRA de la série conservés.
+distilled: false   # modèle de base (non distillé) : cfg > 1 permis (négatif lu), cfg 1 par défaut
 workflow_file: qwen-image-base-controlnet.json
 output_node: "11"
 timeout_s: 1200   # au-delà, la génération est interrompue et le job passe en échec
 role: controle
 with_references: qwen-image-edit-ref-controlnet   # même palier pour les cases avec références
 tier:
-  name: Qualité
+  name: Qualité max
 # Durée d'une case (s) tant qu'il y a moins de 3 générations terminées avec ce preset.
 estimated_s: 85
 mapping:
@@ -101,7 +102,7 @@ control:
       description: L'image importée est déjà une carte de contrôle (trait, profondeur ou pose) ; aucun prétraitement.
       order: 6
 defaults:
-  negative_prompt: "text, letters, speech bubbles, watermark, signature, blurry, deformed hands"
+  negative_prompt: "text, letters, speech bubble, caption, watermark, signature, multiple panels, comic page layout, collage, split screen, character sheet, turnaround, model sheet, white background, duplicate character, extra people, extra limbs, deformed hands, blurry, low quality"
   steps: 50
   cfg: 1
   width: 1024

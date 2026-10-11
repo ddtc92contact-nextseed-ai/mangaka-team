@@ -153,7 +153,7 @@ def test_written_prompt_is_stored_on_the_panel_and_used_for_generation(env: Env)
     assert img["params"]["prompt"].startswith(prompt + " Use the reference images for identity and design only")
     assert img["params"]["prompt"].count("<image1> is the identity reference") == 1
     assert "not a character sheet" in img["params"]["prompt"]
-    assert "speech bubbles" in img["params"]["negative_prompt"] and "text" in img["params"]["negative_prompt"]
+    assert "speech bubble" in img["params"]["negative_prompt"] and "text" in img["params"]["negative_prompt"]
 
 
 def test_written_once_per_panel_not_on_every_regeneration(env: Env) -> None:

@@ -52,6 +52,8 @@ export interface Project {
   clean_control: string | null;
   /** Agrandisseur de la finition d'impression (presets/upscalers/) ; null = celui de defaults.yaml. */
   upscaler: string | null;
+  /** CFG des cases (1 à 3, presets non distillés) ; null = celui du palier. À 1, le prompt négatif n'est pas lu. */
+  cfg: number | null;
   /** « Prompt rédigé par l'IA » : le LLM écrit le prompt de chaque case (false : assemblage par fragments). */
   ai_prompt: boolean;
   character_count: number;
@@ -87,6 +89,7 @@ export type ProjectInput = Pick<
   | "clean_mode"
   | "clean_control"
   | "upscaler"
+  | "cfg"
   | "ai_prompt"
 >;
 
@@ -495,6 +498,9 @@ export interface PanelImage {
     reference_images?: UsedReference[];
     /** Réparation ciblée : version source et réglages (absent pour une génération). */
     repair?: RepairParams;
+    /** CFG appliqué ; à 1 (ou modèle distillé), le prompt négatif n'a pas été lu (`negative_active` faux). */
+    cfg?: number | null;
+    negative_active?: boolean;
     [key: string]: unknown;
   };
   qc_score: number | null;
@@ -901,6 +907,12 @@ export interface WorkflowPreset {
   /** Workflow ControlNet (composition verrouillée) du même palier. */
   with_control?: string | null;
   is_sketch?: boolean;
+  steps?: number | null;
+  /** CFG par défaut ; modèle distillé (Turbo) : toujours 1. */
+  cfg?: number;
+  distilled?: boolean;
+  /** cfg > 1 : le prompt négatif est lu par le modèle. */
+  negative_active?: boolean;
 }
 
 /** Temps estimés du palier croquis d'une page ou d'un chapitre. */
@@ -1113,6 +1125,9 @@ export interface ReferenceVariant {
   kept: boolean;
   kept_image_id: number | null;
   job_id: number | null;
+  /** Fiche d'objet ou de décor : personnage détecté par le QC (null : aucun) ; acceptée à la main ou non. */
+  people_warning?: string | null;
+  people_accepted?: boolean;
   params: Record<string, unknown>;
   created_at: string;
 }
@@ -1170,6 +1185,8 @@ export interface StyleBoard {
   style_names: string;
   trials_per_batch: number;
   use_reference_sheets: "with_subject" | "always" | "never" | null;
+  /** Sortes de fiches qui reçoivent la référence de style (jamais objets ni décors avec les presets livrés). */
+  reference_sheet_kinds?: LibraryKind[];
   use_panels: "with_subject" | "free_slot" | "never" | null;
   active: StyleReference | null;
   history: StyleReference[];
@@ -1276,6 +1293,12 @@ export interface Presets {
     from_sketch?: string | null;
     /** Débruitage livré (workflows « propre »). */
     denoise?: number | null;
+    steps?: number | null;
+    /** CFG par défaut du palier ; à 1, le prompt négatif n'est pas lu (« négatif inactif »). */
+    cfg?: number;
+    /** Modèle distillé (Turbo, croquis) : cfg 1 imposé. */
+    distilled?: boolean;
+    negative_active?: boolean;
   }[];
   /** Agrandisseurs de la finition d'impression (presets/upscalers/). */
   upscalers?: Omit<Upscaler, "timeout_s">[];
@@ -1878,8 +1901,12 @@ export const api = {
     request<Job[]>(`/${LIBRARY_SEGMENT[kind]}/${id}/reference-variants`, json("POST", body)),
   refineReference: (variantId: number, body: ReferenceRefineInput) =>
     request<Job[]>(`/reference-variants/${variantId}/refine`, json("POST", body)),
-  keepReference: (variantId: number) =>
-    request<LibraryEntry>(`/reference-variants/${variantId}/keep`, { method: "POST" }),
+  /** `acceptPeople` : « Garder quand même » une fiche d'objet ou de décor où un personnage a été détecté. */
+  keepReference: (variantId: number, acceptPeople = false) =>
+    request<LibraryEntry>(
+      `/reference-variants/${variantId}/keep`,
+      acceptPeople ? json("POST", { accept_people: true }) : { method: "POST" },
+    ),
   deleteReferenceVariant: (variantId: number) =>
     request<void>(`/reference-variants/${variantId}`, { method: "DELETE" }),
   styleBoard: (projectId: number) => request<StyleBoard>(`/projects/${projectId}/style-board`),

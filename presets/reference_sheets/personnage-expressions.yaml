@@ -16,4 +16,4 @@ prompt:
   - "Style: $style."
   - "The last image ($style_ref) is a style reference only (line work, screentones, inking): do not copy its character, scene or composition."
   - "Plain white background, same hairstyle and same face in every vignette, no text."
-negative_prompt: "different faces, text, captions"
+negative_prompt: "extra characters, background people, text, different faces, captions"

@@ -44,8 +44,8 @@ def test_presets_endpoint(client: TestClient) -> None:
     data = client.get("/presets").json()
     assert data["defaults"] == {
         "page_format": "a4-300dpi",
-        "workflow": "qwen-image-base-rapide",
-        "workflow_with_references": "qwen-image-edit-ref-rapide",
+        "workflow": "qwen-image-base-qualite",
+        "workflow_with_references": "qwen-image-edit-ref-qualite",
         "workflow_quality": "qwen-image-base",
         "workflow_inpaint": "qwen-image-inpaint-turbo",
         "layout_style": "dynamique",
@@ -58,7 +58,11 @@ def test_presets_endpoint(client: TestClient) -> None:
         "style_board": data["defaults"]["style_board"],
     }
     board = data["defaults"]["style_board"]
-    assert (board["trials"], board["reference_sheets"], board["panels"]) == (4, "with_subject", "never")
+    assert (board["trials"], board["reference_sheets"], board["panels"]) == (
+        4,
+        {"character": "with_subject", "object": "never", "decor": "never"},
+        "never",
+    )
     assert {st["id"] for st in data["layout_styles"]} >= {"sage", "dynamique", "nerveuse"}
     assert [st["id"] for st in data["layout_styles"] if st["is_default"]] == ["dynamique"]
     formats = {f["id"]: f for f in data["page_formats"]}
@@ -74,7 +78,7 @@ def test_presets_endpoint(client: TestClient) -> None:
 def test_project_crud(client: TestClient) -> None:
     created = _project(client, style_genre="seinen", style_tone="dark", reading_direction="ltr")
     assert created["page_format"] == "a4-300dpi"
-    assert created["workflow_preset"] == "qwen-image-base-rapide"  # Rapide par défaut pour les nouvelles séries
+    assert created["workflow_preset"] == "qwen-image-base-qualite"  # Qualité par défaut pour les nouvelles séries
     assert created["reading_direction"] == "ltr"
     pid = created["id"]
 

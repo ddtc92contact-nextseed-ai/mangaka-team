@@ -118,6 +118,8 @@ def test_check_ok_with_recorded_object_info() -> None:
         "qwen-image-base-rapide",
         "qwen-image-edit-ref",
         "qwen-image-edit-ref-rapide",
+        "qwen-image-base-qualite",
+        "qwen-image-edit-ref-qualite",
         "qwen-image-turbo",
         "qwen-image-edit-ref-turbo",
         "qwen-image-croquis",
@@ -153,6 +155,8 @@ def test_recorded_comfyui_without_controlnet_reports_it_clearly() -> None:
             "qwen-image-edit-ref-turbo",
             "qwen-image-base-rapide",
             "qwen-image-edit-ref-rapide",
+            "qwen-image-base-qualite",
+            "qwen-image-edit-ref-qualite",
             "qwen-image-base",
             "qwen-image-edit-ref",
         )
@@ -530,7 +534,7 @@ def test_trial_generation_mock(make_client: Callable[[ComfyUIClient], TestClient
 
     # sans preset : workflow par défaut des séries
     default = c.post("/comfyui/trial", json={}).json()
-    assert default["params"]["preset"] == "qwen-image-base-rapide"
+    assert default["params"]["preset"] == "qwen-image-base-qualite"
     _wait_done(c, default["id"])
 
 

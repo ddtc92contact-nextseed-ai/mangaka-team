@@ -275,7 +275,12 @@ Un seul module (`engine/mangaka_engine/pipeline/style.py`) compose le style d'un
 
 Champs communs : `id` (minuscules, chiffres, tirets), `name` et `description` **en français** (affichés
 dans la fiche série), `prompt_keywords` (liste), `lang` (`fr` ou `en`, obligatoire : langue des
-mots-clés, voir « Calibrage »), `order` (ordre dans la liste déroulante). Une description signale une
+mots-clés, voir « Calibrage »), `order` (ordre dans la liste déroulante).
+
+Un mot-clé qui évoque des personnes (« sourire », « determined young hero », « expression comique »)
+s'écrit `{text: smiles, people: true}` dans `prompt_keywords` (réglages fins compris). Il reste dans le
+`$style` des cases et des fiches de personnage, mais il est **écarté des fiches d'objet et de décor** :
+sinon le modèle y invente un personnage, qui revient ensuite dans chaque case utilisant la fiche. Une description signale une
 **dominante** quand le pack prend le pas sur les autres (ex. franco-belge sur le rendu, humour sur le genre).
 
 ### Calibrage
@@ -425,12 +430,18 @@ style_board:
     - "Style board, test scene: $scene."
     - "Style: $style."
   negative_prompt: "text, speech bubbles"   # ajouté au négatif du workflow
-  reference_sheets: with_subject  # with_subject | always | never : voir ci-dessous
+  reference_sheets:         # with_subject | always | never, une valeur pour toutes les sortes ou une par sorte
+    character: with_subject
+    object: never           # sorte absente = never
+    decor: never
   panels: never             # with_subject | free_slot | never : voir « Cases » ci-dessous
 ```
 
-- **Fiches de référence** (`reference_sheets`) :
-  - `with_subject` (défaut) : la référence de style n'est jointe que si une image du sujet est déjà
+- **Fiches de référence** (`reference_sheets`, une valeur ou une par sorte de fiche). Livré
+  (11/10/2026) : `with_subject` pour les personnages, **`never` pour les objets et les décors** — la
+  planche montre des personnages, qui apparaissaient dans la fiche d'objet ou de décor puis dans chaque
+  case qui l'utilise comme référence (la même fuite que sur les cases le 10/10).
+  - `with_subject` (personnages) : la référence de style n'est jointe que si une image du sujet est déjà
     envoyée (image de départ choisie, ou variante d'« Affiner »), **toujours après elle** et seulement
     s'il reste un emplacement dans le workflow « avec références » du palier. Une fiche créée à
     partir de zéro reste en texte → image : le workflow d'édition traite l'image 1 comme le sujet à
@@ -510,7 +521,7 @@ lora_chain: { … }                     # point d'insertion des LoRA (voir plus 
 
 ### Mapping des nœuds (presets Qwen-Image 2.1)
 
-Les six presets livrés partagent le même graphe et les mêmes numéros de nœuds :
+Les presets texte → image et « avec références » livrés partagent le même graphe et les mêmes numéros de nœuds :
 
 | Paramètre | Nœud | Type ComfyUI | Entrée | Obligatoire |
 | --- | --- | --- | --- | --- |
@@ -525,8 +536,15 @@ Les six presets livrés partagent le même graphe et les mêmes numéros de nœu
 
 Graphe : `1 UNETLoader` → `4 QwenImage21Cache` → `9 KSampler` ; `2 CLIPLoader` (`type: qwen_image`) →
 `6 TextEncodeQwenImage21` (sorties 0 = positif, 1 = négatif ; `vae` = `3 VAELoader`) ; `8 EmptyLatentImage` →
-`9` → `10 VAEDecode` → `11 SaveImage`. `cfg: 1` est le chemin officiel de Qwen-Image 2.1 : à cfg 1 le prompt
-négatif est ignoré par le modèle (le monter n'a de sens qu'avec un prompt négatif utile, et double le coût).
+`9` → `10 VAEDecode` → `11 SaveImage`. `cfg: 1` est le chemin officiel de Qwen-Image 2.1 : **à cfg 1, ComfyUI
+saute la passe négative** et le prompt négatif n'est jamais lu (« négatif inactif », affiché dans la fiche
+série et l'atelier). Au-dessus de 1 (vrai CFG), il est lu et chaque étape coûte environ deux fois plus ;
+**garder cfg ≤ 3** (au-delà : image trop contrastée, exposition décalée ; cfg 5 la dégrade nettement).
+
+Chaque preset déclare `distilled: true|false`. Un modèle **distillé** (Turbo, croquis) refuse tout cfg
+différent de 1, au chargement (`defaults.cfg`) comme à la construction du workflow (`PresetError`, 422
+lisible côté API). Le cfg d'un preset non distillé va de 1 à 3. Le réglage « CFG » du dessinateur
+(écran « L'équipe ») ne touche jamais les presets distillés.
 
 Règles vérifiées au chargement :
 
@@ -545,11 +563,42 @@ Les noms de fichiers de modèles (`unet_name`, `clip_name`, `vae_name`) vivent
 
 Fichiers installés dans `~/ComfyUI/models/` (liens vers le disque T9) et utilisés par les presets :
 
-| Dossier | Qualité | Rapide | Turbo |
+| Dossier | Qualité max | Qualité et Rapide | Turbo |
 | --- | --- | --- | --- |
 | `diffusion_models/` | `qwen_image_2.1_bf16.safetensors` (14,2 Go) | `qwen_image_2.1_int8_convrot.safetensors` (7,3 Go) | `qwen_image_2.1_turbo_int8_convrot.safetensors` |
 | `text_encoders/` | `qwen3vl_8b_bf16.safetensors` (17,5 Go) | `qwen3vl_8b_int8_convrot.safetensors` (9,4 Go) | idem Rapide |
 | `vae/` | `qwen_image_2.1_vae_bf16.safetensors` | idem | idem |
+
+**Paliers (11/10/2026)** — étapes, cfg, prompt négatif lu ou non, et durée attendue d'une case
+(`estimated_s`, remplacé par la médiane réelle dès 3 générations) :
+
+| Palier | Presets | Modèle | Étapes | cfg | Négatif actif | Durée (texte / avec réf.) |
+| --- | --- | --- | --- | --- | --- | --- |
+| Croquis | `qwen-image-croquis` (+ `-edit-ref-croquis`) | Turbo distillé | 6 | 1 | non | 6 s / 10 s |
+| Turbo | `qwen-image-turbo` (+ `-edit-ref-turbo`) | Turbo distillé | 8 | 1 | non (jamais) | 20 s / 80 s |
+| Rapide | `qwen-image-base-rapide` (+ `-edit-ref-rapide`) | int8, non distillé | 25 | 1 | non | 60 s / 240 s |
+| **Qualité** (défaut) | `qwen-image-base-qualite` (+ `-edit-ref-qualite`) | int8, non distillé | 35 | 2,5 | **oui** | 168 s / 672 s |
+| Qualité max | `qwen-image-base` (+ `-edit-ref`) | bf16, non distillé | 50 | 1 | non | 70 s / 280 s |
+
+Qualité = mêmes fichiers que Rapide, `euler` / `simple`, mais un vrai CFG : ≈ 2× Rapide par étape
+(passe négative en plus), d'où `estimated_s` = Rapide × 2 × 35/25 (passage au propre : 112 / 448 s,
+ControlNet : 196 / 700 s). Environ 3 h pour un chapitre de 10 pages au lieu de 3-4 min par page :
+accepté pour la qualité. Le cfg se règle par série (fiche série, 1 à 3 ; vide = celui du palier), pour
+tous les presets non distillés de la série ; un palier distillé refuse un cfg > 1 (422).
+
+**Prompts négatifs, en anglais, par tâche** (les termes « pas de texte » de `image_prompt.yaml →
+forbidden_text_terms` y sont toujours ajoutés, en anglais eux aussi) :
+
+| Tâche | Où | Négatif |
+| --- | --- | --- |
+| Cases | `defaults.negative_prompt` des presets de case | text, letters, speech bubble, caption, watermark, signature, multiple panels, comic page layout, collage, split screen, character sheet, turnaround, model sheet, white background, duplicate character, extra people, extra limbs, deformed hands, blurry, low quality |
+| Réparation | presets `qwen-image-inpaint*` | text, letters, speech bubble, watermark, signature, blurry, deformed hands, extra fingers, low quality |
+| Fiche d'objet | `reference_sheets/objet-*.yaml` | person, people, human, character, face, hands, figure, crowd, text (+ cluttered background) |
+| Fiche de décor | `reference_sheets/decor-*.yaml` | person, people, human, character, figure, crowd, silhouette, animal, text, close-up |
+| Fiche de personnage | `reference_sheets/personnage-*.yaml` | extra characters, background people, text (+ termes propres à la fiche) |
+
+Une fiche de référence envoie **son** négatif, jamais celui des cases (qui exclut justement « character
+sheet, white background »).
 
 **Turbo** = version distillée officielle de Qwen-Image 2.1, publiée par Qwen dans le dépôt
 `Comfy-Org/Qwen-Image-2.1` (`diffusion_models/`) : la distillation est déjà fusionnée dans les poids,
@@ -572,24 +621,29 @@ Les fichiers int8 « convrot » se chargent avec les nœuds standard (`UNETLoade
 | --- | --- | --- | --- | --- | --- |
 | `qwen-image-turbo` | Turbo (fiches de référence, planche de style) | texte → image | 8 | 5 min | 20 |
 | `qwen-image-edit-ref-turbo` | Turbo | avec images de référence | 8 | 10 min | 80 |
-| `qwen-image-base-rapide` | Rapide (défaut des nouvelles séries) | texte → image | 25 | 10 min | 60 |
+| `qwen-image-base-rapide` | Rapide | texte → image | 25 | 10 min | 60 |
 | `qwen-image-edit-ref-rapide` | Rapide | avec images de référence | 25 | 15 min | 240 |
-| `qwen-image-base` | Qualité (finitions, « Régénérer en Qualité ») | texte → image | 50 | 20 min | 70 |
-| `qwen-image-edit-ref` | Qualité | avec images de référence | 50 | 25 min | 280 |
+| `qwen-image-base-qualite` | Qualité (défaut des nouvelles séries, vrai CFG 2,5) | texte → image | 35 | 30 min | 168 |
+| `qwen-image-edit-ref-qualite` | Qualité | avec images de référence | 35 | 45 min | 672 |
+| `qwen-image-base` | Qualité max (bf16, finitions, « Régénérer en Qualité ») | texte → image | 50 | 20 min | 70 |
+| `qwen-image-edit-ref` | Qualité max | avec images de référence | 50 | 25 min | 280 |
 
 Le palier se choisit avec le **workflow de la série** (liste « Palier de génération » de la fiche
-série : « Turbo (production en volume, ~35 s par case) », « Rapide (recommandé pour la qualité, ~1 min
-par case) », « Qualité (finitions) »). Les séries existantes gardent leur preset ; une série restée sous
-le palier par défaut voit dans sa fiche un bouton « Passer en Rapide » (puis Enregistrer).
+série : « Turbo (production en volume, ~35 s par case) », « Rapide (~1 min par case, négatif inactif) »,
+« Qualité (recommandé, négatif actif, ~3 min par case) », « Qualité max (bf16, 50 étapes, finitions) »).
+Les séries existantes gardent leur preset (et leur cfg : vide) ; une série restée sous le palier par
+défaut voit dans sa fiche un bouton « Passer en Qualité » (puis Enregistrer).
 
 **Quel palier pour quelle tâche (10/10/2026)** :
 
 | Tâche | Palier | Pourquoi |
 | --- | --- | --- |
-| Cases (génération, passage au propre, réparation) | **Rapide** (`defaults.workflow`, `workflow_with_references`) | Mesure en génération libre avec références : 8 pas (Turbo) contre 25 pas changent ~60 % de l'image, au profit de 25 pas — le réglage du workflow officiel « Image Edit (Qwen Image 2.1) » (int8, 25 pas, cfg 1, euler/simple). ~35 s → ~60 s par case, accepté : la qualité prime. L'encodeur de texte n'y est pour rien (int8 contre bf16 : 0,1 % des pixels changés). |
+| Cases (génération, passage au propre) — avant le 11/10/2026 | Rapide | Mesure en génération libre avec références : 8 pas (Turbo) contre 25 pas changent ~60 % de l'image, au profit de 25 pas — le réglage du workflow officiel « Image Edit (Qwen Image 2.1) » (int8, 25 pas, cfg 1, euler/simple). ~35 s → ~60 s par case, accepté : la qualité prime. L'encodeur de texte n'y est pour rien (int8 contre bf16 : 0,1 % des pixels changés). |
 | Croquis | croquis (`workflow_sketch`, modèle Turbo, 6 pas) | Tri rapide des compositions. |
-| Fiches de référence, propre de la planche de style | **Turbo** (`workflow_library`) | Images de travail, refaites souvent ; « Qualité » reste proposé par fiche. |
-| Finitions | Qualité (`workflow_quality`) | « Régénérer en Qualité » des cases importantes. |
+| Fiches de personnage, propre de la planche de style | **Turbo** (`workflow_library`) | Images de travail, refaites souvent ; « Qualité » reste proposé par fiche. |
+| Cases (génération, passage au propre), depuis le 11/10/2026 | **Qualité** (`defaults.workflow`, `workflow_with_references`) | Vrai CFG 2,5 : le négatif (texte, collage, personnages en trop) est enfin lu. La réparation reste celle de Rapide (mêmes fichiers). |
+| Fiches d'objet et de décor | **Qualité** (`workflow` du type de fiche) | Le négatif « person, people… » doit être lu : aucune personne dans la fiche. |
+| Finitions | Qualité max (`workflow_quality`) | « Régénérer en Qualité » des cases importantes (bf16, 50 pas). |
 
 Chaque preset déclare son palier :
 
@@ -631,7 +685,8 @@ version propre que pour les compositions retenues — sans que le passage au pro
 | `qwen-image-turbo-from-sketch` | `propre` | Turbo depuis le croquis validé | mise en page | 8 | 15 |
 | `qwen-image-edit-ref-turbo-from-sketch` | `propre` | idem, avec références | mise en page | 8 | 55 |
 | `qwen-image-base-rapide-from-sketch` (+ `qwen-image-edit-ref-rapide-from-sketch`) | `propre` | Rapide depuis le croquis | mise en page | 25 | 40 / 160 |
-| `qwen-image-base-from-sketch` (+ `qwen-image-edit-ref-from-sketch`) | `propre` | Qualité depuis le croquis | mise en page | 50 | 50 / 190 |
+| `qwen-image-base-qualite-from-sketch` (+ `qwen-image-edit-ref-qualite-from-sketch`) | `propre` | Qualité depuis le croquis (cfg 2,5, défaut) | mise en page | 35 | 112 / 448 |
+| `qwen-image-base-from-sketch` (+ `qwen-image-edit-ref-from-sketch`) | `propre` | Qualité max depuis le croquis | mise en page | 50 | 50 / 190 |
 
 Champs propres à ce palier (vérifiés au chargement, erreurs dans `GET /presets`) :
 
@@ -701,7 +756,8 @@ Prétraitements : `comfyui_controlnet_aux` (`LineArtPreprocessor`, `DepthAnythin
 | --- | --- | --- |
 | `qwen-image-turbo-controlnet` (+ `qwen-image-edit-ref-turbo-controlnet`) | Turbo | 25 / 90 |
 | `qwen-image-base-rapide-controlnet` (+ `qwen-image-edit-ref-rapide-controlnet`) | Rapide | 70 / 250 |
-| `qwen-image-base-controlnet` (+ `qwen-image-edit-ref-controlnet`) | Qualité | 85 / 300 |
+| `qwen-image-base-qualite-controlnet` (+ `qwen-image-edit-ref-qualite-controlnet`) | Qualité | 196 / 700 |
+| `qwen-image-base-controlnet` (+ `qwen-image-edit-ref-controlnet`) | Qualité max | 85 / 300 |
 
 Même graphe que le palier, **mêmes ids** (`1` modèle, `2` encodeur, `6` prompts, `8` latent, `9`
 échantillonneur, `11` sortie) ; nœuds ajoutés : `40` ModelPatchLoader, `41` LoadImage (image guide), `42`
@@ -1051,6 +1107,21 @@ qu'après l'image du sujet (voir « Planche de style », `style_board.reference_
 référence »** copie la variante parmi les images de référence de la fiche (8 au plus) ; la première
 image est la référence principale, servie en premier quand les emplacements d'une case manquent.
 
+**Fiches d'objet et de décor : personne dedans** (11/10/2026 — des personnages inventés apparaissaient
+dans ces fiches, puis dans chaque case qui les recevait en référence) :
+
+- jamais de planche de style jointe (`style_board.reference_sheets` : `object: never`, `decor: never`) ;
+- palier Qualité imposé (`workflow: qwen-image-base-qualite` du type de fiche, son `with_references`
+  pour « Affiner » ou une image de départ) : vrai CFG, donc leur négatif « person, people… » est lu ;
+- `$style` sans les mots-clés marqués `people` des packs ;
+- après chaque génération, le détecteur de visages du contrôle qualité (couche « détecteurs », seuil
+  `detectors.face.min_confidence` de `qc.yaml`) passe sur l'image (`params.people_check`). Un visage
+  trouvé : avertissement sur la variante (« Personnage détecté dans la fiche : régénérer avant de
+  l'utiliser ») et **« Garder comme référence » refusé** (409) — la variante ne peut donc pas servir
+  de référence aux cases. On la régénère, ou on l'accepte à la main (« Garder quand même »,
+  `POST /reference-variants/{id}/keep` avec `{"accept_people": true}`, noté sur la variante).
+  Détecteurs absents ou en erreur : rien n'est bloqué.
+
 Un type de fiche = un fichier ; en ajouter un ne demande aucun code (il est validé au démarrage, une
 erreur apparaît dans `GET /presets` et `GET /health`) :
 
@@ -1072,7 +1143,7 @@ prompt:                          # morceaux assemblés ; un morceau dont une var
   - "$start is the starting image: keep the object and its silhouette."   # « <image1> » si une image de départ est choisie
   - "Style: $style."             # packs de style de la série + mots déclencheurs du LoRA de style
   - "The last image ($style_ref) is a style reference only."   # « <imageN> » si la référence de style est jointe
-negative_prompt: "character"     # ajouté au négatif du workflow (les termes « pas de texte » y sont toujours)
+negative_prompt: "person, people, text"   # en anglais ; remplace le négatif du workflow (termes « pas de texte » toujours ajoutés)
 ```
 
 ## Prompt final des cases (`image_prompt.yaml`)
@@ -1213,7 +1284,7 @@ Le texte n'est **jamais** dessiné par le modèle d'image : il est posé au lett
 ### Onomatopées (type `sfx`)
 
 « CLIC », « BIIIP ! », « VROUM ! » : grand texte sans bulle, lui aussi vectoriel (jamais dessiné par
-le modèle d'image : « onomatopées » est dans `forbidden_text_terms` et le texte n'entre pas dans le
+le modèle d'image : « onomatopoeia » est dans `forbidden_text_terms` et le texte n'entre pas dans le
 prompt de la case).
 
 - `fonts.yaml` → `sfx` : police par intensité (`by_intensity` : Lilita One / Titan One / Bowlby One) et

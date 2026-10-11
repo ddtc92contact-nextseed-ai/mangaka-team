@@ -4,7 +4,7 @@ name: Shōjo
 description: Romance et émotions — sentiments intérieurs, relations, regards.
 order: 30
 lang: en
-prompt_keywords: [shojo manga, romantic style, large expressive eyes, delicate flowery linework]
+prompt_keywords: [shojo manga, romantic style, {text: large expressive eyes, people: true}, delicate flowery linework]
 reading_direction: rtl
 fonts: { dialogue: fredoka, shout: lilita-one }
 # Planche de style : scène test des essais (français, affichée sur la fiche série ; aucun personnage de la série)

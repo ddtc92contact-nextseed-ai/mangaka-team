@@ -164,6 +164,8 @@ def build_context(settings: Settings, providers: Providers | None = None) -> App
         comfyui_error=providers.errors.get("comfyui"),
         poll_s=settings.comfyui_poll_s,
         presets_for=agents_service.presets_for,
+        detectors=providers.detectors,
+        detectors_error=providers.errors.get("detectors", ""),
     )
     queue.add_step(
         REFERENCE_STEP, QueueStep(execute=references, describe_error=describe_error, interrupt=references.interrupt)

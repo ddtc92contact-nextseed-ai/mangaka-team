@@ -159,6 +159,9 @@ class Project(TimestampMixin, Base):
     clean_control: Mapped[str | None] = mapped_column(String(40), default=None)
     # Agrandisseur de la finition d'impression (presets/upscalers/) ; None = celui de defaults.yaml.
     upscaler: Mapped[str | None] = mapped_column(String(100), default=None)
+    # CFG des cases (1 à 3) pour les presets non distillés ; None = celui du palier (`defaults.cfg`).
+    # À cfg 1, le prompt négatif n'est pas lu. Les presets distillés (Turbo, croquis) gardent cfg 1.
+    cfg: Mapped[float | None] = mapped_column(Float, default=None)
     # « Prompt rédigé par l'IA » : le LLM du dessinateur écrit le prompt image de chaque case en un
     # paragraphe (pipeline/prompt_writer.py) ; False = assemblage par fragments (image_prompt.yaml#parts).
     # Nouvelles séries : `enabled` de presets/prompts/redacteur-image.yaml ; séries d'avant la v21 : False.

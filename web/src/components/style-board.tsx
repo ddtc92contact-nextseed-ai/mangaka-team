@@ -286,12 +286,20 @@ export function StyleBoardCard({ projectId, board }: { projectId: number; board:
   );
 }
 
+const SHEET_KIND_LABELS: Record<string, string> = { character: "personnages", object: "objets", decor: "décors" };
+
 function ActiveReference({ reference: ref, board }: { reference: StyleReference; board: StyleBoard }) {
+  // Sortes de fiches qui la reçoivent : jamais les objets ni les décors (ses personnages y apparaîtraient).
+  const kinds = board.reference_sheet_kinds ?? ["character", "object", "decor"];
+  const kindLabel =
+    kinds.length === 3
+      ? "fiches de référence (personnages, objets, décors)"
+      : `fiches de ${kinds.map((k) => SHEET_KIND_LABELS[k]).join(", ")} (jamais aux objets ni aux décors)`;
   const sheets =
     board.use_reference_sheets === "always"
-      ? "jointe à chaque fiche de référence (personnages, objets, décors)"
+      ? `jointe à chaque ${kindLabel.replace(/^fiches/, "fiche")}`
       : board.use_reference_sheets === "with_subject"
-        ? "aux fiches de référence après leur image de départ ou la variante à affiner (pour le trait seulement)"
+        ? `aux ${kindLabel} après leur image de départ ou la variante à affiner (pour le trait seulement)`
         : null;
   const panels =
     board.use_panels === "free_slot"

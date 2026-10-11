@@ -185,6 +185,8 @@ def apply_overrides(
                             continue  # paramètre non mappé par ce workflow
                         if wf.preset.role == "croquis" and list(path) == ["defaults", "steps"]:
                             continue  # le croquis garde ses quelques étapes (c'est tout son intérêt)
+                        if wf.preset.distilled and list(path) == ["defaults", "cfg"]:
+                            continue  # modèle distillé (Turbo) : cfg 1 imposé
                         _set(data, path, value)
                     workflows[wf_id] = dataclasses.replace(wf, preset=WorkflowPreset.model_validate(data))
                 changes["workflows"] = workflows

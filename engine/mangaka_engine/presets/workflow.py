@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .loader import LoadedUpscaler, LoadedWorkflow, PresetError
-from .schemas import ControlSettings, LoraChain
+from .schemas import ControlSettings, LoraChain, check_cfg
 
 MAX_SEED = 2**63 - 1
 
@@ -76,6 +76,7 @@ def build_workflow(
 
     - un paramètre absent du mapping lève `PresetError` ;
     - `seed` absente ou None → tirée au hasard puis renvoyée (pour être enregistrée) ;
+    - `cfg` : 1 à 3, et 1 seulement pour un preset distillé (`distilled`) — sinon `PresetError` ;
     - `reference_images` remplissent les emplacements dans l'ordre, les emplacements vides
       sont retirés ;
     - `loras` sont chaînés au point d'insertion `lora_chain`, dans l'ordre ;
@@ -99,6 +100,12 @@ def build_workflow(
     if "positive_prompt" not in resolved:
         raise PresetError("positive_prompt est obligatoire")
     resolved.setdefault("negative_prompt", "")
+    cfg = resolved.get("cfg")
+    if cfg is not None:
+        try:
+            check_cfg(float(cfg), distilled=preset.distilled)
+        except (TypeError, ValueError) as exc:
+            raise PresetError(f"workflow {preset.id} : {exc}") from None
 
     inpaint = preset.inpaint
     if inpaint is not None and inpaint_images is None:

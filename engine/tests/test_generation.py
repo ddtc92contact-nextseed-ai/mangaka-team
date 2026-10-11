@@ -207,7 +207,7 @@ def test_generate_panel_mock_end_to_end(make_client: Callable[..., TestClient]) 
     p1, p2, p3 = data["panels"]
     [job] = _ok(c.post(f"/panels/{p1['id']}/generate"), 202)
     assert job["step"] == "generation" and job["panel_id"] == p1["id"] and job["status"] in ("pending", "running")
-    assert job["params"]["preset"] == "qwen-image-edit-ref-rapide"  # Aiko a une planche de référence
+    assert job["params"]["preset"] == "qwen-image-edit-ref-qualite"  # Aiko a une planche de référence
     _wait(c)
     done = _job(c, job["id"])
     assert done["status"] == "succeeded" and done["progress"] == 100 and done["message"].startswith("Version 1")
@@ -217,29 +217,32 @@ def test_generate_panel_mock_end_to_end(make_client: Callable[..., TestClient]) 
     assert (img["version"], img["selected"], img["width"], img["height"]) == (1, True, w, h)
     assert w % 16 == 0 and h % 16 == 0 and 0.9e6 < w * h < 1.1e6
     params = img["params"]
-    assert params["preset"] == "qwen-image-edit-ref-rapide" and params["seed"] == img["seed"]
-    assert img["tier"] == "Rapide" and params["tier"] == "Rapide"
+    assert params["preset"] == "qwen-image-edit-ref-qualite" and params["seed"] == img["seed"]
+    assert img["tier"] == "Qualité" and params["tier"] == "Qualité"
     assert [lo["name"] for lo in params["loras"]] == ["encre.safetensors", "aiko-v3.safetensors"]
     assert params["loras"][1]["weight"] == 0.9
     assert len(params["reference_images"]) == 1 and params["reference_images"][0]["comfyui_name"] in comfy.uploads
     # la référence citée par <image1>, la case, le style de la série
     assert params["prompt"].startswith("<image1> is the identity reference for Aiko")
     assert "Aiko" in params["prompt"] and "seinen manga" in params["prompt"]
-    assert "speech bubbles" in params["negative_prompt"] and "text" in params["negative_prompt"]
+    assert "speech bubble" in params["negative_prompt"] and "text" in params["negative_prompt"]
+    assert "extra people" in params["negative_prompt"] and "collage" in params["negative_prompt"]
+    assert params["cfg"] == 2.5 and params["negative_active"] is True  # vrai CFG : le négatif est lu
     assert params["duration_ms"] >= 0 and params["workflow_params"]["width"] == w
 
     # le workflow envoyé : référence chargée, 2 emplacements retirés, 2 LoRA chaînés
     [wf] = comfy.prompts.values()
     assert sum(n["class_type"] == "LoadImage" for n in wf.values()) == 1
     assert sum(n["class_type"] == "LoraLoaderModelOnly" for n in wf.values()) == 2
-    # palier Rapide (défaut des nouvelles séries, 10/10/2026) : modèle int8, 25 étapes, cfg 1 — lus dans
-    # le preset (réglage du workflow officiel « Image Edit (Qwen Image 2.1) »)
+    # palier Qualité (défaut des nouvelles séries, 11/10/2026) : mêmes fichiers int8 que Rapide, 35 étapes,
+    # vrai CFG 2,5 — le prompt négatif des cases arrive sur l'entrée négative de l'encodeur
     reg = c.app.state.ctx.presets  # type: ignore[attr-defined]
     rapide = reg.workflow("qwen-image-edit-ref-rapide").workflow
     [unet] = [n for n in wf.values() if n["class_type"] == "UNETLoader"]
     assert unet["inputs"]["unet_name"] == rapide["1"]["inputs"]["unet_name"]
     assert "turbo" not in unet["inputs"]["unet_name"] and "int8" in unet["inputs"]["unet_name"]
-    assert (wf["9"]["inputs"]["steps"], wf["9"]["inputs"]["cfg"]) == (25, 1)
+    assert (wf["9"]["inputs"]["steps"], wf["9"]["inputs"]["cfg"]) == (35, 2.5)
+    assert wf["6"]["inputs"]["negative_prompt"] == params["negative_prompt"]
 
     resp = c.get(img["url"])
     assert resp.status_code == 200 and resp.headers["content-type"] == "image/png"
@@ -259,7 +262,7 @@ def test_generate_panel_mock_end_to_end(make_client: Callable[..., TestClient]) 
 
     # case sans référence → workflow de la série
     [job2] = _ok(c.post(f"/panels/{p2['id']}/generate"), 202)
-    assert job2["params"]["preset"] == "qwen-image-base-rapide"
+    assert job2["params"]["preset"] == "qwen-image-base-qualite"
     _wait(c)
     [img2] = _ok(c.get(f"/panels/{p2['id']}/images"))
     assert img2["params"]["reference_images"] == [] and [lo["source"] for lo in img2["params"]["loras"]] == ["style"]
@@ -437,8 +440,8 @@ def test_queue_runs_one_job_at_a_time_in_order(make_client: Callable[..., TestCl
     assert [i["job"]["id"] for i in q["pending"]] == [first[1]["id"], second[0]["id"]]
     assert [i["position"] for i in q["pending"]] == [1, 2]
     assert q["pending"][1]["label"] == "Les Lames · ch. 1 · p. 1 · case 2"
-    assert q["pending"][0]["preset"] == "qwen-image-edit-ref-rapide"
-    assert q["pending"][1]["preset"] == "qwen-image-base-rapide"
+    assert q["pending"][0]["preset"] == "qwen-image-edit-ref-qualite"
+    assert q["pending"][1]["preset"] == "qwen-image-base-qualite"
     assert q["running"]["eta_s"] is None  # aucune durée connue encore
     assert q["comfyui"] == "mock"
     assert _ok(c.get(f"/panels/{p1['id']}"))["state"] == "generating"
@@ -573,7 +576,7 @@ def test_workflow_refused_gives_node_errors(make_client: Callable[..., TestClien
 def test_generation_timeout_from_preset(make_client: Callable[..., TestClient], tmp_path: Path) -> None:
     presets = tmp_path / "presets"
     shutil.copytree(PRESETS_DIR, presets)
-    path = presets / "workflows" / "qwen-image-base-rapide.yaml"
+    path = presets / "workflows" / "qwen-image-base-qualite.yaml"
     data = yaml.safe_load(path.read_text())
     data["timeout_s"] = 3
     path.write_text(yaml.safe_dump(data, allow_unicode=True))
@@ -593,7 +596,7 @@ def test_generation_timeout_from_preset(make_client: Callable[..., TestClient], 
     client = _http(handler, sleep=sleep, clock=lambda: now[0])
     job = _generate_and_fail(make_client(client, mangaka_presets_dir=presets))
     assert job["error"] == (
-        "ComfyUI n'a pas terminé la génération en 3 s (délai réglable : timeout_s du preset qwen-image-base-rapide)"
+        "ComfyUI n'a pas terminé la génération en 3 s (délai réglable : timeout_s du preset qwen-image-base-qualite)"
     )
     assert "/interrupt" in paths
 
@@ -651,14 +654,25 @@ def test_restart_recovers_generation_jobs_and_states(make_settings: Callable[...
 def test_workflow_presets_endpoint(make_client: Callable[..., TestClient]) -> None:
     c = make_client()
     presets = {p["id"]: p for p in _ok(c.get("/presets/workflows"))}
-    # Rapide (25 pas) par défaut des nouvelles séries et des cases avec références (10/10/2026).
-    assert presets["qwen-image-base-rapide"]["is_default"] and presets["qwen-image-turbo"]["reference_slots"] == 0
-    assert presets["qwen-image-edit-ref-rapide"]["is_reference_default"]
+    # Qualité (vrai CFG) par défaut des nouvelles séries et des cases avec références (11/10/2026).
+    assert presets["qwen-image-base-qualite"]["is_default"] and presets["qwen-image-turbo"]["reference_slots"] == 0
+    assert presets["qwen-image-edit-ref-qualite"]["is_reference_default"]
     assert not presets["qwen-image-turbo"]["is_default"]
     edit = presets["qwen-image-edit-ref"]
     assert edit["reference_slots"] == 3 and edit["supports_lora"] and not edit["is_reference_default"]
     assert edit["lora_loader"] == "LoraLoaderModelOnly" and edit["timeout_s"] == 1500
-    assert presets["qwen-image-base"]["is_quality"] and presets["qwen-image-base"]["tier"] == "Qualité"
+    assert presets["qwen-image-base"]["is_quality"] and presets["qwen-image-base"]["tier"] == "Qualité max"
+    # cfg, étapes, distillation et négatif actif exposés pour la fiche série et l'atelier
+    qualite = presets["qwen-image-base-qualite"]
+    assert (qualite["cfg"], qualite["steps"], qualite["distilled"], qualite["negative_active"]) == (
+        2.5,
+        35,
+        False,
+        True,
+    )
+    turbo = presets["qwen-image-turbo"]
+    assert (turbo["cfg"], turbo["distilled"], turbo["negative_active"]) == (1, True, False)
+    assert presets["qwen-image-base-rapide"]["negative_active"] is False
     assert presets["qwen-image-turbo"]["with_references"] == "qwen-image-edit-ref-turbo"
     assert (presets["qwen-image-turbo"]["tier_choice"], presets["qwen-image-turbo"]["estimated_s"]) == (
         "Turbo (production en volume, ~35 s par case)",
@@ -671,6 +685,42 @@ def test_workflow_presets_endpoint(make_client: Callable[..., TestClient]) -> No
     assert all(p["has_trial"] for p in presets.values() if p["role"] not in ("propre", "controle"))
     assert presets["qwen-image-croquis"]["is_sketch"] and presets["qwen-image-croquis"]["role"] == "croquis"
     assert presets["qwen-image-turbo"]["from_sketch"] == "qwen-image-turbo-from-sketch"
+
+
+def test_series_cfg_is_validated_and_applied_to_true_cfg_presets_only(make_client: Callable[..., TestClient]) -> None:
+    """CFG par série : 1 à 3, refusé (422 lisible) au-delà de 1 sur un palier distillé (Turbo) ; appliqué aux
+    cases des paliers non distillés, jamais aux croquis (modèle Turbo)."""
+    comfy = MockComfyUIClient()
+    c = make_client(comfy)
+    data = setup_chapter(c)
+    sid = data["series"]["id"]
+    assert data["series"]["cfg"] is None  # nouvelle série : cfg du palier (Qualité : 2,5)
+
+    turbo = c.patch(f"/projects/{sid}", json={"workflow_preset": "qwen-image-turbo", "cfg": 2.5})
+    assert turbo.status_code == 422
+    [error] = turbo.json()["errors"]
+    assert error["field"] == "cfg" and "distillé" in error["message"] and "cfg 1 obligatoire" in error["message"]
+    too_high = c.patch(f"/projects/{sid}", json={"cfg": 5})
+    assert too_high.status_code == 422
+    assert _ok(c.get(f"/projects/{sid}"))["workflow_preset"] == "qwen-image-base-qualite"  # rien d'enregistré
+
+    assert _ok(c.patch(f"/projects/{sid}", json={"cfg": 2}))["cfg"] == 2
+    # passer en Turbo avec un cfg > 1 enregistré : refusé tant que le cfg n'est pas vidé
+    assert c.patch(f"/projects/{sid}", json={"workflow_preset": "qwen-image-turbo"}).status_code == 422
+    p2 = data["panels"][1]  # sans référence : workflow de la série
+    _ok(c.post(f"/panels/{p2['id']}/generate"), 202)
+    _wait(c)
+    [wf] = comfy.prompts.values()
+    assert wf["9"]["inputs"]["cfg"] == 2 and wf["9"]["inputs"]["steps"] == 35
+    [img] = _ok(c.get(f"/panels/{p2['id']}/images"))
+    assert (img["params"]["cfg"], img["params"]["negative_active"]) == (2, True)
+
+    _ok(c.post(f"/panels/{p2['id']}/sketch"), 202)  # croquis : modèle distillé, cfg 1 quoi qu'il arrive
+    _wait(c)
+    sketch = list(comfy.prompts.values())[-1]
+    assert sketch["9"]["inputs"]["cfg"] == 1
+
+    assert _ok(c.patch(f"/projects/{sid}", json={"cfg": None, "workflow_preset": "qwen-image-turbo"}))["cfg"] is None
 
 
 # --- paliers : Turbo par défaut, « Régénérer en Qualité », taille des cases avec références ------
@@ -700,13 +750,13 @@ def test_regenerate_in_quality_adds_one_version_only(make_client: Callable[..., 
     comfy = MockComfyUIClient()
     c = make_client(comfy)
     data = setup_chapter(c)
-    assert data["series"]["workflow_preset"] == "qwen-image-base-rapide"  # nouvelle série : Rapide
+    assert data["series"]["workflow_preset"] == "qwen-image-base-qualite"  # nouvelle série : Qualité
     p1, p2, p3 = data["panels"]
     _ok(c.post(f"/panels/{p1['id']}/generate", json={"count": 2}), 202)
     _ok(c.post(f"/panels/{p2['id']}/generate"), 202)
     _wait(c)
     before = {pid: _ok(c.get(f"/panels/{pid}/images")) for pid in (p1["id"], p2["id"], p3["id"])}
-    assert [i["tier"] for i in before[p1["id"]]] == ["Rapide", "Rapide"]
+    assert [i["tier"] for i in before[p1["id"]]] == ["Qualité", "Qualité"]
 
     [job] = _ok(c.post(f"/panels/{p1['id']}/regenerate-quality"), 202)
     assert job["params"]["preset"] == "qwen-image-edit-ref"  # Qualité avec références (Aiko en a)
@@ -717,7 +767,12 @@ def test_regenerate_in_quality_adds_one_version_only(make_client: Callable[..., 
     after = _ok(c.get(f"/panels/{p1['id']}/images"))
     assert after[:2] == before[p1["id"]]  # versions existantes intactes (choix compris)
     new = after[2]
-    assert (new["version"], new["selected"], new["tier"], new["preset"]) == (3, False, "Qualité", "qwen-image-edit-ref")
+    assert (new["version"], new["selected"], new["tier"], new["preset"]) == (
+        3,
+        False,
+        "Qualité max",
+        "qwen-image-edit-ref",
+    )
     assert new["params"]["prompt"] == before[p1["id"]][0]["params"]["prompt"]  # même prompt
     assert new["seed"] not in {i["seed"] for i in before[p1["id"]]}
     assert len(new["params"]["reference_images"]) == 1
@@ -733,7 +788,7 @@ def test_regenerate_in_quality_adds_one_version_only(make_client: Callable[..., 
     assert job2["params"]["preset"] == "qwen-image-base"
     _wait(c)
     v1, v2 = _ok(c.get(f"/panels/{p2['id']}/images"))
-    assert v1 == before[p2["id"]][0] and v2["tier"] == "Qualité" and v2["params"]["reference_images"] == []
+    assert v1 == before[p2["id"]][0] and v2["tier"] == "Qualité max" and v2["params"]["reference_images"] == []
     assert v1["selected"] and not v2["selected"]
 
 
@@ -756,6 +811,7 @@ def test_chapter_estimate(make_client: Callable[..., TestClient]) -> None:
     data = setup_chapter(c)
     chapter_id, series_id = data["chapter"]["id"], data["series"]["id"]
     p1, p2, _ = data["panels"]
+    _ok(c.patch(f"/projects/{series_id}", json={"workflow_preset": "qwen-image-base-rapide"}))
 
     # aucune génération : estimations des presets (Rapide 60 s, avec références × 4)
     est = _ok(c.get(f"/chapters/{chapter_id}/estimate"))
@@ -866,7 +922,7 @@ def test_queue_reports_tier(make_client: Callable[..., TestClient]) -> None:
     _ok(c.post(f"/panels/{data['panels'][1]['id']}/generate"), 202)
     assert comfy.started.acquire(timeout=5)
     q = _ok(c.get("/queue"))
-    assert q["running"]["tier"] == "Rapide"
+    assert q["running"]["tier"] == "Qualité"
     comfy.gate.set()
     _wait(c)
 

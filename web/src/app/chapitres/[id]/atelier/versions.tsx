@@ -14,11 +14,19 @@ function caption(img: PanelImage): string {
   return `v${img.version}${img.tier ? ` · ${img.tier}` : ""} · seed ${img.seed ?? "—"} · ${formatDuration(imageDurationS(img))}`;
 }
 
+/** CFG d'une version et état du prompt négatif (lu seulement au-dessus de cfg 1). */
+export function negativeLabel(params: PanelImage["params"]): string | null {
+  const cfg = typeof params.cfg === "number" ? params.cfg : null;
+  if (cfg === null && params.negative_active === undefined) return null; // version d'avant le vrai CFG
+  const value = (cfg ?? 1).toLocaleString("fr-FR", { maximumFractionDigits: 2 });
+  return params.negative_active ? `cfg ${value} · négatif actif` : "négatif inactif (cfg 1)";
+}
+
 /** Pastille du palier qui a produit la version (Turbo, Rapide, Qualité). */
-function TierBadge({ tier }: { tier: string | null }) {
+function TierBadge({ tier, title }: { tier: string | null; title?: string | null }) {
   if (!tier) return null;
   const tone =
-    tier === "Qualité"
+    tier === "Qualité" || tier === "Qualité max"
       ? "bg-amber-500/15 text-amber-300"
       : tier === "Turbo"
         ? "bg-sky-500/15 text-sky-300"
@@ -26,7 +34,11 @@ function TierBadge({ tier }: { tier: string | null }) {
           ? "bg-zinc-200 text-zinc-800"
           : "bg-zinc-800 text-zinc-300";
   return (
-    <span className={`rounded px-1 py-px text-[9px] font-semibold uppercase tracking-wide ${tone}`} data-testid="version-tier">
+    <span
+      className={`rounded px-1 py-px text-[9px] font-semibold uppercase tracking-wide ${tone}`}
+      title={title ?? undefined}
+      data-testid="version-tier"
+    >
       {tier}
     </span>
   );
@@ -137,7 +149,7 @@ export function VersionsStrip({
               )}
               <span className="block px-1.5 py-1 text-[10px] leading-tight text-zinc-400">
                 <span className="flex items-center gap-1">
-                  v{img.version} <TierBadge tier={img.tier} />
+                  v{img.version} <TierBadge tier={img.tier} title={negativeLabel(img.params)} />
                   {img.finish && (
                     <span
                       className="rounded bg-emerald-500/15 px-1 py-px text-[9px] font-semibold uppercase tracking-wide text-emerald-300"
@@ -310,6 +322,7 @@ function VersionLarge({ img }: { img: PanelImage }) {
     ["Seed", String(img.seed ?? "—")],
     ["Durée", formatDuration(imageDurationS(img))],
     ["Palier", img.tier ?? "—"],
+    ["CFG", negativeLabel(p) ?? "—"],
     ["Workflow", img.preset ?? "—"],
     ...(typeof img.params.composition === "object" && img.params.composition
       ? ([

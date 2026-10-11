@@ -1,24 +1,26 @@
 # Presets appliqués aux nouveaux projets (modifiables projet par projet).
 page_format: a4-300dpi
-# Palier des nouvelles séries : Rapide (int8, 25 pas — le réglage du workflow officiel « Image Edit
-# (Qwen Image 2.1) »). Mesuré le 10/10/2026 : avec des références, 8 pas (Turbo) contre 25 pas changent
-# ~60 % de l'image ; ~1 min par case au lieu de ~35 s, accepté pour la qualité. Les séries existantes
-# gardent le leur (Turbo reste proposé dans la fiche série ; croquis, fiches de référence et planche de
-# style restent au palier croquis / Turbo).
-workflow: qwen-image-base-rapide
+# Palier des nouvelles séries : Qualité (11/10/2026) — mêmes fichiers int8 que Rapide, mais vrai CFG
+# (cfg 2,5, 35 pas) : à cfg 1, ComfyUI saute la passe négative et nos prompts négatifs n'étaient jamais
+# lus. ~2× Rapide par pas : ~3 h par chapitre de 10 pages au lieu de 3-4 min par page, accepté pour la
+# qualité. Le passage au propre suit (`from_sketch` du palier). Les séries existantes gardent le leur
+# (Turbo et Rapide restent proposés dans la fiche série ; les croquis restent au palier croquis / Turbo).
+workflow: qwen-image-base-qualite
 # Images de référence d'une case, par fiche (personnage, décor, objet) : principale = la seule image
 # principale de la fiche (la 1re de sa galerie — une vue simple, pas une planche multi-poses que le
 # modèle recopierait) ; toutes = la principale d'abord, puis les suivantes s'il reste des emplacements.
 panel_references: principale
 # Workflow choisi automatiquement pour une case dont un personnage a des images de référence
 # (sinon : le workflow de la série). Une case peut imposer le sien (`generation_preset`).
-# Rapide (25 pas) comme le palier par défaut ; le `with_references` du palier de la série prime.
-workflow_with_references: qwen-image-edit-ref-rapide
-# Palier des fiches de référence et du passage au propre de la planche de style, quel que soit le palier
-# de la série : Turbo (ce sont des images de travail, refaites souvent ; les cases passent en Rapide).
-# Son `with_references` sert dès qu'une image est envoyée. Absent = palier de la série.
+# Qualité (vrai CFG) comme le palier par défaut ; le `with_references` du palier de la série prime.
+workflow_with_references: qwen-image-edit-ref-qualite
+# Palier des fiches de référence de personnage et du passage au propre de la planche de style, quel que
+# soit le palier de la série : Turbo (images de travail, refaites souvent). Son `with_references` sert dès
+# qu'une image est envoyée. Absent = palier de la série. Les fiches d'objet et de décor imposent le palier
+# Qualité (`workflow` de presets/reference_sheets/) : leur prompt négatif « aucune personne » doit être lu.
 workflow_library: qwen-image-turbo
-# Palier « Régénérer en Qualité » de l'atelier (son `with_references` sert aux cases avec références).
+# Palier « Régénérer en Qualité » de l'atelier (son `with_references` sert aux cases avec références) :
+# Qualité max (bf16, 50 pas).
 workflow_quality: qwen-image-base
 # Style de mise en page des nouvelles séries (presets/layout_styles/) : sage, dynamique, nerveuse.
 layout_style: dynamique
@@ -51,12 +53,17 @@ style_board:
     - "Style: $style."
     - "A single full-page illustration, one continuous scene, no text, no speech bubbles."
   negative_prompt: "text, letters, speech bubbles, multiple panels"
-  # Référence de style validée — fiches de référence (personnages, objets, décors) :
+  # Référence de style validée — fiches de référence, par sorte (une seule valeur = toutes les sortes) :
   # with_subject = jointe seulement après une image du sujet (image de départ choisie ou variante
   # d'« Affiner »), en dernière image et s'il reste un emplacement ; sans image de départ, la fiche
   # se crée à partir de la description seule (texte → image) ;
   # always = jointe à chaque fiche (seule image envoyée sans image de départ) ; never = jamais.
-  reference_sheets: with_subject
+  # Objets et décors : never (11/10/2026) — la planche montre des personnages, qui apparaissaient dans
+  # la fiche puis dans chaque case qui l'utilise comme référence (même fuite que sur les cases le 10/10).
+  reference_sheets:
+    character: with_subject
+    object: never
+    decor: never
   # Cases : with_subject = jointe s'il reste un emplacement libre parmi les images de référence du
   # workflow (priorité : personnages > décor > objets > style), et seulement si la case a déjà une image
   # d'un personnage, de son décor ou d'un objet : jamais seule (le modèle d'édition la redessinerait

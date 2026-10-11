@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { AnnotationBar } from "@/components/annotation";
 import { InfoTip } from "@/components/info-tip";
+import { NegativeBadge } from "@/components/negative-badge";
 import { DpiBadge } from "@/components/print-dpi";
 import { ProductionLink } from "@/components/production-link";
 import { useQueue } from "@/components/queue";
@@ -226,6 +227,9 @@ export function PanelInspector({
   const refsImage = qcImage;
 
   const resolvedName = presets?.find((p) => p.id === d?.resolved_preset)?.name ?? d?.resolved_preset ?? "—";
+  // Workflow effectif de la case : le prompt négatif n'est lu qu'au-dessus de cfg 1 (jamais en Turbo).
+  const effective = presets?.find((p) => p.id === (d?.generation_preset || d?.resolved_preset));
+  const effectiveCfg = effective ? (effective.distilled ? 1 : (series.cfg ?? effective.cfg ?? 1)) : null;
   const hasImages = finals.length > 0;
   const quality = presets?.find((p) => p.is_quality) ?? null;
 
@@ -472,6 +476,11 @@ export function PanelInspector({
                     </option>
                   ))}
                 </Select>
+                {effectiveCfg !== null && (
+                  <p className="mt-1">
+                    <NegativeBadge cfg={effectiveCfg} />
+                  </p>
+                )}
               </Field>
             </div>
             <Field label="Seed" htmlFor="seed" error={seedError} hint="Vide = au hasard" help="atelier.seed">

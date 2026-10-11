@@ -50,11 +50,14 @@ settings:
     label: CFG
     group: Workflow
     type: number
-    min: 0
-    max: 30
+    min: 1
+    max: 3
     step: 0.1
     source: workflows/*.yaml#defaults.cfg
-    help: Qwen-Image 2.1 attend 1 (le prompt négatif est alors ignoré par le modèle).
+    help: >-
+      Valeur livrée : celle du workflow par défaut (Qualité : 2,5). Une fois modifiée, elle s'applique à tous
+      les workflows non distillés (Turbo et croquis gardent 1). À 1, le prompt négatif est ignoré par le
+      modèle (« négatif inactif ») ; au-delà de 3, l'image se dégrade. Chaque série peut avoir le sien.
   - key: megapixels
     label: Taille des images (mégapixels)
     group: Workflow
