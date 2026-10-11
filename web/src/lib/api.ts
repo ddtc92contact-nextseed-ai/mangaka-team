@@ -103,6 +103,20 @@ export type ProjectInput = Pick<
 export type CleanMode = "img2img" | "controlnet";
 
 /** « Remettre en page les pages non générées » d'une série. */
+/** Résultat de « Remettre l'atelier à zéro » (écran Réglages, ou `npm run reset`). */
+export interface ResetResult {
+  /** Dossier de la sauvegarde écrite avant toute suppression (data/backups/reset-<date-heure>/). */
+  backup: string;
+  /** Mode « tout » : réglages globaux des agents et savoir-faire remis par défaut. */
+  all: boolean;
+  series_deleted: number;
+  data_removed: string[];
+  /** Dossiers effacés dans ComfyUI (output/ et input/ mangaka/, jamais old/). */
+  comfyui_removed: string[];
+  /** ComfyUI non nettoyé (COMFYUI_DIR absent ou introuvable). */
+  comfyui_warning: string | null;
+}
+
 /** Résultat de « Nettoyer les variantes non retenues ». */
 export interface CleanupResult {
   variants_deleted: number;
@@ -2005,6 +2019,7 @@ export const api = {
   relayoutProject: (id: number) => request<RelayoutResult>(`/projects/${id}/relayout`, { method: "POST" }),
   deleteProject: (id: number) => request<void>(`/projects/${id}`, { method: "DELETE" }),
   cleanupProject: (id: number) => request<CleanupResult>(`/projects/${id}/cleanup`, { method: "POST" }),
+  resetWorkshop: (confirm: string, all: boolean) => request<ResetResult>("/reset", json("POST", { confirm, all })),
 
   listLibrary: <T extends LibraryEntry = LibraryEntry>(kind: LibraryKind, projectId: number) =>
     request<T[]>(`/projects/${projectId}/${LIBRARY_SEGMENT[kind]}`),

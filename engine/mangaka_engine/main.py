@@ -33,6 +33,7 @@ from .api import (
     qc,
     qc_bench,
     reference_sheets,
+    reset,
     sketch,
     storage,
     style_board,
@@ -264,6 +265,7 @@ def create_app(settings: Settings | None = None, providers: Providers | None = N
     app.include_router(qc_bench.router)
     app.include_router(knowledge.router)
     app.include_router(agents.router)
+    app.include_router(reset.router)
     return app
 
 

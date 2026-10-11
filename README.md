@@ -209,6 +209,46 @@ mangaka/<série>/chapitre-01/page-01/case-01, case-01-croquis, case-01-controle,
 
 `data/` garde ses dossiers par id (`data/projects/<id>/…`) : les chemins y sont enregistrés dans la base.
 
+### Remettre l'atelier à zéro
+
+Pour repartir d'un atelier vide (jamais automatique) : bouton « Remettre l'atelier à zéro » de l'écran
+**Réglages** (taper `RÉINITIALISER`), ou en ligne de commande, de préférence application arrêtée :
+
+```bash
+npm run reset            # demande de taper RÉINITIALISER
+npm run reset -- --all   # remet aussi les réglages globaux et le savoir-faire par défaut
+npm run reset -- --yes   # sans question (script)
+```
+
+1. **Refus** si un job (génération, contrôle…) est en attente ou en cours : attendre sa fin ou l'annuler.
+2. **Sauvegarde d'abord** dans `data/backups/reset-<date-heure>/` : `mangaka.db` (copie cohérente par l'API
+   de sauvegarde de SQLite) et `data.tar.gz` (tout `data/` sauf la base et les sauvegardes). Le chemin est
+   affiché. Si la sauvegarde échoue, rien n'est supprimé.
+3. **Effacé** : toutes les séries et tout ce qui en dépend (chapitres, pages, cases et leurs versions,
+   personnages, objets, décors, planche de style, variantes, bibles, mises en page, jobs, contrôles qualité,
+   savoir-faire et réglages d'agents propres à une série), tout `data/` sauf la base et `data/backups/`, et
+   le contenu de `output/mangaka/` et `input/mangaka/` dans `COMFYUI_DIR` — **sauf `old/`**. Sans
+   `COMFYUI_DIR` (ou dossier introuvable), ComfyUI n'est pas touché et le résultat le dit. Les ids repartent
+   de 1.
+4. **Gardé** : presets, `.env`, `launcher.env`, réglages globaux des agents (« L'équipe »), savoir-faire de
+   l'équipe, `data/backups/`, `output/mangaka/old/`. Avec « Tout remettre à zéro » (`--all`), réglages
+   globaux et savoir-faire reviennent aux valeurs par défaut — jamais les presets, les `.env`, les
+   sauvegardes ni `old/`.
+
+**Restaurer une sauvegarde** :
+
+```bash
+./scripts/stop.sh                       # ou Ctrl+C sur npm run dev : l'application doit être arrêtée
+cd data
+SAUVEGARDE=backups/reset-2026-10-11-153000   # le dossier affiché lors de la remise à zéro
+rm -f mangaka.db mangaka.db-wal mangaka.db-shm
+cp "$SAUVEGARDE/mangaka.db" mangaka.db
+tar -xzf "$SAUVEGARDE/data.tar.gz"      # remet projects/, exports/… à leur place dans data/
+```
+
+puis relancer l'application. Les fichiers effacés de ComfyUI ne sont pas sauvegardés (zone de transit :
+tout ce qui compte est déjà copié dans `data/`).
+
 ## Commandes
 
 | Commande | Effet |
@@ -219,6 +259,7 @@ mangaka/<série>/chapitre-01/page-01/case-01, case-01-croquis, case-01-controle,
 | `npm run lint:engine` | Ruff sur le moteur |
 | `npm run test:launcher` | Tests du lanceur en un clic (faux serveurs HTTP, aucun service réel) ; `shellcheck -x scripts/*.sh` pour le lint |
 | `npm run setup:engine` | (Ré)installe le venv du moteur |
+| `npm run reset` | Remet l'atelier à zéro après une sauvegarde (voir « Remettre l'atelier à zéro ») ; `-- --all` pour les réglages et le savoir-faire |
 
 ## API du moteur
 
