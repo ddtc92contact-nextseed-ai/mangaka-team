@@ -12,13 +12,14 @@ from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from ..pipeline.reference_sheets import delete_entry_variants, next_position
+from ..pipeline.reference_sheets import delete_entry_variants, entry_folder, next_position
 from ..store.files import StoredImage, cache_headers, versioned_url
 from ..store.models import AssetKind, Chapter, Page, Panel, SeriesAsset, SeriesAssetImage
 from .characters import apply_changes, check_room, read_uploads, reference_image_out, store_uploads
 from .deps import AppContext, get_ctx, get_session
 from .projects import get_project_or_404
 from .schemas import AssetCreate, AssetOut, AssetUpdate
+from .storage import move_folders, remove_entry_folders, rename_entry, set_entry_slug
 
 # Sorte → (segment d'URL, libellé « introuvable », dossier sous data/projects/{id}/).
 ROUTES = {
@@ -37,6 +38,7 @@ def asset_out(a: SeriesAsset) -> AssetOut:
         project_id=a.project_id,
         kind=a.kind.value,
         name=a.name,
+        slug=a.slug,
         visual_description=a.visual_description,
         prompt_keywords=list(a.prompt_keywords or []),
         lora_name=a.lora_name,
@@ -92,9 +94,12 @@ def _router(kind: AssetKind) -> APIRouter:
     @router.post(
         f"/projects/{{project_id}}/{segment}", response_model=AssetOut, status_code=201, name=f"create_{segment}"
     )
-    def create_asset(project_id: int, body: AssetCreate, session: Session = Depends(get_session)) -> AssetOut:
-        get_project_or_404(session, project_id)
+    def create_asset(
+        project_id: int, body: AssetCreate, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
+    ) -> AssetOut:
+        series = get_project_or_404(session, project_id)
         asset = SeriesAsset(project_id=project_id, kind=kind, **body.model_dump())
+        set_entry_slug(ctx, session, asset, series)
         session.add(asset)
         session.commit()
         return asset_out(get_asset_or_404(session, kind, asset.id))
@@ -104,10 +109,14 @@ def _router(kind: AssetKind) -> APIRouter:
         return asset_out(get_asset_or_404(session, kind, asset_id))
 
     @router.patch(f"/{segment}/{{asset_id}}", response_model=AssetOut, name=f"update_{segment}")
-    def update_asset(asset_id: int, body: AssetUpdate, session: Session = Depends(get_session)) -> AssetOut:
+    def update_asset(
+        asset_id: int, body: AssetUpdate, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
+    ) -> AssetOut:
         asset = get_asset_or_404(session, kind, asset_id)
         apply_changes(asset, body)
+        move = rename_entry(ctx, session, asset, asset.project) if "name" in body.model_fields_set else None
         session.commit()
+        move_folders(ctx, move)
         return asset_out(asset)
 
     @router.delete(f"/{segment}/{{asset_id}}", status_code=204, name=f"delete_{segment}")
@@ -117,11 +126,14 @@ def _router(kind: AssetKind) -> APIRouter:
         asset = get_asset_or_404(session, kind, asset_id)
         paths = [img.path for img in asset.reference_images]
         paths += delete_entry_variants(session, asset.kind.value, asset.id)
+        series = asset.project.slug
         unlink_asset(session, asset)
         session.delete(asset)
         session.commit()
         for path in paths:
             ctx.files.delete(path)
+        ctx.files.delete_tree(entry_folder(asset))
+        remove_entry_folders(ctx, series, asset)
         return Response(status_code=204)
 
     @router.post(

@@ -30,6 +30,7 @@ from ..store.models import (
 from .deps import AppContext, get_ctx, get_session
 from .errors import FieldError
 from .schemas import ProjectCreate, ProjectOut, ProjectUpdate, RelayoutOut
+from .storage import move_folders, remove_series_folders, rename_series, set_series_slug
 
 router = APIRouter(prefix="/projects", tags=["projets"])
 
@@ -50,6 +51,7 @@ def project_out(
     return ProjectOut(
         id=project.id,
         title=project.title,
+        slug=project.slug,
         legacy_style=project.legacy_style or "",
         style_genre=project.style_genre,
         style_rendering=project.style_rendering,
@@ -269,6 +271,7 @@ def create_project(
         "shout_font": body.shout_font or genre.fonts.shout,
     }
     _check_fonts(ctx, {"dialogue_font": body.dialogue_font, "shout_font": body.shout_font})
+    set_series_slug(ctx, session, project)
     session.add(project)
     session.commit()
     _save_fonts(ctx, session, project, fonts)
@@ -343,12 +346,14 @@ def update_project(
     ai_off = changes.get("ai_prompt") is False and project.ai_prompt
     for key, value in changes.items():
         setattr(project, key, value)
+    renamed = rename_series(ctx, session, project) if "title" in changes else None
     if ai_off:
         drop_written_prompts(ctx.agents.presets_for(project.id), session, project.id)
     if direction is not None:
         # Après les autres champs : un changement de format en même temps fait tout recalculer.
         change_reading_direction(ctx.agents.presets_for(project.id), project, ReadingDirection(direction))
     session.commit()
+    move_folders(ctx, ([renamed[0]], [renamed[1]]) if renamed else None)
     _save_fonts(ctx, session, project, fonts)
     return project_out(ctx, project, *_counts(session, project_id))
 
@@ -385,8 +390,10 @@ def delete_project(
     project_id: int, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
 ) -> Response:
     project = get_project_or_404(session, project_id)
+    slug = project.slug
     session.delete(project)
     session.commit()
     ctx.agents.invalidate()  # surcharges d'agents de la série supprimées avec elle
     ctx.files.delete_tree(f"projects/{project_id}")
+    remove_series_folders(ctx, slug)  # ses dossiers dans ComfyUI (output et input), jamais ceux d'une autre
     return Response(status_code=204)

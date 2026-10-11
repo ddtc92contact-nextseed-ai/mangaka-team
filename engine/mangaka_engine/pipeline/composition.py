@@ -30,12 +30,12 @@ from sqlalchemy.orm import Session
 from ..presets import PresetRegistry, build_control_map_workflow
 from ..presets.schemas import ControlSettings
 from ..providers.comfyui import ComfyUIClient, ComfyUIError, ComfyUIInterruptedError, ComfyUITimeoutError
+from ..store.comfy_folders import ComfyFolders, page_folder, panel_name
 from ..store.db import Database
 from ..store.files import FileStore
 from ..store.models import ImageKind, Job, JobStatus, Panel, PanelImage
 from .comfy_check import check_control
 from .generation import (
-    UPLOAD_SUBFOLDER,
     GenerationError,
     control_variant,
     guide_image,
@@ -306,8 +306,10 @@ class ControlMapExecutor:
         comfyui_error: str | None = None,
         poll_s: float = 1.0,
         presets_for: Callable[[int | None], PresetRegistry] | None = None,
+        folders: ComfyFolders | None = None,
     ) -> None:
         self.db = db
+        self.folders = folders  # sortie de ComfyUI effacée une fois copiée dans data/
         self.presets_for = presets_for or (lambda _project_id: presets)
         self.files = files
         self.comfyui = comfyui
@@ -339,12 +341,12 @@ class ControlMapExecutor:
             _, data, filename = guide_image(session, self.files, panel, lock)
             chapter = panel.page.chapter
             folder = f"projects/{chapter.project_id}/chapters/{chapter.id}/panels/{panel.id}/guides"
-            prefix = f"mangaka/serie-{chapter.project_id}/chapitre-{chapter.number}/page-{panel.page.number}"
-            prefix += f"/controle-case-{panel.index + 1}"
+            upload_folder = page_folder(chapter, panel.page)
+            prefix = f"{upload_folder}/{panel_name(panel, 'controle')}"
             type_id = str(lock.get("type"))
 
         report(5, "Envoi de l'image guide à ComfyUI…")
-        name = comfy.upload_image(data, filename, subfolder=UPLOAD_SUBFOLDER)
+        name = comfy.upload_image(data, filename, subfolder=upload_folder)
         built = build_control_map_workflow(loaded, name, type_id, size["width"], size["height"], filename_prefix=prefix)
         if cancel.is_set():
             raise ComfyUIInterruptedError("aperçu annulé")
@@ -369,6 +371,8 @@ class ControlMapExecutor:
             self._prompt_ids.pop(job_id, None)
         report(92, "Récupération de la carte…")
         stored = self.files.save_image(comfy.fetch_image(refs[0]), folder)
+        if self.folders is not None:
+            self.folders.discard_output(refs[0])
 
         with self.db.session_scope() as session:
             panel = session.get(Panel, panel_id)

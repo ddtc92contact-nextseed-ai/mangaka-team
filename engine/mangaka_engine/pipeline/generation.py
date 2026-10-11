@@ -66,6 +66,7 @@ from ..providers.comfyui import (
     ComfyUIWorkflowError,
 )
 from ..providers.llm import LLMProvider
+from ..store.comfy_folders import ComfyFolders, entry_folder, page_folder, panel_name
 from ..store.db import Database
 from ..store.files import FileStore, InvalidImageError
 from ..store.models import (
@@ -114,7 +115,7 @@ STEP = "generation"
 QC_STEP = "qc"
 ACTIVE = (JobStatus.pending, JobStatus.running)
 MAX_VARIANTS = 4
-UPLOAD_SUBFOLDER = "mangaka"
+UPLOAD_SUBFOLDER = "mangaka"  # images envoyées hors d'une série (case d'essai) ; sinon store/comfy_folders.py
 
 
 class GenerationError(Exception):
@@ -413,11 +414,11 @@ def guide_image(
             )
         rel = img.path
         info: dict[str, Any] = {"source": source, "image_id": img.id, "version": img.version}
-        filename = f"guide_case{panel.id}_v{img.version}{PurePosixPath(rel).suffix or '.png'}"
+        filename = f"{panel_name(panel, 'guide')}-v{img.version}{PurePosixPath(rel).suffix or '.png'}"
     elif source == "import":
         rel = str(control.get("path") or "")
         info = {"source": source, "path": rel}
-        filename = f"guide_case{panel.id}_{PurePosixPath(rel).name}"
+        filename = f"{panel_name(panel, 'guide')}-{PurePosixPath(rel).name}"
     else:
         raise GenerationError(f"source de composition inconnue : « {source} »")
     path = files.absolute(rel)
@@ -955,6 +956,10 @@ class _Plan:
     control_data: bytes | None = None
     # LoRA de caméra et d'identité : angle demandé, LoRA non ajoutés et pourquoi (`CameraPlan.as_dict`).
     camera: dict[str, Any] = field(default_factory=dict)
+    # Dossier de la page dans ComfyUI (`mangaka/<série>/chapitre-01/page-01`) : croquis, guide, source et
+    # masque envoyés ; les images de référence vont dans le dossier de leur fiche (`subfolder` de chacune).
+    upload_folder: str = UPLOAD_SUBFOLDER
+    panel_label: str = "case"  # `case-01` : début du nom des fichiers envoyés
 
 
 def _capitalize(text: str) -> str:
@@ -988,9 +993,12 @@ class GenerationExecutor:
         presets_for: Callable[[int | None], PresetRegistry] | None = None,
         knowledge: KnowledgeBase | None = None,
         llm_for: Callable[[int | None], tuple[LLMProvider | None, str | None]] | None = None,
+        folders: ComfyFolders | None = None,
     ) -> None:
         self.db = db
         self.knowledge = knowledge
+        # Dossiers de ComfyUI : la copie d'un résultat dans `output/` est effacée une fois dans data/.
+        self.folders = folders
         # LLM qui rédige le prompt des cases d'une série (« Prompt rédigé par l'IA ») ; None : aucun.
         self.llm_for = llm_for
         # Presets effectifs d'une série (profils des agents, écran « L'équipe ») ; sans profil : `presets`.
@@ -1124,7 +1132,6 @@ class GenerationExecutor:
                         raise GenerationError(f"image de référence de {entry.name} absente de data/ ({image.path})")
                     ext = PurePosixPath(image.path).suffix or ".png"
                     kind = entry_kind(entry)
-                    prefix = {"character": "perso", "decor": "decor", "object": "objet", "style": "style"}[kind]
                     references.append(
                         {
                             "slot": len(references) + 1,
@@ -1133,7 +1140,8 @@ class GenerationExecutor:
                             "name": entry.name,
                             "image_id": image.id,
                             **({"angle": image.angle} if image.angle else {}),
-                            "filename": f"{prefix}{entry.id}_img{image.id}{ext}",
+                            "subfolder": entry_folder(entry, chapter.project),
+                            "filename": f"reference-{image.id}{ext}",
                         }
                     )
                     reference_data.append(path.read_bytes())
@@ -1173,10 +1181,16 @@ class GenerationExecutor:
             if sketch is not None and "denoise" in loaded.preset.mapping:
                 params["denoise"] = sketch["denoise"]
             if "filename_prefix" in loaded.preset.mapping:
-                params["filename_prefix"] = (
-                    f"mangaka/serie-{chapter.project_id}/chapitre-{chapter.number}/page-{page.number}"
-                    f"/{'croquis-' if loaded.preset.role == 'croquis' else ''}case-{panel.index + 1}"
+                suffix = (
+                    "reparation"
+                    if repair is not None
+                    else "croquis"
+                    if loaded.preset.role == "croquis"
+                    else "angle"
+                    if angle_id
+                    else ""
                 )
+                params["filename_prefix"] = f"{page_folder(chapter, page)}/{panel_name(panel, suffix)}"
             plan = _Plan(
                 loaded=loaded,
                 params=params,
@@ -1196,6 +1210,8 @@ class GenerationExecutor:
                 sketch_data=sketch_data,
                 control=control,
                 control_data=control_data,
+                upload_folder=page_folder(chapter, page),
+                panel_label=panel_name(panel),
             )
             session.commit()  # prompt final éventuellement reconstruit
             return plan
@@ -1225,7 +1241,7 @@ class GenerationExecutor:
             "seed": sketch.seed,
             "method": "img2img",
             "denoise": denoise,
-            "filename": f"croquis_case{panel.id}_v{sketch.version}{PurePosixPath(sketch.path).suffix or '.png'}",
+            "filename": f"{panel_name(panel, 'croquis')}-v{sketch.version}{PurePosixPath(sketch.path).suffix or '.png'}",
         }
         return source, path.read_bytes()
 
@@ -1275,7 +1291,8 @@ class GenerationExecutor:
             "name": f"version {img.version}",
             "image_id": img.id,
             "version": img.version,
-            "filename": f"angle_case{panel.id}_v{img.version}{PurePosixPath(img.path).suffix or '.png'}",
+            "subfolder": page_folder(panel.page.chapter, panel.page),
+            "filename": f"{panel_name(panel, 'angle')}-v{img.version}{PurePosixPath(img.path).suffix or '.png'}",
         }
         return ref, path.read_bytes()
 
@@ -1314,23 +1331,27 @@ class GenerationExecutor:
         uploaded: list[str] = []
         for i, (ref, data) in enumerate(zip(plan.references, plan.reference_data, strict=True), start=1):
             report(4, f"Envoi de l'image de référence {i}/{len(plan.references)} à ComfyUI…")
-            uploaded.append(comfy.upload_image(data, ref["filename"], subfolder=UPLOAD_SUBFOLDER))
+            uploaded.append(comfy.upload_image(data, ref["filename"], subfolder=ref["subfolder"]))
         sketch_name: str | None = None
         if plan.sketch is not None and plan.sketch_data is not None:
             report(6, f"Envoi du croquis validé (version {plan.sketch['version']}) à ComfyUI…")
-            sketch_name = comfy.upload_image(plan.sketch_data, plan.sketch["filename"], subfolder=UPLOAD_SUBFOLDER)
+            sketch_name = comfy.upload_image(plan.sketch_data, plan.sketch["filename"], subfolder=plan.upload_folder)
         control: ControlInput | None = None
         if plan.control is not None and plan.control_data is not None:
             report(6, "Envoi de l'image guide (composition verrouillée) à ComfyUI…")
-            name = comfy.upload_image(plan.control_data, plan.control["filename"], subfolder=UPLOAD_SUBFOLDER)
+            name = comfy.upload_image(plan.control_data, plan.control["filename"], subfolder=plan.upload_folder)
             control = ControlInput(image=name, type=plan.control["type"], strength=plan.control["strength"])
         inpaint_images: tuple[str, str] | None = None
         if plan.repair is not None:
             report(6, "Envoi de la version source et du masque à ComfyUI…")
             source_id = plan.repair.get("source_image_id")
+            source_version = plan.repair.get("source_version")
+            label = plan.panel_label
             inpaint_images = (
-                comfy.upload_image(plan.source_data, f"source_img{source_id}.png", subfolder=UPLOAD_SUBFOLDER),
-                comfy.upload_image(plan.mask_data, f"masque_job{job_id}.png", subfolder=UPLOAD_SUBFOLDER),
+                comfy.upload_image(
+                    plan.source_data, f"{label}-source-v{source_version or source_id}.png", subfolder=plan.upload_folder
+                ),
+                comfy.upload_image(plan.mask_data, f"{label}-masque-job{job_id}.png", subfolder=plan.upload_folder),
             )
         built = build_workflow(
             plan.loaded,
@@ -1390,6 +1411,8 @@ class GenerationExecutor:
             except (UnidentifiedImageError, OSError) as exc:
                 raise GenerationError(f"image renvoyée par ComfyUI illisible : {exc}") from None
         stored = self.files.save_image(data, plan.folder)
+        if self.folders is not None:
+            self.folders.discard_output(refs[0])
         duration_ms = int((time.monotonic() - t0) * 1000)
 
         with self.db.session_scope() as session:
@@ -1452,7 +1475,7 @@ class GenerationExecutor:
                     **({"camera": plan.camera} if plan.camera else {}),
                     "reference_images": [
                         {
-                            **{k: v for k, v in ref.items() if k != "filename"},
+                            **{k: v for k, v in ref.items() if k not in ("filename", "subfolder")},
                             **({"character_id": ref["id"]} if ref["kind"] == "character" else {}),
                             "comfyui_name": name,
                         }

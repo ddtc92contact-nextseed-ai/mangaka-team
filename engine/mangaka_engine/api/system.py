@@ -90,6 +90,8 @@ def health(ctx: AppContext = Depends(get_ctx)) -> dict[str, Any]:
             for kind in ("llm", "vision", "comfyui", "detectors", "identity", "embedding")
         },
         "active": active_providers(ctx),
+        # Dossiers de ComfyUI (rangement et nettoyage) : `problem` = rien n'est supprimé hors de data/.
+        "storage": {**ctx.folders.status(), "warning": ctx.folders.warning()},
         "mock": all(
             providers.names.get(k) == "mock" for k in ("llm", "vision", "comfyui", "detectors", "identity", "embedding")
         ),

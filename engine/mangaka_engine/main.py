@@ -33,6 +33,7 @@ from .api import (
     qc_bench,
     reference_sheets,
     sketch,
+    storage,
     style_board,
     system,
 )
@@ -62,6 +63,7 @@ from .pipeline.style_board import STEP as STYLE_BOARD_STEP
 from .pipeline.style_board import StyleBoardExecutor
 from .presets import PresetRegistry
 from .providers.factory import Providers, build_providers
+from .store.comfy_folders import ComfyFolders
 from .store.db import Database
 from .store.files import FileStore
 
@@ -83,6 +85,13 @@ def build_context(settings: Settings, providers: Providers | None = None) -> App
         log.warning("%s job(s) interrompu(s) par l'arrêt précédent marqué(s) en échec", interrupted)
     recover_states(db)
     files = FileStore(settings.data_dir)
+    # Dossiers de ComfyUI (rangement, nettoyage) : COMFYUI_DIR, sinon ~/ComfyUI avec le vrai ComfyUI.
+    folders = ComfyFolders.from_settings(
+        settings.comfyui_dir,
+        provider=providers.names.get("comfyui"),
+    )
+    if folders.problem:
+        log.warning("dossiers ComfyUI : %s", folders.problem)
     kb = KnowledgeBase(presets.knowledge, providers.embedding)
     # « Savoir-faire » des profils d'agents (écran « L'équipe ») : prime sur knowledge.yaml.
     kb.profile_lookup = agents_service.knowledge_collections
@@ -99,6 +108,7 @@ def build_context(settings: Settings, providers: Providers | None = None) -> App
         knowledge=kb,
         # LLM du dessinateur (écran « L'équipe ») : rédaction du prompt de chaque case.
         llm_for=lambda project_id: agents_service.llm_for(WRITER_AGENT, project_id),
+        folders=folders,
     )
     comfy = providers.comfyui
 
@@ -151,6 +161,7 @@ def build_context(settings: Settings, providers: Providers | None = None) -> App
         comfyui_error=providers.errors.get("comfyui"),
         poll_s=settings.comfyui_poll_s,
         presets_for=agents_service.presets_for,
+        folders=folders,
     )
     queue.add_step(
         FINISHING_STEP, QueueStep(execute=finishing, describe_error=describe_error, interrupt=finishing.interrupt)
@@ -166,6 +177,8 @@ def build_context(settings: Settings, providers: Providers | None = None) -> App
         presets_for=agents_service.presets_for,
         detectors=providers.detectors,
         detectors_error=providers.errors.get("detectors", ""),
+        folders=folders,
+        variants_kept=settings.reference_variants_kept,
     )
     queue.add_step(
         REFERENCE_STEP, QueueStep(execute=references, describe_error=describe_error, interrupt=references.interrupt)
@@ -179,6 +192,7 @@ def build_context(settings: Settings, providers: Providers | None = None) -> App
         comfyui_error=providers.errors.get("comfyui"),
         poll_s=settings.comfyui_poll_s,
         presets_for=agents_service.presets_for,
+        folders=folders,
     )
     queue.add_step(
         STYLE_BOARD_STEP,
@@ -193,6 +207,7 @@ def build_context(settings: Settings, providers: Providers | None = None) -> App
         comfyui_error=providers.errors.get("comfyui"),
         poll_s=settings.comfyui_poll_s,
         presets_for=agents_service.presets_for,
+        folders=folders,
     )
     queue.add_step(
         CONTROL_MAP_STEP, QueueStep(execute=control_map, describe_error=describe_error, interrupt=control_map.interrupt)
@@ -209,6 +224,7 @@ def build_context(settings: Settings, providers: Providers | None = None) -> App
         qc=qc_executor,
         agents=agents_service,
         knowledge=kb,
+        folders=folders,
     )
 
 
@@ -227,6 +243,7 @@ def create_app(settings: Settings | None = None, providers: Providers | None = N
     install_error_handlers(app)
     app.include_router(system.router)
     app.include_router(projects.router)
+    app.include_router(storage.router)
     app.include_router(characters.router)
     app.include_router(assets.router)
     app.include_router(reference_sheets.router)

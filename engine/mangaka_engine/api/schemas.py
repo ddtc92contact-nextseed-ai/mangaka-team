@@ -109,6 +109,7 @@ class ProjectUpdate(_In):
 class ProjectOut(BaseModel):
     id: int
     title: str
+    slug: str  # dossier de la série dans ComfyUI : mangaka/<slug>/
     # Ancien style libre (lecture seule) ; ignoré dès qu'un pack est choisi.
     legacy_style: str
     style_genre: str | None
@@ -150,6 +151,15 @@ class ProjectOut(BaseModel):
     layout_style_notice: bool = False
     created_at: datetime
     updated_at: datetime
+
+
+class CleanupOut(BaseModel):
+    """Résultat de « Nettoyer les variantes non retenues »."""
+
+    variants_deleted: int  # variantes non gardées effacées (fiches et essais de la planche de style)
+    comfyui_folders_removed: list[str]  # dossiers de transit vidés dans ComfyUI (relatifs à ComfyUI)
+    comfyui_cleaned: bool  # False : dossier ComfyUI inconnu ou générations en cours (voir `warning`)
+    warning: str | None = None
 
 
 class RelayoutOut(BaseModel):
@@ -998,6 +1008,7 @@ class CharacterOut(BaseModel):
     id: int
     project_id: int
     name: str
+    slug: str  # dossier de la fiche dans ComfyUI : mangaka/<série>/personnages|objets|decors/<slug>/
     visual_description: str
     prompt_keywords: list[str]
     lora_name: str | None

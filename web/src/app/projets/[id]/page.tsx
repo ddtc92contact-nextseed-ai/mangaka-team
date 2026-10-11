@@ -10,6 +10,7 @@ import { EstimateLabel } from "@/components/estimate";
 import { LayoutStyleNotices } from "@/components/layout-style-notice";
 import { ProjectForm } from "@/components/project-form";
 import { SeriesBible } from "@/components/series-bible";
+import { SeriesFiles } from "@/components/series-files";
 import { StyleBoardBanner, StyleBoardCard, useStyleBoard } from "@/components/style-board";
 import { DIRECTIONS, DirectionBadge } from "@/components/reading-direction";
 import { SeriesStatusBadge } from "@/components/status";
@@ -136,6 +137,9 @@ export default function ProjectPage() {
       </div>
       <div className="mt-6">
         <SeriesBible projectId={id} />
+      </div>
+      <div className="mt-6">
+        <SeriesFiles project={project.data} />
       </div>
     </>
   );

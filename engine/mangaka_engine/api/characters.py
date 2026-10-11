@@ -10,13 +10,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from ..pipeline.names import relink_project
-from ..pipeline.reference_sheets import MAX_KEPT, delete_entry_variants, next_position
+from ..pipeline.reference_sheets import MAX_KEPT, delete_entry_variants, entry_folder, next_position
 from ..store.files import InvalidImageError, StoredImage, cache_headers, versioned_url
 from ..store.models import Character, CharacterImage, SeriesAsset, SeriesAssetImage
 from .deps import AppContext, get_ctx, get_session
 from .errors import FieldError
 from .projects import get_project_or_404
 from .schemas import CharacterCreate, CharacterOut, CharacterUpdate, EntryUpdate, ReferenceImageOut
+from .storage import move_folders, remove_entry_folders, rename_entry, set_entry_slug
 
 router = APIRouter(tags=["personnages"])
 
@@ -45,6 +46,7 @@ def character_out(c: Character) -> CharacterOut:
         id=c.id,
         project_id=c.project_id,
         name=c.name,
+        slug=c.slug,
         visual_description=c.visual_description,
         prompt_keywords=list(c.prompt_keywords or []),
         lora_name=c.lora_name,
@@ -143,9 +145,12 @@ def list_characters(project_id: int, session: Session = Depends(get_session)) ->
 
 
 @router.post("/projects/{project_id}/characters", response_model=CharacterOut, status_code=201)
-def create_character(project_id: int, body: CharacterCreate, session: Session = Depends(get_session)) -> CharacterOut:
-    get_project_or_404(session, project_id)
+def create_character(
+    project_id: int, body: CharacterCreate, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
+) -> CharacterOut:
+    series = get_project_or_404(session, project_id)
     character = Character(project_id=project_id, **body.model_dump())
+    set_entry_slug(ctx, session, character, series)
     session.add(character)
     session.flush()
     relink_project(session, project_id)  # les cases qui citaient déjà ce nom le retrouvent
@@ -159,13 +164,20 @@ def get_character(character_id: int, session: Session = Depends(get_session)) ->
 
 
 @router.patch("/characters/{character_id}", response_model=CharacterOut)
-def update_character(character_id: int, body: CharacterUpdate, session: Session = Depends(get_session)) -> CharacterOut:
+def update_character(
+    character_id: int,
+    body: CharacterUpdate,
+    session: Session = Depends(get_session),
+    ctx: AppContext = Depends(get_ctx),
+) -> CharacterOut:
     character = get_character_or_404(session, character_id)
     apply_changes(character, body)
+    move = rename_entry(ctx, session, character, character.project) if "name" in body.model_fields_set else None
     if {"name", "aliases"} & body.model_fields_set:
         session.flush()
         relink_project(session, character.project_id)
     session.commit()
+    move_folders(ctx, move)
     return character_out(character)
 
 
@@ -177,12 +189,15 @@ def delete_character(
     paths = [img.path for img in character.reference_images]
     paths += delete_entry_variants(session, "character", character.id)
     project_id = character.project_id
+    series = character.project.slug
     session.delete(character)
     session.flush()
     relink_project(session, project_id)  # ses noms redeviennent « sans fiche » dans les cases
     session.commit()
     for path in paths:
         ctx.files.delete(path)
+    ctx.files.delete_tree(entry_folder(character))
+    remove_entry_folders(ctx, series, character)
     return Response(status_code=204)
 
 

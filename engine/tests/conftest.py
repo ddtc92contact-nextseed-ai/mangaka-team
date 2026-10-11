@@ -34,6 +34,9 @@ def make_settings(tmp_path: Path) -> Callable[..., Settings]:
             "mangaka_data_dir": tmp_path / "data",
             "mangaka_presets_dir": PRESETS_DIR,
             "mock_comfyui_seconds": 0,
+            # Jamais le vrai ~/ComfyUI (ni un COMFYUI_DIR du shell) : les tests du rangement passent un dossier
+            # temporaire.
+            "comfyui_dir": None,
         }
         values.update(overrides)
         return Settings(_env_file=None, **values)

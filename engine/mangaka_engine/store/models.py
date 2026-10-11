@@ -116,8 +116,9 @@ def _enum(e: type[enum.Enum]) -> Enum:
     return Enum(e, native_enum=False, validate_strings=True, length=20)
 
 
-# Ids jamais réutilisés (AUTOINCREMENT) pour les tables dont l'id finit dans l'URL d'un fichier servi : sans
-# cela SQLite reprend max(id) + 1 après une suppression, et une URL recyclée montrerait l'image supprimée.
+# Ids jamais réutilisés (AUTOINCREMENT) pour les tables dont l'id finit dans l'URL d'un fichier servi ou dans
+# un dossier de data/ (séries, chapitres, pages) : sans cela SQLite reprend max(id) + 1 après une suppression,
+# et une URL ou un dossier recyclé montrerait les images supprimées.
 NEVER_REUSED = {"sqlite_autoincrement": True}
 
 
@@ -125,9 +126,12 @@ class Project(TimestampMixin, Base):
     """Une série (table historique `projects`)."""
 
     __tablename__ = "projects"
+    __table_args__ = NEVER_REUSED
 
     id: Mapped[int] = mapped_column(primary_key=True)
     title: Mapped[str] = mapped_column(String(200))
+    # Nom du dossier de la série dans ComfyUI (store/slugs.py) : tiré du titre, unique, jamais `old`.
+    slug: Mapped[str] = mapped_column(String(120), default="", server_default="", index=True)
     # Ancien style en texte libre : lecture seule (fiche série), ignoré dès qu'un pack est choisi.
     legacy_style: Mapped[str] = mapped_column(Text, default="")
     # Packs de style (presets/style_genres, style_renderings, style_tones) ; None = pas encore choisi.
@@ -188,6 +192,8 @@ class Character(TimestampMixin, Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(120))
+    # Dossier de la fiche dans ComfyUI (`<série>/personnages/<slug>`) : tiré du nom, unique dans la série.
+    slug: Mapped[str] = mapped_column(String(120), default="", server_default="")
     visual_description: Mapped[str] = mapped_column(Text, default="")
     prompt_keywords: Mapped[list[str]] = mapped_column(JSON, default=list)
     lora_name: Mapped[str | None] = mapped_column(String(255), default=None)
@@ -246,6 +252,8 @@ class SeriesAsset(TimestampMixin, Base):
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     kind: Mapped[AssetKind] = mapped_column(_enum(AssetKind))
     name: Mapped[str] = mapped_column(String(120))
+    # Dossier dans ComfyUI (`<série>/objets|decors|style/<slug>`) : tiré du nom, unique par sorte dans la série.
+    slug: Mapped[str] = mapped_column(String(120), default="", server_default="")
     visual_description: Mapped[str] = mapped_column(Text, default="")
     prompt_keywords: Mapped[list[str]] = mapped_column(JSON, default=list)
     lora_name: Mapped[str | None] = mapped_column(String(255), default=None)
@@ -316,7 +324,7 @@ class ReferenceVariant(Base):
 
 class Chapter(TimestampMixin, Base):
     __tablename__ = "chapters"
-    __table_args__ = (UniqueConstraint("project_id", "number"),)
+    __table_args__ = (UniqueConstraint("project_id", "number"), NEVER_REUSED)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
@@ -337,7 +345,7 @@ class Chapter(TimestampMixin, Base):
 
 class Page(TimestampMixin, Base):
     __tablename__ = "pages"
-    __table_args__ = (UniqueConstraint("chapter_id", "number"),)
+    __table_args__ = (UniqueConstraint("chapter_id", "number"), NEVER_REUSED)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     chapter_id: Mapped[int] = mapped_column(ForeignKey("chapters.id", ondelete="CASCADE"), index=True)

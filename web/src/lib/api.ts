@@ -15,6 +15,8 @@ export type Rythme = "lent" | "normal" | "rapide";
 export interface Project {
   id: number;
   title: string;
+  /** Dossier de la série dans ComfyUI : mangaka/<slug>/ (tiré du titre, unique). */
+  slug: string;
   /** Ancien style en texte libre : lecture seule, ignoré dès qu'un pack est choisi. */
   legacy_style: string;
   /** Packs de style (presets/style_*) ; null : série d'avant les packs, style à choisir. */
@@ -101,6 +103,25 @@ export type ProjectInput = Pick<
 export type CleanMode = "img2img" | "controlnet";
 
 /** « Remettre en page les pages non générées » d'une série. */
+/** Résultat de « Nettoyer les variantes non retenues ». */
+export interface CleanupResult {
+  variants_deleted: number;
+  /** Dossiers de transit vidés dans ComfyUI (relatifs au dossier de ComfyUI). */
+  comfyui_folders_removed: string[];
+  /** Faux : dossier ComfyUI inconnu ou générations en cours (voir `warning`). */
+  comfyui_cleaned: boolean;
+  warning: string | null;
+}
+
+/** Dossiers de ComfyUI gérés par le moteur (COMFYUI_DIR) ; `warning` : rien n'est supprimé hors de data/. */
+export interface StorageStatus {
+  enabled: boolean;
+  path: string | null;
+  mock: boolean;
+  problem: string | null;
+  warning: string | null;
+}
+
 export interface RelayoutResult {
   relaid_page_ids: number[];
   /** Pages déjà (en partie) générées : inchangées. */
@@ -1125,6 +1146,8 @@ export interface Character {
   id: number;
   project_id: number;
   name: string;
+  /** Dossier de la fiche dans ComfyUI : mangaka/<série>/personnages|objets|decors/<slug>/. */
+  slug?: string;
   visual_description: string;
   prompt_keywords: string[];
   lora_name: string | null;
@@ -1307,6 +1330,8 @@ export interface Health {
   >;
   /** Fournisseurs actifs (badge de l'en-tête) ; absent d'un moteur plus ancien. */
   active?: ActiveProviders;
+  /** Dossiers de ComfyUI (rangement, nettoyage) ; absent d'un moteur plus ancien. */
+  storage?: StorageStatus;
   mock: boolean;
   presets: { page_formats: number; workflows: number; issues: number };
 }
@@ -1949,6 +1974,7 @@ export const api = {
     request<Project>(`/projects/${id}`, json("PATCH", body)),
   relayoutProject: (id: number) => request<RelayoutResult>(`/projects/${id}/relayout`, { method: "POST" }),
   deleteProject: (id: number) => request<void>(`/projects/${id}`, { method: "DELETE" }),
+  cleanupProject: (id: number) => request<CleanupResult>(`/projects/${id}/cleanup`, { method: "POST" }),
 
   listLibrary: <T extends LibraryEntry = LibraryEntry>(kind: LibraryKind, projectId: number) =>
     request<T[]>(`/projects/${projectId}/${LIBRARY_SEGMENT[kind]}`),

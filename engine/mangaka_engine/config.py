@@ -9,7 +9,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -48,6 +48,13 @@ class Settings(BaseSettings):
     comfyui_poll_s: float = 1.0  # sondage de /history (et lecture du websocket) pendant une génération
     # Mode mock : durée simulée d'une génération (progression factice étape par étape).
     mock_comfyui_seconds: float = 4.0
+    # Dossier d'installation de ComfyUI (celui du lanceur) : rangement et nettoyage de `output/mangaka/` et
+    # `input/mangaka/` (store/comfy_folders.py). Absent : `~/ComfyUI` avec le vrai ComfyUI, aucun en mode
+    # mock ; vide ou introuvable : rien n'est supprimé hors de data/ (avertissement dans l'interface).
+    comfyui_dir: str | None = None
+    # Variantes non gardées de « Créer des références » conservées au plus par fiche et par type de fiche ; les
+    # plus anciennes sont effacées après chaque génération (les références gardées restent toujours).
+    reference_variants_kept: int = Field(default=4, ge=1)
 
     mangaka_data_dir: Path = REPO_ROOT / "data"
     mangaka_presets_dir: Path = REPO_ROOT / "presets"
