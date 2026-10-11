@@ -420,11 +420,13 @@ def test_generation_records_references_used_on_job_and_version(c: TestClient, co
     assert "Recurring setting: Le labo (laboratoire encombré, néons)." in img["params"]["prompt"]
     [wf] = comfy.prompts.values()
     loads = [wf[wf["6"]["inputs"][f"images.image_{i}"][0]]["inputs"]["image"] for i in (1, 2, 3)]
-    assert [name.split("/")[-1].split("_")[0] for name in loads] == [
-        f"perso{aiko['id']}",
-        f"decor{decor}",
-        f"objet{obj}",
+    # Chaque image envoyée dans le dossier de sa fiche : mangaka/<série>/personnages|decors|objets/<nom>/.
+    assert [name.split("/")[2:4] for name in loads] == [
+        ["personnages", "aiko"],
+        ["decors", "le-labo"],
+        ["objets", "robot-r-2"],
     ]
+    assert all(name.split("/")[-1].startswith("reference-") for name in loads)
 
 
 # --- bible ------------------------------------------------------------------------------

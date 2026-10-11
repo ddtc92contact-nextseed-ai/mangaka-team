@@ -37,6 +37,9 @@
   personnages (aucun pour les fiches existantes).
 - 23 : angle de caméra des vues de référence (aucune étiquette sur les images existantes) et « Cohérence
   anime » par série (désactivée sur les séries existantes).
+- 24 : rangement des fichiers : nom de dossier lisible (slug) des séries et des fiches de la bibliothèque,
+  tiré du titre ou du nom (store/slugs.py) ; ids jamais réutilisés (AUTOINCREMENT) sur les séries, les
+  chapitres et les pages (tables reconstruites, données et ids gardés).
 
 Une base neuve est créée directement à la dernière version. Chaque migration tourne dans une
 transaction unique, clés étrangères désactivées (recette « 12 étapes » de SQLite pour reconstruire
@@ -66,19 +69,22 @@ from .models import (
     KnowledgeCollection,
     KnowledgeDocument,
     LLMRun,
+    Page,
     Panel,
     PanelImage,
     PanelImageAnnotation,
+    Project,
     QCBenchRun,
     ReferenceVariant,
     SeriesAsset,
     SeriesAssetImage,
     SeriesBible,
 )
+from .slugs import RESERVED_ENTRIES, RESERVED_SERIES, slugify, unique_slug
 
 log = logging.getLogger("mangaka_engine")
 
-SCHEMA_VERSION = 23
+SCHEMA_VERSION = 24
 
 
 class MigrationError(RuntimeError):
@@ -357,6 +363,34 @@ def _v22_to_v23(cur: sqlite3.Cursor) -> None:
         cur.execute("ALTER TABLE projects ADD COLUMN anime_consistency BOOLEAN NOT NULL DEFAULT 0")
 
 
+def _v23_to_v24(cur: sqlite3.Cursor) -> None:
+    # Slugs d'abord (colonne ajoutée puis remplie), puis reconstruction des séries, chapitres et pages.
+    # Tables reconstruites ou créées par une migration antérieure depuis le modèle courant : colonne déjà là.
+    for table in ("projects", "characters", "series_assets"):
+        if "slug" not in {row[1] for row in cur.execute(f"PRAGMA table_info({table})")}:
+            cur.execute(f"ALTER TABLE {table} ADD COLUMN slug VARCHAR(120) NOT NULL DEFAULT ''")
+    taken = set(RESERVED_SERIES) | {s for (s,) in cur.execute("SELECT slug FROM projects WHERE slug != ''")}
+    for project_id, title in cur.execute("SELECT id, title FROM projects WHERE slug = '' ORDER BY id").fetchall():
+        slug = unique_slug(slugify(title, "serie"), taken)
+        taken.add(slug)
+        cur.execute("UPDATE projects SET slug = ? WHERE id = ?", (slug, project_id))
+    for table, kind_sql in (("characters", "'character'"), ("series_assets", "kind")):
+        rows = cur.execute(f"SELECT id, project_id, {kind_sql}, name, slug FROM {table} ORDER BY id").fetchall()
+        used: dict[tuple[int, str], set[str]] = {}
+        for _id, project_id, kind, _name, slug in rows:
+            if slug:
+                used.setdefault((project_id, kind), set(RESERVED_ENTRIES.get(kind, ()))).add(slug)
+        for entry_id, project_id, kind, name, slug in rows:
+            if slug:
+                continue
+            seen = used.setdefault((project_id, kind), set(RESERVED_ENTRIES.get(kind, ())))
+            slug = unique_slug(slugify(name, "fiche"), seen)
+            seen.add(slug)
+            cur.execute(f"UPDATE {table} SET slug = ? WHERE id = ?", (slug, entry_id))
+    for model in (Project, Chapter, Page):
+        _rebuild(cur, model.__table__)  # type: ignore[arg-type]
+
+
 MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     # version de départ → (version d'arrivée, fonction)
     0: (2, _v0_to_v2),
@@ -382,6 +416,7 @@ MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     20: (21, _v20_to_v21),
     21: (22, _v21_to_v22),
     22: (23, _v22_to_v23),
+    23: (24, _v23_to_v24),
 }
 
 

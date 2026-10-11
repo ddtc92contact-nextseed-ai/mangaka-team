@@ -34,10 +34,12 @@ from sqlalchemy.orm import Session, selectinload
 from ..presets import LoadedWorkflow, LoraSpec, PresetRegistry, build_workflow
 from ..presets.schemas import StyleBoardSettings
 from ..providers.comfyui import ComfyUIClient, ComfyUIError, ComfyUIInterruptedError, ComfyUITimeoutError
+from ..store.comfy_folders import STYLE_TRIALS, ComfyFolders
+from ..store.comfy_folders import style_folder as comfy_style_folder
 from ..store.db import Database
 from ..store.files import FileStore
 from ..store.models import AssetKind, Job, JobStatus, Project, ReferenceVariant, SeriesAsset, SeriesAssetImage
-from .generation import UPLOAD_SUBFOLDER, GenerationError, sketch_size
+from .generation import GenerationError, sketch_size
 from .jobs import JobReporter
 from .prompt import build_negative_prompt
 from .style import series_style, style_names
@@ -266,6 +268,7 @@ class _Plan:
     source: dict[str, Any] | None  # essai retenu (passage au propre) : {trial_id, filename}
     source_data: bytes | None
     project_id: int
+    upload_folder: str = ""  # `mangaka/<série>/style/essais` : essai retenu envoyé
 
 
 class StyleBoardExecutor:
@@ -281,6 +284,7 @@ class StyleBoardExecutor:
         comfyui_error: str | None = None,
         poll_s: float = 1.0,
         presets_for: Callable[[int | None], PresetRegistry] | None = None,
+        folders: ComfyFolders | None = None,
     ) -> None:
         self.db = db
         self.presets_for = presets_for or (lambda _project_id: presets)
@@ -288,6 +292,9 @@ class StyleBoardExecutor:
         self.comfyui = comfyui
         self.comfyui_error = comfyui_error
         self.poll_s = poll_s
+        # Sortie de ComfyUI effacée une fois copiée dans data/. Les essais restent dans l'historique (« Relancer »
+        # en ajoute) : seul « Nettoyer les variantes non retenues » efface ceux qui n'ont pas été choisis.
+        self.folders = folders
         self._prompt_ids: dict[int, str] = {}
 
     def interrupt(self, job_id: int) -> None:
@@ -314,7 +321,7 @@ class StyleBoardExecutor:
                 if trial is None or trial.entry_kind != ENTRY_KIND or path is None or not path.is_file():
                     raise GenerationError("essai introuvable (supprimé entre-temps ?)")
                 ext = PurePosixPath(trial.path).suffix or ".png"
-                source = {"trial_id": trial.id, "filename": f"style_serie{series.id}_essai{trial.id}{ext}"}
+                source = {"trial_id": trial.id, "filename": f"essai-{trial.id}{ext}"}
                 source_data = path.read_bytes()
             base_negative = str(loaded.preset.defaults.get("negative_prompt", ""))
             negative = ", ".join(t for t in (base_negative.strip(), settings.negative_prompt.strip()) if t)
@@ -327,9 +334,14 @@ class StyleBoardExecutor:
             }
             if mode == "clean" and params.get("denoise") is not None and "denoise" in loaded.preset.mapping:
                 wf_params["denoise"] = float(params["denoise"])
+            folder = comfy_style_folder(series)
             if "filename_prefix" in loaded.preset.mapping:
-                name = f"essai-{params.get('batch')}-{params.get('variant')}" if mode == "trial" else "reference"
-                wf_params["filename_prefix"] = f"mangaka/serie-{series.id}/planche-de-style/{name}"
+                name = (
+                    f"{STYLE_TRIALS}/essai-{params.get('batch')}-{params.get('variant')}"
+                    if mode == "trial"
+                    else f"reference-{params.get('batch')}-{params.get('variant')}"
+                )
+                wf_params["filename_prefix"] = f"{folder}/{name}"
             return _Plan(
                 mode=mode,
                 loaded=loaded,
@@ -338,6 +350,7 @@ class StyleBoardExecutor:
                 source=source,
                 source_data=source_data,
                 project_id=series.id,
+                upload_folder=f"{folder}/{STYLE_TRIALS}",
             )
 
     def __call__(self, job_id: int, report: JobReporter, cancel: threading.Event) -> str:
@@ -352,7 +365,7 @@ class StyleBoardExecutor:
         source_name: str | None = None
         if plan.source is not None and plan.source_data is not None:
             report(4, "Envoi de l'essai retenu à ComfyUI…")
-            source_name = comfy.upload_image(plan.source_data, plan.source["filename"], subfolder=UPLOAD_SUBFOLDER)
+            source_name = comfy.upload_image(plan.source_data, plan.source["filename"], subfolder=plan.upload_folder)
         built = build_workflow(plan.loaded, plan.params, loras=plan.loras, source_image=source_name)
         if cancel.is_set():
             raise ComfyUIInterruptedError("génération annulée")
@@ -392,6 +405,8 @@ class StyleBoardExecutor:
         data = comfy.fetch_image(refs[0])
         folder = style_folder(plan.project_id) + ("/essais" if plan.mode == "trial" else "")
         stored = self.files.save_image(data, folder)
+        if self.folders is not None:
+            self.folders.discard_output(refs[0])
         record = {
             "preset": preset.id,
             "preset_name": preset.name,

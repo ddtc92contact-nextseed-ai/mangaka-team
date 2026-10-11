@@ -36,10 +36,11 @@ from sqlalchemy.orm import Session
 
 from ..presets import LoadedUpscaler, PageFormat, PresetError, PresetRegistry, build_upscale_workflow
 from ..providers.comfyui import ComfyUIClient, ComfyUIError, ComfyUIInterruptedError, ComfyUITimeoutError
+from ..store.comfy_folders import ComfyFolders, page_folder, panel_name
 from ..store.db import Database
 from ..store.files import FileStore
 from ..store.models import Job, JobStatus, Page, Panel, PanelImage, Project
-from .generation import UPLOAD_SUBFOLDER, GenerationError
+from .generation import GenerationError
 from .jobs import JobReporter
 
 STEP = "finishing"
@@ -300,6 +301,7 @@ class _Plan:
     filename: str
     folder: str
     prefix: str
+    upload_folder: str
     box: tuple[int, int]
     source: tuple[int, int]
     dpi: int
@@ -322,8 +324,10 @@ class FinishingExecutor:
         comfyui_error: str | None = None,
         poll_s: float = 1.0,
         presets_for: Callable[[int | None], PresetRegistry] | None = None,
+        folders: ComfyFolders | None = None,
     ) -> None:
         self.db = db
+        self.folders = folders  # sortie de ComfyUI effacée une fois copiée dans data/
         self.files = files
         self.comfyui = comfyui
         self.comfyui_error = comfyui_error
@@ -368,12 +372,10 @@ class FinishingExecutor:
                 panel_id=panel.id,
                 panel_index=panel.index,
                 data=path.read_bytes(),
-                filename=f"finition_case{panel.id}_v{image.version}{ext}",
+                filename=f"{panel_name(panel, 'finition')}-v{image.version}{ext}",
                 folder=f"projects/{chapter.project_id}/chapters/{chapter.id}/panels/{panel.id}/finitions",
-                prefix=(
-                    f"mangaka/serie-{chapter.project_id}/chapitre-{chapter.number}/page-{page.number}"
-                    f"/finition-case-{panel.index + 1}"
-                ),
+                prefix=f"{page_folder(chapter, page)}/{panel_name(panel, 'finition')}",
+                upload_folder=page_folder(chapter, page),
                 box=(info["box_width"], info["box_height"]),
                 source=(info["source_width"], info["source_height"]),
                 dpi=info["target_dpi"],
@@ -394,7 +396,7 @@ class FinishingExecutor:
             return plan
         preset = plan.loaded.preset
         report(5, "Envoi de la version retenue à ComfyUI…")
-        uploaded = comfy.upload_image(plan.data, plan.filename, subfolder=UPLOAD_SUBFOLDER)
+        uploaded = comfy.upload_image(plan.data, plan.filename, subfolder=plan.upload_folder)
         built = build_upscale_workflow(plan.loaded, uploaded, plan.width, plan.height, filename_prefix=plan.prefix)
         if cancel.is_set():
             raise ComfyUIInterruptedError("finition annulée")
@@ -431,6 +433,8 @@ class FinishingExecutor:
 
         report(92, "Récupération de l'image agrandie…")
         stored = self.files.save_image(comfy.fetch_image(refs[0]), plan.folder)
+        if self.folders is not None:
+            self.folders.discard_output(refs[0])
         dpi_after = round(effective_dpi(stored.width, stored.height, *plan.box, plan.dpi))
         with self.db.session_scope() as session:
             image = session.get(PanelImage, plan.image_id)
