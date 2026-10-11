@@ -54,6 +54,7 @@ SERIES_TABLES = (
     "llm_runs",
     "bubbles",
     "page_directions",
+    "panel_dialog_turns",
     "panel_images",
     "panel_dialog_turns",
     "panels",

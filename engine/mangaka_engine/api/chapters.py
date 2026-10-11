@@ -9,9 +9,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, object_session, selectinload
 
+from ..pipeline.crop import PanelCrop, bounded
 from ..pipeline.finishing import panel_print_info
 from ..pipeline.knowledge import record_chapter_summary
 from ..pipeline.layout import LayoutError, clamp_to_live
+from ..pipeline.lettering import Box
 from ..pipeline.library import SeriesLibrary
 from ..pipeline.names import CharacterMatcher, name_key, relink_project
 from ..pipeline.pages import (
@@ -24,6 +26,7 @@ from ..pipeline.pages import (
     regeneration_advised,
     slant_page_cut,
 )
+from ..pipeline.render import crop_max_zoom, displayed_image, image_size
 from ..pipeline.script import normalize_shot_type, script_job
 from ..pipeline.sketch import cleaned_from, latest_sketch, validated_sketch
 from ..presets import PresetError, PresetRegistry
@@ -59,6 +62,8 @@ from .schemas import (
     JobOut,
     PageLayoutIn,
     PageOut,
+    PanelCropIn,
+    PanelCropOut,
     PanelFrameIn,
     PanelOut,
     SfxOut,
@@ -202,6 +207,10 @@ def page_out(
                     if b.kind == BubbleKind.sfx
                 ],
                 frame=PanelFrameIn(**f) if (f := frame_override(p)) else None,
+                crop=PanelCropOut(**c.to_json()) if (c := PanelCrop.parse(p.crop)) else None,
+                crop_max_zoom=crop_max_zoom(files, p, box)
+                if files is not None and (box := Box.parse(_clamped_bbox(p.bbox, layout_panels.get(p.id))))
+                else None,
                 bbox=_clamped_bbox(p.bbox, layout_panels.get(p.id)),
                 bubble_zone=p.bubble_zone,
                 state=p.state.value,
@@ -732,6 +741,44 @@ def set_panel_frame(
         raise FieldError("frame", f"page {page.number} : {exc}") from None
     session.commit()
     return _page_out(ctx, page)
+
+
+@router.put("/panels/{panel_id}/crop", response_model=PageOut)
+def set_panel_crop(
+    panel_id: int, body: PanelCropIn, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
+) -> PageOut:
+    """Recadre l'image dans la case (centre + zoom), borné à la case et à l'image montrée : jamais de bande
+    vide, zoom limité par la résolution. S'applique à la version montrée (propre, sinon croquis), garde la
+    même valeur si la version choisie ou la mise en page changent (rebornée au rendu)."""
+    panel = session.get(Panel, panel_id)
+    if panel is None:
+        raise HTTPException(status_code=404, detail="Case introuvable")
+    img = displayed_image(panel)
+    size = image_size(img, ctx.files) if img is not None else None
+    if img is None or size is None:
+        raise FieldError("crop", f"case {panel.index + 1} : aucune image à recadrer")
+    crop = PanelCrop(body.x, body.y, body.zoom)
+    layout = clamp_to_live(panel.page.layout) if panel.page.layout else {}
+    layout_panel = next((lp for lp in layout.get("panels", []) if lp.get("panel_id") == panel.id), None)
+    box = Box.parse(_clamped_bbox(panel.bbox, layout_panel))
+    if box is not None and box.w > 0 and box.h > 0:
+        crop = bounded(crop, size[0], size[1], box.w, box.h, crop_max_zoom(ctx.files, panel, box))
+    panel.crop = crop.to_json()
+    session.commit()
+    return _page_out(ctx, panel.page)
+
+
+@router.delete("/panels/{panel_id}/crop", response_model=PageOut)
+def reset_panel_crop(
+    panel_id: int, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
+) -> PageOut:
+    """« Recentrer » : l'image redevient centrée au remplissage de la case."""
+    panel = session.get(Panel, panel_id)
+    if panel is None:
+        raise HTTPException(status_code=404, detail="Case introuvable")
+    panel.crop = None
+    session.commit()
+    return _page_out(ctx, panel.page)
 
 
 @router.get("/layout/templates")

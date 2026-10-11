@@ -12,6 +12,11 @@ d'origine (ou normalisées 0–1) : `faces`, ou `qc.faces` / `qc.boxes.faces` / 
 chaque boîte au format `{x1, y1, x2, y2}`, `{x, y, w, h}`, `[x1, y1, x2, y2]` ou `{"box": …}`.
 Sans boîte, seule la zone réservée aux bulles compte.
 
+Image montrée : l'assemblage et l'export prennent la version propre choisie (jamais un croquis ; une case
+qui n'a qu'un croquis est signalée « croquis seulement »). L'aperçu du lettrage (`preview=True`) montre à
+défaut le croquis validé, sinon le dernier croquis, marqué `image_kind = croquis`. Le cadrage manuel de la
+case (`Panel.crop`, voir `crop.py`) s'applique partout à la version montrée.
+
 Onomatopées : bulles `kind = sfx` ; leurs réglages imposés (`Bubble.sfx` : intensité, police, taille,
 angle, cisaillement) et leur centre placé à la main (`Bubble.position` : {"x", "y", "manual"}).
 Marge extérieure inviolable : la mise en page stockée est relue à travers `clamp_to_live` (une ancienne
@@ -28,7 +33,7 @@ import re
 import unicodedata
 import zipfile
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
@@ -41,12 +46,14 @@ from ..store.db import Database
 from ..store.files import FileStore, versioned_url
 from ..store.models import Bubble, BubbleKind, Chapter, ImageKind, Job, Page, Panel, PanelImage
 from .assembly import Canvas, PageArt, PanelArt, canvas_geometry, cover_transform, png_bytes, render_png, render_svg
+from .crop import PanelCrop, max_zoom
 from .finishing import finished_art, panel_print_info
 from .fonts import FontBook
 from .jobs import JobReporter
 from .layout import clamp_to_live, live_rect, page_frame
 from .lettering import Box, BubbleSpec, Letterer, LetteringError, LetteringWarning, PanelSpec, SfxSpec
 from .pages import is_stale
+from .sketch import latest_sketch, validated_sketch
 
 STEP = "export"
 
@@ -104,9 +111,9 @@ def face_boxes(img: PanelImage, size: tuple[int, int]) -> list[Box]:
     return out
 
 
-def faces_on_page(faces: list[Box], size: tuple[int, int], panel: Box) -> list[Box]:
-    """Boîtes de l'image → px de la page, via le recadrage « au remplissage » de la case."""
-    scale, x0, y0 = cover_transform(size[0], size[1], panel)
+def faces_on_page(faces: list[Box], size: tuple[int, int], panel: Box, crop: PanelCrop | None = None) -> list[Box]:
+    """Boîtes de l'image → px de la page, via le recadrage de la case (au remplissage, ou manuel)."""
+    scale, x0, y0 = cover_transform(size[0], size[1], panel, crop)
     out = []
     for f in faces:
         mapped = Box(x0 + f.x1 * scale, y0 + f.y1 * scale, x0 + f.x2 * scale, y0 + f.y2 * scale).intersection(panel)
@@ -123,6 +130,9 @@ class PageInputs:
     faces: dict[int, list[Box]]
     image_urls: dict[int, str | None]
     stale: bool
+    # Aperçu : sorte de l'image montrée (final | croquis) et où l'image entière tombe sur la page (px).
+    image_kinds: dict[int, str] = field(default_factory=dict)
+    image_rects: dict[int, Box] = field(default_factory=dict)
 
 
 def selected_image(panel: Panel) -> PanelImage | None:
@@ -130,7 +140,28 @@ def selected_image(panel: Panel) -> PanelImage | None:
     return next((i for i in panel.images if i.selected and i.kind == ImageKind.final), None)
 
 
-def _image_size(img: PanelImage, files: FileStore) -> tuple[int, int] | None:
+def sketch_fallback(panel: Panel) -> PanelImage | None:
+    """Croquis montré à défaut de version propre : le croquis validé, sinon le dernier croquis."""
+    return validated_sketch(panel) or latest_sketch(panel)
+
+
+def displayed_image(panel: Panel) -> PanelImage | None:
+    """Image montrée à l'écran : la version propre choisie, sinon le croquis validé, sinon le dernier croquis."""
+    return selected_image(panel) or sketch_fallback(panel)
+
+
+def crop_max_zoom(files: FileStore, panel: Panel, box: Box) -> float | None:
+    """Zoom maximal du cadrage manuel de la case sur `box`, d'après l'image montrée (sa finition d'impression
+    quand elle existe : plus de pixels) ; None = aucune image à cadrer."""
+    img = displayed_image(panel)
+    if img is None:
+        return None
+    finished = finished_art(img, files) if img.kind == ImageKind.final else None
+    size = finished[1] if finished is not None else image_size(img, files)
+    return round(max_zoom(size[0], size[1], box.w, box.h), 4) if size is not None else None
+
+
+def image_size(img: PanelImage, files: FileStore) -> tuple[int, int] | None:
     params = img.params or {}
     w, h = params.get("image_width"), params.get("image_height")
     if isinstance(w, int) and isinstance(h, int) and w > 0 and h > 0:
@@ -186,7 +217,10 @@ def sfx_spec(b: Bubble) -> SfxSpec:
     )
 
 
-def page_inputs(presets: PresetRegistry, files: FileStore, page: Page, fonts: FontBook) -> PageInputs:
+def page_inputs(
+    presets: PresetRegistry, files: FileStore, page: Page, fonts: FontBook, *, preview: bool = False
+) -> PageInputs:
+    """Page en base → planche à lettrer. `preview` : aperçu écran (croquis montré à défaut de version propre)."""
     if not page.panels:
         raise LetteringError(f"page {page.number} sans case : rien à assembler")
     if page.layout is None:
@@ -201,6 +235,8 @@ def page_inputs(presets: PresetRegistry, files: FileStore, page: Page, fonts: Fo
     specs: list[PanelSpec] = []
     faces_by_panel: dict[int, list[Box]] = {}
     urls: dict[int, str | None] = {}
+    kinds: dict[int, str] = {}
+    rects: dict[int, Box] = {}
     layout = clamp_to_live(page.layout)
     # Zone utile : celle de la mise en page, sinon (mise en page d'avant les polygones) celle du format.
     live_r = (
@@ -236,25 +272,46 @@ def page_inputs(presets: PresetRegistry, files: FileStore, page: Page, fonts: Fo
                 )
             )
             continue
+        crop = PanelCrop.parse(panel.crop)
         img = selected_image(panel)
         path = files.absolute(img.path) if img is not None else None
-        size = _image_size(img, files) if img is not None else None
+        size = image_size(img, files) if img is not None else None
+        faces: list[Box] = []
         if path is None or not path.is_file() or size is None:
             path, size = None, None
             urls[panel.id] = None
-            warnings.append(
-                LetteringWarning(
-                    "missing_image",
-                    f"Case {panel.index + 1} : aucune version choisie — aplat gris « case manquante ».",
-                    panel.id,
+            sketch = sketch_fallback(panel)
+            sketch_path = files.absolute(sketch.path) if sketch is not None else None
+            sketch_size = image_size(sketch, files) if sketch is not None else None
+            if sketch is not None and sketch_path is not None and sketch_path.is_file() and sketch_size is not None:
+                warnings.append(
+                    LetteringWarning(
+                        "sketch_only",
+                        f"Case {panel.index + 1} : croquis seulement — choisis une version propre "
+                        "(sans elle, l'export montre un aplat gris « case manquante »).",
+                        panel.id,
+                    )
                 )
-            )
-            faces: list[Box] = []
+                if preview:  # aperçu écran : le croquis plutôt qu'une case vide (jamais dans l'export)
+                    path, size = sketch_path, sketch_size
+                    urls[panel.id] = versioned_url(f"/panel-images/{sketch.id}/file", sketch.path)
+                    kinds[panel.id] = ImageKind.croquis.value
+                    rects[panel.id] = _image_rect(sketch_size, box, crop)
+            else:
+                warnings.append(
+                    LetteringWarning(
+                        "missing_image",
+                        f"Case {panel.index + 1} : aucune version choisie — aplat gris « case manquante ».",
+                        panel.id,
+                    )
+                )
         else:
             assert img is not None
             # Aperçu écran : l'image légère ; visages en px de la version (même cadrage que sa finition).
             urls[panel.id] = versioned_url(f"/panel-images/{img.id}/file", img.path)
-            faces = faces_on_page(face_boxes(img, size), size, box)
+            kinds[panel.id] = ImageKind.final.value
+            rects[panel.id] = _image_rect(size, box, crop)
+            faces = faces_on_page(face_boxes(img, size), size, box, crop)
             # Finition d'impression : l'assemblage prend l'image agrandie quand elle existe.
             finished = finished_art(img, files)
             if finished is not None:
@@ -271,6 +328,7 @@ def page_inputs(presets: PresetRegistry, files: FileStore, page: Page, fonts: Fo
                 frame=lp.get("frame") if lp.get("frame") in ("border", "none", "fade") else "border",
                 inset=bool(lp.get("inset")),
                 break_out=bool(lp.get("break_out")),
+                crop=crop,
             )
         )
         # Débordement : bulles et onomatopées restent dans la case d'origine.
@@ -314,7 +372,15 @@ def page_inputs(presets: PresetRegistry, files: FileStore, page: Page, fonts: Fo
         warnings=warnings + lettering.warnings,
         live=live_box,
     )
-    return PageInputs(art=art, specs=specs, faces=faces_by_panel, image_urls=urls, stale=stale)
+    return PageInputs(
+        art=art, specs=specs, faces=faces_by_panel, image_urls=urls, stale=stale, image_kinds=kinds, image_rects=rects
+    )
+
+
+def _image_rect(size: tuple[int, int], box: Box, crop: PanelCrop | None) -> Box:
+    """Où l'image entière tombe sur la page (px) une fois cadrée dans la case : la case n'en montre que la fenêtre."""
+    scale, x0, y0 = cover_transform(size[0], size[1], box, crop)
+    return Box(x0, y0, x0 + size[0] * scale, y0 + size[1] * scale)
 
 
 def lettering_json(
@@ -370,6 +436,9 @@ def lettering_json(
                 "break_out": p.break_out,
                 "bubble_zone": spec.zone.as_rect() if spec.zone else None,
                 "image_url": inputs.image_urls.get(p.id),
+                # final | croquis (aperçu : croquis montré à défaut de version propre) ; None = case manquante.
+                "image_kind": inputs.image_kinds.get(p.id),
+                "image_rect": r.as_rect() if (r := inputs.image_rects.get(p.id)) else None,
                 "faces": [f.as_rect() for f in inputs.faces.get(p.id, [])],
             }
             for p, spec in zip(art.panels, inputs.specs, strict=True)

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { CroppedImage } from "@/components/cropped-image";
 import { GenerateChapterButton } from "@/components/generate-chapter";
 import { HelpLabel, InfoTip } from "@/components/info-tip";
 import { hasLettering, LetteredPreview } from "@/components/lettered-preview";
@@ -488,11 +489,13 @@ function ThumbPanel({ lp, view, W, H }: { lp: LayoutPanel; view: PanelView | und
       data-state={state}
     >
       {url && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
+        <CroppedImage
           src={engineUrl(url)}
+          crop={view?.panel.crop}
+          boxWidth={lp.width}
+          boxHeight={lp.height}
           alt=""
-          className={`h-full w-full object-cover ${state === "running" || state === "queued" || state === "sketch" ? "opacity-60" : ""}`}
+          className={state === "running" || state === "queued" || state === "sketch" ? "opacity-60" : ""}
         />
       )}
       {state === "queued" && !url && (

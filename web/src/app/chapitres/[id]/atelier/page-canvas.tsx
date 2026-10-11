@@ -2,6 +2,7 @@
 
 import { useImperativeHandle, useRef, type KeyboardEvent, type Ref } from "react";
 import { engineUrl, type Job, type LayoutPanel, type PageData, type PanelData, type QueueItem } from "@/lib/api";
+import { CroppedImage } from "@/components/cropped-image";
 import { DpiBadge } from "@/components/print-dpi";
 import { DetectionOverlay, QCBadge } from "@/components/qc";
 import { ValidatedCheck } from "@/components/validated-check";
@@ -201,11 +202,13 @@ export function PageCanvas({
             }}
           >
             {imageUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
+              <CroppedImage
                 src={engineUrl(imageUrl)}
+                crop={panel.crop}
+                boxWidth={lp.width}
+                boxHeight={lp.height}
                 alt=""
-                className={`h-full w-full object-cover ${running || queued ? "opacity-60" : ""} ${queued ? "grayscale" : ""}`}
+                className={`${running || queued ? "opacity-60" : ""} ${queued ? "grayscale" : ""}`}
                 draggable={false}
                 data-sketch={isSketch ? "true" : undefined}
               />

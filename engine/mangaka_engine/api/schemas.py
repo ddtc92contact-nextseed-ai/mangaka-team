@@ -315,6 +315,21 @@ class PanelFrameIn(_In):
     inset: bool | None = None
 
 
+class PanelCropIn(_In):
+    """Cadrage manuel de l'image dans la case : centre de la fenêtre (fraction de l'image, 0–1) et zoom sur
+    le remplissage (1 = l'image remplit tout juste la case)."""
+
+    x: float = Field(ge=0, le=1)
+    y: float = Field(ge=0, le=1)
+    zoom: float = Field(ge=1, le=4)
+
+
+class PanelCropOut(BaseModel):
+    x: float
+    y: float
+    zoom: float
+
+
 class PrintInfoOut(BaseModel):
     """Dpi effectif de la version retenue à l'impression (finition d'impression)."""
 
@@ -359,6 +374,9 @@ class PanelOut(BaseModel):
     sfx: list[SfxOut] = Field(default_factory=list)
     # Options de cadre imposées dans l'UI (les options effectives sont dans layout.panels).
     frame: PanelFrameIn | None = None
+    # Cadrage manuel de l'image (None = centrée au remplissage) et zoom maximal permis par l'image montrée.
+    crop: PanelCropOut | None = None
+    crop_max_zoom: float | None = None
     bbox: dict[str, int] | None
     bubble_zone: dict[str, int] | None
     state: str = "draft"

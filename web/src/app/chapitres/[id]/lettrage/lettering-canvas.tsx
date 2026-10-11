@@ -99,6 +99,8 @@ export function LetteringCanvas({
   const { width: W, height: H } = data;
   const border = (1.5 / 72) * data.dpi;
   const guide = Math.max(3, W / 600);
+  // Badge « croquis » (aperçu seulement) : lisible à l'écran quelle que soit la taille de la page.
+  const badge = W / 40;
   const warnedPanels = new Set(data.warnings.map((w) => w.panel_id).filter((id): id is number => id !== null));
   const families = new Map(
     [...Object.values(data.styles), ...Object.values(data.sfx_fonts ?? {})].map((s) => [s.family, s.url]),
@@ -248,6 +250,7 @@ export function LetteringCanvas({
             key={p.id}
             data-testid="lettering-panel"
             data-missing={p.image_url ? undefined : "true"}
+            data-image-kind={p.image_kind ?? undefined}
             data-frame={p.frame ?? "border"}
             data-inset={p.inset ? "true" : undefined}
             data-break-out={p.break_out ? "true" : undefined}
@@ -255,14 +258,16 @@ export function LetteringCanvas({
             {p.inset && <polygon points={svgPoints(outsetPolygon(polygonOf(p), outline))} fill="#ffffff" />}
             <g mask={p.frame === "fade" ? `url(#fondu-case-${p.id})` : undefined}>
             {p.image_url ? (
+              // Même cadrage que l'assemblage : l'image entière placée par le moteur, la case n'en garde que la fenêtre.
               <image
                 href={engineUrl(p.image_url)}
-                x={p.box.x1}
-                y={p.box.y1}
-                width={w}
-                height={h}
-                preserveAspectRatio="xMidYMid slice"
+                x={p.image_rect ? p.image_rect.x1 : p.box.x1}
+                y={p.image_rect ? p.image_rect.y1 : p.box.y1}
+                width={p.image_rect ? p.image_rect.x2 - p.image_rect.x1 : w}
+                height={p.image_rect ? p.image_rect.y2 - p.image_rect.y1 : h}
+                preserveAspectRatio={p.image_rect ? "none" : "xMidYMid slice"}
                 clipPath={`url(#clip-case-${p.id})`}
+                data-kind={p.image_kind ?? undefined}
               />
             ) : (
               <>
@@ -332,6 +337,23 @@ export function LetteringCanvas({
                   data-testid="face-box"
                 />
               ))}
+            {p.image_kind === "croquis" && (
+              // Aperçu seulement : jamais dans le rendu ni l'export (aplat « case manquante » + avertissement).
+              <g pointerEvents="none" data-testid="lettering-sketch-badge" aria-label={`Case ${p.index + 1} : croquis seulement`}>
+                <rect x={p.box.x1 + badge * 0.6} y={p.box.y1 + badge * 1.4} width={badge * 4.6} height={badge * 1.6} rx={badge * 0.3} fill="#09090b" fillOpacity={0.75} />
+                <text
+                  x={p.box.x1 + badge * 2.9}
+                  y={p.box.y1 + badge * 2.2}
+                  fill="#e4e4e7"
+                  fontSize={badge}
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  fontFamily="system-ui, sans-serif"
+                >
+                  croquis
+                </text>
+              </g>
+            )}
           </g>
         );
       })}

@@ -428,6 +428,9 @@ class Panel(TimestampMixin, Base):
     # Gardées jusqu'à « Reconstruire le prompt » ; None = rien d'imposé.
     dialog_direction: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
     reference_choice: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
+    # Cadrage manuel de l'image dans la case (« Recadrer », voir pipeline/crop.py) : {"x", "y", "zoom"} —
+    # centre de la fenêtre en fraction de l'image et zoom sur le remplissage ; None = centrée au remplissage.
+    crop: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
     qc_score: Mapped[int | None] = mapped_column(Integer, default=None)
     state: Mapped[PanelState] = mapped_column(_enum(PanelState), default=PanelState.draft)
 

@@ -52,7 +52,7 @@ def _lettering(ctx: AppContext, page: Page) -> dict[str, Any]:
     presets = _presets(ctx, page)
     fonts = _fonts(ctx, presets)
     try:
-        return lettering_json(page, page_inputs(presets, ctx.files, page, fonts), fonts, presets)
+        return lettering_json(page, page_inputs(presets, ctx.files, page, fonts, preview=True), fonts, presets)
     except (LetteringError, PresetError) as exc:
         raise FieldError("lettering", str(exc)) from None
 

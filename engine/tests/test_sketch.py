@@ -224,15 +224,30 @@ def test_sketch_page_then_triage_then_clean(make_client: Callable[..., TestClien
     assert all(i["kind"] == "croquis" for i in _images(c, p2["id"]))
 
 
-def test_sketches_never_reach_assembly_lettering_or_export(make_client: Callable[..., TestClient]) -> None:  # noqa: F811
+def _missing_fill_at(c: TestClient, page_id: int, box: dict[str, int]) -> bool:
+    """Le rendu assemblé montre-t-il l'aplat « case manquante » dans le coin haut-gauche de la case ?"""
+    _ok(c.post(f"/pages/{page_id}/render", json={}))
+    with Image.open(io.BytesIO(c.get(f"/pages/{page_id}/render.png").content)) as im:
+        return im.convert("RGB").getpixel((box["x1"] + 30, box["y1"] + 30)) == (0x9E, 0x9E, 0x9E)
+
+
+def test_sketches_never_reach_assembly_or_export(make_client: Callable[..., TestClient]) -> None:  # noqa: F811
+    """Un croquis n'est jamais assemblé ni exporté (aplat « case manquante » + avertissement « croquis
+    seulement ») ; l'aperçu du lettrage le montre à défaut de version propre, marqué « croquis »."""
     c = make_client()
     data = setup_chapter(c)
     page = data["pages"][1]
     [p3] = page["panels"]
     _ok(c.post(f"/pages/{page['id']}/sketch"), 202)
     _wait(c)
+    [sketch] = _images(c, p3["id"])
     lettering = _ok(c.get(f"/pages/{page['id']}/lettering"))
-    assert [p["image_url"] for p in lettering["panels"]] == [None]
+    [shown] = lettering["panels"]
+    assert shown["image_url"] == sketch["url"] and shown["image_kind"] == "croquis"
+    assert [w["code"] for w in lettering["warnings"] if w.get("panel_id") == p3["id"]] == ["sketch_only"]
+    rendered = _ok(c.post(f"/pages/{page['id']}/render", json={}))
+    assert any(w["code"] == "sketch_only" and "croquis seulement" in w["message"] for w in rendered["warnings"])
+    assert _missing_fill_at(c, page["id"], shown["box"])
     # Même un croquis marqué « choisi » par erreur n'est jamais assemblé.
     with c.app.state.ctx.db.session_scope() as session:  # type: ignore[attr-defined]
         img = session.query(PanelImage).filter(PanelImage.panel_id == p3["id"]).one()
@@ -240,8 +255,35 @@ def test_sketches_never_reach_assembly_lettering_or_export(make_client: Callable
         img.selected = True
         session.commit()
     lettering = _ok(c.get(f"/pages/{page['id']}/lettering"))
-    assert [p["image_url"] for p in lettering["panels"]] == [None]
-    assert any(w["code"] == "missing_image" for w in lettering["warnings"])
+    assert [p["image_kind"] for p in lettering["panels"]] == ["croquis"]
+    assert _missing_fill_at(c, page["id"], shown["box"])
+
+
+def test_lettering_preview_prefers_clean_then_validated_then_latest_sketch(
+    make_client: Callable[..., TestClient],  # noqa: F811
+) -> None:
+    c = make_client()
+    data = setup_chapter(c)
+    page = data["pages"][1]
+    [p3] = page["panels"]
+
+    def shown() -> tuple[str | None, str | None]:
+        [panel] = _ok(c.get(f"/pages/{page['id']}/lettering"))["panels"]
+        return panel["image_url"], panel["image_kind"]
+
+    assert shown() == (None, None)
+    for _ in range(2):
+        _ok(c.post(f"/panels/{p3['id']}/sketch"), 202)
+        _wait(c)
+    first, latest = _images(c, p3["id"])
+    assert shown() == (latest["url"], "croquis")  # dernier croquis
+    _ok(c.post(f"/panels/{p3['id']}/sketch/validate", json={"image_id": first["id"]}))
+    assert shown() == (first["url"], "croquis")  # croquis validé
+    [job] = _ok(c.post(f"/panels/{p3['id']}/clean"), 202)
+    _wait(c)
+    final = next(i for i in _images(c, p3["id"]) if i["kind"] == "final")
+    assert final["selected"]
+    assert shown() == (final["url"], "final")  # version propre choisie
 
 
 def test_denoise_panel_over_series_over_preset(make_client: Callable[..., TestClient]) -> None:  # noqa: F811
