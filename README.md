@@ -16,7 +16,7 @@ dans [`docs/SPEC.md`](docs/SPEC.md).
 | `data/` | Base SQLite et images (créé au premier lancement, **jamais commité**) |
 | `scripts/` | Scripts npm : installation du moteur, lancement conjoint web + moteur ; lanceur en un clic (`launch.sh`, `stop.sh`, `install-desktop.sh`) |
 | `assets/icon/` | Icône de l'application (SVG + PNG 256/512) |
-| `docs/` | Spécification |
+| `docs/` | Spécification ; manques à décider : [`docs/A-RAJOUTER.md`](docs/A-RAJOUTER.md) |
 
 ## Installation sur le GX10
 
