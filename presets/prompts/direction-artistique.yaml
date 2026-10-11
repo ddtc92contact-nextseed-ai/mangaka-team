@@ -84,7 +84,8 @@ user: |
   - « intensity » : $intensities ;
   - « plan » : $plans ;
   - « angle » : $angles ;
-  - « cadre » : $cadres ;
+  - « cadre » : $cadres (« débordement » : la case empiète sur ses voisines, jamais sur la marge de la
+    page ; à réserver à une case « choc » ou à une page choc) ;
   - « ambiance » : une courte note de lumière et d'atmosphère, en français ;
   - « sfx » : onomatopées suggérées (0 à 4), chacune {"text": "…", "intensity": l'une de $sfx_intensities} ;
   - « decor » (facultatif) : null pour garder le décor du scénario, sinon l'id d'un décor de la

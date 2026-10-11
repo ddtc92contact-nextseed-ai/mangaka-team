@@ -3,6 +3,11 @@
 # Taille minimale (mm) d'une case quand on déplace une gouttière dans l'interface.
 min_panel_mm: 20
 
+# Case qui « déborde sur les cases voisines » (option imposée dans l'atelier, ou par la direction
+# artistique sur une page choc / une case choc) : ses bords franchissent la gouttière et avancent
+# encore de break_out_mm sur les cases voisines. Rien ne franchit jamais la marge extérieure (zone utile du format).
+break_out_mm: 6
+
 # Taille cible des images générées pour une case : même ratio que la case,
 # surface ≈ megapixels, côtés arrondis à un multiple de `multiple` (contrainte du modèle).
 generation:

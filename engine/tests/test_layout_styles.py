@@ -88,33 +88,24 @@ def _sat_gap(a: geo.Polygon, b: geo.Polygon) -> float:
 
 
 def _check_frames(layout: dict[str, Any]) -> None:
-    """Fond perdu jusqu'au bord exact de la page ; incrustation contenue dans son hôte."""
-    W, H = layout["page"]["width"], layout["page"]["height"]
+    """Marge extérieure inviolable (0 px) ; débordement autour de sa case d'origine ; incrustation dans son hôte."""
     live = layout["live_area"]
     panels = layout["panels"]
     for p in panels:
         assert p.get("frame", "border") in ("border", "none", "fade")
-        if p.get("bleed"):
-            poly = [(float(x), float(y)) for x, y in p["polygon"]]
-            inner = [(float(x), float(y)) for x, y in p["live_polygon"]]
-            x1, y1, x2, y2 = geo.bbox(inner)
-            bx1, by1, bx2, by2 = geo.bbox(poly)
-            touched = []
-            if abs(y1 - live["y1"]) < 0.05:
-                touched.append(by1 == 0)
-            if abs(y2 - live["y2"]) < 0.05:
-                touched.append(by2 == H)
-            if abs(x1 - live["x1"]) < 0.05 and layout["inner_side"] != "left":
-                touched.append(bx1 == 0)
-            if abs(x2 - live["x2"]) < 0.05 and layout["inner_side"] != "right":
-                touched.append(bx2 == W)
-            assert touched and all(touched), p
-            # la case agrandie contient sa partie dans la zone utile
+        assert "bleed" not in p and "live_polygon" not in p
+        poly = [(float(x), float(y)) for x, y in p["polygon"]]
+        for x, y in poly:
+            assert live["x1"] <= x <= live["x2"] and live["y1"] <= y <= live["y2"], p
+        assert live["x1"] <= p["x1"] and p["x2"] <= live["x2"] and live["y1"] <= p["y1"] and p["y2"] <= live["y2"]
+        if p.get("break_out"):
+            inner = [(float(x), float(y)) for x, y in p["base_polygon"]]
+            # la case agrandie contient sa case d'origine
             assert all(geo.contains(geo.edges(poly), x, y, tol=0.2) for x, y in inner), p
         if p.get("inset"):
             host = panels[p["host_index"]]
             assert not host.get("inset")
-            hpoly = [(float(x), float(y)) for x, y in (host.get("live_polygon") or host["polygon"])]
+            hpoly = [(float(x), float(y)) for x, y in (host.get("base_polygon") or host["polygon"])]
             assert geo.contains_box(geo.edges(hpoly), p["x1"], p["y1"], p["x2"], p["y2"]), (p, host)
 
 
@@ -123,13 +114,13 @@ def _check(layout: dict[str, Any]) -> None:
     live = layout["live_area"]
     gh, gv = layout["gutters_px"]["horizontal"], layout["gutters_px"]["vertical"]
     _check_frames(layout)
-    # Cases de l'arbre, dans la zone utile (fond perdu : leur partie dans la zone utile) ; les
-    # incrustations, posées sur leur hôte, sont vérifiées par _check_frames.
+    # Cases de l'arbre (débordement : leur case d'origine) ; les incrustations, posées sur leur hôte,
+    # sont vérifiées par _check_frames.
     tree_panels = [p for p in layout["panels"] if not p.get("inset")]
-    polys = [[(float(x), float(y)) for x, y in (p.get("live_polygon") or p["polygon"])] for p in tree_panels]
+    polys = [[(float(x), float(y)) for x, y in (p.get("base_polygon") or p["polygon"])] for p in tree_panels]
     for p, poly in zip(tree_panels, polys, strict=True):
         assert len(poly) >= 3 and geo.area(poly) > 0, p
-        if p.get("bleed"):
+        if p.get("break_out"):
             x1, y1, x2, y2 = geo.bbox([(float(x), float(y)) for x, y in p["polygon"]])
             assert (p["x1"], p["y1"], p["x2"], p["y2"]) == (
                 math.floor(x1 + 1e-6),

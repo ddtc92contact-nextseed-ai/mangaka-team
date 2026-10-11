@@ -165,20 +165,23 @@ def test_panel_frame_overrides_keep_the_page_fresh(client: TestClient) -> None:
     # sans bord
     out = _ok(client.put(f"/panels/{second['id']}/frame", json={"frame": "fade"}))
     assert out["layout"]["panels"][1]["frame"] == "fade" and not out["layout_stale"]
-    assert out["panels"][1]["frame"] == {"frame": "fade", "bleed": None, "inset": None}
-    # fond perdu sur la première case (en haut, au bord de la zone utile)
-    out = _ok(client.put(f"/panels/{first['id']}/frame", json={"bleed": True}))
-    lp = out["layout"]["panels"][0]
-    assert lp["bleed"] and lp["y1"] == 0 and lp["live_polygon"] and not out["layout_stale"]
+    assert out["panels"][1]["frame"] == {"frame": "fade", "break_out": None, "inset": None}
+    # débordement de la première case sur ses voisines, jamais sur la marge
+    out = _ok(client.put(f"/panels/{first['id']}/frame", json={"break_out": True}))
+    lp, live = out["layout"]["panels"][0], out["layout"]["live_area"]
+    assert lp["break_out"] and lp["base_polygon"] and not out["layout_stale"]
+    assert lp["y1"] == live["y1"] and lp["y2"] > out["layout"]["panels"][1]["y1"]
+    assert out["panels"][0]["frame"] == {"frame": None, "break_out": True, "inset": None}
     assert out["layout"]["panels"][1]["frame"] == "fade"  # option précédente gardée
     # lettrage et rendu en tiennent compte
     let = _ok(client.get(f"/pages/{page['id']}/lettering"))
-    assert let["panels"][0]["bleed"] and let["panels"][1]["frame"] == "fade"
+    assert let["panels"][0]["break_out"] and let["panels"][1]["frame"] == "fade"
     b = let["bubbles"][0]["box"]
-    assert b["y"] >= out["layout"]["live_area"]["y1"]  # bulle dans la zone utile
+    assert b["y"] >= live["y1"]  # bulle dans la zone utile
     info = _ok(client.post(f"/pages/{page['id']}/render", json={"bleed": True}))
     svg = client.get(info["svg_url"]).text
-    assert 'mask="url(#fondu-' in svg
+    assert 'mask="url(#fondu-' in svg and 'clip-path="url(#zone-utile)"' in svg
+    assert svg.index('<g id="case-2"') < svg.index('<g id="case-1"')  # le débordement par-dessus
     # incrustation : la case 2 se pose dans la case 1
     out = _ok(client.put(f"/panels/{second['id']}/frame", json={"inset": True}))
     lp = out["layout"]["panels"][1]
@@ -195,7 +198,7 @@ def test_panel_frame_overrides_keep_the_page_fresh(client: TestClient) -> None:
     assert client.put(f"/panels/{third['id']}/frame", json={"frame": "ondulé"}).status_code == 422
 
 
-def test_bleed_toggle_keeps_hand_slanted_cuts(client: TestClient) -> None:
+def test_break_out_toggle_keeps_hand_slanted_cuts(client: TestClient) -> None:
     data = _setup(client, style="sage")
     page = data["page"]
     g = page["layout"]["gutters"][0]
@@ -207,5 +210,5 @@ def test_bleed_toggle_keeps_hand_slanted_cuts(client: TestClient) -> None:
     )
     angle = tilted["layout"]["gutters"][0]["angle_deg"]
     assert angle != 0
-    out = _ok(client.put(f"/panels/{page['panels'][0]['id']}/frame", json={"bleed": True}))
-    assert out["layout"]["gutters"][0]["angle_deg"] == angle and out["layout"]["panels"][0]["bleed"]
+    out = _ok(client.put(f"/panels/{page['panels'][0]['id']}/frame", json={"break_out": True}))
+    assert out["layout"]["gutters"][0]["angle_deg"] == angle and out["layout"]["panels"][0]["break_out"]

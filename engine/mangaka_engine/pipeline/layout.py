@@ -19,13 +19,21 @@ Options de cadre (`frames`, une entrée par case, décidées par le style ou imp
 
 - `frame` : `border` (bordure), `none` (sans bord, image à bord franc) ou `fade` (sans bord, l'image se
   fond au papier) — rendu seulement, la géométrie ne change pas ;
-- `bleed` : les bords de la case posés sur un bord extérieur de la zone utile (haut, bas, côté opposé à
-  la reliure) avancent jusqu'au bord de la page ; à l'export avec fond perdu, ils vont jusqu'au bord
-  du fond perdu. Les autres bords (gouttières, biais) ne bougent pas. `live_polygon` garde la case
-  dans la zone utile (bulles et onomatopées y restent) ;
+- `break_out` (déborder sur les cases voisines, imposé dans l'atelier ou par la direction artistique) :
+  chaque bord de la case avance de la gouttière + `break_out_mm` (par-dessus la gouttière, puis sur les
+  voisines), puis la case est
+  bornée à la zone utile ; elle est dessinée au-dessus des autres cases de l'arbre. `base_polygon`
+  garde la case d'origine (bulles et zone de bulles y restent) ;
 - `inset` : la case ne prend pas de place dans l'arbre de découpes ; c'est un rectangle posé dans sa
   case hôte (`host_index`, la précédente sinon la suivante), en bas côté fin de lecture, entièrement
   contenu dans l'hôte (marge `margin_mm`) et dessiné après lui.
+
+Marge extérieure inviolable : rien ne sort de la zone utile du format (`live_area`). `clamp_to_live`
+est le garde-fou unique, appliqué à toute mise en page calculée (gabarits, styles, retouches de
+gouttière ou de biais, options de cadre) et aux mises en page déjà stockées quand on les relit pour
+l'affichage ou l'export. Sans `break_out`, deux cases de l'arbre ne se recouvrent jamais (une
+incrustation est posée dans sa case hôte, par construction). L'ancienne option « fond perdu » d'une
+case (`bleed`) est ignorée ; le fond perdu d'impression du format (`bleed_mm`) ne change pas.
 
 Les calculs se font dans « l'espace de lecture » (colonnes de gauche à droite), puis la page est
 mise en miroir dans la zone utile si la lecture se fait de droite à gauche (manga).
@@ -92,7 +100,7 @@ class PanelSpec:
     panel_id: int | None = None
     intensity: str | None = None  # calme | normal | choc (indice de mise en scène du scénario)
     shot_type: str | None = None
-    # Options de cadre imposées dans l'UI ({"frame", "bleed", "inset"}) ; le reste vient du style.
+    # Options de cadre imposées dans l'UI ({"frame", "break_out", "inset"}) ; le reste vient du style.
     frame: dict[str, Any] | None = None
 
 
@@ -100,7 +108,7 @@ FRAME_KINDS = ("border", "none", "fade")
 
 
 def default_frame() -> dict[str, Any]:
-    return {"frame": "border", "bleed": False, "inset": False}
+    return {"frame": "border", "break_out": False, "inset": False}
 
 
 def normalize_frames(frames: Sequence[dict[str, Any]] | None, n: int) -> list[dict[str, Any]]:
@@ -110,10 +118,11 @@ def normalize_frames(frames: Sequence[dict[str, Any]] | None, n: int) -> list[di
     out = []
     for f in frames:
         entry = {**default_frame(), **(f if isinstance(f, dict) else {})}
+        entry.pop("bleed", None)  # ancienne case à fond perdu : ignorée (marge extérieure inviolable)
         if entry["frame"] not in FRAME_KINDS:
             entry["frame"] = "border"
-        entry["bleed"] = bool(entry["bleed"]) and not entry["inset"]
         entry["inset"] = bool(entry["inset"])
+        entry["break_out"] = entry["break_out"] is True and not entry["inset"]
         out.append(entry)
     hosts = [f.get("host") for f in out]
     for i, f in enumerate(out):
@@ -559,20 +568,19 @@ def compute_layout(
             by_index[i] = panel_out(i, rect.polygon(), panels[i])
     for i, f in enumerate(decided):
         out = by_index[i]
-        bleed_poly = None if f["inset"] else _bleed_polygon(leaf_polys[i], frame)
+        grown_poly = _break_out_polygon(leaf_polys[i], frame, settings.break_out_mm) if f["break_out"] else None
         out.update(
             frame=f["frame"],
             inset=f["inset"],
             host_index=f["host"] if f["inset"] else None,
-            bleed_possible=bleed_poly is not None,
-            bleed=bool(f["bleed"] and bleed_poly),
+            break_out=grown_poly is not None,
         )
-        if out["bleed"] and bleed_poly:
-            # Fond perdu : boîte, ratio et taille de génération deviennent ceux de la case agrandie ;
-            # la zone de bulles et `live_polygon` restent dans la zone utile.
-            rounded = [(float(x), float(y)) for x, y in map(geo.round_point, bleed_poly)]
+        if grown_poly is not None:
+            # Débordement : boîte, ratio et taille de génération deviennent ceux de la case agrandie
+            # (toujours dans la zone utile) ; la zone de bulles et `base_polygon` restent ceux d'origine.
+            rounded = [(float(x), float(y)) for x, y in map(geo.round_point, grown_poly)]
             grown = by_index[i] = {**out, **panel_out(i, rounded, panels[i])}
-            grown.update(bubble_zone=out["bubble_zone"], live_polygon=out["polygon"], slanted=out["slanted"])
+            grown.update(bubble_zone=out["bubble_zone"], base_polygon=out["polygon"])
     panels_out = [by_index[i] for i in range(len(panels))]
 
     gutters_out: list[dict[str, Any]] = []
@@ -628,54 +636,125 @@ def compute_layout(
     }
     if style is not None:
         out["style"] = style
-    if any(f["frame"] != "border" or f["bleed"] or f["inset"] for f in decided):
+    if any(f["frame"] != "border" or f["break_out"] or f["inset"] for f in decided):
         # Seulement s'il y a une option : une page sans option garde exactement le JSON d'avant.
         out["frames"] = [
-            {k: v for k, v in f.items() if k in ("frame", "bleed", "inset", "host", "size", "margin_mm", "min_side_mm")}
+            {
+                k: v
+                for k, v in f.items()
+                if k in ("frame", "break_out", "inset", "host", "size", "margin_mm", "min_side_mm")
+            }
             for f in decided
         ]
-    return out
+    return clamp_to_live(out, settings)
 
 
-def _bleed_polygon(poly: geo.Polygon, frame: Frame) -> geo.Polygon | None:
-    """Case agrandie jusqu'au bord de la page sur ses bords extérieurs (posés sur la zone utile, hors reliure).
-
-    Chaque bord extérieur avance parallèlement jusqu'au bord de la page ; les bords voisins (gouttières,
-    biais) gardent leur direction. None si la case ne touche aucun bord extérieur.
-    """
-    live = frame.live
-    outer = {
-        "top": live.y1,
-        "bottom": frame.height - live.y2,
-        "left": live.x1 if frame.inner_side != "left" else None,
-        "right": frame.width - live.x2 if frame.inner_side != "right" else None,
-    }
-    offsets: list[float] = []
-    touched = False
-    n = len(poly)
-    for k in range(n):
-        (x1, y1), (x2, y2) = poly[k], poly[(k + 1) % n]
-        if math.hypot(x2 - x1, y2 - y1) < geo.EPS:
-            continue
-        side = None
-        if abs(y1 - live.y1) < 0.05 and abs(y2 - live.y1) < 0.05:
-            side = "top"
-        elif abs(y1 - live.y2) < 0.05 and abs(y2 - live.y2) < 0.05:
-            side = "bottom"
-        elif abs(x1 - live.x1) < 0.05 and abs(x2 - live.x1) < 0.05:
-            side = "left"
-        elif abs(x1 - live.x2) < 0.05 and abs(x2 - live.x2) < 0.05:
-            side = "right"
-        dist = outer.get(side) if side else None
-        if dist is not None and dist > 0:
-            offsets.append(-float(dist))
-            touched = True
-        else:
-            offsets.append(0.0)
-    if not touched:
+def _break_out_polygon(poly: geo.Polygon, frame: Frame, distance_mm: float) -> geo.Polygon | None:
+    """Case qui déborde : chaque bord franchit la gouttière et avance encore de `distance_mm` sur les
+    voisines, puis la case est coupée à la zone utile. None si la distance est nulle."""
+    if distance_mm <= 0:
         return None
-    grown = geo.offset_edges(poly, offsets)
-    return grown or None
+    d = max(frame.gutter_h, frame.gutter_v) + distance_mm * frame.px_per_mm
+    live = frame.live
+    grown = geo.clip_rect(geo.outset(poly, d), live.x1, live.y1, live.x2, live.y2)
+    return grown if len(grown) >= 3 else None
+
+
+# Clés d'une ancienne case à fond perdu (avant la marge extérieure inviolable) : retirées à la relecture.
+_LEGACY_PANEL_KEYS = ("bleed", "bleed_possible", "live_polygon")
+
+
+def _clip_box(box: Any, live: Rect) -> dict[str, int] | None:
+    if not isinstance(box, dict):
+        return None
+    try:
+        x1, y1, x2, y2 = (int(box[k]) for k in ("x1", "y1", "x2", "y2"))
+    except (KeyError, TypeError, ValueError):
+        return None
+    x1, x2 = max(x1, live.x1), min(x2, live.x2)
+    y1, y2 = max(y1, live.y1), min(y2, live.y2)
+    if x2 - x1 < 1 or y2 - y1 < 1:
+        return None
+    return {"x1": x1, "y1": y1, "x2": x2, "y2": y2}
+
+
+def live_rect(layout: dict[str, Any]) -> Rect | None:
+    live = layout.get("live_area")
+    if not isinstance(live, dict):
+        return None
+    try:
+        return Rect(*(int(live[k]) for k in ("x1", "y1", "x2", "y2")))
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def clamp_to_live(layout: dict[str, Any], settings: LayoutSettings | None = None) -> dict[str, Any]:
+    """Garde-fou unique de la marge extérieure : chaque case (polygone, boîte, zone de bulles, case
+    d'origine d'un débordement) est coupée à la zone utile, à 0 px près.
+
+    Une case déjà dans la zone utile n'est pas touchée (aucun saut). Une case qui en sortait (ancienne
+    case à fond perdu) est ramenée à sa partie dans la zone utile ; sa boîte, son ratio et, si `settings`
+    est donné, sa taille de génération suivent. Renvoie une copie ; `layout` n'est pas modifié.
+    """
+    live = live_rect(layout)
+    if live is None or not isinstance(layout.get("panels"), list):
+        return layout
+    panels: list[Any] = []
+    for lp in layout["panels"]:
+        if not isinstance(lp, dict):
+            panels.append(lp)
+            continue
+        p = {k: v for k, v in lp.items() if k not in _LEGACY_PANEL_KEYS}
+        box = _clip_box(lp, live)
+        raw = lp.get("polygon")
+        try:
+            poly = [(float(x), float(y)) for x, y in raw] if raw else None
+        except (TypeError, ValueError):
+            poly = None
+        inside = box is not None and all(box[k] == lp.get(k) for k in ("x1", "y1", "x2", "y2"))
+        if poly is not None:
+            inside = inside and all(live.x1 <= x <= live.x2 and live.y1 <= y <= live.y2 for x, y in poly)
+        if not inside:
+            clipped = geo.clip_rect(poly, live.x1, live.y1, live.x2, live.y2) if poly else []
+            if len(clipped) >= 3:
+                rect = bounding_rect(clipped)
+                p["polygon"] = [geo.round_point(q) for q in clipped]
+                p["slanted"] = not geo.is_axis_rect(clipped)
+            elif box is not None:
+                rect = Rect(box["x1"], box["y1"], box["x2"], box["y2"])
+                if poly is not None:
+                    p["polygon"] = [geo.round_point(q) for q in rect.polygon()]
+                    p["slanted"] = False
+            else:
+                # Case entièrement hors de la zone utile (mise en page corrompue) : réduite à rien.
+                rect = Rect(live.x1, live.y1, live.x1, live.y1)
+                if poly is not None:
+                    p["polygon"] = []
+            p.update(rect.as_dict(), width=rect.w, height=rect.h)
+            if rect.w > 0 and rect.h > 0:
+                p["ratio"] = round(rect.w / rect.h, 4)
+                if settings is not None:
+                    p["target"] = target_size(rect.w, rect.h, settings)
+            zone = lp.get("bubble_zone")
+            if isinstance(zone, dict):
+                p["bubble_zone"] = _clip_box(zone, rect) if rect.w > 0 and rect.h > 0 else None
+        base = lp.get("base_polygon")
+        if base:
+            try:
+                bpoly = [(float(x), float(y)) for x, y in base]
+            except (TypeError, ValueError):
+                bpoly = []
+            bclip = geo.clip_rect(bpoly, live.x1, live.y1, live.x2, live.y2) if bpoly else []
+            if len(bclip) >= 3:
+                p["base_polygon"] = [geo.round_point(q) for q in bclip]
+            else:
+                p.pop("base_polygon", None)
+        panels.append(p)
+    out = {**layout, "panels": panels}
+    frames = layout.get("frames")
+    if isinstance(frames, list):
+        out["frames"] = [{k: v for k, v in f.items() if k != "bleed"} if isinstance(f, dict) else f for f in frames]
+    return out
 
 
 def _inset_rect(host: geo.Polygon, info: dict[str, Any], direction: Direction, frame: Frame) -> Rect:
