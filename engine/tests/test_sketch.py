@@ -286,6 +286,66 @@ def test_lettering_preview_prefers_clean_then_validated_then_latest_sketch(
     assert shown() == (final["url"], "final")  # version propre choisie
 
 
+def test_validate_any_sketch_switches_preview_crop_and_clean(
+    make_client: Callable[..., TestClient],  # noqa: F811
+) -> None:
+    """Valider un croquis plus ancien que le dernier (« Valider ce croquis » des versions), puis en changer :
+    aperçu de la case, cadrage gardé, « Passer au propre » repart du croquis validé, rien n'est supprimé."""
+    c = make_client()
+    data = setup_chapter(c)
+    chapter_id = data["chapter"]["id"]
+    page = data["pages"][1]
+    [p3] = page["panels"]
+    for _ in range(3):
+        _ok(c.post(f"/panels/{p3['id']}/sketch"), 202)
+        _wait(c)
+    v1, v2, v3 = _images(c, p3["id"])
+    assert [i["version"] for i in (v1, v2, v3)] == [1, 2, 3]
+
+    def preview() -> dict[str, Any]:
+        pages = _ok(c.get(f"/chapters/{chapter_id}/pages"))
+        return next(p for pg in pages for p in pg["panels"] if p["id"] == p3["id"])
+
+    assert preview()["sketch_image_url"] == v3["url"] and not preview()["sketch_validated"]
+    _ok(c.put(f"/panels/{p3['id']}/crop", json={"x": 0.4, "y": 0.5, "zoom": 1.5}))
+    crop = preview()["crop"]
+
+    for img in (v1, v2, v1):  # v1 → v2 → v1
+        detail = _ok(c.post(f"/panels/{p3['id']}/sketch/validate", json={"image_id": img["id"]}))
+        assert detail["sketch_image_id"] == img["id"]
+        shown = preview()
+        assert shown["sketch_validated"] and shown["sketch_image_id"] == img["id"]
+        assert shown["sketch_image_url"] == img["url"]
+        assert shown["crop"] == crop  # cadrage de la case gardé (reborné au rendu)
+
+    _ok(c.post(f"/panels/{p3['id']}/clean"), 202)
+    _wait(c)
+    [final] = [i for i in _images(c, p3["id"]) if i["kind"] == "final"]
+    assert final["params"]["composition"]["image_id"] == v1["id"]  # passé au propre depuis v1, pas le dernier
+
+    # Changer de croquis validé garde la version propre déjà tirée de v1 ; rien n'est supprimé.
+    _ok(c.post(f"/panels/{p3['id']}/sketch/validate", json={"image_id": v2["id"]}))
+    images = _images(c, p3["id"])
+    assert {i["id"] for i in images} == {v1["id"], v2["id"], v3["id"], final["id"]}
+    assert next(i for i in images if i["id"] == final["id"])["selected"]
+    assert not preview()["sketch_cleaned"]  # v2 pas encore passé au propre
+
+    # Annuler la validation : la case repasse « à trier », le dernier croquis redevient l'aperçu de secours.
+    assert _ok(c.delete(f"/panels/{p3['id']}/sketch/validate"))["sketch_image_id"] is None
+    assert not preview()["sketch_validated"] and preview()["sketch_image_url"] == v3["url"]
+
+
+def test_validate_sketch_of_another_panel_is_refused(make_client: Callable[..., TestClient]) -> None:  # noqa: F811
+    c = make_client()
+    data = setup_chapter(c)
+    p1, _, p3 = data["panels"]
+    _ok(c.post(f"/panels/{p1['id']}/sketch"), 202)
+    _wait(c)
+    [other] = _images(c, p1["id"])
+    res = c.post(f"/panels/{p3['id']}/sketch/validate", json={"image_id": other["id"]})
+    assert res.status_code == 422, res.text
+
+
 def test_denoise_panel_over_series_over_preset(make_client: Callable[..., TestClient]) -> None:  # noqa: F811
     c = make_client()
     data = setup_chapter(c)

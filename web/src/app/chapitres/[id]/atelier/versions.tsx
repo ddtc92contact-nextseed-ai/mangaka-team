@@ -8,6 +8,7 @@ import { Alert, Button, Select } from "@/components/ui";
 import { engineUrl, fullErrorMessage, type Annotation, type PanelImage } from "@/lib/api";
 import { formatDuration, imageDurationS } from "@/lib/generation";
 import { QC_VERDICT } from "@/lib/qc";
+import { isRetained, versionChoice } from "@/lib/version-choice";
 import { REPAIR_TARGETS, isSketch } from "./repair-dialog";
 
 function caption(img: PanelImage): string {
@@ -44,16 +45,26 @@ function TierBadge({ tier, title }: { tier: string | null; title?: string | null
   );
 }
 
-/** Bandeau des versions d'une case : vignettes, grand aperçu, choix, suppression, comparaison. */
+/** Bandeau des versions d'une case : vignettes, grand aperçu, choix (ou validation d'un croquis), suppression,
+ * comparaison. */
 export function VersionsStrip({
   images,
+  validatedSketchId = null,
   onSelect,
+  onValidateSketch,
+  onUnvalidateSketch,
   onDelete,
   onAnnotated,
   onRepair,
 }: {
   images: PanelImage[];
+  /** Croquis validé de la case (null : aucun). */
+  validatedSketchId?: number | null;
   onSelect: (img: PanelImage) => Promise<void>;
+  /** Valide ce croquis (n'importe lequel, pas seulement le dernier). */
+  onValidateSketch?: (img: PanelImage) => Promise<void>;
+  /** Retire la validation du croquis validé. */
+  onUnvalidateSketch?: () => Promise<void>;
   onDelete: (img: PanelImage) => Promise<void>;
   onAnnotated: (imageId: number, annotation: Annotation | null) => void;
   /** Ouvre « Réparer une zone » sur une version (la fenêtre des versions se ferme). */
@@ -66,7 +77,11 @@ export function VersionsStrip({
 
   const sorted = [...images].sort((a, b) => b.version - a.version);
   const viewed = images.find((i) => i.id === viewId) ?? null;
-  const chosen = images.find((i) => i.selected) ?? null;
+  // Version retenue à comparer : le croquis validé pour un croquis, la version choisie sinon.
+  const chosen =
+    (viewed?.kind === "croquis"
+      ? images.find((i) => i.id === validatedSketchId)
+      : images.find((i) => i.selected && i.kind !== "croquis")) ?? null;
   const compared = viewed && compareId !== null ? (images.find((i) => i.id === compareId) ?? null) : null;
 
   function open(img: PanelImage) {
@@ -91,6 +106,14 @@ export function VersionsStrip({
     }
   }
 
+  /** Bouton principal : choisir une version propre, valider un croquis. */
+  const choose = (img: PanelImage) =>
+    run(async () => {
+      const action = versionChoice(img, validatedSketchId).action;
+      if (action === "select") await onSelect(img);
+      else if (action === "validate" && onValidateSketch) await onValidateSketch(img);
+    });
+
   const remove = (img: PanelImage) =>
     run(async () => {
       if (
@@ -112,15 +135,23 @@ export function VersionsStrip({
   return (
     <>
       <ul className="grid grid-cols-3 gap-2" data-testid="versions">
-        {sorted.map((img) => (
+        {sorted.map((img) => {
+          const validated = img.kind === "croquis" && img.id === validatedSketchId;
+          return (
           <li key={img.id}>
             <button
               type="button"
               onClick={() => open(img)}
               className={`group relative block w-full overflow-hidden rounded-md bg-zinc-950 text-left ring-inset focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-400 ${
-                img.selected ? "ring-2 ring-rose-400" : "ring-1 ring-zinc-800 hover:ring-zinc-500"
+                validated
+                  ? "ring-2 ring-emerald-400"
+                  : isRetained(img, validatedSketchId)
+                    ? "ring-2 ring-rose-400"
+                    : "ring-1 ring-zinc-800 hover:ring-zinc-500"
               }`}
-              aria-label={`Version ${img.version}${img.tier ? `, palier ${img.tier}` : ""}, seed ${img.seed ?? "inconnue"}${img.selected ? ", choisie" : ""}${
+              aria-label={`Version ${img.version}${img.tier ? `, palier ${img.tier}` : ""}, seed ${img.seed ?? "inconnue"}${
+                validated ? ", croquis validé" : isRetained(img, validatedSketchId) ? ", choisie" : ""
+              }${
                 img.qc_verdict ? `, QC ${QC_VERDICT[img.qc_verdict].toLowerCase()}` : ""
               } : agrandir`}
               data-testid="version-thumb"
@@ -132,10 +163,19 @@ export function VersionsStrip({
                 loading="lazy"
                 className="aspect-square w-full object-cover transition-opacity group-hover:opacity-90"
               />
-              {img.selected && (
-                <span className="absolute right-1 top-1 rounded bg-rose-500 px-1.5 py-0.5 text-[10px] font-semibold text-white">
-                  Choisie
+              {validated ? (
+                <span
+                  className="absolute right-1 top-1 rounded bg-emerald-600 px-1.5 py-0.5 text-[10px] font-semibold text-white"
+                  data-testid="version-validated"
+                >
+                  Validé
                 </span>
+              ) : (
+                isRetained(img, validatedSketchId) && (
+                  <span className="absolute right-1 top-1 rounded bg-rose-500 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                    Choisie
+                  </span>
+                )
               )}
               {img.qc_verdict && (
                 <span className="absolute left-1 top-1">
@@ -172,7 +212,8 @@ export function VersionsStrip({
               </span>
             </button>
           </li>
-        ))}
+          );
+        })}
       </ul>
 
       <Modal
@@ -183,7 +224,15 @@ export function VersionsStrip({
           viewed
             ? compared
               ? `Comparer v${viewed.version} et v${compared.version}`
-              : `Version ${viewed.version}${viewed.selected ? " (choisie)" : ""}`
+              : `Version ${viewed.version}${
+                  viewed.kind === "croquis"
+                    ? viewed.id === validatedSketchId
+                      ? " (croquis validé)"
+                      : " (croquis)"
+                    : viewed.selected
+                      ? " (choisie)"
+                      : ""
+                }`
             : ""
         }
         footer={
@@ -200,7 +249,11 @@ export function VersionsStrip({
                   onClick={() => setCompareId((chosen && chosen.id !== viewed.id ? chosen : sorted.find((i) => i.id !== viewed.id))!.id)}
                   disabled={busy}
                 >
-                  {chosen && chosen.id !== viewed.id ? "Comparer avec la version choisie" : "Comparer avec une autre"}
+                  {chosen && chosen.id !== viewed.id
+                    ? chosen.kind === "croquis"
+                      ? "Comparer avec le croquis validé"
+                      : "Comparer avec la version choisie"
+                    : "Comparer avec une autre"}
                 </Button>
               )}
               {compared && (
@@ -221,16 +274,31 @@ export function VersionsStrip({
                   Réparer une zone…
                 </Button>
               )}
-              {!compared && (
+              {!compared && viewed.kind === "croquis" && viewed.id === validatedSketchId && onUnvalidateSketch && (
                 <Button
-                  onClick={() => run(() => onSelect(viewed))}
-                  disabled={busy || viewed.selected || viewed.kind === "croquis"}
-                  title={viewed.kind === "croquis" ? "Un croquis n'est jamais assemblé : valide-le puis « Passer au propre »" : undefined}
-                  data-testid="choose-version"
+                  variant="ghost"
+                  onClick={() => run(onUnvalidateSketch)}
+                  disabled={busy}
+                  title="La case repasse « à trier » : plus aucun croquis validé"
+                  data-testid="unvalidate-sketch"
                 >
-                  {viewed.kind === "croquis" ? "Croquis (non assemblé)" : viewed.selected ? "Version choisie" : "Choisir cette version"}
+                  Annuler la validation
                 </Button>
               )}
+              {!compared &&
+                (() => {
+                  const choice = versionChoice(viewed, validatedSketchId);
+                  return (
+                    <Button
+                      onClick={() => choose(viewed)}
+                      disabled={busy || choice.action === null || (choice.action === "validate" && !onValidateSketch)}
+                      title={choice.title}
+                      data-testid="choose-version"
+                    >
+                      {choice.label}
+                    </Button>
+                  );
+                })()}
             </>
           )
         }
@@ -276,7 +344,13 @@ export function VersionsStrip({
                             <option key={o.id} value={o.id}>
                               Version {o.version}
                               {o.tier ? ` · ${o.tier}` : ""}
-                              {o.selected ? " (choisie)" : ""}
+                              {o.kind === "croquis"
+                                ? o.id === validatedSketchId
+                                  ? " (croquis validé)"
+                                  : " (croquis)"
+                                : o.selected
+                                  ? " (choisie)"
+                                  : ""}
                             </option>
                           ))}
                       </Select>
@@ -285,19 +359,29 @@ export function VersionsStrip({
                     <span className="text-sm font-medium text-zinc-200">
                       Version {img.version}
                       {img.tier && <span className="ml-2 text-xs text-zinc-400">{img.tier}</span>}
-                      {img.selected && <span className="ml-2 text-xs text-rose-300">choisie</span>}
+                      {img.kind === "croquis" ? (
+                        img.id === validatedSketchId && <span className="ml-2 text-xs text-emerald-300">croquis validé</span>
+                      ) : (
+                        img.selected && <span className="ml-2 text-xs text-rose-300">choisie</span>
+                      )}
                     </span>
                   )}
-                  {img.kind !== "croquis" && (
-                    <Button
-                      variant={img.selected ? "ghost" : "secondary"}
-                      className="!px-2.5 !py-1 text-xs"
-                      disabled={busy || img.selected}
-                      onClick={() => run(() => onSelect(img))}
-                    >
-                      {img.selected ? "Choisie" : "Choisir celle-ci"}
-                    </Button>
-                  )}
+                  {(() => {
+                    const choice = versionChoice(img, validatedSketchId);
+                    if (choice.action === "validate" && !onValidateSketch) return null;
+                    return (
+                      <Button
+                        variant={choice.retained ? "ghost" : "secondary"}
+                        className="!px-2.5 !py-1 text-xs"
+                        disabled={busy || choice.action === null}
+                        title={choice.title}
+                        onClick={() => choose(img)}
+                        data-testid="compare-choose"
+                      >
+                        {choice.short}
+                      </Button>
+                    );
+                  })()}
                 </div>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img

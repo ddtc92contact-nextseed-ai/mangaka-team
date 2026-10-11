@@ -212,6 +212,23 @@ def _chapter(c: TestClient, s: dict[str, Any], panels: int = 2) -> tuple[dict[st
     return ch, pages
 
 
+def test_validating_another_sketch_swaps_library_and_trash(c: TestClient, comfy_dir: Path) -> None:
+    """Valider un croquis plus ancien que le dernier (« Valider ce croquis » des versions) remplace
+    case-NN-croquis.png ; l'autre croquis passe dans la corbeille avec son numéro de version."""
+    s = _series(c, "Lucius et Stan")
+    _, [page] = _chapter(c, s)
+    p1, _ = page["panels"]
+    for _ in range(2):
+        _wait_jobs(c, [_ok(c.post(f"/panels/{p1['id']}/sketch"), 202)[0]])
+    s1, s2 = sorted(_ok(c.get(f"/panels/{p1['id']}/images")), key=lambda i: i["version"])
+    sketch_file = _lib(comfy_dir) / "chapitre-01" / "page-01" / "case-01-croquis.png"
+    for kept, other in ((s2, s1), (s1, s2), (s2, s1)):
+        _ok(c.post(f"/panels/{p1['id']}/sketch/validate", json={"image_id": kept["id"]}))
+        assert _lib_files(comfy_dir) == {"chapitre-01/page-01/case-01-croquis.png"}
+        assert sketch_file.read_bytes() == c.get(kept["url"]).content
+        assert _trash(comfy_dir) == {f"chapitre-01/page-01/case-01-croquis-v{other['version']}.png"}
+
+
 def test_panels_sketches_and_plates(c: TestClient, comfy_dir: Path) -> None:
     s = _series(c, "Lucius et Stan")
     ch, [page] = _chapter(c, s)
