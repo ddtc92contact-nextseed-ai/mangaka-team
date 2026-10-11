@@ -169,7 +169,7 @@ def test_build_inpaint_graph_image_mask_denoise_seed_loras() -> None:
     loras = [n for n in wf.values() if n["class_type"] == "LoraLoaderModelOnly"]
     assert [n["inputs"]["lora_name"] for n in loras] == ["encre.safetensors", "aiko.safetensors"]
     assert wf["4"]["inputs"]["model"][0] != "1"
-    assert set(built.removed_nodes) == {"21", "22"} and "images.image_2" not in wf["6"]["inputs"]
+    assert set(built.removed_nodes) == {"21", "22", "23", "24"} and "images.image_2" not in wf["6"]["inputs"]
     assert built.params["denoise"] == 0.35 and "width" not in built.params
     # denoise par défaut du preset (aucune valeur codée dans le moteur)
     default = build_workflow(

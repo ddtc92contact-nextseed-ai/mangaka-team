@@ -9,7 +9,7 @@
 id: qwen-image-edit-ref-rapide-from-sketch
 name: "Qwen-Image 2.1 · Rapide — propre depuis croquis (avec références)"
 description: >-
-  Passage au propre au palier Rapide (25 étapes) à partir du croquis validé de la case (image → image, denoise réglable), guidé par jusqu'à 3 images de référence ; LoRA de la série conservés.
+  Passage au propre au palier Rapide (25 étapes) à partir du croquis validé de la case (image → image, denoise réglable), guidé par jusqu'à 5 images de référence ; LoRA de la série conservés.
 distilled: false   # modèle de base (non distillé) : cfg > 1 permis (négatif lu), cfg 1 par défaut
 workflow_file: qwen-image-edit-ref-rapide-from-sketch.json
 output_node: "11"
@@ -38,6 +38,8 @@ reference_images:
   - { node: "20", input: image }
   - { node: "21", input: image }
   - { node: "22", input: image }
+  - { node: "23", input: image }
+  - { node: "24", input: image }
 # LoRA (style de la série puis identité de chaque fiche) chaînés après le modèle, comme le croquis.
 lora_chain:
   class_type: LoraLoaderModelOnly

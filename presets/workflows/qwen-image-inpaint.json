@@ -68,6 +68,14 @@
       "images.image_3": [
         "22",
         0
+      ],
+      "images.image_4": [
+        "23",
+        0
+      ],
+      "images.image_5": [
+        "24",
+        0
       ]
     },
     "_meta": {
@@ -209,6 +217,24 @@
     },
     "_meta": {
       "title": "Bruit limité au masque"
+    }
+  },
+  "23": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "mangaka/reference.png"
+    },
+    "_meta": {
+      "title": "Référence 4"
+    }
+  },
+  "24": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "mangaka/reference.png"
+    },
+    "_meta": {
+      "title": "Référence 5"
     }
   }
 }

@@ -97,6 +97,22 @@ def test_workflow_matches_golden(preset_id: str) -> None:
     assert json.loads(path.read_text(encoding="utf-8")) == built
 
 
+# 4 et 5 références (une fiche par personnage de la case) : tous les emplacements remplis, dans l'ordre.
+FULL_REFERENCES = [f"mangaka/perso{i}_img{i}.png" for i in range(1, 6)]
+
+
+@pytest.mark.parametrize("n_refs", [4, 5])
+@pytest.mark.parametrize("preset_id", ["qwen-image-edit-ref-qualite", "qwen-image-edit-ref-turbo"])
+def test_four_and_five_references_match_golden(preset_id: str, n_refs: int) -> None:
+    loaded = REG.workflow(preset_id)
+    built = build_workflow(loaded, PARAMS, reference_images=FULL_REFERENCES[:n_refs], loras=LORAS).workflow
+    path = GOLDEN / f"{preset_id}.refs{n_refs}.json"
+    text = json.dumps(built, indent=2, ensure_ascii=False, sort_keys=True) + "\n"
+    if os.environ.get("UPDATE_GOLDEN"):
+        path.write_text(text, encoding="utf-8")
+    assert json.loads(path.read_text(encoding="utf-8")) == built
+
+
 CONTROL_PRESETS = [p for p in PRESETS if p.endswith("-controlnet")]
 # Types sans post-traitement de la carte : graphe figé (le golden a été produit avant l'inversion de « Trait »).
 PLAIN_CONTROL_TYPES = ["depth", "pose", "scribble", "canny", "carte"]
