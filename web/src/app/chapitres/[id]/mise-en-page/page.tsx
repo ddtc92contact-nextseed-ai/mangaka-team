@@ -224,7 +224,7 @@ export default function LayoutPreviewPage() {
               </>
             )}{" "}
             · glisse une gouttière pour redimensionner ses cases voisines, ou une poignée ronde au bout d&apos;une découpe
-            pour l&apos;incliner (flèches du clavier aussi). Bord, fond perdu et incrustation se règlent case par case, à
+            pour l&apos;incliner (flèches du clavier aussi). Bord, débordement sur les cases voisines et incrustation se règlent case par case, à
             droite.
           </p>
         )}
@@ -250,7 +250,7 @@ export default function LayoutPreviewPage() {
                     <p className="text-zinc-400">
                       {lp.width} × {lp.height} px · ratio {lp.ratio.toFixed(2)}
                       {lp.slanted && <span className="ml-1 text-sky-300">· en biais</span>}
-                      {lp.bleed && <span className="ml-1 text-sky-300">· fond perdu</span>}
+                      {lp.break_out && <span className="ml-1 text-sky-300">· déborde sur ses voisines</span>}
                       {lp.inset && <span className="ml-1 text-sky-300">· incrustée dans la case {(lp.host_index ?? 0) + 1}</span>}
                       {lp.frame && lp.frame !== "border" && (
                         <span className="ml-1 text-sky-300">· {lp.frame === "fade" ? "fondu" : "sans bord"}</span>
@@ -306,11 +306,10 @@ function FrameControls({
   disabled: boolean;
   onChange: (change: Partial<PanelFrame>) => void;
 }) {
-  const forced = panel.frame ?? { frame: null, bleed: null, inset: null };
+  const forced = panel.frame ?? { frame: null, break_out: null, inset: null };
   const yesNo = (v: boolean | null) => (v === null ? "" : v ? "oui" : "non");
   const parse = (v: string) => (v === "" ? null : v === "oui");
   const n = panel.index + 1;
-  const bleedOff = !layoutPanel.bleed_possible && !forced.bleed;
   return (
     <div className="mt-2 grid grid-cols-1 gap-1.5" data-testid="frame-controls">
       <label className="flex items-center justify-between gap-2 text-zinc-400">
@@ -332,23 +331,20 @@ function FrameControls({
           <option value="fade">Fondu au papier</option>
         </Select>
       </label>
-      <label className="flex items-center justify-between gap-2 text-zinc-400" title={bleedOff ? "La case ne touche pas un bord extérieur de la page" : undefined}>
+      <label className="flex items-center justify-between gap-2 text-zinc-400">
         <span className="flex items-center gap-1.5">
-          Fond perdu
-          <InfoTip help="layout.bleed" label="Fond perdu" />
+          Déborder sur les cases voisines
+          <InfoTip help="layout.breakOut" label="Déborder sur les cases voisines" />
         </span>
-        <Select
-          className="!w-36 py-1 text-xs"
-          value={yesNo(forced.bleed)}
-          onChange={(e) => onChange({ bleed: parse(e.target.value) })}
-          disabled={disabled || bleedOff || Boolean(layoutPanel.inset)}
-          aria-label={`Fond perdu de la case ${n}`}
-          data-testid="panel-bleed"
-        >
-          <option value="">Auto ({layoutPanel.bleed ? "oui" : "non"})</option>
-          <option value="oui">Oui</option>
-          <option value="non">Non</option>
-        </Select>
+        <input
+          type="checkbox"
+          className="accent-rose-500"
+          checked={Boolean(layoutPanel.break_out)}
+          onChange={(e) => onChange({ break_out: e.target.checked ? true : null })}
+          disabled={disabled || Boolean(layoutPanel.inset)}
+          aria-label={`Case ${n} : déborder sur les cases voisines`}
+          data-testid="panel-break-out"
+        />
       </label>
       <label className="flex items-center justify-between gap-2 text-zinc-400">
         <span className="flex items-center gap-1.5">

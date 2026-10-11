@@ -348,6 +348,8 @@ def lettering_json(
         "width": art.fmt.width_px,
         "height": art.fmt.height_px,
         "bleed_mm": art.fmt.bleed_mm,
+        # Zone utile : rien n'est dessiné au-delà (marge extérieure inviolable).
+        "live_area": art.live.as_rect() if art.live else None,
         "layout_stale": inputs.stale,
         "styles": styles,
         "sfx_fonts": sfx_fonts,

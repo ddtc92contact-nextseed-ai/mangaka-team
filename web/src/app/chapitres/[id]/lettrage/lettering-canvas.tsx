@@ -103,8 +103,10 @@ export function LetteringCanvas({
   const families = new Map(
     [...Object.values(data.styles), ...Object.values(data.sfx_fonts ?? {})].map((s) => [s.family, s.url]),
   );
-  // Les incrustations se dessinent après les autres cases (comme à l'export).
-  const panels = [...data.panels.filter((p) => !p.inset), ...data.panels.filter((p) => p.inset)];
+  // Comme à l'export : les cases qui débordent sur leurs voisines par-dessus, puis les incrustations.
+  const tree = data.panels.filter((p) => !p.inset);
+  const panels = [...tree.filter((p) => !p.break_out), ...tree.filter((p) => p.break_out), ...data.panels.filter((p) => p.inset)];
+  const live = data.live_area ?? { x1: 0, y1: 0, x2: W, y2: H };
   const outline = (1.2 / 25.4) * data.dpi;
   const fade = (6 / 25.4) * data.dpi;
   const fontCss = [...families]
@@ -229,8 +231,13 @@ export function LetteringCanvas({
               </filter>
             </mask>
           ))}
+        <clipPath id="zone-utile">
+          <rect x={live.x1} y={live.y1} width={live.x2 - live.x1} height={live.y2 - live.y1} />
+        </clipPath>
       </defs>
       <rect width={W} height={H} fill="#ffffff" />
+      {/* Marge extérieure inviolable : cases, bulles et onomatopées coupées à la zone utile. */}
+      <g clipPath="url(#zone-utile)" data-testid="lettering-live-area">
       {panels.map((p) => {
         const w = p.box.x2 - p.box.x1;
         const h = p.box.y2 - p.box.y1;
@@ -243,7 +250,7 @@ export function LetteringCanvas({
             data-missing={p.image_url ? undefined : "true"}
             data-frame={p.frame ?? "border"}
             data-inset={p.inset ? "true" : undefined}
-            data-bleed={p.bleed ? "true" : undefined}
+            data-break-out={p.break_out ? "true" : undefined}
           >
             {p.inset && <polygon points={svgPoints(outsetPolygon(polygonOf(p), outline))} fill="#ffffff" />}
             <g mask={p.frame === "fade" ? `url(#fondu-case-${p.id})` : undefined}>
@@ -464,6 +471,7 @@ export function LetteringCanvas({
           </g>
         );
       })}
+      </g>
       {sfxList
         .filter((fx) => fx.id === selectedId && !disabled)
         .map((fx) => {
