@@ -246,7 +246,7 @@ def test_change_angle_errors(make_client: Callable[..., TestClient], tmp_path: P
     assert len(_ok(turbo.get(f"/panels/{q1['id']}/images"))) == 1
 
 
-def test_new_angle_view_is_stored_and_tagged(make_client: Callable[..., TestClient]) -> None:  # noqa: F811
+def test_new_angle_view_waits_for_validation_then_is_stored_and_tagged(make_client: Callable[..., TestClient]) -> None:  # noqa: F811
     assert MVA is not None
     comfy = MockComfyUIClient()
     c = make_client(comfy)
@@ -257,15 +257,24 @@ def test_new_angle_view_is_stored_and_tagged(make_client: Callable[..., TestClie
     [job] = _ok(c.post(f"/characters/{aiko['id']}/angle-views", json={"angle": "right-eye"}), 202)
     assert job["params"]["start_image_id"] == main["id"] and job["params"]["preset"] == CATALOG.workflow
     _wait(c)
-    assert _ok(c.get(f"/jobs/{job['id']}"))["status"] == "succeeded"
+    done = _ok(c.get(f"/jobs/{job['id']}"))
+    assert done["status"] == "succeeded"
+    assert "en attente de validation" in done["message"] and "rangée dans la fiche" not in done["message"]
+    # Candidate de l'historique, pas encore parmi les vues de la fiche.
     views = _ok(c.get(f"/characters/{aiko['id']}"))["reference_images"]
-    assert [v["angle"] for v in views] == [None, "right-eye"]
+    assert [v["angle"] for v in views] == [None]
     sent = list(comfy.prompts.values())[-1]
     assert sent["6"]["inputs"]["prompt"].startswith(MVA.trigger)
     assert MVA.file in [n["inputs"].get("lora_name") for n in sent.values()]
     studio = _ok(c.get(f"/characters/{aiko['id']}/reference-variants"))
     [variant] = studio["variants"]
-    assert variant["kept"] and variant["params"]["camera"]["angle"]["id"] == "right-eye"
+    assert not variant["kept"] and variant["params"]["camera"]["angle"]["id"] == "right-eye"
+
+    # « Valider » : rangée parmi les vues, étiquetée par son angle.
+    kept = _ok(c.post(f"/reference-variants/{variant['id']}/keep"), 201)
+    assert [v["angle"] for v in kept["reference_images"]] == [None, "right-eye"]
+    [variant] = _ok(c.get(f"/characters/{aiko['id']}/reference-variants"))["variants"]
+    assert variant["kept"]
 
     # Étiquette posée à la main, puis retirée ; angle inconnu refusé.
     tagged = _ok(c.put(f"/characters/{aiko['id']}/images/{main['id']}/angle", json={"angle": "front-eye"}))

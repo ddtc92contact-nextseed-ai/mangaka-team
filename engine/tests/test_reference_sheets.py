@@ -683,3 +683,76 @@ def test_character_sheets_are_not_checked_for_people(
         [variant] = _ok(c.get(f"/characters/{entry['id']}/reference-variants"))["variants"]
         assert detector.calls == 0 and variant["people_warning"] is None and "people_check" not in variant["params"]
         _ok(c.post(f"/reference-variants/{variant['id']}/keep"), 201)
+
+
+# --- « Nouvel angle » : candidate, rangée seulement sur « Valider » ------------------------------
+def test_angle_view_on_a_full_sheet_is_refused_on_validate(c: TestClient) -> None:
+    _, entry = _create_entry(c, "character")
+    files = [("files", (f"{i}.png", png_bytes(), "image/png")) for i in range(MAX_KEPT)]
+    _ok(c.post(f"/characters/{entry['id']}/images", files=files), 201)
+    [job] = _ok(c.post(f"/characters/{entry['id']}/angle-views", json={"angle": "right-eye"}), 202)
+    _idle(c)
+    done = _ok(c.get(f"/jobs/{job['id']}"))
+    assert done["status"] == "succeeded" and "en attente de validation" in done["message"]
+    [variant] = _ok(c.get(f"/characters/{entry['id']}/reference-variants"))["variants"]
+    assert not variant["kept"]
+    full = c.post(f"/reference-variants/{variant['id']}/keep")
+    assert full.status_code == 409 and f"{MAX_KEPT} images de référence au plus" in full.json()["detail"]
+    assert len(_ok(c.get(f"/characters/{entry['id']}"))["reference_images"]) == MAX_KEPT
+
+
+@pytest.mark.parametrize("kind", ["object", "decor"])
+def test_angle_view_with_a_person_is_refused_on_validate(
+    make_settings: Callable[..., Settings], comfy: MockComfyUIClient, kind: str
+) -> None:
+    with _client_with_detector(make_settings, comfy, _FaceDetector(1)) as c:
+        _, entry = _create_entry(c, kind)
+        segment = SEGMENTS[kind]
+        _ok(c.post(f"/{segment}/{entry['id']}/images", files=[("files", ("a.png", png_bytes(), "image/png"))]), 201)
+        [job] = _ok(c.post(f"/{segment}/{entry['id']}/angle-views", json={"angle": "right-eye"}), 202)
+        _idle(c)
+        assert "Personnage détecté dans la fiche" in _ok(c.get(f"/jobs/{job['id']}"))["message"]
+        [variant] = _ok(c.get(f"/{segment}/{entry['id']}/reference-variants"))["variants"]
+        assert not variant["kept"] and variant["people_warning"]
+        assert len(_ok(c.get(f"/{segment}/{entry['id']}"))["reference_images"]) == 1
+
+        refused = c.post(f"/reference-variants/{variant['id']}/keep")
+        assert refused.status_code == 409 and "Personnage détecté dans la fiche" in refused.json()["detail"]
+        assert len(_ok(c.get(f"/{segment}/{entry['id']}"))["reference_images"]) == 1
+
+
+# --- plein pied : de la tête aux pieds, quel que soit le gabarit ---------------------------------
+def test_turnaround_frames_the_whole_figure_head_to_toe() -> None:
+    sheet = REG.reference_sheet("personnage-turnaround")
+    assert sheet.width % 16 == 0 and sheet.height % 16 == 0
+    assert sheet.height / sheet.width > 9 / 16  # plus haut que le 16:9 qui coupait aux genoux
+    assert abs(sheet.width * sheet.height - 1536 * 864) / (1536 * 864) < 0.02  # même budget de pixels
+
+    entry = _entry("character")
+    prompt = sheet_prompt(REG, sheet, entry, _series())
+    assert "entirely visible from head to toe" in prompt and "feet and shoes fully visible" in prompt
+    assert "small empty margin above the head and below the feet" in prompt
+    assert "scaled to fit the canvas height" in prompt
+    assert "tall or heavily built" not in prompt  # gabarit ordinaire : pas de consigne de réduction
+
+    loaded = REG.workflow(sheet_preset_id(REG, sheet, _series()))
+    params = sheet_params(loaded, sheet, prompt, REG, seed=1)
+    for term in ("cropped legs", "cut-off feet", "out of frame"):
+        assert term in params["negative_prompt"]
+    assert (params["width"], params["height"]) == (sheet.width, sheet.height)
+
+
+@pytest.mark.parametrize(
+    ("description", "keywords", "found"),
+    [
+        ("Argus, très grand et trapu, armure lourde", [], "grand, très grand, trapu"),
+        ("un Géant aux épaules larges", [], "géant"),
+        ("guerrier", ["stocky", "katana"], "stocky"),
+    ],
+)
+def test_turnaround_fits_tall_or_stocky_characters(description: str, keywords: list[str], found: str) -> None:
+    sheet = REG.reference_sheet("personnage-turnaround")
+    entry = _entry("character", name="Argus", visual_description=description, prompt_keywords=keywords)
+    prompt = sheet_prompt(REG, sheet, entry, _series())
+    assert f"The character is tall or heavily built ({found})" in prompt
+    assert "never crop the legs or the feet" in prompt

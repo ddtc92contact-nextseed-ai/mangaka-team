@@ -60,7 +60,7 @@ export const HELP = {
 
   // --- angles de caméra (LoRA Multiple-Angles) --------------------------------------------------------------------
   "camera.new_angle":
-    "Crée une nouvelle vue de la fiche sous l'angle choisi (trois-quarts, profil, dos, plongée…) à partir d'une de ses images. La vue est rangée parmi les images de référence, étiquetée par son angle : une case dont la direction artistique demande cet angle la recevra plutôt que la vue principale.",
+    "Crée une nouvelle vue de la fiche sous l'angle choisi (trois-quarts, profil, dos, plongée…) à partir d'une de ses images. La vue arrive dans l'historique en attente de validation ; « Valider » la range parmi les images de référence, étiquetée par son angle : une case dont la direction artistique demande cet angle la recevra plutôt que la vue principale.",
   "camera.change_angle":
     "Redessine cette case sous un autre angle de caméra à partir de la version choisie : une nouvelle version s'ajoute, les autres ne bougent pas. Une génération à la fois, comme les autres.",
   "camera.angle":

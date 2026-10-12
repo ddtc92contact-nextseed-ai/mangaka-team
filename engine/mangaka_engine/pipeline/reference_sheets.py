@@ -28,9 +28,9 @@ jointe à chaque fiche (seule image sans sujet) ; `never` = jamais. Le prompt pr
 
 « Nouvel angle » (`enqueue_angle_view`) : une vue de la fiche (la principale par défaut) envoyée en image 1,
 le LoRA Multiple-Angles et son mot déclencheur en tête du prompt, au palier de presets/camera_loras.yaml
-(`workflow`, Qualité) quel que soit celui de la série. La variante produite est aussitôt rangée parmi les
-vues de la fiche, étiquetée par son angle (sauf personnage détecté dans un objet ou un décor, ou fiche
-pleine : elle reste alors dans l'historique, « Garder comme référence » reprend son angle).
+(`workflow`, Qualité) quel que soit celui de la série. La variante produite est une candidate de l'historique,
+comme toute fiche : elle ne rejoint les vues de la fiche, étiquetée par son angle, que sur « Valider »
+(`keep_variant` : refusé si un personnage est détecté dans un objet ou un décor, ou si la fiche est pleine).
 « Cohérence anime » de la série : LoRA d'identité ajouté à chaque fiche dont le palier le permet.
 
 Aucun nom de modèle, de LoRA ni de nœud ici : tout vient des presets et des fiches.
@@ -39,6 +39,7 @@ Aucun nom de modèle, de LoRA ni de nœud ici : tout vient des presets et des fi
 from __future__ import annotations
 
 import contextlib
+import re
 import string
 import threading
 import time
@@ -95,6 +96,8 @@ PEOPLE_CHECK_KINDS = ("object", "decor")
 PEOPLE_WARNING = "Personnage détecté dans la fiche : régénérer avant de l'utiliser"
 # `sheet` des variantes de « Nouvel angle » (pas un type de presets/reference_sheets/).
 ANGLE_SHEET = "nouvel-angle"
+# Message du job « Nouvel angle » : la vue attend la validation, comme toute variante.
+ANGLE_PENDING = "vue en attente de validation : « Valider » la range parmi les vues de la fiche"
 
 
 def people_check(detectors: DetectorProvider | None, qc: QCSettings | None, data: bytes, *, error: str = "") -> dict:
@@ -155,6 +158,17 @@ def _clean(text: str | None) -> str:
     return " ".join((text or "").split()).rstrip(" .;,:")
 
 
+def large_build(sheet: ReferenceSheet, entry: LibraryEntry) -> list[str]:
+    """Mots de `large_build_keywords` du type de fiche trouvés (mots entiers, sans casse) dans la description
+    visuelle ou les mots-clés de la fiche : personnage grand, géant, trapu… à faire tenir en entier."""
+    text = " ".join((entry.visual_description or "", *(entry.prompt_keywords or []))).casefold()
+    found = []
+    for word in sheet.large_build_keywords:
+        if re.search(rf"(?<!\w){re.escape(word.casefold())}(?!\w)", text):
+            found.append(word)
+    return list(dict.fromkeys(found))
+
+
 def sheet_prompt(
     presets: PresetRegistry,
     sheet: ReferenceSheet,
@@ -181,6 +195,7 @@ def sheet_prompt(
         "instruction": _clean(instruction),
         "start": "<image1>" if start else "",
         "style_ref": f"<image{style_slot}>" if style_slot else "",
+        "large_build": ", ".join(large_build(sheet, entry)),
     }
     parts: list[str] = []
     for part in sheet.prompt:
@@ -767,18 +782,6 @@ class ReferenceExecutor:
                 qc=presets.qc,
             )
 
-    def _store_view(self, session: Session, entry: LibraryEntry, variant: ReferenceVariant) -> str:
-        """« Nouvel angle » : range la variante parmi les vues de la fiche, étiquetée par son angle. Personnage
-        détecté (objet, décor) ou fiche pleine : elle reste dans l'historique (raison dans le message du job)."""
-        if people_blocked(variant):
-            return " (gardée dans l'historique : personnage détecté)"
-        try:
-            # Refus (fiche pleine, fichier absent) avant toute écriture : rien à défaire.
-            keep_variant(session, self.files, entry, variant)
-        except GenerationError as exc:
-            return f" (gardée dans l'historique : {exc})"
-        return " — nouvelle vue rangée dans la fiche"
-
     def _style(self, session: Session, project_id: int, asset_id: int) -> SeriesAsset:
         """Référence de style notée sur le job ; si elle a disparu entre-temps, la référence active."""
         style = session.get(SeriesAsset, asset_id, options=[selectinload(SeriesAsset.reference_images)])
@@ -894,9 +897,6 @@ class ReferenceExecutor:
             session.add(variant)
             session.flush()
             job.params = {**params, "variant_id": variant.id}
-            stored_view = ""
-            if params.get("mode") == "angle":
-                stored_view = self._store_view(session, entry, variant)
             pruned: list[str] = []
             if self.variants_kept is not None:
                 pruned = prune_variants(
@@ -913,5 +913,5 @@ class ReferenceExecutor:
             self.files.delete(path)
         warning = f" — {PEOPLE_WARNING}" if check is not None and check["detected"] else ""
         if params.get("mode") == "angle":
-            return f"{params.get('sheet_name')} — {stored.width}×{stored.height}, seed {built.params['seed']}{stored_view}{warning}"
+            return f"{params.get('sheet_name')} — {stored.width}×{stored.height}, seed {built.params['seed']} — {ANGLE_PENDING}{warning}"
         return f"Variante {params.get('variant', 1)}/{params.get('count', 1)} — {stored.width}×{stored.height}, seed {built.params['seed']} ({n} dans l'historique){warning}"

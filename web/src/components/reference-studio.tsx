@@ -139,18 +139,19 @@ export function ReferenceStudio({
     setFinished((f) => new Set(f).add(job.id));
     if (job.status === "failed") setError(`Variante ${String(job.params?.variant ?? "")} : ${job.error ?? "échec"}`);
     studio.reload();
-    // « Nouvel angle » : la vue est rangée d'office parmi les images de la fiche.
-    if (job.params?.mode === "angle" && job.status === "succeeded") {
-      api.getLibraryEntry(kind, entry.id).then(onEntryChange, () => undefined);
-      if (job.message) setNotice(job.message);
-    }
+    // « Nouvel angle » : la vue attend la validation (« Valider »), comme toute variante.
+    if (job.params?.mode === "angle" && job.status === "succeeded" && job.message) setNotice(job.message);
   }
 
   async function keep(variant: ReferenceVariant, acceptPeople = false) {
     setError(null);
     try {
       onEntryChange(await api.keepReference(variant.id, acceptPeople));
-      setNotice("Image ajoutée aux références de la fiche (en dernière position : change l’ordre dans « Images de référence »).");
+      setNotice(
+        variant.sheet === ANGLE_SHEET
+          ? "Vue validée : rangée parmi les vues de la fiche, étiquetée par son angle."
+          : "Image ajoutée aux références de la fiche (en dernière position : change l’ordre dans « Images de référence »).",
+      );
       studio.reload();
     } catch (err) {
       setError(fullErrorMessage(err));
@@ -255,7 +256,7 @@ export function ReferenceStudio({
             setNotice(null);
             try {
               const newJobs = await api.newAngleView(kind, entry.id, body);
-              enqueued(newJobs, `Nouvel angle « ${label} » en file : la vue sera rangée parmi les images de référence de la fiche, étiquetée par son angle.`);
+              enqueued(newJobs, `Nouvel angle « ${label} » en file : la vue apparaîtra ci-dessous en attente de validation : « Valider » la range parmi les vues de la fiche, étiquetée par son angle.`);
             } catch (err) {
               setError(fullErrorMessage(err));
             }
@@ -552,6 +553,8 @@ function VariantCard({
   const [busy, setBusy] = useState(false);
   // Fiche d'objet ou de décor où le QC a vu un visage : la garder demande une acceptation explicite.
   const blocked = Boolean(v.people_warning && !v.people_accepted);
+  // « Nouvel angle » : une candidate, rangée parmi les vues de la fiche seulement sur « Valider ».
+  const angle = v.sheet === ANGLE_SHEET;
 
   async function run(action: () => Promise<unknown>) {
     setBusy(true);
@@ -591,7 +594,12 @@ function VariantCard({
               Affinée
             </span>
           )}
-          {kept && <span className="rounded bg-emerald-500/15 px-1 py-px text-[10px] text-emerald-300">Gardée</span>}
+          {kept && <span className="rounded bg-emerald-500/15 px-1 py-px text-[10px] text-emerald-300">{angle ? "Validée" : "Gardée"}</span>}
+          {angle && !kept && (
+            <span className="rounded bg-amber-500/15 px-1 py-px text-[10px] text-amber-200" data-testid="variant-pending">
+              En attente de validation
+            </span>
+          )}
           {usedStyleReference(v) && (
             <span className="rounded bg-sky-500/15 px-1 py-px text-[10px] text-sky-200" title="La référence de style de la série a été jointe à cette génération" data-testid="variant-style-reference">
               Référence de style
@@ -631,13 +639,25 @@ function VariantCard({
                 : full
                   ? `${maxKept} images de référence au plus : supprimes-en une`
                   : blocked
-                    ? "Un personnage a été détecté : mieux vaut régénérer. Garder quand même l'accepte à la main, et elle servira de référence aux cases."
-                    : undefined
+                    ? `Un personnage a été détecté : mieux vaut régénérer. ${angle ? "Valider" : "Garder"} quand même l'accepte à la main, et elle servira de référence aux cases.`
+                    : angle
+                      ? "Range cette vue parmi les vues de la fiche, étiquetée par son angle"
+                      : undefined
             }
             onClick={() => run(() => onKeep(blocked))}
             data-testid={blocked ? "variant-keep-anyway" : undefined}
           >
-            {kept ? "Gardée ✓" : blocked ? "Garder quand même" : "Garder comme référence"}
+            {angle
+              ? kept
+                ? "Validée ✓"
+                : blocked
+                  ? "Valider quand même"
+                  : "Valider"
+              : kept
+                ? "Gardée ✓"
+                : blocked
+                  ? "Garder quand même"
+                  : "Garder comme référence"}
           </Button>
           {v.sheet !== ANGLE_SHEET && (
             <Button type="button" variant="secondary" className="px-2 py-1 text-xs" disabled={busy} onClick={() => setRefining((r) => !r)} aria-expanded={refining}>

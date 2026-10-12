@@ -1480,7 +1480,16 @@ class ImagePromptSettings(_Strict):
 
 
 # --- Fiches de référence (« Créer des références » de la bibliothèque) ---------
-REFERENCE_SHEET_VARIABLES = {"name", "description", "keywords", "style", "instruction", "start", "style_ref"}
+REFERENCE_SHEET_VARIABLES = {
+    "name",
+    "description",
+    "keywords",
+    "style",
+    "instruction",
+    "start",
+    "style_ref",
+    "large_build",
+}
 # Sous-dossiers de la bibliothèque lisible tenus par l'appli (vues de « Nouvel angle », images envoyées).
 REFERENCE_SHEET_RESERVED_FOLDERS = frozenset({"angles", "imports"})
 
@@ -1493,7 +1502,8 @@ class ReferenceSheet(_Strict):
     déclencheurs de son LoRA), $style (style de la série + mots déclencheurs du LoRA de style),
     $instruction (consigne d'« Affiner », vide pour une première génération), $start (« image 1 » si
     une image de départ est envoyée, vide sinon), $style_ref (« image N » si la référence de style de
-    la série est jointe, toujours en dernier, vide sinon).
+    la série est jointe, toujours en dernier, vide sinon), $large_build (mots de `large_build_keywords`
+    trouvés dans la description ou les mots-clés de la fiche — personnage grand, géant, trapu… —, vide sinon).
     """
 
     id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
@@ -1508,6 +1518,9 @@ class ReferenceSheet(_Strict):
     # impose ce workflow.
     workflow: str | None = None
     order: int = Field(default=100, description="Ordre dans la liste déroulante")
+    # Mots (insensibles à la casse, mots entiers) qui signalent une silhouette grande ou massive : ceux trouvés
+    # remplissent $large_build (ex. « réduis les figures pour qu'elles tiennent en entier »).
+    large_build_keywords: list[str] = Field(default_factory=list)
     # Sous-dossier de la fiche dans la bibliothèque lisible (`references/personnages/<nom>/<dossier>/`, voir
     # pipeline/comfy_library.py) ; absent : l'id sans la sorte (`personnage-portrait` → `portrait`).
     folder: str | None = Field(default=None, pattern=r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")

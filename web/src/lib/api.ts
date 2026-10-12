@@ -2073,7 +2073,7 @@ export const api = {
   setLibraryImageAngle: (kind: LibraryKind, id: number, imageId: number, angle: string | null) =>
     request<LibraryEntry>(`/${LIBRARY_SEGMENT[kind]}/${id}/images/${imageId}/angle`, json("PUT", { angle })),
   cameraLoras: () => request<CameraLoras>("/presets/camera-loras"),
-  /** « Nouvel angle » : une nouvelle vue de la fiche, rangée parmi ses images et étiquetée par son angle. */
+  /** « Nouvel angle » : une nouvelle vue de la fiche, candidate de l'historique ; « Valider » (`keepReference`) la range parmi ses images, étiquetée par son angle. */
   newAngleView: (kind: LibraryKind, id: number, body: AngleInput & { start_image_id?: number | null }) =>
     request<Job[]>(`/${LIBRARY_SEGMENT[kind]}/${id}/angle-views`, json("POST", body)),
   referenceSheets: (kind?: LibraryKind) =>

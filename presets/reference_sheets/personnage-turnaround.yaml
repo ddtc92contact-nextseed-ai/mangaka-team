@@ -6,16 +6,56 @@ kinds: [character]
 order: 20
 # Sous-dossier de la bibliothèque lisible (references/personnages/<nom>/plein-pied/).
 folder: plein-pied
-width: 1536
-height: 864
+# 4:3 (1328×992 ≈ 1,32 Mpx, même budget que l'ancien 1536×864 en 16:9) : 15 % de hauteur en plus, chaque
+# figure dispose d'une colonne ≈ 443×992 (1:2,2), assez large pour une carrure massive et assez haute pour
+# un personnage grand, de la tête aux semelles avec une marge. Le 16:9 coupait les grands gabarits aux genoux.
+width: 1328
+height: 992
 workflow: null
+# Personnage grand ou massif (description ou mots-clés) : morceau $large_build, figures réduites pour tenir.
+large_build_keywords:
+  - grand
+  - grande
+  - très grand
+  - géant
+  - géante
+  - immense
+  - colosse
+  - colossal
+  - colossale
+  - massif
+  - massive
+  - trapu
+  - trapue
+  - costaud
+  - costaude
+  - corpulent
+  - corpulente
+  - baraqué
+  - baraquée
+  - imposant
+  - imposante
+  - musclé
+  - musclée
+  - tall
+  - giant
+  - huge
+  - towering
+  - stocky
+  - burly
+  - bulky
+  - hulking
+  - massive
+  - muscular
 prompt:
   - "Model sheet (turnaround) of $name: three full-body views of the same character side by side — front, side profile, back — same size, same outfit, neutral pose with arms along the body."
+  - "Framing: each figure is entirely visible from head to toe, the top of the head and the soles of the shoes fully inside the frame, feet and shoes fully visible, a small empty margin above the head and below the feet; the three figures are scaled to fit the canvas height, standing on the same ground line."
   - "$description."
+  - "The character is tall or heavily built ($large_build): draw the three figures smaller if needed so the whole body, head to shoes, still fits inside the frame; never crop the legs or the feet."
   - "Details: $keywords."
   - "Requested change: $instruction."
-  - "$start is the starting image: keep the subject, the silhouette and the outfit, and redraw them cleanly in the three requested views."
+  - "$start is the starting image: keep the subject, the silhouette and the outfit, and redraw them cleanly in the three requested views, each one complete from head to toe."
   - "Style: $style."
   - "The last image ($style_ref) is a style reference only (line work, screentones, inking): do not copy its character, scene or composition."
   - "Plain white background, neutral lighting, no text or captions."
-negative_prompt: "extra characters, background people, text, different characters, cropped views, background scenery"
+negative_prompt: "extra characters, background people, text, different characters, cropped views, background scenery, cropped legs, cut-off feet, feet out of frame, cropped head, out of frame, partial body, half body, knee-up shot, cowboy shot, close-up"

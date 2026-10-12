@@ -1167,7 +1167,15 @@ prompt:                          # morceaux assemblés ; un morceau dont une var
   - "Style: $style."             # packs de style de la série + mots déclencheurs du LoRA de style
   - "The last image ($style_ref) is a style reference only."   # « <imageN> » si la référence de style est jointe
 negative_prompt: "person, people, text"   # en anglais ; remplace le négatif du workflow (termes « pas de texte » toujours ajoutés)
+large_build_keywords: [grand, géant, trapu, tall, stocky]   # facultatif : mots entiers (sans casse) cherchés dans la
+                                 # description et les mots-clés de la fiche ; ceux trouvés remplissent $large_build
 ```
+
+**Plein pied (`personnage-turnaround`)** (12/10/2026 — un personnage grand et trapu était coupé aux genoux en
+16:9) : toile 4:3 de 1328×992 (même budget de pixels que 1536×864, 15 % de hauteur en plus, une colonne
+≈ 443×992 par figure), morceau de cadrage « de la tête aux semelles, marge au-dessus et en dessous, figures
+mises à l'échelle de la hauteur », négatif « cropped legs, cut-off feet, out of frame… », et morceau
+`$large_build` pour un personnage décrit grand, géant, trapu, costaud… (figures réduites pour tenir en entier).
 
 ## Angles de caméra et cohérence anime (`camera_loras.yaml`)
 
@@ -1191,8 +1199,11 @@ aucune conversion). 40 pas en 1024² avec une référence ≈ 57 à 66 s.
   la référence sans tourner.
 - **« Nouvel angle »** (fiche personnage, objet ou décor) : une vue de la fiche (la principale par défaut) en
   image 1, au `workflow` du catalogue (Qualité avec références) et à ses `steps`, quel que soit le palier de
-  la série. La vue produite est rangée parmi les images de référence, **étiquetée par son angle** (colonne
-  `angle` des images, migration v23) ; les autres vues s'étiquettent à la main sous chaque image.
+  la série. La vue produite est une **candidate** de l'historique, comme toute fiche (12/10/2026 — elle se
+  rangeait d'office) : **« Valider »** (`POST /reference-variants/{id}/keep`) la range parmi les images de
+  référence, **étiquetée par son angle** (colonne `angle` des images, migration v23) ; refusé si un
+  personnage est détecté dans un objet ou un décor (sauf « Valider quand même ») ou si la fiche est pleine ;
+  les autres vues s'étiquettent à la main sous chaque image.
 - **Vue servie à une case** : la vue étiquetée la plus proche de l'angle de la direction artistique (`angle`,
   et `plan` pour plongée / contre-plongée, table `direction_angles` ; le côté gauche/droite ne compte pas).
   Sans angle demandé ou sans vue étiquetée : la vue principale (angle supposé : `main_view`).
