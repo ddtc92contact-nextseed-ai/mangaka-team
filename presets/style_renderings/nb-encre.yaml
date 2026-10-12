@@ -6,6 +6,8 @@ order: 20
 monochrome: true
 lang: en
 prompt_keywords: [black and white inked manga, cross-hatching, high contrast]
+# Début de la phrase de style qui ouvre chaque prompt de case (style_lead d'image_prompt.yaml).
+lead: "Black and white manga panel, hand-drawn inked line art with cross-hatching and solid blacks"
 # Tonalité « papier blanc » (11/10/2026) : aplats noirs en accents seulement, le papier reste dominant.
 # Ajoutée au prompt positif ; le négatif n'est lu qu'à vrai CFG (palier Qualité). Voir nb-trames.yaml.
 tonality: "White paper dominant, clean line art, solid black only as accents in the shadows, large white areas, no muddy grey fill"

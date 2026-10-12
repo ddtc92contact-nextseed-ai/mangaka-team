@@ -22,7 +22,10 @@
 # Scénario : $setting (lieu de la case : lieu, moment, éléments du décor — présent même sans décor de la
 # bibliothèque), $staging (mise en scène : qui fait quoi, où dans le cadre, interactions),
 # $character_count (nombre de personnages en toutes lettres : « One character », « Two characters »).
+# $style_lead : phrase de style de la série (`style_lead` ci-dessous), toujours en tête : sans image de
+# référence (figurants, lieux, workflow texte), c'est elle qui tient le style manga (12/10/2026).
 parts:
+  - "$style_lead."
   - "$plan."
   - "Camera angle: $angle."
   - "$description."
@@ -46,6 +49,37 @@ character_separator: "; "
 # Le modèle d'image ne dessine jamais de texte (bulles et lettrage sont vectoriels) :
 # ces termes sont toujours ajoutés au prompt négatif s'ils n'y sont pas déjà.
 forbidden_text_terms: [text, letters, speech bubble, caption, onomatopoeia, watermark, signature]
+
+# Contre le photoréalisme (12/10/2026) : seuls les personnages à image de référence sortaient en manga,
+# figurants, lieux et cases sans référence sortaient en photo. Ces termes sont toujours ajoutés au prompt
+# négatif s'ils n'y sont pas déjà (lu à vrai CFG seulement, palier Qualité) …
+negative_photo_terms: [photorealistic, photograph, photo, 3d render, cgi, realistic skin texture, film grain]
+# … et un paragraphe du rédacteur de prompt qui contient l'un de ces termes (mots entiers, sans casse,
+# hors mots-clés de style de la série) est refusé puis redemandé : pour Qwen-Image, ce vocabulaire
+# d'objectif et de photo est un fort déclencheur de photoréalisme.
+forbidden_photo_terms:
+  - photo
+  - photograph
+  - photographic
+  - photorealistic
+  - photorealism
+  - realistic
+  - lens
+  - bokeh
+  - depth of field
+  - telephoto
+  - DSLR
+  - cinematic still
+  - 35mm
+
+# Phrase de style en tête de chaque prompt de case (fragments et rédacteur de prompt), avant même le rôle
+# des images : morceaux joints par « , » et terminés par un point ; un morceau dont une variable est vide
+# est omis. $rendering : `lead` du pack de rendu de la série (sinon son 1er mot-clé) ; $genre : 1er
+# mot-clé du genre. Ex. « Black and white manga panel, inked line art with halftone screentone shading,
+# seinen manga style. » Les mots-clés `$style` restent en fin de prompt.
+style_lead:
+  - "$rendering"
+  - "$genre style"
 
 # Longueur maximale de $style (caractères, séparateurs compris ; null = sans plafond). Le bloc « Style »
 # pesait ~1/3 du prompt et noyait la description de la case : les packs y entrent tour à tour (1er
@@ -84,10 +118,11 @@ references:
     - "$images"
   after:
     - "$sorting"
-    - "Use the reference images for identity and design only (face, hair, body shape, outfit, colours, materials): draw a new scene with new poses, a new camera angle and the whole background described above. Exactly one continuous scene in a single panel: not a character sheet, not a turnaround, not a collage, no side-by-side views, no multiple poses, no plain white background."
+    - "Use the reference images for identity and design only (face, hair, body shape, outfit, colours, materials): draw a new scene with new poses, a new camera angle and the whole background described above, everything (extras and places included) drawn in the same manga style as the reference images. Exactly one continuous scene in a single panel: not a character sheet, not a turnaround, not a collage, no side-by-side views, no multiple poses, no plain white background."
 
 # Plans et angles (direction artistique, scénario) → termes de cadrage anglais ($shot, $plan, $angle et
-# le rédacteur de prompt). Clés comparées sans casse ; une valeur absente passe telle quelle.
+# le rédacteur de prompt). Jamais de vocabulaire d'objectif ou de photo (forbidden_photo_terms) : cadrage
+# et angle seulement. Clés comparées sans casse ; une valeur absente passe telle quelle.
 # Chaque plan serré dit où le cadre coupe le corps (12/10/2026) : « medium shot » seul laissait Qwen-Image
 # dessiner les personnages en pied, surtout avec une référence plein pied.
 camera_terms:

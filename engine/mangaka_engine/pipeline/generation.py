@@ -12,7 +12,7 @@
   prompt envoyé les nomme dans l'ordre (« <image1> is the identity reference for Urus… ») et dit ce
   qu'il faut prendre de chacune (`prompt.frame_references`, `references.sorting` d'image_prompt.yaml) ;
 - tonalité du rendu de la série (`tonality` du pack, prompt positif ; `tonality_negative`, prompt
-  négatif quand il est lu : vrai CFG) ;
+  négatif, lu à vrai CFG) et termes contre le photoréalisme (`negative_photo_terms` d'image_prompt.yaml) ;
 - `GenerationExecutor` : exécuté par la file sérielle (`pipeline/queue.py`) pour un job :
   envoi des images de référence, construction du workflow (références + LoRA via le preset),
   file ComfyUI, progression, récupération de l'image → nouvelle `PanelImage` (version n+1) ;
@@ -120,7 +120,7 @@ from .prompt_dialog import (
 from .prompt_dialog import PROMPT_ID as DIALOG_PROMPT_ID
 from .prompt_writer import PROMPT_ID as WRITER_PROMPT_ID
 from .prompt_writer import PromptBrief, PromptWriterError, WriteRun, write_prompt
-from .style import series_rendering, series_style
+from .style import series_rendering, series_style, series_style_lead
 
 log = logging.getLogger("mangaka_engine")
 
@@ -283,6 +283,7 @@ def build_panel_prompt(
         decor=_prompt_entry(decor) if decor is not None else None,
         objects=[_prompt_entry(o) for o in objects],
         style=series_style(presets, series),
+        style_lead=series_style_lead(presets, series),
         savoir_faire=savoir_faire,
         bible=bible,
         settings=presets.image_prompt,
@@ -767,6 +768,7 @@ def panel_brief(
         objects=[_prompt_entry(o) for o in cast.objects],
         references=references,
         style=series_style(presets, project),
+        style_lead=series_style_lead(presets, project),
         bible=bible,
         savoir_faire=savoir_faire,
         prompt=presets.prompts.get(WRITER_PROMPT_ID),
@@ -1490,8 +1492,8 @@ class GenerationExecutor:
                 plan=panel_plan(panel) if repair is None and not angle_id else None,
             )
             cfg = series_cfg(chapter.project, loaded)
-            if rendering is not None and loaded.preset.negative_active(cfg):
-                # Vrai CFG (palier Qualité) : le négatif est lu, la tonalité y a ses termes.
+            if rendering is not None:
+                # La tonalité a ses termes dans le négatif (lu seulement à vrai CFG, palier Qualité).
                 negative = merge_negative(negative, rendering.tonality_negative)
             params: dict[str, Any] = {
                 "positive_prompt": prompt,

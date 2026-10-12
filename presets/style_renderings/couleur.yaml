@@ -6,3 +6,5 @@ order: 30
 monochrome: false
 lang: en
 prompt_keywords: [color manga, cel shading, clean outlines]
+# Début de la phrase de style qui ouvre chaque prompt de case (style_lead d'image_prompt.yaml).
+lead: "Colour comic panel, hand-drawn inked line art with flat cel-shaded colours"

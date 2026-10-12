@@ -225,7 +225,8 @@ def test_two_character_panel_gets_two_references_named_in_slot_order(client: Tes
         "<image1> is the identity reference for Urus: keep the face, hair, outfit and colours; ignore its pose, "
         "framing and background. <image2> is the identity reference for Kaël: "
     )
-    assert "background. Wide shot. Urus retrouve Kaël." in prompt
+    assert "background. Black and white manga panel, hand-drawn inked line art with halftone screentone" in prompt
+    assert "manga style. Wide shot. Urus retrouve Kaël." in prompt
     assert "Setting: clairière au bord d'un lac, fin d'après-midi, herbes hautes." in prompt
     assert "Staging: Urus au premier plan à gauche, ailes déployées ; Kaël sur un rocher à droite." in prompt
     assert "Two characters: Urus (dragon bleu, cornes torsadées); Kaël (dragon rouge, ailes)." in prompt

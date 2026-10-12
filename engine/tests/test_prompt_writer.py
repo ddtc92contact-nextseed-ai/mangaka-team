@@ -27,7 +27,7 @@ from mangaka_engine.presets import PresetRegistry
 from mangaka_engine.providers.comfyui import MockComfyUIClient
 from mangaka_engine.providers.factory import Providers
 from mangaka_engine.providers.llm import ChatMessage, LLMUnavailableError, MockLLMProvider
-from tests.conftest import PRESETS_DIR, STYLE, png_bytes
+from tests.conftest import LEAD, PRESETS_DIR, STYLE, png_bytes
 
 
 def _writer_calls(llm: MockLLMProvider) -> list[list[ChatMessage]]:
@@ -63,8 +63,13 @@ def _wait(c: TestClient) -> None:
     assert c.app.state.ctx.generation.wait_idle(10)  # type: ignore[attr-defined]
 
 
-def _setup(c: TestClient, description: str = "Aiko bondit vers Kenji. « Fuyez ! » crie-t-elle.", **series: Any) -> dict:
-    """Série (Aiko avec référence, Kenji, Ren absent de la case), une case à deux personnages."""
+def _setup(
+    c: TestClient,
+    description: str = "Aiko bondit vers Kenji. « Fuyez ! » crie-t-elle.",
+    cast: tuple[str, ...] = ("Aiko", "Kenji"),
+    **series: Any,
+) -> dict:
+    """Série (Aiko avec référence, Kenji, Ren absent de la case), une case à deux personnages (`cast`)."""
     s = _ok(c.post("/projects", json={**STYLE, "title": "Les Lames", **series}), 201)
     aiko = _ok(
         c.post(
@@ -86,7 +91,7 @@ def _setup(c: TestClient, description: str = "Aiko bondit vers Kenji. « Fuyez !
                         "panels": [
                             {
                                 "description": description,
-                                "characters": ["Aiko", "Kenji"],
+                                "characters": list(cast),
                                 "shot_type": "plan large",
                                 "setting": "toit d'un lycée sous la pluie",
                                 "staging": "Aiko à gauche, Kenji à droite",
@@ -127,8 +132,9 @@ def test_written_prompt_is_stored_on_the_panel_and_used_for_generation(env: Env)
     prompt = panel["final_prompt"]
     assert panel["prompt_source"] == "ia" and panel["final_prompt_manual"] is False
     assert panel["prompt_pending"] is False and panel["prompt_warning"] is None
-    # le rôle de la référence défini en tête, par <image1> ; chaque personnage de la case nommé
-    assert prompt.startswith("<image1> is the identity reference for Aiko: keep the face")
+    # la phrase de style de la série en tête, puis le rôle de la référence, par <image1> ; chaque
+    # personnage de la case nommé
+    assert prompt.startswith(f"{LEAD}<image1> is the identity reference for Aiko: keep the face")
     assert "Aiko" in prompt and "Kenji" in prompt
     # aucun personnage hors de la case, aucune réplique entre guillemets
     assert "Ren" not in prompt.split() and "manteau gris" not in prompt
@@ -144,7 +150,7 @@ def test_written_prompt_is_stored_on_the_panel_and_used_for_generation(env: Env)
     assert "translate everything" in system and "between 180 and 320 words" in system
     assert "toit d'un lycée sous la pluie" in user and "Aiko à gauche" in user and "Fuyez" not in user
     assert "- <image1> is the identity reference for Aiko" in user and "Ren" in user  # Ren : absent
-    assert "camera in cinematic English: wide shot" in user
+    assert "framing terms: wide shot" in user
 
     # prompt envoyé à ComfyUI : le rédigé (qui définit déjà les rôles : pas de 2e ligne de rôle), puis la
     # consigne « identité seulement » ; négatif « pas de texte »
@@ -190,7 +196,7 @@ def test_invalid_output_twice_falls_back_to_fragments_with_a_warning(env: Env) -
     # 2 tentatives au plus (max_retries: 1), puis repli : la génération a bien eu lieu
     assert len(_writer_calls(env.llm)) == 2
     assert panel["images"][0]["params"]["panel_prompt"] == panel["final_prompt"]
-    assert panel["prompt_source"] == "fragments" and panel["final_prompt"].startswith("Wide shot.")
+    assert panel["prompt_source"] == "fragments" and panel["final_prompt"].startswith(f"{LEAD}Wide shot.")
     assert "Setting: toit d'un lycée sous la pluie." in panel["final_prompt"]
     warning = panel["prompt_warning"]
     assert warning.startswith("Prompt rédigé par l'IA indisponible (réponse invalide 2 fois de suite")
@@ -236,7 +242,7 @@ def test_setting_off_gives_exactly_the_fragment_prompt(env: Env) -> None:
     style = data["series"]["style_prompt"]
     # golden : l'assemblage par fragments actuel, inchangé (presets/image_prompt.yaml#parts)
     assert panel["final_prompt"] == (
-        "Wide shot. Aiko bondit vers Kenji. crie-t-elle. Setting: toit d'un lycée sous la pluie. "
+        f"{LEAD}Wide shot. Aiko bondit vers Kenji. crie-t-elle. Setting: toit d'un lycée sous la pluie. "
         "Staging: Aiko à gauche, Kenji à droite. "
         "Two characters: Aiko (cheveux noirs courts, kimono rouge); Kenji (grand, lunettes). "
         f"Style: {style}. A single continuous scene in one panel, no text or speech bubbles in the image."
@@ -253,7 +259,7 @@ def test_turning_the_setting_off_brings_back_the_fragment_prompt(env: Env) -> No
     assert _generate(c, pid)["prompt_source"] == "ia"
     _ok(c.patch(f"/projects/{data['series']['id']}", json={"ai_prompt": False}))
     panel = _ok(c.get(f"/panels/{pid}"))
-    assert panel["prompt_source"] == "fragments" and panel["final_prompt"].startswith("Wide shot. Aiko bondit")
+    assert panel["prompt_source"] == "fragments" and panel["final_prompt"].startswith(f"{LEAD}Wide shot. Aiko bondit")
     # et de nouveau oui : rédigé à la prochaine génération
     _ok(c.patch(f"/projects/{data['series']['id']}", json={"ai_prompt": True}))
     assert _ok(c.get(f"/panels/{pid}"))["prompt_pending"] is True
@@ -403,3 +409,113 @@ def test_mock_panel_prompt_sent_to_comfyui_is_english_with_image_roles_first() -
     )
     assert "medium shot, framed from the waist up, legs out of frame, low-angle view looking up" in sent
     assert french_hits(sent) == 0 and not re.search(r"[éèàùçâêîôû«»]", sent)
+
+
+# --- style manga sur toutes les cases (pas de vocabulaire photo) ------------------------------------------
+def _photo_words(text: str) -> list[str]:
+    terms = PresetRegistry.load(PRESETS_DIR).image_prompt.forbidden_photo_terms
+    return [t for t in terms if re.search(rf"(?<![\w-]){re.escape(t)}(?![\w-])", text, re.IGNORECASE)]
+
+
+def test_panel_without_reference_opens_on_the_manga_style_sentence(env: Env) -> None:
+    """Critère d'acceptation (mode mock) : une case sans image de référence (Kenji et un figurant) → son prompt,
+    celui de l'atelier, commence par la phrase de style manga et n'a aucun terme photographique."""
+    c = env.c
+    pid = _setup(c, description="Kenji croise un passant dans la rue", cast=("Kenji", "un passant"))["panel"]["id"]
+    panel = _generate(c, pid)
+    prompt = panel["final_prompt"]
+    assert panel["prompt_source"] == "ia" and prompt.startswith(LEAD + "Kenji, on the left of the frame")
+    assert _photo_words(prompt) == [] and "<image" not in prompt
+    sent = panel["images"][0]["params"]["prompt"]
+    assert sent.startswith(LEAD) and _photo_words(sent) == []
+    # le figurant sans fiche : même style manga que le reste de la case
+    [messages] = _writer_calls(env.llm)
+    assert "un passant (extra, no character sheet: drawn in the same manga style as the rest of the panel)" in (
+        messages[1].content
+    )
+
+
+def test_negative_sent_to_comfyui_has_anti_photo_and_tonality_terms_once(env: Env) -> None:
+    c = env.c
+    pid = _setup(c)["panel"]["id"]
+    negative = _generate(c, pid)["images"][0]["params"]["negative_prompt"]
+    terms = [t.strip() for t in negative.split(",")]
+    for term in ["photorealistic", "photograph", "photo", "3d render", "cgi", "realistic skin texture", "film grain"]:
+        assert terms.count(term) == 1, term
+    for term in ["dark muddy image", "grey overall", "heavy black fill", "underexposed"]:  # tonality_negative
+        assert terms.count(term) == 1, term
+    assert len(terms) == len({t.casefold() for t in terms})
+
+
+def test_written_prompts_are_pending_again_after_a_writer_revision(env: Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Nouvelle version des consignes du rédacteur : les prompts rédigés sont redemandés, jamais un prompt
+    édité à la main."""
+    c = env.c
+    data = _setup(c)
+    pid = data["panel"]["id"]
+    assert _generate(c, pid)["prompt_pending"] is False
+    from mangaka_engine.pipeline import prompt_writer
+
+    monkeypatch.setattr(prompt_writer, "WRITER_REVISION", prompt_writer.WRITER_REVISION + 1)
+    assert _ok(c.get(f"/panels/{pid}"))["prompt_pending"] is True
+    _ok(c.patch(f"/panels/{pid}", json={"final_prompt": "Aiko et Kenji sur le toit, à la main."}))
+    assert _ok(c.get(f"/panels/{pid}"))["prompt_pending"] is False
+
+
+@pytest.mark.parametrize("photo", ["shallow depth of field", "wide-angle lens"])
+def test_photographic_answer_is_refused_in_french_then_retried(photo: str) -> None:
+    reg = PresetRegistry.load(PRESETS_DIR)
+    brief = _brief(settings=reg.image_prompt, style_lead="Black and white manga panel, seinen manga style.")
+    bad = _answer(f"<image1> is Aiko. Aiko leaps, seen through a {photo}, {WORDS}.")
+    good = _answer(f"<image1> is Aiko. Aiko leaps, strong foreshortening and speed lines, {WORDS}.")
+    answers = iter([bad, good])
+    llm = MockLLMProvider(lambda _m, _j: next(answers))
+    run = write_prompt(llm, reg.prompt("redacteur-image"), brief)
+    assert run.attempts == 2
+    retry = llm.calls[1][-1].content
+    term = photo.split(" ", 1)[1] if photo.startswith("shallow") else "lens"
+    assert "vocabulaire photographique interdit" in retry and term in retry
+    assert run.output.prompt.startswith("Black and white manga panel, seinen manga style. <image1> is Aiko.")
+    assert run.output.prompt.endswith("shonen manga, halftone screentone dots.")
+    with pytest.raises(PromptValidationError, match="vocabulaire photographique interdit : (depth of field|lens)"):
+        parse_written(bad, brief)
+
+
+def test_photo_terms_match_whole_words_case_insensitively_outside_the_style() -> None:
+    reg = PresetRegistry.load(PRESETS_DIR)
+    # ancien style libre « realistic » : recopié tel quel, jamais reproché au rédacteur
+    brief = _brief(settings=reg.image_prompt, style="realistic manga")
+    ok = parse_written(_answer(f"<image1> is Aiko. Aiko stands by the lenslike window, Photon blades {WORDS}."), brief)
+    assert ok.prompt.endswith("realistic manga.")
+    with pytest.raises(PromptValidationError, match="interdit : bokeh, DSLR"):
+        parse_written(_answer(f"<image1> is Aiko. Aiko in BOKEH, dslr {WORDS}."), brief)
+
+
+def test_writer_messages_open_on_the_style_sentence_without_lens_vocabulary() -> None:
+    from mangaka_engine.pipeline.prompt_writer import render_messages
+    from mangaka_engine.pipeline.style import series_style, series_style_lead
+    from mangaka_engine.store.models import Project
+
+    reg = PresetRegistry.load(PRESETS_DIR)
+    series = Project(title="t", style_genre="seinen", style_rendering="nb-trames", style_tone="dark", style_options={})
+    lead = series_style_lead(reg, series)
+    assert lead == (
+        "Black and white manga panel, hand-drawn inked line art with halftone screentone shading, seinen manga style."
+    )
+    brief = _brief(
+        settings=reg.image_prompt,
+        style=series_style(reg, series),
+        style_lead=lead,
+        plan="plan large",
+        extras=["un garde"],
+    )
+    system, user = render_messages(reg.prompt("redacteur-image"), brief)
+    assert "Open the paragraph with the style sentence" in system.content
+    assert f"open the paragraph with it, exactly as written): {lead}" in user.content
+    assert "same manga style as the reference images" in " ".join(system.content.split())
+    assert (
+        "un garde (extra, no character sheet: drawn in the same manga style as the rest of the panel)" in user.content
+    )
+    for message in (system, user):
+        assert _photo_words(message.content) == [], message.role
+        assert "cinematic" not in message.content

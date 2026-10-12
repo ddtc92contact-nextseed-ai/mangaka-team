@@ -11,13 +11,16 @@ référence et leur rôle) et rend UN long paragraphe mis en scène, traduit dan
 
 Sortie JSON validée par Pydantic (`prompt`, `language`, `notes`) puis contre la case : chaque
 personnage de la case nommé, aucun personnage de la série absent de la case, chaque image envoyée citée
-(`<image1>`…) et aucune autre, paragraphe anglais sans phrases françaises, longueur plausible ;
+(`<image1>`…) et aucune autre, paragraphe anglais sans phrases françaises ni vocabulaire photographique
+(`forbidden_photo_terms` d'image_prompt.yaml : « lens », « depth of field »… poussent Qwen-Image vers le
+photoréalisme), longueur plausible ;
 invalide → nouvel essai avec l'erreur (`max_retries`) → sinon `PromptWriterError` (l'appelant retombe
 sur le prompt par fragments, avec un avertissement sur la case).
 
 Le texte n'est jamais dessiné : les répliques entre guillemets sont retirées des données envoyées ET
-du paragraphe rendu. Les mots-clés de style restent dans leur langue mesurée : absents du paragraphe,
-ils y sont ajoutés tels quels.
+du paragraphe rendu. Le style tient sur toutes les cases, avec ou sans image de référence : le paragraphe
+s'ouvre sur la phrase de style de la série (`style.series_style_lead`, ajoutée en tête si le LLM l'a
+oubliée) et finit sur les mots-clés de style, dans leur langue mesurée (ajoutés tels quels s'ils manquent).
 
 Fonctions pures (aucune base) : le rassemblement des données d'une case vit dans `generation.py`.
 """
@@ -103,6 +106,10 @@ _FRENCH_WORDS = frozenset(
     ]
 )
 FRENCH_MIN_HITS, FRENCH_MAX_SHARE = 6, 0.04
+# Version des consignes du rédacteur, comprise dans l'empreinte d'une case (`PromptBrief.key`) : la changer
+# remet à rédiger chaque prompt rédigé par l'IA (jamais un prompt édité à la main) à la prochaine génération.
+# 2 : style manga en tête, plus de vocabulaire photographique (12/10/2026).
+WRITER_REVISION = 2
 _FENCE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.DOTALL)
 _SPACES = re.compile(r"\s+")
 
@@ -154,8 +161,12 @@ class PromptBrief:
     objects: list[PromptCharacter] = field(default_factory=list)
     references: list[ReferenceSlot] = field(default_factory=list)
     style: str = ""
+    # Phrase de style qui ouvre le paragraphe (« Black and white manga panel, inked line art… »).
+    style_lead: str = ""
     bible: str = ""
     savoir_faire: str = ""
+    # Termes photographiques refusés dans le paragraphe (`forbidden_photo_terms` d'image_prompt.yaml).
+    photo_terms: list[str] = field(default_factory=list)
     language: str = DEFAULT_LANGUAGE
     min_words: int = DEFAULT_MIN_WORDS
     max_words: int = DEFAULT_MAX_WORDS
@@ -179,6 +190,7 @@ class PromptBrief:
         objects: Sequence[PromptCharacter] = (),
         references: Sequence[ReferenceSlot] = (),
         style: str = "",
+        style_lead: str = "",
         bible: str = "",
         savoir_faire: str = "",
         prompt: PromptPreset | None = None,
@@ -203,9 +215,11 @@ class PromptBrief:
             objects=list(objects),
             references=list(references),
             style=_SPACES.sub(" ", style or "").strip().rstrip(" .;,"),
+            style_lead=_SPACES.sub(" ", style_lead or "").strip(),
             bible=_text(bible),
             # Passages entiers avec leur source (titres entre « ») : ni guillemets retirés ni lignes fusionnées.
             savoir_faire=(savoir_faire or "").strip(),
+            photo_terms=list((settings or ImagePromptSettings()).forbidden_photo_terms),
             language=(prompt.language if prompt and prompt.language else DEFAULT_LANGUAGE),
             min_words=(prompt.min_words if prompt and prompt.min_words else DEFAULT_MIN_WORDS),
             max_words=(prompt.max_words if prompt and prompt.max_words else DEFAULT_MAX_WORDS),
@@ -248,13 +262,15 @@ class PromptBrief:
             "decor": entry(self.decor) if self.decor is not None else None,
             "objects": [entry(o) for o in self.objects],
             "references": self.reference_lines(),
+            "style_lead": self.style_lead,
             "style": self.style,
         }
 
     def key(self) -> str:
         """Empreinte des données de la case (bible et savoir-faire exclus : ils varient avec la base de
-        connaissances) : le prompt rédigé n'est redemandé que si elle change."""
-        raw = json.dumps(self.as_json(), ensure_ascii=False, sort_keys=True)
+        connaissances) et de la version des consignes (`WRITER_REVISION`) : le prompt rédigé n'est redemandé
+        que si elle change."""
+        raw = json.dumps({**self.as_json(), "revision": WRITER_REVISION}, ensure_ascii=False, sort_keys=True)
         return hashlib.sha256(raw.encode()).hexdigest()[:32]
 
 
@@ -274,7 +290,10 @@ def render_messages(prompt: PromptPreset, brief: PromptBrief) -> list[ChatMessag
 def template_values(brief: PromptBrief) -> dict[str, str]:
     """Variables des gabarits du rédacteur ($plan, $characters, $references…), aussi lues par le dialogue."""
     chars = [f"- {c.name}: {_details(c) or '(no description)'}" for c in brief.characters]
-    chars += [f"- {e} (extra, no character sheet)" for e in brief.extras]
+    chars += [
+        f"- {e} (extra, no character sheet: drawn in the same manga style as the rest of the panel)"
+        for e in brief.extras
+    ]
     refs = [f"- {r['tag']} is {r['role']}." for r in brief.reference_lines()]
     lib = ", ".join(f"{o.name} ({_details(o)})" if _details(o) else o.name for o in brief.objects)
     return {
@@ -299,6 +318,7 @@ def template_values(brief: PromptBrief) -> dict[str, str]:
         "references": "\n".join(refs) or "(no reference image)",
         "image_tags": ", ".join(r["tag"] for r in brief.reference_lines()) or "(none)",
         "style": _or(brief.style, "(none)"),
+        "style_lead": _or(brief.style_lead, "(none)"),
         "bible": _or(brief.bible, "(nothing specific)"),
         "savoir_faire": _or(brief.savoir_faire, "(none)"),
         "context_json": json.dumps(brief.as_json(), ensure_ascii=False, indent=2),
@@ -361,6 +381,45 @@ def clean_paragraph(text: str) -> str:
     return _SPACES.sub(" ", strip_quoted(text)).strip()
 
 
+def _without(text: str, *fragments: str) -> str:
+    """`text` sans les `fragments` (sans casse) : le style et la phrase de style ne sont pas du LLM."""
+    for frag in fragments:
+        frag = frag.strip().rstrip(".")
+        if frag:
+            text = re.sub(re.escape(frag), " ", text, flags=re.IGNORECASE)
+    return text
+
+
+def photo_problems(paragraph: str, brief: PromptBrief) -> list[str]:
+    """Termes photographiques du paragraphe (mots entiers, sans casse), hors style de la série."""
+    text = _without(paragraph, brief.style, brief.style_lead)
+    found = [
+        t
+        for t in dict.fromkeys(t.strip() for t in brief.photo_terms if t.strip())
+        if re.search(rf"(?<![\w-]){re.escape(t)}(?![\w-])", text, flags=re.IGNORECASE)
+    ]
+    if not found:
+        return []
+    return [
+        f"vocabulaire photographique interdit : {', '.join(found)} (c'est une case de manga dessinée, pas une "
+        "photo : parle de raccourcis, lignes de fuite, traits de vitesse, épaisseur d'encre, trames, blancs)"
+    ]
+
+
+def with_lead(text: str, lead: str) -> str:
+    """La phrase de style de la série en tête du paragraphe : déplacée en tête si elle est ailleurs,
+    ajoutée sinon."""
+    lead = lead.strip()
+    if not lead:
+        return text
+    if name_key(text).startswith(name_key(lead.rstrip("."))):
+        return text
+    body = _SPACES.sub(" ", _without(text, lead)).strip()
+    body = re.sub(r"^[\s.,;]+", "", body)
+    sentence = lead if lead[-1] in ".!?…" else f"{lead}."
+    return f"{sentence} {body}".strip()
+
+
 def with_style(text: str, style: str) -> str:
     """Les mots-clés de style, dans leur langue mesurée : ajoutés tels quels s'ils manquent."""
     if not style or name_key(style) in name_key(text):
@@ -369,6 +428,11 @@ def with_style(text: str, style: str) -> str:
     if body and body[-1] not in ".!?…":
         body += "."
     return f"{body} {style}."
+
+
+def finish_paragraph(paragraph: str, brief: PromptBrief) -> str:
+    """Paragraphe validé → prompt stocké : phrase de style en tête, mots-clés de style à la fin."""
+    return with_lead(with_style(paragraph, brief.style), brief.style_lead)
 
 
 def load_json_object(text: str, root_hint: str) -> dict[str, Any]:
@@ -392,6 +456,7 @@ def paragraph_problems(paragraph: str, language: str, brief: PromptBrief) -> lis
             f"language : « {language} » au lieu de « {brief.language} » (écris le paragraphe en {LANGUAGE_LABELS.get(brief.language, brief.language)})"
         )
     problems += reference_problems(paragraph, len(brief.references))
+    problems += photo_problems(paragraph, brief)
     if brief.language == "en":
         hits = french_hits(paragraph)
         if hits >= FRENCH_MIN_HITS and hits > FRENCH_MAX_SHARE * word_count(paragraph):
@@ -422,7 +487,7 @@ def parse_written(text: str, brief: PromptBrief) -> WrittenPrompt:
     problems = paragraph_problems(paragraph, out.language, brief)
     if problems:
         raise PromptValidationError(" ; ".join(problems))
-    return out.model_copy(update={"prompt": with_style(paragraph, brief.style)})
+    return out.model_copy(update={"prompt": finish_paragraph(paragraph, brief)})
 
 
 # --- appel du LLM avec relances -------------------------------------------------
