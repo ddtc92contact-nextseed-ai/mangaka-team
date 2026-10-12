@@ -17,6 +17,7 @@ import { useEngineData } from "@/lib/hooks";
 import { generationStep, MAX_VARIANTS } from "@/lib/generation";
 import { useJob } from "@/lib/jobs";
 import { LIBRARY_KINDS } from "@/lib/library";
+import { useConfirm } from "./confirm";
 import { AngleFields, TierRestriction, angleInput, angleLabel, angleWeight, initialAngleForm, type AngleForm } from "./camera-angle";
 import { InfoTip } from "./info-tip";
 import { Alert, Button, Field, Input, Loading, ProgressBar, Select } from "./ui";
@@ -58,6 +59,7 @@ export function ReferenceStudio({
   const sheets = useEngineData(() => api.referenceSheets(kind), [kind]);
   const studio = useEngineData(() => api.referenceStudio(kind, entry.id), [kind, entry.id]);
   const camera = useEngineData(() => api.cameraLoras());
+  const confirm = useConfirm();
   const [sheetId, setSheetId] = useState("");
   const [count, setCount] = useState(4);
   const [quality, setQuality] = useState(false);
@@ -173,7 +175,8 @@ export function ReferenceStudio({
     const message = keptIds.has(variant.kept_image_id ?? -1)
       ? "Retirer cette variante de l'historique ? L'image gardée comme référence reste sur la fiche."
       : "Supprimer cette variante de l'historique ?";
-    if (!window.confirm(message)) return;
+    const ok = await confirm({ title: "Supprimer la variante ?", message, confirmLabel: "Supprimer", danger: true });
+    if (!ok) return;
     setError(null);
     try {
       await api.deleteReferenceVariant(variant.id);

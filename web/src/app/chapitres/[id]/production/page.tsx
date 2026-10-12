@@ -16,6 +16,7 @@ import { useEngineData } from "@/lib/hooks";
 import { cssClipPath, panelPolygon } from "@/lib/layout";
 import { buildPanelViews, PageCanvas, runningLabel, type PanelView } from "../atelier/page-canvas";
 import { useChapter } from "../chapter-context";
+import { StepAlert } from "../step-alert";
 
 export default function ProductionRoute() {
   return (
@@ -445,7 +446,7 @@ function CurrentJob({
           </span>
         )}
       </p>
-      {error && <Alert>{error}</Alert>}
+      {error && <StepAlert message={error} />}
     </Card>
   );
 }

@@ -4,12 +4,14 @@ import type { ComponentProps, ReactNode } from "react";
 import type { HelpId } from "@/lib/help";
 import { InfoTip } from "./info-tip";
 
-type Variant = "primary" | "secondary" | "danger" | "ghost";
+type Variant = "primary" | "secondary" | "danger" | "destructive" | "ghost";
 
 const VARIANTS: Record<Variant, string> = {
   primary: "bg-rose-500 text-white hover:bg-rose-400 disabled:bg-rose-500/40",
   secondary: "bg-zinc-800 text-zinc-100 hover:bg-zinc-700 disabled:opacity-50",
   danger: "bg-transparent text-red-400 ring-1 ring-inset ring-red-500/40 hover:bg-red-500/10 disabled:opacity-50",
+  // Bouton plein rouge : confirmation d'une suppression définitive.
+  destructive: "bg-red-600 text-white hover:bg-red-500 disabled:bg-red-600/40",
   ghost: "bg-transparent text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100",
 };
 

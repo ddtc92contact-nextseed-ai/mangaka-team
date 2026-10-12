@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import { useConfirm } from "@/components/confirm";
 import { Alert, Button, Card } from "@/components/ui";
 import { api, errorMessage, type CleanupResult, type LibraryResult, type Project } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
-import { CLEANUP_CONFIRM, cleanupSummary, librarySummary } from "@/lib/storage";
+import { CLEANUP_CONFIRM, CLEANUP_CONFIRM_TITLE, cleanupSummary, librarySummary } from "@/lib/storage";
 
 /** « Fichiers » de la fiche série : dossier dans ComfyUI (bibliothèque lisible), avertissement sans COMFYUI_DIR,
  * nettoyage du transit, « Reconstruire la bibliothèque ». */
@@ -15,9 +16,11 @@ export function SeriesFiles({ project }: { project: Project }) {
   const [library, setLibrary] = useState<LibraryResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const storage = health.data?.storage;
+  const confirm = useConfirm();
 
   async function cleanup() {
-    if (!window.confirm(CLEANUP_CONFIRM)) return;
+    const ok = await confirm({ title: CLEANUP_CONFIRM_TITLE, message: CLEANUP_CONFIRM, confirmLabel: "Nettoyer", danger: true });
+    if (!ok) return;
     setBusy(true);
     setError(null);
     try {

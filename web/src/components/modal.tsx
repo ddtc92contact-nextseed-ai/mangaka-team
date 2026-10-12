@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 
 /**
  * Fenêtre modale sur `<dialog>` natif : piège le focus, Échap ferme, clic sur le fond aussi.
@@ -13,6 +13,7 @@ export function Modal({
   children,
   footer,
   size = "md",
+  describedBy,
 }: {
   open: boolean;
   onClose: () => void;
@@ -20,8 +21,11 @@ export function Modal({
   children: ReactNode;
   footer?: ReactNode;
   size?: "md" | "xl";
+  /** Id de l'élément qui décrit la fenêtre (message d'une confirmation). */
+  describedBy?: string;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
 
   useEffect(() => {
     const dialog = ref.current;
@@ -37,7 +41,8 @@ export function Modal({
       onClick={(e) => {
         if (e.target === ref.current) onClose();
       }}
-      aria-labelledby="modal-title"
+      aria-labelledby={titleId}
+      aria-describedby={describedBy}
       className={`m-auto max-h-[92vh] w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-zinc-700 bg-zinc-900 p-0 text-zinc-100 shadow-2xl backdrop:bg-black/70 ${
         size === "xl" ? "max-w-6xl" : "max-w-lg"
       }`}
@@ -45,7 +50,7 @@ export function Modal({
       {open && (
         <div className="flex max-h-[92vh] flex-col">
           <header className="flex items-center justify-between gap-4 border-b border-zinc-800 px-5 py-3">
-            <h2 id="modal-title" className="font-semibold text-zinc-50">
+            <h2 id={titleId} className="font-semibold text-zinc-50">
               {title}
             </h2>
             <button

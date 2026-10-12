@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useMemo, useState } from "react";
+import { useConfirm } from "@/components/confirm";
 import { HelpLabel, InfoTip } from "@/components/info-tip";
 import { useToast } from "@/components/toast";
 import { Alert, Button, Card, Field, Input, Loading, PageHeader, Select } from "@/components/ui";
@@ -172,6 +173,7 @@ function AgentForm({
   const [message, setMessage] = useState<{ tone: "info" | "error"; text: string } | null>(null);
   const [busy, setBusy] = useState<"save" | "trial" | "reset" | null>(null);
   const [trial, setTrial] = useState<TrialResult | null>(null);
+  const confirm = useConfirm();
   const toast = useToast();
 
   const dirty = agent.settings.some((s) => JSON.stringify(values[s.key]) !== JSON.stringify(initial[s.key]));
@@ -238,7 +240,12 @@ function AgentForm({
     const what = projectId
       ? `Supprimer les réglages propres à « ${agent.scope.project_title} » ? La série suivra le profil global.`
       : "Revenir aux réglages d'origine (presets livrés) pour toutes les séries sans réglages propres ?";
-    if (!window.confirm(what)) return;
+    const ok = await confirm({
+      title: projectId ? "Supprimer les réglages de la série ?" : "Revenir aux réglages d'origine ?",
+      message: what,
+      confirmLabel: projectId ? "Supprimer les réglages" : "Rétablir",
+    });
+    if (!ok) return;
     setBusy("reset");
     setMessage(null);
     try {

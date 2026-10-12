@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
+import { useConfirm } from "@/components/confirm";
 import { HelpLabel } from "@/components/info-tip";
 import { DocumentDropzone, RetrievalTester, SOURCE_LABELS, Tags, formatTokens } from "@/components/knowledge";
 import { useToast } from "@/components/toast";
@@ -19,6 +20,7 @@ export default function CollectionPage() {
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const toast = useToast();
+  const confirm = useConfirm();
 
   function refresh() {
     documents.reload();
@@ -27,7 +29,13 @@ export default function CollectionPage() {
 
   async function remove() {
     if (!collection.data) return;
-    if (!window.confirm(`Supprimer la collection « ${collection.data.name} » et tous ses documents ?`)) return;
+    const ok = await confirm({
+      title: "Supprimer la collection ?",
+      message: `« ${collection.data.name} » et tous ses documents seront supprimés.`,
+      confirmLabel: "Supprimer",
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await api.deleteCollection(id);
       toast("Collection supprimée");

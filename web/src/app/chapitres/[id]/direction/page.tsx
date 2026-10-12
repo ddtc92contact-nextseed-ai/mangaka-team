@@ -31,6 +31,7 @@ import type { HelpId } from "@/lib/help";
 import { useEngineData } from "@/lib/hooks";
 import { isFinished, useJob } from "@/lib/jobs";
 import { useChapter } from "../chapter-context";
+import { StepAlert } from "../step-alert";
 
 const STEP = "art_direction";
 
@@ -155,7 +156,7 @@ export default function DirectionPage() {
         {job && <JobLine job={job} />}
         {error && (
           <div className="mt-4">
-            <Alert>{error}</Alert>
+            <StepAlert message={error} />
           </div>
         )}
         {notice && (

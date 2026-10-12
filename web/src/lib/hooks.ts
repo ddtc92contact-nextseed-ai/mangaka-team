@@ -1,6 +1,8 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+import { useConfirm } from "@/components/confirm";
 import { errorMessage } from "./api";
 
 /** Charge une ressource du moteur ; `reload()` relance la requête. */
@@ -38,9 +40,12 @@ export const UNSAVED_MESSAGE = "Tu as des modifications non enregistrées. Quitt
 
 /**
  * Prévient avant de quitter une page aux modifications non enregistrées : fermeture ou rechargement de l'onglet
- * (`beforeunload`, message du navigateur) et clic sur un lien interne (onglet du chapitre, menu…).
+ * (`beforeunload`, message du navigateur, seul cas que l'appli ne peut pas habiller) et clic sur un lien interne
+ * (onglet du chapitre, menu…), confirmé dans la fenêtre de l'appli.
  */
 export function useUnsavedWarning(dirty: boolean, message = UNSAVED_MESSAGE) {
+  const confirm = useConfirm();
+  const router = useRouter();
   useEffect(() => {
     if (!dirty) return;
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -54,10 +59,17 @@ export function useUnsavedWarning(dirty: boolean, message = UNSAVED_MESSAGE) {
       if (!(link instanceof HTMLAnchorElement) || link.target === "_blank" || link.hasAttribute("download")) return;
       const url = new URL(link.href, window.location.href);
       if (url.origin !== window.location.origin || url.pathname === window.location.pathname) return;
-      if (!window.confirm(message)) {
-        e.preventDefault();
-        e.stopPropagation();
-      }
+      e.preventDefault();
+      e.stopPropagation();
+      confirm({
+        title: "Quitter sans enregistrer ?",
+        message,
+        confirmLabel: "Quitter sans enregistrer",
+        cancelLabel: "Rester sur la page",
+        danger: true,
+      }).then((ok) => {
+        if (ok) router.push(url.pathname + url.search + url.hash);
+      });
     };
     window.addEventListener("beforeunload", onBeforeUnload);
     document.addEventListener("click", onClick, true);
@@ -65,5 +77,5 @@ export function useUnsavedWarning(dirty: boolean, message = UNSAVED_MESSAGE) {
       window.removeEventListener("beforeunload", onBeforeUnload);
       document.removeEventListener("click", onClick, true);
     };
-  }, [dirty, message]);
+  }, [dirty, message, confirm, router]);
 }

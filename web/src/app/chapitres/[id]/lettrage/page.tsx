@@ -2,6 +2,7 @@
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { useConfirm } from "@/components/confirm";
 import { HelpLabel, InfoTip } from "@/components/info-tip";
 import { useToast } from "@/components/toast";
 import { Alert, Button, ButtonLink, Card, EmptyState, Loading, Select } from "@/components/ui";
@@ -9,6 +10,7 @@ import { api, fullErrorMessage, type BubbleUpdate, type Intensity, type SfxUpdat
 import { useEngineData } from "@/lib/hooks";
 import { PAGE_KINDS } from "@/lib/script";
 import { useChapter } from "../chapter-context";
+import { StepAlert } from "../step-alert";
 import { BubbleEditor } from "./bubble-editor";
 import { ExportPanel } from "./export-panel";
 import { LetteringCanvas, type CanvasEdit, type LetteringCanvasHandle } from "./lettering-canvas";
@@ -43,6 +45,7 @@ function Lettering() {
   const [showGuides, setShowGuides] = useState(true);
   const canvasRef = useRef<LetteringCanvasHandle>(null);
   const toast = useToast();
+  const confirm = useConfirm();
 
   const data = lettering.data && page && lettering.data.page_id === page.id ? lettering.data : null;
   const selectedId = selection && page && selection.page === page.id ? selection.id : null;
@@ -119,16 +122,18 @@ function Lettering() {
       select(null);
       toast("Onomatopée supprimée");
     });
-  const recompute = () => {
+  const recompute = async () => {
     if (!page || !data) return;
     const manual =
       data.bubbles.filter((b) => b.manual || b.manual_tail).length +
       (data.sfx ?? []).filter((x) => x.manual || x.manual_size || x.manual_angle || x.manual_skew).length;
     if (
       manual &&
-      !window.confirm(
-        `Recalculer le lettrage de la page ${page.number} ? ${manual} élément${manual > 1 ? "s" : ""} ajusté${manual > 1 ? "s" : ""} à la main ser${manual > 1 ? "ont" : "a"} replacé${manual > 1 ? "s" : ""}.`,
-      )
+      !(await confirm({
+        title: `Recalculer le lettrage de la page ${page.number} ?`,
+        message: `${manual} élément${manual > 1 ? "s" : ""} ajusté${manual > 1 ? "s" : ""} à la main ser${manual > 1 ? "ont" : "a"} replacé${manual > 1 ? "s" : ""}.`,
+        confirmLabel: "Recalculer",
+      }))
     )
       return;
     run(async () => {
@@ -211,7 +216,7 @@ function Lettering() {
         </div>
       </div>
 
-      {error && <Alert>{error}</Alert>}
+      {error && <StepAlert message={error} />}
       {notice && !error && <Alert tone="info">{notice}</Alert>}
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
