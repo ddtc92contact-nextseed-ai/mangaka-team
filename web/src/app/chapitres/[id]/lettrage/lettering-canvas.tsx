@@ -1,9 +1,10 @@
 "use client";
 
-import { useImperativeHandle, useRef, useState, type KeyboardEvent, type PointerEvent, type Ref } from "react";
+import { useId, useImperativeHandle, useRef, useState, type KeyboardEvent, type PointerEvent, type Ref } from "react";
 import { engineUrl, type BubbleBox, type LetteredBubble, type LetteredSfx, type PageLettering, type SfxUpdate } from "@/lib/api";
 import { BUBBLE_KINDS } from "@/lib/script";
 import { insetPolygon, outsetPolygon, svgPoints, type Point } from "@/lib/layout";
+import { screenToPage, type View } from "@/lib/panel-zoom";
 import { applySfxDelta, sfxCorner, sfxRotateHandle, sfxTransform, type SfxMode } from "./sfx";
 
 /** Modification d'une bulle faite à la souris ou au clavier sur la planche. */
@@ -73,6 +74,8 @@ export function LetteringCanvas({
   onSelect,
   onCommit,
   onCommitSfx,
+  onExpand,
+  focus,
   ref,
 }: {
   data: PageLettering;
@@ -82,6 +85,10 @@ export function LetteringCanvas({
   onSelect: (id: number | null) => void;
   onCommit: (edit: CanvasEdit) => void;
   onCommitSfx: (id: number, update: SfxUpdate) => void;
+  /** Planche entière : bouton « Agrandir » (et double-clic) sur chaque case. */
+  onExpand?: (panelId: number) => void;
+  /** Case agrandie : seule cette case, sa fenêtre `view` de la page, affichée à `size` px CSS. */
+  focus?: { panelId: number; view: View; size: { width: number; height: number } };
   ref?: Ref<LetteringCanvasHandle>;
 }) {
   const svgRef = useRef<SVGSVGElement>(null);
@@ -97,17 +104,27 @@ export function LetteringCanvas({
   useImperativeHandle(ref, () => ({ focusBubble: (id) => groups.current.get(id)?.focus() }), []);
 
   const { width: W, height: H } = data;
+  const view = focus?.view ?? { x: 0, y: 0, w: W, h: H };
+  // Traits, poignées et badges suivent la fenêtre montrée : même taille à l'écran en case agrandie.
+  const k = view.w / W;
   const border = (1.5 / 72) * data.dpi;
-  const guide = Math.max(3, W / 600);
+  const guide = Math.max(3 * k, view.w / 600);
+  const handle = Math.max(26 * k, view.w / 90);
   // Badge « croquis » (aperçu seulement) : lisible à l'écran quelle que soit la taille de la page.
-  const badge = W / 40;
+  const badge = view.w / 40;
+  // Identifiants uniques : la planche et la case agrandie sont dans le document en même temps.
+  const uid = useId().replace(/[^a-zA-Z0-9_-]/g, "");
+  const clipId = (id: number) => `${uid}-clip-case-${id}`;
   const warnedPanels = new Set(data.warnings.map((w) => w.panel_id).filter((id): id is number => id !== null));
   const families = new Map(
     [...Object.values(data.styles), ...Object.values(data.sfx_fonts ?? {})].map((s) => [s.family, s.url]),
   );
   // Comme à l'export : les cases qui débordent sur leurs voisines par-dessus, puis les incrustations.
   const tree = data.panels.filter((p) => !p.inset);
-  const panels = [...tree.filter((p) => !p.break_out), ...tree.filter((p) => p.break_out), ...data.panels.filter((p) => p.inset)];
+  const ordered = [...tree.filter((p) => !p.break_out), ...tree.filter((p) => p.break_out), ...data.panels.filter((p) => p.inset)];
+  const panels = focus ? ordered.filter((p) => p.id === focus.panelId) : ordered;
+  const bubbles = focus ? data.bubbles.filter((b) => b.panel_id === focus.panelId) : data.bubbles;
+  const sfxShown = focus ? sfxList.filter((fx) => fx.panel_id === focus.panelId) : sfxList;
   const live = data.live_area ?? { x1: 0, y1: 0, x2: W, y2: H };
   const outline = (1.2 / 25.4) * data.dpi;
   const fade = (6 / 25.4) * data.dpi;
@@ -116,10 +133,9 @@ export function LetteringCanvas({
     .join("");
 
   function toPage(e: PointerEvent): { x: number; y: number } | null {
-    const ctm = svgRef.current?.getScreenCTM();
-    if (!ctm) return null;
-    const pt = new DOMPoint(e.clientX, e.clientY).matrixTransform(ctm.inverse());
-    return { x: pt.x, y: pt.y };
+    const box = svgRef.current?.getBoundingClientRect();
+    if (!box || !box.width || !box.height) return null;
+    return screenToPage({ x: e.clientX, y: e.clientY }, box, view);
   }
 
   function onPointerDown(e: PointerEvent<SVGElement>, b: LetteredBubble, mode: Mode) {
@@ -204,18 +220,18 @@ export function LetteringCanvas({
   return (
     <svg
       ref={svgRef}
-      viewBox={`0 0 ${W} ${H}`}
-      className="mx-auto block max-h-[80vh] w-full touch-none select-none"
-      style={{ aspectRatio: `${W} / ${H}` }}
-      data-testid="lettering-svg"
+      viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`}
+      className={`block touch-none select-none ${focus ? "shrink-0" : "mx-auto max-h-[80vh] w-full"}`}
+      style={focus ? { width: focus.size.width, height: focus.size.height } : { aspectRatio: `${W} / ${H}` }}
+      data-testid={focus ? "panel-zoom-svg" : "lettering-svg"}
       role="group"
-      aria-label={`Planche assemblée, page ${data.page_number} : ${data.bubbles.length} bulle${data.bubbles.length > 1 ? "s" : ""}, ${sfxList.length} onomatopée${sfxList.length > 1 ? "s" : ""}. Tab pour passer d'un élément à l'autre, flèches pour le déplacer, Alt + flèches pour le redimensionner (ou tourner une onomatopée).`}
+      aria-label={`${focus ? `Case ${(panels[0]?.index ?? 0) + 1} agrandie` : "Planche assemblée"}, page ${data.page_number} : ${bubbles.length} bulle${bubbles.length > 1 ? "s" : ""}, ${sfxShown.length} onomatopée${sfxShown.length > 1 ? "s" : ""}. Tab pour passer d'un élément à l'autre, flèches pour le déplacer, Alt + flèches pour le redimensionner (ou tourner une onomatopée).`}
       onPointerDown={() => onSelect(null)}
     >
       <defs>
         <style>{fontCss}</style>
         {data.panels.map((p) => (
-          <clipPath key={p.id} id={`clip-case-${p.id}`}>
+          <clipPath key={p.id} id={clipId(p.id)}>
             {p.polygon ? (
               <polygon points={svgPoints(p.polygon)} />
             ) : (
@@ -226,20 +242,20 @@ export function LetteringCanvas({
         {data.panels
           .filter((p) => p.frame === "fade")
           .map((p) => (
-            <mask key={p.id} id={`fondu-case-${p.id}`} maskUnits="userSpaceOnUse">
-              <polygon points={svgPoints(insetPolygon(polygonOf(p), fade))} fill="#ffffff" filter={`url(#flou-case-${p.id})`} />
-              <filter id={`flou-case-${p.id}`} x="-20%" y="-20%" width="140%" height="140%">
+            <mask key={p.id} id={`${uid}-fondu-case-${p.id}`} maskUnits="userSpaceOnUse">
+              <polygon points={svgPoints(insetPolygon(polygonOf(p), fade))} fill="#ffffff" filter={`url(#${uid}-flou-case-${p.id})`} />
+              <filter id={`${uid}-flou-case-${p.id}`} x="-20%" y="-20%" width="140%" height="140%">
                 <feGaussianBlur stdDeviation={fade / 2} />
               </filter>
             </mask>
           ))}
-        <clipPath id="zone-utile">
+        <clipPath id={`${uid}-zone-utile`}>
           <rect x={live.x1} y={live.y1} width={live.x2 - live.x1} height={live.y2 - live.y1} />
         </clipPath>
       </defs>
       <rect width={W} height={H} fill="#ffffff" />
       {/* Marge extérieure inviolable : cases, bulles et onomatopées coupées à la zone utile. */}
-      <g clipPath="url(#zone-utile)" data-testid="lettering-live-area">
+      <g clipPath={`url(#${uid}-zone-utile)`} data-testid="lettering-live-area">
       {panels.map((p) => {
         const w = p.box.x2 - p.box.x1;
         const h = p.box.y2 - p.box.y1;
@@ -254,9 +270,10 @@ export function LetteringCanvas({
             data-frame={p.frame ?? "border"}
             data-inset={p.inset ? "true" : undefined}
             data-break-out={p.break_out ? "true" : undefined}
+            onDoubleClick={onExpand ? () => onExpand(p.id) : undefined}
           >
             {p.inset && <polygon points={svgPoints(outsetPolygon(polygonOf(p), outline))} fill="#ffffff" />}
-            <g mask={p.frame === "fade" ? `url(#fondu-case-${p.id})` : undefined}>
+            <g mask={p.frame === "fade" ? `url(#${uid}-fondu-case-${p.id})` : undefined}>
             {p.image_url ? (
               // Même cadrage que l'assemblage : l'image entière placée par le moteur, la case n'en garde que la fenêtre.
               <image
@@ -266,12 +283,12 @@ export function LetteringCanvas({
                 width={p.image_rect ? p.image_rect.x2 - p.image_rect.x1 : w}
                 height={p.image_rect ? p.image_rect.y2 - p.image_rect.y1 : h}
                 preserveAspectRatio={p.image_rect ? "none" : "xMidYMid slice"}
-                clipPath={`url(#clip-case-${p.id})`}
+                clipPath={`url(#${clipId(p.id)})`}
                 data-kind={p.image_kind ?? undefined}
               />
             ) : (
               <>
-                <rect x={p.box.x1} y={p.box.y1} width={w} height={h} fill="#9e9e9e" clipPath={`url(#clip-case-${p.id})`} />
+                <rect x={p.box.x1} y={p.box.y1} width={w} height={h} fill="#9e9e9e" clipPath={`url(#${clipId(p.id)})`} />
                 <text
                   x={p.box.x1 + w / 2}
                   y={p.box.y1 + h / 2}
@@ -294,7 +311,7 @@ export function LetteringCanvas({
                   fill="none"
                   stroke={warned ? "#f59e0b" : "#000000"}
                   strokeWidth={warned ? border * 2.5 : border}
-                  clipPath={`url(#clip-case-${p.id})`}
+                  clipPath={`url(#${clipId(p.id)})`}
                 />
               ) : (
                 <rect
@@ -358,7 +375,8 @@ export function LetteringCanvas({
         );
       })}
 
-      {data.bubbles.map((b, i) => {
+      {bubbles.map((b) => {
+        const i = data.bubbles.indexOf(b);
         const active = drag?.id === b.id ? drag : null;
         const selected = b.id === selectedId;
         const move = active?.mode === "move" ? `translate(${active.dx} ${active.dy})` : undefined;
@@ -435,7 +453,7 @@ export function LetteringCanvas({
       })}
 
       {/* Onomatopées : texte, contour épais et halo, transformés comme à l'export. */}
-      {sfxList.map((fx) => {
+      {sfxShown.map((fx) => {
         const active = sfxDrag?.id === fx.id ? sfxDrag : null;
         const shown = active ? applySfxDelta(fx, active.mode, active.start, active.now).preview : fx;
         const selected = fx.id === selectedId;
@@ -501,12 +519,11 @@ export function LetteringCanvas({
         );
       })}
       </g>
-      {sfxList
+      {sfxShown
         .filter((fx) => fx.id === selectedId && !disabled)
         .map((fx) => {
           const active = sfxDrag?.id === fx.id ? sfxDrag : null;
           const shown = active ? applySfxDelta(fx, active.mode, active.start, active.now).preview : fx;
-          const handle = Math.max(26, W / 90);
           const [rx, ry] = sfxRotateHandle(shown, handle * 2);
           const [kx, ky] = sfxCorner(shown);
           return (
@@ -531,7 +548,7 @@ export function LetteringCanvas({
                 y={ky - handle / 2}
                 width={handle}
                 height={handle}
-                rx={4}
+                rx={handle / 6}
                 fill="#e11d48"
                 stroke="#ffffff"
                 strokeWidth={guide}
@@ -547,14 +564,13 @@ export function LetteringCanvas({
         })}
 
       {/* Poignées de la bulle choisie : taille (coin) et pointe de la queue. */}
-      {data.bubbles
+      {bubbles
         .filter((b) => b.id === selectedId && !disabled)
         .map((b) => {
           const active = drag?.id === b.id ? drag : null;
           const preview = active ? applyDelta(b, active.mode, active.dx, active.dy) : null;
           const box = preview?.position ?? b.box;
           const tail = preview?.tail ?? b.tail;
-          const handle = Math.max(26, W / 90);
           return (
             <g key={`handles-${b.id}`}>
               {active?.mode === "resize" && (
@@ -568,7 +584,7 @@ export function LetteringCanvas({
                 y={box.y + box.h - handle / 2 + (active?.mode === "move" ? active.dy : 0)}
                 width={handle}
                 height={handle}
-                rx={4}
+                rx={handle / 6}
                 fill="#e11d48"
                 stroke="#ffffff"
                 strokeWidth={guide}
@@ -595,6 +611,54 @@ export function LetteringCanvas({
                   onPointerUp={onPointerUp}
                 />
               )}
+            </g>
+          );
+        })}
+
+      {/* Planche entière : « Agrandir » chaque case pour la lettrer en grand. */}
+      {onExpand &&
+        ordered.map((p) => {
+          const size = badge * 1.5;
+          const x = p.box.x2 - size - badge * 0.5;
+          const y = p.box.y1 + badge * 0.5;
+          return (
+            <g
+              key={`expand-${p.id}`}
+              tabIndex={0}
+              role="button"
+              aria-label={`Agrandir la case ${p.index + 1}`}
+              data-testid="panel-expand"
+              className="cursor-zoom-in outline-none [&:focus-visible>.focus-ring]:opacity-100"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={() => onExpand(p.id)}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter" && e.key !== " ") return;
+                e.preventDefault();
+                onExpand(p.id);
+              }}
+            >
+              <title>{`Agrandir la case ${p.index + 1}`}</title>
+              <rect x={x} y={y} width={size} height={size} rx={size / 5} fill="#09090b" fillOpacity={0.75} />
+              <path
+                d={`M${x + size * 0.28} ${y + size * 0.5}V${y + size * 0.28}H${x + size * 0.5}M${x + size * 0.72} ${y + size * 0.5}V${y + size * 0.72}H${x + size * 0.5}M${x + size * 0.3} ${y + size * 0.3}L${x + size * 0.7} ${y + size * 0.7}`}
+                fill="none"
+                stroke="#e4e4e7"
+                strokeWidth={size / 12}
+                strokeLinecap="round"
+                pointerEvents="none"
+              />
+              <rect
+                className="focus-ring opacity-0"
+                x={x - guide * 2}
+                y={y - guide * 2}
+                width={size + guide * 4}
+                height={size + guide * 4}
+                rx={size / 4}
+                fill="none"
+                stroke="#38bdf8"
+                strokeWidth={guide * 1.5}
+                pointerEvents="none"
+              />
             </g>
           );
         })}
