@@ -107,6 +107,7 @@ def build_prompt(
     decor: PromptEntry | None = None,
     objects: Sequence[PromptEntry] = (),
     style: str = "",
+    style_lead: str = "",
     savoir_faire: str = "",
     bible: str = "",
     settings: ImagePromptSettings | None = None,
@@ -116,7 +117,8 @@ def build_prompt(
     `plan`, `angle`, `ambiance`, `action` : direction artistique appliquée à la case ; `$plan` vaut le
     type de plan du scénario quand la direction artistique n'en donne pas (plans et angles en anglais,
     `camera_terms`). `decor`, `objects` : fiches de la
-    bibliothèque (`$decor`, `$objects`), décrites comme les personnages.
+    bibliothèque (`$decor`, `$objects`), décrites comme les personnages. `style_lead` : phrase de style
+    de la série (`style.series_style_lead`, `$style_lead`), en tête du prompt.
     """
     settings = settings or ImagePromptSettings()
     desc, savoir_faire, bible = description or "", savoir_faire or "", bible or ""
@@ -146,6 +148,7 @@ def build_prompt(
             d for d in (describe_character(o, settings) for o in objects) if d
         ),
         "style": _clean(style),
+        "style_lead": _clean(style_lead),
         "savoir_faire": _clean(savoir_faire),
         "bible": _clean(bible),
     }
@@ -170,13 +173,14 @@ def is_tight_shot(plan: str | None, settings: ImagePromptSettings | None = None)
 
 
 def build_negative_prompt(base: str, settings: ImagePromptSettings | None = None, plan: str | None = None) -> str:
-    """Ajoute au prompt négatif les termes « pas de texte » qui n'y sont pas déjà, et pour un plan serré
-    (`plan`, voir `is_tight_shot`) les termes contre le plein pied (`tight_shots.negative`)."""
+    """Ajoute au prompt négatif les termes « pas de texte » et « pas de photo » (`negative_photo_terms`) qui
+    n'y sont pas déjà, et pour un plan serré (`plan`, voir `is_tight_shot`) les termes contre le plein pied
+    (`tight_shots.negative`)."""
     settings = settings or ImagePromptSettings()
     terms = [t.strip() for t in (base or "").split(",") if t.strip()]
     present = {t.casefold() for t in terms}
     extra = settings.tight_shots.negative if is_tight_shot(plan, settings) else []
-    for term in [*settings.forbidden_text_terms, *extra]:
+    for term in [*settings.forbidden_text_terms, *settings.negative_photo_terms, *extra]:
         if term.casefold() not in present:
             terms.append(term)
             present.add(term.casefold())
@@ -204,12 +208,17 @@ def image_tags(text: str) -> list[int]:
     return list(dict.fromkeys(int(n) for n in _IMAGE_TAG.findall(text)))
 
 
+_FIRST_SENTENCE = re.compile(r"^[^<]*?[.!?…]\s+")
+
+
 def defines_references(prompt: str, count: int) -> bool:
-    """Le prompt commence par le rôle des images (`<image1>` d'abord) et cite exactement les `count`
-    images envoyées, dans l'ordre : c'est le cas d'un prompt rédigé par l'IA."""
-    return (
-        count > 0 and prompt.lstrip().lower().startswith("<image1>") and image_tags(prompt) == list(range(1, count + 1))
-    )
+    """Le prompt commence par le rôle des images (`<image1>` d'abord, éventuellement après la phrase de
+    style de la série) et cite exactement les `count` images envoyées, dans l'ordre : c'est le cas d'un
+    prompt rédigé par l'IA."""
+    head = prompt.lstrip().lower()
+    if not head.startswith("<image1>"):
+        head = _FIRST_SENTENCE.sub("", head, count=1)
+    return count > 0 and head.startswith("<image1>") and image_tags(prompt) == list(range(1, count + 1))
 
 
 def frame_references(prompt: str, slots: Sequence[ReferenceSlot], settings: ImagePromptSettings | None = None) -> str:

@@ -79,8 +79,10 @@ settings:
     type: prompt_list
     source: image_prompt.yaml#parts
     variables:
-      [plan, angle, ambiance, action, shot, description, setting, staging, character_count, characters, decor, objects, style, savoir_faire, bible]
-    help: Un morceau dont une variable est vide est omis.
+      [style_lead, plan, angle, ambiance, action, shot, description, setting, staging, character_count, characters, decor, objects, style, savoir_faire, bible]
+    help: >-
+      Un morceau dont une variable est vide est omis. $style_lead : phrase de style de la série (rendu + genre),
+      à garder en tête pour que le style manga tienne même sans image de référence.
   - key: character
     label: Présentation d'un personnage
     group: Prompt
@@ -115,6 +117,20 @@ settings:
     group: Prompt
     type: list
     source: image_prompt.yaml#forbidden_text_terms
+  - key: negative_photo_terms
+    label: Termes « pas de photo » du prompt négatif
+    group: Prompt
+    type: list
+    source: image_prompt.yaml#negative_photo_terms
+    help: Toujours ajoutés au prompt négatif, contre le photoréalisme (lu au palier Qualité seulement).
+  - key: forbidden_photo_terms
+    label: Vocabulaire photo refusé dans le prompt rédigé
+    group: Rédacteur de prompt
+    type: list
+    source: image_prompt.yaml#forbidden_photo_terms
+    help: >-
+      Un paragraphe du rédacteur qui contient l'un de ces termes (mots entiers, sans casse) est refusé puis
+      redemandé : objectif, flou, profondeur de champ… font sortir des photos au lieu de dessins.
   - key: strip_quotes
     label: Retirer les répliques entre guillemets de la description
     group: Prompt
@@ -215,6 +231,7 @@ settings:
       - references
       - image_tags
       - style
+      - style_lead
       - bible
       - savoir_faire
       - context_json

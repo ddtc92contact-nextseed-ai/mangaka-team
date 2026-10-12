@@ -365,7 +365,10 @@ def test_manual_prompt_is_kept_until_rebuilt(make_client: Callable[..., TestClie
     assert img["params"]["prompt"].endswith("large white areas, no muddy grey fill.")
 
     panel = _ok(c.post(f"/panels/{p1['id']}/prompt/rebuild"))
-    assert panel["final_prompt_manual"] is False and panel["final_prompt"].startswith("Wide shot. Aiko sur un toit.")
+    assert panel["final_prompt_manual"] is False and panel["final_prompt"].startswith(
+        "Black and white manga panel, hand-drawn inked line art with halftone screentone shading, seinen manga "
+        "style. Wide shot. Aiko sur un toit."
+    )
 
     _ok(c.post(f"/panels/{p1['id']}/generate", json={"prompt_override": "Toit vide"}), 202)
     _wait(c)

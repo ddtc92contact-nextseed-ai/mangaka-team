@@ -40,10 +40,10 @@ from .prompt_writer import (
     PromptBrief,
     PromptValidationError,
     clean_paragraph,
+    finish_paragraph,
     load_json_object,
     paragraph_problems,
     template_values,
-    with_style,
 )
 from .script import _render
 
@@ -300,7 +300,7 @@ def parse_dialog(text: str, d: DialogBrief) -> DialogProposal:
             }
         )
     return DialogProposal(
-        prompt=with_style(paragraph, d.brief.style),
+        prompt=finish_paragraph(paragraph, d.brief),
         explanation=out.explanation,
         direction=direction,
         references=references,

@@ -27,7 +27,7 @@ from mangaka_engine.pipeline.art_direction import (
 from mangaka_engine.presets import PresetRegistry
 from mangaka_engine.providers.llm import LLMAuthError, MockLLMProvider
 from mangaka_engine.providers.llm.mock import mock_art_direction
-from tests.conftest import PRESETS_DIR, STYLE
+from tests.conftest import LEAD, PRESETS_DIR, STYLE
 
 PRESETS = PresetRegistry.load(PRESETS_DIR)
 PROMPT = PRESETS.prompt("direction-artistique")
@@ -383,11 +383,12 @@ def test_image_prompt_gets_plan_angle_and_ambiance(c: TestClient) -> None:
     # Pas encore appliquée : le prompt garde le plan du scénario (traduit : camera_terms).
     prompt = c.post(f"/panels/{pid}/prompt/rebuild").json()["final_prompt"]
     assert (
-        prompt.startswith("Medium shot, framed from the waist up, legs out of frame.") and "side profile" not in prompt
+        prompt.startswith(f"{LEAD}Medium shot, framed from the waist up, legs out of frame.")
+        and "side profile" not in prompt
     )
     c.post(f"/chapters/{chapter_id}/direction/apply", json={})
     prompt = c.post(f"/panels/{pid}/prompt/rebuild").json()["final_prompt"]
-    assert prompt.startswith("Low-angle shot. Camera angle: side profile view.")
+    assert prompt.startswith(f"{LEAD}Low-angle shot. Camera angle: side profile view.")
     assert "Mood and lighting: pluie, néons." in prompt
     assert "Action and pose: Aiko saute par-dessus la rambarde." in prompt
 

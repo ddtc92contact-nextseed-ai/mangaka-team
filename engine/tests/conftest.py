@@ -15,6 +15,8 @@ from mangaka_engine.main import create_app
 PRESETS_DIR = REPO_ROOT / "presets"
 # Packs de style obligatoires à la création d'une série (presets/style_*/).
 STYLE = {"style_genre": "shonen", "style_rendering": "nb-trames", "style_tone": "neutre"}
+# Phrase de style de STYLE, en tête de chaque prompt de case (style_lead d'image_prompt.yaml).
+LEAD = "Black and white manga panel, hand-drawn inked line art with halftone screentone shading, shonen manga style. "
 # Réponses enregistrées sur un vrai ComfyUI (GX10) : /object_info réduit, /system_stats, refus de /prompt.
 COMFY_FIXTURES = Path(__file__).parent / "fixtures" / "comfyui"
 

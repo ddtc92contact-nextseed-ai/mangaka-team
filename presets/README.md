@@ -400,10 +400,18 @@ prompt_keywords: [sepia toned illustration, engraved hatching]
 
 Tonalité « papier blanc » (facultatif, anglais) : `tonality` est ajouté à la fin du prompt positif de
 chaque case du rendu (fragments, prompt rédigé par l'IA ou édité à la main) ; `tonality_negative` est
-ajouté au prompt négatif quand il est lu (vrai CFG > 1 : palier Qualité). Les rendus N&B livrés en ont
+ajouté au prompt négatif de chaque case (lu seulement à vrai CFG > 1 : palier Qualité). Les rendus N&B livrés en ont
 une (« White paper dominant, clean line art, screentone only in the shadows, large white areas, no muddy
 grey fill ») : mesurées le 11/10/2026, les cases sortaient grises et bouchées (50 à 83 % de pixels
 sombres, contre 21,7 % sur une planche de référence). Le QC vérifie la tonalité (`detectors.tone`).
+
+Phrase de style (`lead`, anglais, vocabulaire du dessin) : début de la phrase qui **ouvre chaque prompt
+de case** (fragments `$style_lead` et rédacteur de prompt), complétée du 1er mot-clé du genre par
+`style_lead` d'image_prompt.yaml — « Black and white manga panel, hand-drawn inked line art with halftone
+screentone shading, seinen manga style. » Sans `lead`, le 1er mot-clé du rendu. Depuis le 12/10/2026 :
+seuls les personnages à image de référence sortaient en manga, figurants, lieux et cases sans référence
+sortaient en photo. Aucun mot-clé de pack ne doit pousser vers la photo (« realistic » retiré du seinen ;
+liste `forbidden_photo_terms`, vérifiée par les tests).
 
 Le rendu remplace toute mention de rendu en dur : `image_prompt.yaml` et les prompts de réparation
 ne parlent plus d'« encre » ni de « manga », sinon un rendu couleur serait contredit.
@@ -1256,7 +1264,9 @@ case, `$savoir_faire` = passages du savoir-faire de l'agent `image_prompt`) ; un
 variable est vide est omis.
 `character` met en forme un personnage (`$name`, `$details` = description visuelle + mots-clés).
 `forbidden_text_terms` est toujours ajouté au prompt négatif du workflow (le texte est posé au
-lettrage, jamais dessiné par le modèle) et `strip_quotes` retire les répliques entre guillemets
+lettrage, jamais dessiné par le modèle), `negative_photo_terms` aussi (contre le photoréalisme :
+« photorealistic, photograph, 3d render… »), `$style_lead` (phrase de style de la série, `style_lead`)
+ouvre le prompt, et `strip_quotes` retire les répliques entre guillemets
 de la description. Le prompt est stocké sur la case ; une édition manuelle est conservée jusqu'à
 « reconstruire le prompt ».
 
@@ -1308,7 +1318,10 @@ en mode mock) écrit le prompt de chaque case :
   Aiko… », `$image_tags`), `$style` (bloc court), repères de la bible et savoir-faire — les répliques
   entre guillemets en sont retirées ;
 - il **traduit** et écrit un long paragraphe anglais (180 à 320 mots ; l'enhancer officiel écrit ~20
-  phrases), mis en scène comme un plan de film et dans cet ordre : rôles des images de référence d'abord
+  phrases), mis en scène comme une case de manga dessinée (raccourcis, lignes de fuite, traits de
+  vitesse, épaisseur d'encre, trames, blancs — jamais d'objectif ni de profondeur de champ : un terme de
+  `forbidden_photo_terms` fait refuser la réponse, en français, puis redemander) et dans cet ordre :
+  phrase de style de la série (`$style_lead`, remise en tête par le moteur si elle manque), rôles des images de référence d'abord
   (`<image1> is the identity reference for Aiko: keep her face, hair, outfit and colours; ignore its
   pose, framing and background.`) → sujet avec un verbe d'action et la pose du corps (poids, membres,
   mouvement, geste), place de chacun dans le cadre, regard et expression → caméra en termes de cinéma

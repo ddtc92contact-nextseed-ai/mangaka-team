@@ -458,7 +458,7 @@ _FILLERS = {
         "Le décor garde sa profondeur, avec des plans successifs bien séparés.",
     ],
     "en": [
-        "In the foreground, a few blurred props frame the action and give the shot depth.",
+        "In the foreground, a few props drawn with bold outlines frame the action, thinner lines for everything further away.",
         "Behind the characters, the background recedes in clearly separated layers, from mid-ground details to a hazy distance.",
         "At the top of the frame, the space stays open so that the movement can breathe.",
         "On the left and on the right, secondary elements of the setting lead the eye toward the main action.",
@@ -492,10 +492,15 @@ def _seed(text: str) -> int:
 
 
 def _mock_english(ctx: dict[str, Any]) -> list[str]:
-    """Phrases anglaises seulement (le mock ne traduit pas) : rôles des images, sujet et pose, caméra,
-    décor, lumière, composition."""
+    """Phrases anglaises seulement (le mock ne traduit pas) : phrase de style, rôles des images, sujet et pose,
+    cadrage, décor, lumière, composition — jamais de vocabulaire photographique."""
     panel = ctx.get("panel") or {}
-    sentences = [f"{r['tag']} is {r['role']}." for r in ctx.get("references") or [] if r.get("tag") and r.get("role")]
+    lead = [str(ctx["style_lead"])] if ctx.get("style_lead") else []
+    sentences = lead + [
+        f"{r['tag']} is {r['role']}." for r in ctx.get("references") or [] if r.get("tag") and r.get("role")
+    ]
+    if ctx.get("references"):
+        sentences.append("The whole panel is drawn in the same manga style as the reference images.")
     seed = _seed(str(panel.get("description") or "") + str(panel.get("action") or ""))
     for i, c in enumerate(ctx.get("characters") or []):
         name = c.get("name", "")
@@ -504,7 +509,9 @@ def _mock_english(ctx: dict[str, Any]) -> list[str]:
         look = _LOOKS[(seed + i) % len(_LOOKS)]
         sentences.append(f"{name}, {spot}, {pose}, {look}.")
     if panel.get("camera"):
-        sentences.append(f"Camera: {panel['camera']}, with a slight wide-angle feel and a shallow depth of field.")
+        sentences.append(
+            f"Framing: {panel['camera']}, with strong foreshortening, converging perspective lines and speed lines behind the motion."
+        )
     sentences += [str(x) for x in ctx.get("extra_sentences") or []]
     if (ctx.get("decor") or {}).get("name"):
         sentences.append(f"The scene takes place in {ctx['decor']['name']}, seen from the new camera angle.")
@@ -518,7 +525,8 @@ def _mock_english(ctx: dict[str, Any]) -> list[str]:
 
 
 def mock_image_prompt(ctx: dict[str, Any]) -> dict[str, Any]:
-    """Paragraphe déterministe : rôles des images → sujet et pose → caméra → décor → lumière → style."""
+    """Paragraphe déterministe : phrase de style → rôles des images → sujet et pose → cadrage → décor →
+    lumière → style."""
     lang = "en" if ctx.get("language") == "en" else "fr"
     panel = ctx.get("panel") or {}
     description = _ANY_MARK.sub(" ", str(panel.get("description") or "")).strip()
@@ -531,7 +539,8 @@ def mock_image_prompt(ctx: dict[str, Any]) -> dict[str, Any]:
             name, details = c.get("name", ""), c.get("details", "")
             who = f"{name}, la personne de {refs[name]}" if refs.get(name) else name
             subjects.append(f"{who} ({details})" if details else who)
-        sentences = [f"{r['tag']} : {r['name']}." for r in ctx.get("references") or [] if r.get("tag")]
+        sentences = [str(ctx["style_lead"])] if ctx.get("style_lead") else []
+        sentences += [f"{r['tag']} : {r['name']}." for r in ctx.get("references") or [] if r.get("tag")]
         if subjects:
             sentences.append("On voit " + ", ".join(subjects) + ".")
         if description:

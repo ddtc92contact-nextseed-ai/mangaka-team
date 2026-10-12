@@ -854,6 +854,9 @@ class StyleRendering(StylePack):
     tonality: str = Field(default="", description="Consigne de tonalité ajoutée au prompt positif des cases")
     # Termes ajoutés au prompt négatif des cases quand il est lu (vrai CFG, palier Qualité) ; vide = aucun.
     tonality_negative: str = Field(default="", description="Termes négatifs de tonalité (lus à cfg > 1)")
+    # Début de la phrase de style qui ouvre chaque prompt de case (anglais, vocabulaire du dessin : « Black
+    # and white manga panel, inked line art with halftone screentone shading ») ; vide = 1er mot-clé.
+    lead: str = Field(default="", description="Phrase de style en tête des prompts de case (anglais)")
 
 
 class StyleTone(StylePack):
@@ -1388,7 +1391,10 @@ IMAGE_PROMPT_VARIABLES = {
     "setting",
     "staging",
     "character_count",
+    "style_lead",
 }
+# Phrase de style en tête des prompts de case (`style_lead` d'image_prompt.yaml).
+STYLE_LEAD_VARIABLES = {"rendering", "genre"}
 # Lignes d'images de référence (`references.character`…) et morceaux autour du prompt (`before`, `after`).
 REFERENCE_LINE_VARIABLES = {"slot", "name"}
 REFERENCE_PART_VARIABLES = {"images", "count", "sorting"}
@@ -1492,6 +1498,41 @@ class ImagePromptSettings(_Strict):
             "signature",
         ]
     )
+    # Termes photographiques (« lens », « depth of field »…) : un paragraphe du rédacteur qui en contient est
+    # refusé et redemandé (mots entiers, sans casse) ; ils poussent Qwen-Image vers le photoréalisme.
+    forbidden_photo_terms: list[str] = Field(
+        default_factory=lambda: [
+            "photo",
+            "photograph",
+            "photographic",
+            "photorealistic",
+            "photorealism",
+            "realistic",
+            "lens",
+            "bokeh",
+            "depth of field",
+            "telephoto",
+            "DSLR",
+            "cinematic still",
+            "35mm",
+        ]
+    )
+    # Toujours présents dans le prompt négatif (comme `forbidden_text_terms`) : contre le photoréalisme.
+    negative_photo_terms: list[str] = Field(
+        default_factory=lambda: [
+            "photorealistic",
+            "photograph",
+            "photo",
+            "3d render",
+            "cgi",
+            "realistic skin texture",
+            "film grain",
+        ]
+    )
+    # Phrase de style qui ouvre chaque prompt de case : morceaux joints par « , » (un morceau dont une
+    # variable est vide est omis). Variables : $rendering (`lead` du rendu de la série), $genre (1er mot-clé
+    # du genre, ou de l'ancien style libre).
+    style_lead: list[str] = Field(default_factory=lambda: ["$rendering", "$genre style"])
     strip_quotes: bool = Field(default=True, description="Retire les répliques entre guillemets de la description")
     # Longueur maximale de `$style` (caractères) : les packs y entrent tour à tour (pipeline/style.py).
     # null = aucun plafond (tous les mots-clés des packs).
@@ -1511,6 +1552,12 @@ class ImagePromptSettings(_Strict):
     @classmethod
     def _check_parts(cls, value: list[str]) -> list[str]:
         _check_templates(value, IMAGE_PROMPT_VARIABLES)
+        return value
+
+    @field_validator("style_lead")
+    @classmethod
+    def _check_lead(cls, value: list[str]) -> list[str]:
+        _check_templates(value, STYLE_LEAD_VARIABLES)
         return value
 
 

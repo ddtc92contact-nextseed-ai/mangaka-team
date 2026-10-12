@@ -91,6 +91,13 @@ def trial_style(presets: PresetRegistry) -> str:
     return series_style(presets, _trial_project(presets))
 
 
+def trial_style_lead(presets: PresetRegistry) -> str:
+    """Phrase de style de la série d'essai (en tête du prompt de case)."""
+    from ..pipeline.style import series_style_lead
+
+    return series_style_lead(presets, _trial_project(presets))
+
+
 CHARACTERS = [
     {"name": "Aiko", "description": "lycéenne, cheveux courts noirs, bandeau rouge, sabre de bois"},
     {"name": "Ren", "description": "rival au regard froid, long manteau gris, cicatrice à la joue"},
@@ -272,6 +279,7 @@ def trial_image_prompt(ctx: TrialContext) -> dict[str, Any]:
         action=PANEL["action"],  # type: ignore[arg-type]
         characters=characters,
         style=trial_style(presets),
+        style_lead=trial_style_lead(presets),
         settings=presets.image_prompt,
     )
     wf_id = presets.defaults.workflow if presets.defaults else next(iter(presets.workflows), None)
@@ -341,6 +349,7 @@ def _trial_written_prompt(ctx: TrialContext, characters: list[Any]) -> tuple[str
         absent=["Sensei Okada"],
         references=[ReferenceSlot("character", c.name) for c in characters],
         style=trial_style(presets),
+        style_lead=trial_style_lead(presets),
         prompt=prompt,
         settings=presets.image_prompt,
     )

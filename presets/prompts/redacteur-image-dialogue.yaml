@@ -12,7 +12,7 @@
 #
 # Variables : toutes celles de redacteur-image.yaml ($plan, $angle, $camera, $action, $ambiance,
 # $description, $setting, $staging, $characters, $character_names, $absent_characters, $decor, $objects,
-# $references, $image_tags, $style, $bible, $savoir_faire, $language, $language_name, $min_words,
+# $references, $image_tags, $style, $style_lead, $bible, $savoir_faire, $language, $language_name, $min_words,
 # $max_words), plus :
 #   $instruction       (consigne de l'auteur, en français)
 #   $current_prompt    (prompt final actuel de la case)
@@ -33,18 +33,24 @@ system: |
   The author is reviewing ONE comic panel with you and gives you an instruction in French about this
   panel only (framing, pose, action, background, lighting, which reference image to use…). Apply the
   instruction faithfully, keep everything the instruction does not mention, and rewrite the panel
-  prompt: ONE long, concrete and visual paragraph in $language_name, staged like a film shot. Follow
-  the usual order:
-  1. Reference roles first, one sentence per image that is sent, in slot order, citing it as <imageN>.
+  prompt: ONE long, concrete and visual paragraph in $language_name, staged like a hand-drawn manga
+  panel (an ink drawing on paper). Follow the usual order:
+  0. Open the paragraph with the style sentence of the series, copied exactly as given ($style_lead).
+  1. Then the reference roles, one sentence per image that is sent, in slot order, citing it as <imageN>.
      Cite only the images listed ($image_tags) and never another one.
   2. The subject: each character of the panel by exact name, with a strong action verb and a precise
      body pose, placed in the frame, with their gaze and expression.
-  3. The camera: one sentence with the shot size and angle in cinematic English (use the camera terms
-     given below), plus lens feel and depth.
+  3. The framing: one sentence with the shot size and angle in manga framing terms (use the camera
+     terms given below), plus how the drawing renders space and energy (foreshortening, perspective
+     lines, speed lines, impact frames, ink weight, screentone, white space).
   4. The setting, walked through with positional phrases (or a plain background if the author asks).
   5. One sentence on the lighting.
   6. One closing sentence on composition and mood, then the style keywords copied exactly as given.
   Hard rules:
+  - never any word of optics or photography: describe only what the artist draws on the page, or the
+    answer is rejected;
+  - extras and places without a reference image are drawn in the same manga style as the rest of the
+    panel;
   - exactly the characters of the panel, all of them by exact name, never one of the absent characters;
   - a single continuous scene in one panel; no text, speech bubble or sound effect in the image;
   - between $min_words and $max_words words; no list, no heading, no quotation marks.
@@ -68,12 +74,12 @@ user: |
   $current_prompt
 
   Current art direction of the panel: $current_direction
-  Camera terms (French value = cinematic English): $camera_terms
+  Camera terms (French value = English framing terms): $camera_terms
 
   Panel data (French inputs, to translate):
   - shot size: $plan
   - camera angle: $angle
-  - camera in cinematic English: $camera
+  - framing terms: $camera
   - body action or pose: $action
   - description: $description
   - setting: $setting
@@ -104,6 +110,7 @@ user: |
   $savoir_faire
   These notes are guidance, not a format: they mention fields you do not have (narrative_role, variation_reason, panel_weight…); answer only in the requested format.
 
+  Style sentence of the series (open the paragraph with it, exactly as written): $style_lead
   Style keywords of the series (copy them exactly at the end of the paragraph): $style
 
   Answer format:

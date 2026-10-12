@@ -17,6 +17,7 @@ seule) à la place du genre, avec le rendu par défaut ; il est ignoré dès qu'
 from __future__ import annotations
 
 import logging
+import string
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -198,6 +199,31 @@ def style_keywords(presets: PresetRegistry, series: Project, *, people: bool = T
 def series_style(presets: PresetRegistry, series: Project, *, people: bool = True) -> str:
     """`$style` des prompts image de la série (`people` faux : sans les mots-clés qui évoquent des personnes)."""
     return ", ".join(style_keywords(presets, series, people=people))
+
+
+def series_style_lead(presets: PresetRegistry, series: Project) -> str:
+    """Phrase de style qui ouvre chaque prompt de case (« Black and white manga panel, inked line art with
+    halftone screentone shading, seinen manga style. ») : `lead` du rendu de la série (sinon son 1er
+    mot-clé) et 1er mot-clé du genre (ou de l'ancien style libre), dans les morceaux `style_lead`
+    d'image_prompt.yaml. Sans le modèle d'image ancré par une référence, c'est elle qui tient le style."""
+    rendering = series_rendering(presets, series)
+    lead = _clean(rendering.lead) or _clean(rendering.prompt_keywords[0]) if rendering is not None else ""
+    genre = presets.style_genres.get(series.style_genre or "")
+    words = genre.prompt_keywords if genre is not None else (series.legacy_style or "").split(",")
+    first = next((w for w in (_clean(x) for x in words) if w), "")
+    values = {"rendering": lead, "genre": first}
+    parts: list[str] = []
+    for part in presets.image_prompt.style_lead:
+        tpl = string.Template(part)
+        if any(not values.get(v) for v in tpl.get_identifiers()):
+            continue
+        text = _clean(tpl.substitute(values))
+        if text:
+            parts.append(text)
+    if not parts:
+        return ""
+    sentence = ", ".join(parts)
+    return sentence[:1].upper() + sentence[1:] + "."
 
 
 @dataclass(frozen=True)

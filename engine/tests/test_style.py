@@ -240,7 +240,7 @@ def test_simple_backgrounds_keep_the_described_place() -> None:
 def test_style_combinations_lora_out_of_catalog_and_color() -> None:
     # Hors catalogue : appliqué sans mots déclencheurs.
     plain = series_style(REG, _series(style_lora_name="perso/inconnu.safetensors"))
-    assert plain.startswith("seinen manga, realistic mature style")
+    assert plain.startswith("seinen manga, mature detailed ink style")
     # Couleur : les trames (réservées au N&B) n'ajoutent rien, même si elles traînent en base.
     color = series_style(REG, _series(style_rendering="couleur", style_options={"trames": "denses"}))
     assert "color manga" in color and "screentone" not in color
@@ -432,3 +432,33 @@ def test_legacy_series_brief_uses_old_text_until_a_pack_is_chosen() -> None:
     brief = style_brief(REG, legacy)
     assert brief.packs == "Seinen sombre (ancien style libre)" and "à choisir" in brief.guidelines
     assert style_brief(REG, _series(legacy_style="Seinen sombre")).packs.startswith("Genre : Seinen")
+
+
+def test_seinen_style_is_no_longer_realistic() -> None:
+    from mangaka_engine.pipeline.style import series_style_lead
+
+    style = series_style(REG, _series())
+    assert "realistic" not in style.casefold() and style.startswith("seinen manga, mature detailed ink style")
+    assert series_style_lead(REG, _series()) == (
+        "Black and white manga panel, hand-drawn inked line art with halftone screentone shading, seinen manga style."
+    )
+    # aucun pack de genre, de rendu ou de ton ne pousse vers la photo
+    import re
+
+    words = REG.image_prompt.forbidden_photo_terms
+    packs = [*REG.style_genres.values(), *REG.style_renderings.values(), *REG.style_tones.values()]
+    for pack in packs:
+        text = " ".join([*pack.prompt_keywords, getattr(pack, "lead", ""), getattr(pack, "scene_prompt", "")])
+        found = [w for w in words if re.search(rf"(?<![\w-]){re.escape(w)}(?![\w-])", text, re.I)]
+        assert found == [], pack.id
+
+
+def test_style_lead_without_genre_keeps_the_rendering() -> None:
+    from mangaka_engine.pipeline.style import series_style_lead
+
+    legacy = _series(style_genre=None, style_rendering=None, style_tone=None, legacy_style="manga noir, encre")
+    assert series_style_lead(REG, legacy) == (
+        "Black and white manga panel, hand-drawn inked line art with halftone screentone shading, manga noir style."
+    )
+    color = series_style_lead(REG, _series(style_rendering="couleur"))
+    assert color == "Colour comic panel, hand-drawn inked line art with flat cel-shaded colours, seinen manga style."

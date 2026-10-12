@@ -101,3 +101,44 @@ def test_reference_framing_is_skipped_when_the_prompt_defines_the_roles() -> Non
     # une image citée en trop, ou dans le désordre : les rôles sont redéfinis
     assert not defines_references("<image1> <image3> Aiko.", 2)
     assert not defines_references("<image2> <image1> Aiko.", 2)
+
+
+def test_fragment_prompt_opens_on_the_style_sentence() -> None:
+    reg = PresetRegistry.load(PRESETS_DIR)
+    lead = (
+        "Black and white manga panel, hand-drawn inked line art with halftone screentone shading, seinen manga style."
+    )
+    prompt = build_prompt(description="Aiko court", shot_type="plan large", style_lead=lead, settings=reg.image_prompt)
+    assert prompt.startswith(lead + " Wide shot. Aiko court.")
+    # sans phrase de style (série d'avant les packs sans rendu) : le morceau est omis
+    assert build_prompt(description="Aiko court", shot_type="plan large", settings=reg.image_prompt).startswith(
+        "Wide shot."
+    )
+
+
+def test_camera_terms_carry_no_photographic_vocabulary() -> None:
+    import re
+
+    settings = PresetRegistry.load(PRESETS_DIR).image_prompt
+    terms = " ".join(settings.camera_terms.values())
+    found = [t for t in settings.forbidden_photo_terms if re.search(rf"(?<![\w-]){re.escape(t)}(?![\w-])", terms, re.I)]
+    assert found == []
+
+
+def test_negative_prompt_fights_photorealism_without_duplicates() -> None:
+    reg = PresetRegistry.load(PRESETS_DIR)
+    neg = build_negative_prompt("blurry, Photo, text", reg.image_prompt)
+    terms = [t.strip() for t in neg.split(",")]
+    for term in ("photorealistic", "photograph", "3d render", "cgi", "realistic skin texture", "film grain"):
+        assert terms.count(term) == 1
+    assert [t.casefold() for t in terms].count("photo") == 1 and len(terms) == len({t.casefold() for t in terms})
+
+
+def test_reference_framing_is_skipped_after_the_style_sentence() -> None:
+    reg = PresetRegistry.load(PRESETS_DIR)
+    slots = [ReferenceSlot("character", "Aiko")]
+    written = "Black and white manga panel, seinen manga style. <image1> is Aiko. Aiko runs."
+    framed = frame_references(written, slots, reg.image_prompt)
+    assert defines_references(written, 1) and framed.startswith(written)
+    assert framed.count("<image1> is") == 1
+    assert "drawn in the same manga style as the reference images" in framed

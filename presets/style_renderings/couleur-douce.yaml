@@ -6,3 +6,5 @@ order: 40
 monochrome: false
 lang: en
 prompt_keywords: [soft color manga, watercolor pastel, gentle washes]
+# Début de la phrase de style qui ouvre chaque prompt de case (style_lead d'image_prompt.yaml).
+lead: "Soft colour comic panel, hand-drawn inked line art with watercolour pastel washes"

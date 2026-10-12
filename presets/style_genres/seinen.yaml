@@ -1,10 +1,10 @@
 # Genre « seinen » — champs : voir presets/README.md (« Packs de style »).
 id: seinen
 name: Seinen
-description: Pour adultes, dessin réaliste — intrigues mûres, violence et psychologie assumées.
+description: Pour adultes, dessin détaillé — intrigues mûres, violence et psychologie assumées.
 order: 20
 lang: en
-prompt_keywords: [seinen manga, realistic mature style]
+prompt_keywords: [seinen manga, mature detailed ink style]
 layout_style: nerveuse
 reading_direction: rtl
 fonts: { dialogue: comic-neue, shout: titan-one }
@@ -13,7 +13,7 @@ fonts: { dialogue: comic-neue, shout: titan-one }
 scene_test: >-
   un homme anonyme en imperméable sous la pluie dans une ruelle de nuit, néons qui se reflètent dans les flaques, cadrage cinématographique
 scene_prompt: >-
-  an anonymous man in a raincoat stands in the rain in a back alley at night, neon lights reflected in the puddles, cinematic framing
+  an anonymous man in a raincoat stands in the rain in a back alley at night, neon lights reflected in the puddles, dramatic low-angle framing
 llm_guidelines: >-
   Seinen, public adulte : rythme posé qui accélère dans les scènes de tension, 5 à 7 cases par page,
   silences et cases muettes bienvenus. Dialogues naturels et nuancés, vocabulaire adulte ; personnages
