@@ -24,27 +24,62 @@ bible_max_tokens: 2500
 # Collections lues par agent (noms des collections, sans tenir compte de la casse). Si l'agent a
 # un profil avec un champ « Savoir-faire » (écran « L'équipe »), le profil prime sur cette liste.
 # series_collections : ajoute les collections rattachées à la série du chapitre (jamais celles d'une autre série).
+#
+# Les collections « Mise en scène · … » viennent du pack livré presets/knowledge_packs/manga_visual_knowledge
+# (importé au démarrage, « Mettre à jour les packs » dans Savoir-faire). « Vocabulaire », « Checklist » et
+# « Pont ComfyUI » sont de petites collections (moins de small_collection_tokens) : injectées entières.
 agents:
   script:
     label: Scénariste (étape 1)
-    collections: [Écriture de scénario, Rythme et découpage, Humour jeunesse]
+    collections:
+      - Écriture de scénario
+      - Rythme et découpage
+      - Humour jeunesse
+      - Mise en scène · Fondamentaux
+      - Mise en scène · Émotions
+      - Mise en scène · Exemples
     series_collections: true
     budget_tokens: 2500
     top_k: 6
+  # Budget relevé pour le pack : Vocabulaire et Checklist (≈ 1 200 jetons, injectées entières) + 4 à 5 fiches.
   art_direction:
     label: Directeur artistique (avant l'étape 2)
-    collections: [Mise en page, Rythme et découpage]
+    collections:
+      - Mise en page
+      - Rythme et découpage
+      - Mise en scène · Fondamentaux
+      - Mise en scène · Cadrages
+      - Mise en scène · Angles
+      - Mise en scène · Action
+      - Mise en scène · Composition
+      - Mise en scène · Découpage
+      - Mise en scène · Émotions
+      - Mise en scène · Anti-répétition
+      - Mise en scène · Exemples
+      - Mise en scène · Vocabulaire
+      - Mise en scène · Checklist
     series_collections: true
-    budget_tokens: 1500
-    top_k: 4
+    budget_tokens: 3500
+    top_k: 5
   # Deux budgets coupés dans la même recherche : le rédacteur de prompt (LLM, rédaction automatique et
   # « Dialogue ») lit les passages entiers avec leur source ; le prompt par fragments (repli quand le
   # rédacteur est désactivé ou en panne, `$savoir_faire` d'image_prompt.yaml) garde une note courte en
   # une ligne, pour ne jamais coller de théorie en français dans le prompt du modèle d'image.
   # Le budget et le top-k réglés dans « L'équipe » (Dessinateur) sont ceux du rédacteur.
+  # Les fiches d'un pack ne vont qu'au rédacteur : jamais dans la note courte des fragments (prompt du modèle
+  # d'image). Pont ComfyUI (≈ 420 jetons) est injectée entière dans le budget du rédacteur.
   image_prompt:
     label: Prompts image (étape 3)
-    collections: [Design de personnages, Mise en page]
+    collections:
+      - Design de personnages
+      - Mise en page
+      - Mise en scène · Cadrages
+      - Mise en scène · Angles
+      - Mise en scène · Corps et gestes
+      - Mise en scène · Action
+      - Mise en scène · Composition
+      - Mise en scène · Émotions
+      - Mise en scène · Pont ComfyUI
     series_collections: true
     budget_tokens: 160            # fragments : note courte du prompt d'une case
     top_k: 2

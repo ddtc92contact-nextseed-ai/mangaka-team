@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     qc_identity_provider: str | None = None
     # Savoir-faire : embeddings des passages (mock | ollama).
     embedding_provider: str | None = None
+    # Packs de savoir-faire livrés (presets/knowledge_packs/) : importés ou mis à jour au démarrage.
+    knowledge_packs: bool = True
 
     deepseek_api_key: SecretStr | None = None
     deepseek_base_url: str | None = None

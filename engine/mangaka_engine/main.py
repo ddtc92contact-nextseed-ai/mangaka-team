@@ -53,6 +53,7 @@ from .pipeline.generation import STEP as GENERATION_STEP
 from .pipeline.generation import GenerationExecutor, describe_error, recover_states
 from .pipeline.jobs import JobRunner
 from .pipeline.knowledge import KnowledgeBase
+from .pipeline.knowledge_packs import update_packs
 from .pipeline.prompt_writer import AGENT_ID as WRITER_AGENT
 from .pipeline.qc import STEP as QC_STEP
 from .pipeline.qc import AutoQC, QCExecutor
@@ -103,6 +104,14 @@ def build_context(settings: Settings, providers: Providers | None = None) -> App
     kb.profile_lookup = agents_service.knowledge_collections
     kb.profile_top_k = agents_service.knowledge_top_k
     kb.profile_budget = agents_service.knowledge_budget
+    if settings.knowledge_packs:
+        # Packs de savoir-faire livrés : un fichier inchangé ne change rien, une fiche modifiée est réindexée.
+        try:
+            with db.session_scope() as session:
+                kb.pack_reports = update_packs(session, settings.presets_dir, providers.embedding, presets.knowledge)
+                session.commit()
+        except Exception:  # le moteur démarre quand même ; « Mettre à jour les packs » redonnera l'erreur
+            log.exception("import des packs de savoir-faire impossible")
     executor = GenerationExecutor(
         db,
         presets,

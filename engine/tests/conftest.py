@@ -37,6 +37,8 @@ def make_settings(tmp_path: Path) -> Callable[..., Settings]:
             # Jamais le vrai ~/ComfyUI (ni un COMFYUI_DIR du shell) : les tests du rangement passent un dossier
             # temporaire.
             "comfyui_dir": None,
+            # Packs de savoir-faire livrés : importés seulement par les tests qui les demandent (test_knowledge_packs).
+            "knowledge_packs": False,
         }
         values.update(overrides)
         return Settings(_env_file=None, **values)

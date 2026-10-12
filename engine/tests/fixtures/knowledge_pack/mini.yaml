@@ -1,0 +1,19 @@
+# Petit pack de test (tests/test_knowledge_packs.py).
+id: mini
+file: mini.md
+collections:
+  - name: Mini · Cadrages
+    sections: ["01_cadrages"]
+  - name: Mini · Émotions
+    sections: ["07_emotions"]
+  - name: Mini · Vocabulaire
+    sections: ["0.B", "0.C"]
+  - name: Mini · Checklist
+    sections: ["Annexe A"]
+skip: ["0.A", "Annexe C"]
+vocabulary:
+  shot_scale:
+    close_up: gros plan
+    long: plan large
+  camera_angle:
+    low: en contre-plongée
