@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState, type ComponentProps } from "react";
+import { useMemo, useRef, useState, type ComponentProps } from "react";
+import { useConfirm } from "@/components/confirm";
 import { HelpLabel, InfoTip } from "@/components/info-tip";
 import { PassageList, formatTokens } from "@/components/knowledge";
 import { useToast } from "@/components/toast";
@@ -38,6 +39,9 @@ import {
   type DraftPanel,
 } from "@/lib/script";
 import { useChapter } from "../chapter-context";
+import { StepAlert } from "../step-alert";
+
+const SYNOPSIS_FIRST = "Écris d'abord le synopsis ou le script brut du chapitre : le découpage part de lui.";
 
 export default function ScenarioPage() {
   const { chapter, setChapter, reload: reloadChapter } = useChapter();
@@ -63,6 +67,8 @@ export default function ScenarioPage() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const toast = useToast();
+  const confirm = useConfirm();
+  const synopsisRef = useRef<HTMLTextAreaElement>(null);
   useUnsavedWarning(dirty);
 
   const current = started ?? lastJob.data ?? null;
@@ -79,13 +85,27 @@ export default function ScenarioPage() {
 
   async function decouper() {
     setStartError(null);
-    if (dirty && !window.confirm("Le découpage actuel a des modifications non enregistrées. Les remplacer ?")) return;
-    if (
-      !dirty &&
-      draft?.some((p) => p.kind === "story") &&
-      !window.confirm("Remplacer les pages de l'histoire par un nouveau découpage ? (les pages bonus sont conservées)")
-    )
+    if (!synopsis.trim()) {
+      setStartError(SYNOPSIS_FIRST);
+      synopsisRef.current?.focus();
       return;
+    }
+    if (dirty) {
+      const ok = await confirm({
+        title: "Relancer le découpage ?",
+        message: "Le découpage actuel a des modifications non enregistrées : le nouveau découpage les remplacera.",
+        confirmLabel: "Remplacer mes modifications",
+        danger: true,
+      });
+      if (!ok) return;
+    } else if (draft?.some((p) => p.kind === "story")) {
+      const ok = await confirm({
+        title: "Relancer le découpage ?",
+        message: "Les pages de l'histoire seront remplacées par un nouveau découpage. Les pages bonus sont conservées.",
+        confirmLabel: "Remplacer les pages",
+      });
+      if (!ok) return;
+    }
     setStarting(true);
     try {
       if (synopsis !== chapter.synopsis) setChapter(await api.updateChapter(chapter.id, { synopsis }));
@@ -142,6 +162,7 @@ export default function ScenarioPage() {
         >
           <Textarea
             id="synopsis"
+            ref={synopsisRef}
             className="min-h-36"
             value={synopsis}
             onChange={(e) => setSynopsis(e.target.value)}
@@ -155,14 +176,23 @@ export default function ScenarioPage() {
           </p>
           <span className="flex items-center gap-2">
             <InfoTip help="scenario.decouper" label="Découper" />
-            <Button onClick={decouper} disabled={starting || running || !synopsis.trim()} data-testid="decouper">
+            <Button onClick={decouper} disabled={starting || running} data-testid="decouper">
               {running ? "Découpage en cours…" : starting ? "Lancement…" : "Découper"}
             </Button>
           </span>
         </div>
         {startError && (
           <div className="mt-4">
-            <Alert>{startError}</Alert>
+            <StepAlert
+              message={startError}
+              action={
+                startError === SYNOPSIS_FIRST && (
+                  <Button variant="secondary" onClick={() => synopsisRef.current?.focus()}>
+                    Écrire le synopsis
+                  </Button>
+                )
+              }
+            />
           </div>
         )}
         {job && <JobProgress job={job} onRetry={decouper} />}
@@ -246,9 +276,14 @@ export default function ScenarioPage() {
                 disabled={running}
                 onChange={(next) => edit((d) => d.map((p, i) => (i === pi ? next : p)))}
                 onMove={(delta) => edit((d) => moveItem(d, pi, delta))}
-                onRemove={() => {
-                  if (window.confirm(`Supprimer la page ${pi + 1} et ses cases ?`))
-                    edit((d) => d.filter((_, i) => i !== pi));
+                onRemove={async () => {
+                  const ok = await confirm({
+                    title: `Supprimer la page ${pi + 1} ?`,
+                    message: "La page et ses cases sont retirées du découpage (définitif une fois le découpage enregistré).",
+                    confirmLabel: "Supprimer la page",
+                    danger: true,
+                  });
+                  if (ok) edit((d) => d.filter((_, i) => i !== pi));
                 }}
               />
             ))}

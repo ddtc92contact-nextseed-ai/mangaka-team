@@ -15,6 +15,7 @@ import { useEngineData } from "@/lib/hooks";
 import { needsReview } from "@/lib/qc";
 import { PAGE_KINDS } from "@/lib/script";
 import { useChapter } from "../chapter-context";
+import { StepAlert } from "../step-alert";
 import { buildPanelViews, PageCanvas, type PageCanvasHandle } from "./page-canvas";
 import { PanelInspector } from "./panel-inspector";
 import { QCToolbar } from "./qc-toolbar";
@@ -249,7 +250,7 @@ function Workshop() {
         </div>
       </div>
 
-      {error && <Alert>{error}</Alert>}
+      {error && <StepAlert message={error} />}
       {notice && !error && (
         <Alert tone="info">
           {notice} <ProductionLink chapterId={chapter.id} pageId={page.id} />

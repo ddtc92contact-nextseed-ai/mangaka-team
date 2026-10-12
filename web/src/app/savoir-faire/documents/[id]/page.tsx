@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
+import { useConfirm } from "@/components/confirm";
 import { SOURCE_LABELS, Tags, formatTokens } from "@/components/knowledge";
 import { useToast } from "@/components/toast";
 import { Alert, Button, Card, Field, Input, Loading, PageHeader, Textarea } from "@/components/ui";
@@ -15,9 +16,17 @@ export default function DocumentPage() {
   const doc = useEngineData(() => api.getDocument(id), [id]);
   const [error, setError] = useState<string | null>(null);
   const toast = useToast();
+  const confirm = useConfirm();
 
   async function remove() {
-    if (!doc.data || !window.confirm(`Supprimer « ${doc.data.title} » et ses passages ?`)) return;
+    if (!doc.data) return;
+    const ok = await confirm({
+      title: "Supprimer le document ?",
+      message: `« ${doc.data.title} » et ses passages seront supprimés.`,
+      confirmLabel: "Supprimer",
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await api.deleteDocument(id);
       toast("Document supprimé");

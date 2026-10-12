@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
+import { useConfirm } from "@/components/confirm";
 import { Alert, Button, Card, Loading, PageHeader } from "@/components/ui";
 import { api, errorMessage, type LibraryKind } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
@@ -25,13 +26,20 @@ export function LibraryEntryPage({ kind, id }: { kind: LibraryKind; id: number }
   const [saved, setSaved] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const toast = useToast();
+  const confirm = useConfirm();
 
   if (entry.loading) return <Loading />;
   if (entry.error || !entry.data) return <Alert>{entry.error ?? `Fiche introuvable (${info.singular})`}</Alert>;
   const e = entry.data;
 
   async function remove() {
-    if (!window.confirm(info.deleteConfirm(e.name))) return;
+    const ok = await confirm({
+      title: "Supprimer la fiche ?",
+      message: info.deleteConfirm(e.name),
+      confirmLabel: "Supprimer",
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await api.deleteLibraryEntry(kind, e.id);
       toast("Fiche supprimée");
