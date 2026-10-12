@@ -71,7 +71,8 @@ LAYOUTS = "layouts/*.yaml"
 
 
 class Knowledge(BaseModel):
-    """« Savoir-faire » d'un agent : collections de la base de connaissances (par nom) et nombre de passages.
+    """« Savoir-faire » d'un agent : collections de la base de connaissances (par nom), nombre de passages et
+    budget de jetons (pour le Dessinateur : ceux du rédacteur de prompt, pas la note courte des fragments).
 
     Valeur livrée : `presets/knowledge.yaml` (rôle `knowledge_role` de l'agent). Un profil qui le modifie
     prime sur ce fichier (`KnowledgeBase.profile_lookup`), série comprise.
@@ -81,6 +82,8 @@ class Knowledge(BaseModel):
 
     collections: list[str] = Field(default_factory=list, max_length=20)
     top_k: int = Field(default=5, ge=1, le=50)
+    # None : celui de knowledge.yaml (profils enregistrés avant l'arrivée du réglage).
+    budget_tokens: int | None = Field(default=None, ge=0, le=16000)
 
 
 @dataclass
@@ -513,23 +516,36 @@ class AgentService:
             inherited = parent if editing == "series" else preset
             out.append(ResolvedSetting(s, value, origin, preset, inherited))  # type: ignore[arg-type]
         default_k = self.knowledge_default(agent)
-        parent_k = global_values.get(KNOWLEDGE_KEY, default_k)
+
+        def complete(k: dict[str, Any]) -> dict[str, Any]:
+            # Profil enregistré sans budget (ou avec null) : celui de knowledge.yaml.
+            out = {**default_k, **k}
+            if out.get("budget_tokens") is None:
+                out["budget_tokens"] = default_k.get("budget_tokens")
+            return out
+
+        parent_k = complete(global_values[KNOWLEDGE_KEY]) if KNOWLEDGE_KEY in global_values else default_k
         if KNOWLEDGE_KEY in series_values:
-            k_value, k_origin = series_values[KNOWLEDGE_KEY], "series"
+            k_value, k_origin = complete(series_values[KNOWLEDGE_KEY]), "series"
         elif KNOWLEDGE_KEY in global_values:
-            k_value, k_origin = global_values[KNOWLEDGE_KEY], "global"
+            k_value, k_origin = parent_k, "global"
         else:
             k_value, k_origin = default_k, "preset"
         k_inherited = parent_k if editing == "series" else default_k
         return out, {"value": k_value, "origin": k_origin, "inherited": k_inherited}
 
     def knowledge_default(self, agent: AgentPreset) -> dict[str, Any]:
-        """Savoir-faire livré : collections et top-k de `knowledge.yaml` pour le rôle de l'agent."""
+        """Savoir-faire livré : collections, top-k et budget de `knowledge.yaml` pour le rôle de l'agent (ceux du
+        rédacteur de prompt pour `image_prompt`)."""
         settings = self.base.knowledge
         if agent.knowledge_role is None or settings is None or agent.knowledge_role not in settings.agents:
             return Knowledge().model_dump()
         k = settings.agents[agent.knowledge_role]
-        return Knowledge(collections=list(k.collections)[:20], top_k=k.top_k or settings.retrieval.top_k).model_dump()
+        return Knowledge(
+            collections=list(k.collections)[:20],
+            top_k=k.main_top_k or settings.retrieval.top_k,
+            budget_tokens=min(k.main_budget_tokens, 16000),
+        ).model_dump()
 
     def knowledge_profile(self, session: Session, role: str, project_id: int | None = None) -> dict[str, Any] | None:
         """Savoir-faire du profil de l'agent qui tient ce rôle (None : pas modifié, knowledge.yaml s'applique)."""
@@ -546,6 +562,10 @@ class AgentService:
     def knowledge_top_k(self, session: Session, role: str, project_id: int | None = None) -> int | None:
         k = self.knowledge_profile(session, role, project_id)
         return int(k["top_k"]) if k else None
+
+    def knowledge_budget(self, session: Session, role: str, project_id: int | None = None) -> int | None:
+        k = self.knowledge_profile(session, role, project_id)
+        return int(k["budget_tokens"]) if k and k.get("budget_tokens") is not None else None
 
     def resolved_for(
         self, session: Session, agent: AgentPreset, project_id: int | None
@@ -677,6 +697,8 @@ class AgentService:
                     for e in exc.errors()
                 ]
             else:
+                if k["budget_tokens"] is None:  # champ vidé : budget hérité
+                    k["budget_tokens"] = kn["inherited"].get("budget_tokens")
                 if k == kn["inherited"]:
                     new.pop(KNOWLEDGE_KEY, None)
                 else:

@@ -204,7 +204,8 @@ class PromptBrief:
             references=list(references),
             style=_SPACES.sub(" ", style or "").strip().rstrip(" .;,"),
             bible=_text(bible),
-            savoir_faire=_text(savoir_faire),
+            # Passages entiers avec leur source (titres entre « ») : ni guillemets retirés ni lignes fusionnées.
+            savoir_faire=(savoir_faire or "").strip(),
             language=(prompt.language if prompt and prompt.language else DEFAULT_LANGUAGE),
             min_words=(prompt.min_words if prompt and prompt.min_words else DEFAULT_MIN_WORDS),
             max_words=(prompt.max_words if prompt and prompt.max_words else DEFAULT_MAX_WORDS),

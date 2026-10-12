@@ -1880,6 +1880,21 @@ class KnowledgeAgent(_Strict):
     top_k: int | None = Field(default=None, ge=1, le=50)
     bible: bool = True
     bible_max_tokens: int | None = Field(default=None, ge=0, le=32000)
+    # Rédacteur de prompt (LLM) de l'agent `image_prompt` : budget, passages et notes de la bible à part,
+    # plus larges que la note courte des fragments (`budget_tokens`, `top_k`, `bible_max_tokens`).
+    writer_budget_tokens: int | None = Field(default=None, ge=0, le=32000)
+    writer_top_k: int | None = Field(default=None, ge=1, le=50)
+    writer_bible_max_tokens: int | None = Field(default=None, ge=0, le=32000)
+
+    @property
+    def main_budget_tokens(self) -> int:
+        """Budget réglé dans « L'équipe » : celui du rédacteur s'il existe, sinon `budget_tokens`."""
+        return self.writer_budget_tokens if self.writer_budget_tokens is not None else self.budget_tokens
+
+    @property
+    def main_top_k(self) -> int | None:
+        """Top-k réglé dans « L'équipe » : celui du rédacteur s'il existe, sinon `top_k`."""
+        return self.writer_top_k or self.top_k
 
 
 class KnowledgeSettings(_Strict):

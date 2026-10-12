@@ -102,6 +102,7 @@ def build_context(settings: Settings, providers: Providers | None = None) -> App
     # « Savoir-faire » des profils d'agents (écran « L'équipe ») : prime sur knowledge.yaml.
     kb.profile_lookup = agents_service.knowledge_collections
     kb.profile_top_k = agents_service.knowledge_top_k
+    kb.profile_budget = agents_service.knowledge_budget
     executor = GenerationExecutor(
         db,
         presets,

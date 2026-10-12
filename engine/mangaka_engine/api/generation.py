@@ -32,6 +32,7 @@ from ..pipeline.generation import (
     entry_kind,
     panel_brief,
     panel_cast,
+    panel_knowledge,
     panel_label,
     panel_target,
     panels_to_generate,
@@ -46,6 +47,7 @@ from ..pipeline.generation import (
     update_panel_prompt,
 )
 from ..pipeline.inpaint import MaskError, Region, decode_png
+from ..pipeline.knowledge import Passage, estimate_tokens
 from ..pipeline.names import CharacterMatcher
 from ..pipeline.prompt_dialog import PromptDialogError
 from ..pipeline.prompt_writer import AGENT_ID as WRITER_AGENT
@@ -86,7 +88,10 @@ from .schemas import (
     LibraryRef,
     PanelDetailOut,
     PanelImageOut,
+    PanelKnowledgeOut,
+    PanelKnowledgePart,
     PanelUpdate,
+    PassageOut,
     PresetEstimateOut,
     QueueItemOut,
     QueueOut,
@@ -335,6 +340,48 @@ def _enqueue(session: Session, ctx: AppContext, panel: Panel, **kwargs: object) 
 
 
 # --- cases ------------------------------------------------------------------------------
+@router.get("/panels/{panel_id}/knowledge", response_model=PanelKnowledgeOut)
+def get_panel_knowledge(
+    panel_id: int, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
+) -> PanelKnowledgeOut:
+    """Savoir-faire de la case : passages et notes de la bible envoyés au rédacteur de prompt (LLM) et note
+    courte du prompt par fragments, avec leurs jetons (« Savoir-faire de la case » de l'atelier)."""
+    panel = get_panel_or_404(session, panel_id)
+    found = panel_knowledge(session, ctx.knowledge, panel, panel_cast(session, panel).characters)
+
+    def part(
+        passages: list[Passage], tokens: int, budget: int, top_k: int, sent: tuple[str, str]
+    ) -> PanelKnowledgePart:
+        text, bible = sent
+        return PanelKnowledgePart(
+            passages=[PassageOut(**p.as_dict(), selected=True) for p in passages],
+            tokens=tokens,
+            budget_tokens=budget,
+            top_k=top_k,
+            text=text,
+            text_tokens=estimate_tokens(text) if text else 0,
+            bible=bible,
+            bible_tokens=estimate_tokens(bible) if bible else 0,
+        )
+
+    return PanelKnowledgeOut(
+        panel_id=panel.id,
+        query=found.query,
+        collections=found.collections,
+        writer=part(
+            found.writer_passages, found.writer_tokens, found.writer_budget, found.writer_top_k, found.writer()
+        ),
+        fragments=part(
+            found.fragment_passages,
+            found.fragment_tokens,
+            found.fragment_budget,
+            found.fragment_top_k,
+            found.fragments(),
+        ),
+        warning=found.warning,
+    )
+
+
 @router.get("/panels/{panel_id}", response_model=PanelDetailOut)
 def get_panel(
     panel_id: int, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
