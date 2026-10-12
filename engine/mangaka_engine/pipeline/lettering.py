@@ -31,19 +31,22 @@ résultat, ce qui rend les rendus PNG / SVG reproductibles (tests « golden »).
 
 from __future__ import annotations
 
+import logging
 import math
 import random
 import re
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from typing import Any, Literal
 
 import pyphen
 
-from ..presets.schemas import FontsPreset, LetteringSettings, SfxSettings, TailSettings, TextStyle
+from ..presets.schemas import FontsPreset, LetteringSettings, SfxSettings, SfxTextStyle, TailSettings, TextStyle
 from . import geometry as geo
 from .fonts import NBSP, NNBSP, FontBook, pt_to_px
+
+log = logging.getLogger("mangaka_engine")
 
 Direction = Literal["ltr", "rtl"]
 Point = tuple[float, float]
@@ -683,7 +686,7 @@ class SfxLayout:
     text: str
     intensity: str
     font_id: str
-    style: TextStyle
+    style: SfxTextStyle
     family: str
     size_pt: float
     size_px: float
@@ -1203,7 +1206,7 @@ class Letterer:
         bubbles: list[BubbleLayout] = []
         warnings: list[LetteringWarning] = []
         for panel in panels:
-            res = self.letter_panel(panel, direction)
+            res = self._letter_panel_safely(panel, direction)
             bubbles += res.bubbles
             warnings += res.warnings
         sfx: list[SfxLayout] = []
@@ -1213,17 +1216,57 @@ class Letterer:
             faces = [_box_poly(f.expand(self.mm(self.s.sfx.face_margin_mm))) for p in panels for f in p.faces]
             for panel in panels:
                 for spec in panel.sfx:
-                    lay, warn = self.letter_sfx(panel, spec, direction, faces, taken, page)
+                    try:
+                        lay, warn = self.letter_sfx(panel, spec, direction, faces, taken, page)
+                    except Exception as exc:  # noqa: BLE001 — une onomatopée illisible ne bloque pas la page
+                        log.exception("lettrage : onomatopée %s impossible à poser", spec.id, exc_info=exc)
+                        why = f"impossible à lettrer ({_reason(exc)}) — laissée de côté : corrige-la ou supprime-la"
+                        warnings.append(self._sfx_warn("sfx_failed", f"Case {panel.index + 1}", spec, panel, why))
+                        continue
                     sfx.append(lay)
                     taken.append(lay.quad)
                     warnings += warn
         return PageLettering(bubbles, warnings, sfx)
 
+    def _letter_panel_safely(self, panel: PanelSpec, direction: Direction) -> PageLettering:
+        """`letter_panel`, mais une bulle impossible à poser (donnée illisible, police absente…) est
+        laissée de côté avec un avertissement au lieu de faire échouer toute la page."""
+        try:
+            return self.letter_panel(panel, direction)
+        except Exception as exc:  # noqa: BLE001
+            log.exception("lettrage : case %s impossible à lettrer d'un bloc", panel.id, exc_info=exc)
+        label = f"Case {panel.index + 1}"
+        warnings: list[LetteringWarning] = []
+        good: list[BubbleSpec] = []
+        for b in panel.bubbles:
+            try:
+                self.letter_panel(replace(panel, bubbles=[b]), direction)
+            except Exception as exc:  # noqa: BLE001
+                excerpt = b.text if len(b.text) <= 30 else b.text[:29] + "…"
+                warnings.append(
+                    LetteringWarning(
+                        "bubble_failed",
+                        f"{label} : bulle {b.order + 1} (« {excerpt} ») impossible à lettrer ({_reason(exc)}) — "
+                        "laissée de côté : corrige-la dans le Scénario.",
+                        panel.id,
+                        b.id,
+                    )
+                )
+            else:
+                good.append(b)
+        try:
+            res = self.letter_panel(replace(panel, bubbles=good), direction)
+        except Exception as exc:  # noqa: BLE001 — chaque bulle passe seule, pas ensemble : case sans bulle
+            log.exception("lettrage : case %s impossible à lettrer", panel.id, exc_info=exc)
+            msg = f"{label} : bulles impossibles à placer ensemble ({_reason(exc)}) — laissées de côté."
+            return PageLettering([], [*warnings, LetteringWarning("panel_failed", msg, panel.id)])
+        return PageLettering(res.bubbles, warnings + res.warnings)
+
     # onomatopées ---------------------------------------------------------------------------
-    def sfx_style(self, spec: SfxSpec, size_pt: float) -> tuple[str, TextStyle]:
+    def sfx_style(self, spec: SfxSpec, size_pt: float) -> tuple[str, SfxTextStyle]:
         font_id = self.preset.sfx_font(spec.intensity, spec.font)
         cfg = self.preset.sfx
-        st = TextStyle(
+        st = SfxTextStyle(
             font=font_id,
             size_pt=size_pt,
             min_size_pt=size_pt,
@@ -1239,7 +1282,7 @@ class Letterer:
         scale = min(max(side_mm / c.reference_panel_mm, c.scale_min), c.scale_max)
         return round(min(max(c.size_pt[intensity] * scale, c.min_size_pt), c.max_size_pt), 1)  # type: ignore[index]
 
-    def sfx_block(self, spec: SfxSpec, size_pt: float) -> tuple[str, TextStyle, list[TextLine], tuple[float, float]]:
+    def sfx_block(self, spec: SfxSpec, size_pt: float) -> tuple[str, SfxTextStyle, list[TextLine], tuple[float, float]]:
         """Lignes centrées sur l'origine (encre réelle : accents compris) et demi-taille du contour."""
         font_id, st = self.sfx_style(spec, size_pt)
         font = self.fonts.pil(st, self.pt(size_pt))
@@ -1395,6 +1438,13 @@ class Letterer:
     def _sfx_warn(self, code: str, label: str, spec: SfxSpec, panel: PanelSpec, why: str) -> LetteringWarning:
         excerpt = spec.text if len(spec.text) <= 20 else spec.text[:19] + "…"
         return LetteringWarning(code, f"{label} : onomatopée « {excerpt} » {why}.", panel.id, spec.id)
+
+
+def _reason(exc: Exception) -> str:
+    """Cause lisible d'un échec de lettrage (le détail technique reste dans le journal du moteur)."""
+    if isinstance(exc, LetteringError):
+        return str(exc)
+    return f"erreur interne du moteur : {exc.__class__.__name__}"
 
 
 def _box_poly(b: Box) -> list[Point]:

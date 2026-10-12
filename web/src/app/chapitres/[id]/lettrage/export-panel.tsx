@@ -55,6 +55,9 @@ export function ExportPanel({ chapterId, pageId, bleedMm }: { chapterId: number;
   const exports = useEngineData(() => api.chapterJobs(chapterId, "export"), [chapterId]);
   const live = useJob(job, () => exports.reload());
   const lastDone = (exports.data ?? []).find((j) => j.status === "succeeded");
+  // Dernier export en échec (après le dernier réussi) : sa cause reste affichée, même après un rechargement.
+  const latest = exports.data?.[0];
+  const lastFailed = !live && latest?.status === "failed" ? latest : null;
   const running = live && (live.status === "pending" || live.status === "running");
 
   async function renderPage() {
@@ -175,9 +178,15 @@ export function ExportPanel({ chapterId, pageId, bleedMm }: { chapterId: number;
       {live && (
         <div className="space-y-2" data-testid="export-job" data-status={live.status}>
           <ProgressBar value={live.progress} label="Progression de l'export" />
-          <p className="text-sm text-zinc-400" aria-live="polite">
-            {live.status === "failed" ? `Échec : ${live.error ?? "erreur inconnue"}` : live.message}
-          </p>
+          {live.status === "failed" ? (
+            <div data-testid="export-error">
+              <Alert>Export en échec : {live.error ?? "erreur inconnue"}</Alert>
+            </div>
+          ) : (
+            <p className="text-sm text-zinc-400" aria-live="polite">
+              {live.message}
+            </p>
+          )}
           {live.status === "succeeded" && (
             <a className="inline-block text-sm font-medium text-rose-300 underline hover:text-rose-200" href={exportFileUrl(live.id)} data-testid="export-download">
               Télécharger le ZIP du chapitre
@@ -194,6 +203,14 @@ export function ExportPanel({ chapterId, pageId, bleedMm }: { chapterId: number;
               {pageWarnings.length > 8 && <li>… et {pageWarnings.length - 8} autre(s)</li>}
             </ul>
           )}
+        </div>
+      )}
+      {lastFailed && (
+        <div data-testid="export-error">
+          <Alert>
+            Dernier export en échec ({new Date(lastFailed.finished_at ?? lastFailed.created_at).toLocaleString("fr-FR")}) :{" "}
+            {lastFailed.error ?? "erreur inconnue"}
+          </Alert>
         </div>
       )}
       {!live && lastDone && (
