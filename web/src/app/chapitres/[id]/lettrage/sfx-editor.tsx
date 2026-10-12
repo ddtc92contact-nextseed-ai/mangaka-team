@@ -101,7 +101,7 @@ export function SfxEditor({
             <Input id="sfx-size" type="number" min={6} max={300} step={0.5} value={size} onChange={(e) => setSize(e.target.value)} data-testid="sfx-size" />
           </Field>
           <Field label="Angle (°)" htmlFor="sfx-angle">
-            <Input id="sfx-angle" type="number" min={-180} max={180} step={0.5} value={angle} onChange={(e) => setAngle(e.target.value)} data-testid="sfx-angle" />
+            <Input id="sfx-angle" type="number" min={-180} max={180} step="any" value={angle} onChange={(e) => setAngle(e.target.value)} data-testid="sfx-angle" />
           </Field>
           <Field label="Italique (°)" htmlFor="sfx-skew" help="lettrage.sfx_skew">
             <Input id="sfx-skew" type="number" min={-45} max={45} step={0.5} value={skew} onChange={(e) => setSkew(e.target.value)} />
