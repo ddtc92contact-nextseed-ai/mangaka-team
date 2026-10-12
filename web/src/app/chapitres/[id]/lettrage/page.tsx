@@ -2,7 +2,8 @@
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { HelpLabel, InfoTip } from "@/components/info-tip";
+import { InfoTip } from "@/components/info-tip";
+import { modalOpen } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { Alert, Button, ButtonLink, Card, EmptyState, Loading, Select } from "@/components/ui";
 import { api, fullErrorMessage, type BubbleUpdate, type Intensity, type SfxUpdate } from "@/lib/api";
@@ -12,6 +13,7 @@ import { useChapter } from "../chapter-context";
 import { BubbleEditor } from "./bubble-editor";
 import { ExportPanel } from "./export-panel";
 import { LetteringCanvas, type CanvasEdit, type LetteringCanvasHandle } from "./lettering-canvas";
+import { LetteringWarnings, PanelZoom } from "./panel-zoom";
 import { AddSfx, SfxEditor } from "./sfx-editor";
 
 export default function LetteringRoute() {
@@ -42,6 +44,9 @@ function Lettering() {
   const [notice, setNotice] = useState<string | null>(null);
   const [showGuides, setShowGuides] = useState(true);
   const canvasRef = useRef<LetteringCanvasHandle>(null);
+  const zoomCanvasRef = useRef<LetteringCanvasHandle>(null);
+  // Case ouverte en grand (modale) : elle appartient à une page, comme la sélection.
+  const [zoomed, setZoomed] = useState<{ page: number; panel: number } | null>(null);
   const toast = useToast();
 
   const data = lettering.data && page && lettering.data.page_id === page.id ? lettering.data : null;
@@ -49,12 +54,14 @@ function Lettering() {
   const selected = data?.bubbles.find((b) => b.id === selectedId) ?? null;
   const selectedIndex = selected && data ? data.bubbles.indexOf(selected) : -1;
   const selectedSfx = data?.sfx?.find((x) => x.id === selectedId) ?? null;
+  const zoomPanel = zoomed && page && zoomed.page === page.id && data?.panels.some((p) => p.id === zoomed.panel) ? zoomed.panel : null;
 
   // Échap ferme l'éditeur et rend le focus à la bulle.
   useEffect(() => {
     if (!selectedId) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || e.defaultPrevented) return;
+      // Case agrandie ouverte : Échap ferme d'abord la modale (la sélection reste).
+      if (e.key !== "Escape" || e.defaultPrevented || modalOpen()) return;
       const id = selectedId;
       setSelection(null);
       requestAnimationFrame(() => canvasRef.current?.focusBubble(id));
@@ -68,6 +75,18 @@ function Lettering() {
   }
   function select(id: number | null) {
     setSelection(id !== null && page ? { page: page.id, id } : null);
+  }
+  // Fermer l'éditeur rend le focus à l'élément, dans la toile où il était édité (planche ou case agrandie).
+  function closeEditor(id: number) {
+    select(null);
+    requestAnimationFrame(() => (zoomPanel ? zoomCanvasRef : canvasRef).current?.focusBubble(id));
+  }
+  // Ouvrir une case en grand : la sélection n'y reste que si elle est dans cette case.
+  function openPanel(panelId: number) {
+    if (!page) return;
+    setZoomed({ page: page.id, panel: panelId });
+    const owner = selected?.panel_id ?? selectedSfx?.panel_id;
+    if (owner !== undefined && owner !== panelId) select(null);
   }
 
   async function run(action: () => Promise<void>): Promise<boolean> {
@@ -137,6 +156,40 @@ function Lettering() {
       toast("Lettrage recalculé");
     });
   };
+
+  // Éditeurs de la bulle ou de l'onomatopée choisie : dans la colonne de la planche, ou dans la case agrandie.
+  const editors = (
+    <>
+      {selected && data && (
+        <BubbleEditor
+          key={`${selected.id}:${selected.text}:${selected.kind}:${selected.speaker}`}
+          bubble={selected}
+          fontName={data.styles[selected.kind]?.name}
+          index={selectedIndex}
+          warnings={data.warnings}
+          busy={busy}
+          onSave={(body) => save(selected.id, body, "Bulle enregistrée")}
+          onClose={() => {
+            closeEditor(selected.id);
+          }}
+        />
+      )}
+      {selectedSfx && data && (
+        <SfxEditor
+          key={`${selectedSfx.id}:${selectedSfx.text}:${selectedSfx.intensity}:${selectedSfx.font.id}:${selectedSfx.font.size_pt}:${selectedSfx.angle}:${selectedSfx.skew}`}
+          sfx={selectedSfx}
+          fonts={data.sfx_fonts ?? {}}
+          warnings={data.warnings}
+          busy={busy}
+          onSave={(body) => save(selectedSfx.id, body, "Onomatopée enregistrée")}
+          onDelete={() => deleteSfx(selectedSfx.id)}
+          onClose={() => {
+            closeEditor(selectedSfx.id);
+          }}
+        />
+      )}
+    </>
+  );
 
   if (pages.loading && !pages.data) return <Loading />;
   if (pages.error && !pages.data) return <Alert>Impossible de charger les pages : {pages.error}</Alert>;
@@ -240,78 +293,47 @@ function Lettering() {
                 onSelect={select}
                 onCommit={commit}
                 onCommitSfx={commitSfx}
+                onExpand={openPanel}
               />
               <p className="mt-3 text-center text-xs text-zinc-500">
                 Clique sur une bulle ou une onomatopée (ou Tab puis Entrée) pour l&apos;éditer · flèches pour la déplacer,
-                Alt + flèches pour la redimensionner · Échap ferme l&apos;éditeur.
+                Alt + flèches pour la redimensionner · Échap ferme l&apos;éditeur · le bouton ⤢ d&apos;une case (ou un
+                double-clic) l&apos;ouvre en grand.
               </p>
+              <PanelZoom
+                data={data}
+                panelId={zoomPanel}
+                selectedId={selectedId}
+                showGuides={showGuides}
+                busy={busy}
+                canvasRef={zoomCanvasRef}
+                sidebar={(panel) => (
+                  <>
+                    {error && <Alert>{error}</Alert>}
+                    {editors}
+                    <AddSfx key={`${data.page_id}:${panel.id}`} panels={[panel]} busy={busy} onAdd={addSfx} />
+                  </>
+                )}
+                onPanel={openPanel}
+                onClose={() => setZoomed(null)}
+                onSelect={select}
+                onCommit={commit}
+                onCommitSfx={commitSfx}
+              />
             </Card>
           )}
         </div>
 
         <div className="min-w-0 space-y-4 lg:sticky lg:top-16 lg:max-h-[calc(100vh-5rem)] lg:self-start lg:overflow-y-auto">
-          {selected && data && (
-            <BubbleEditor
-              key={`${selected.id}:${selected.text}:${selected.kind}:${selected.speaker}`}
-              bubble={selected}
-              fontName={data.styles[selected.kind]?.name}
-              index={selectedIndex}
-              warnings={data.warnings}
-              busy={busy}
-              onSave={(body) => save(selected.id, body, "Bulle enregistrée")}
-              onClose={() => {
-                const id = selected.id;
-                select(null);
-                requestAnimationFrame(() => canvasRef.current?.focusBubble(id));
-              }}
-            />
-          )}
-          {selectedSfx && data && (
-            <SfxEditor
-              key={`${selectedSfx.id}:${selectedSfx.text}:${selectedSfx.intensity}:${selectedSfx.font.id}:${selectedSfx.font.size_pt}:${selectedSfx.angle}:${selectedSfx.skew}`}
-              sfx={selectedSfx}
-              fonts={data.sfx_fonts ?? {}}
-              warnings={data.warnings}
-              busy={busy}
-              onSave={(body) => save(selectedSfx.id, body, "Onomatopée enregistrée")}
-              onDelete={() => deleteSfx(selectedSfx.id)}
-              onClose={() => {
-                const id = selectedSfx.id;
-                select(null);
-                requestAnimationFrame(() => canvasRef.current?.focusBubble(id));
-              }}
-            />
-          )}
-          {data && <AddSfx key={data.page_id} panels={data.panels} busy={busy} onAdd={addSfx} />}
+          {!zoomPanel && editors}
+          {data && !zoomPanel && <AddSfx key={data.page_id} panels={data.panels} busy={busy} onAdd={addSfx} />}
           {data && (
-            <Card data-testid="lettering-warnings">
-              <h2 className="mb-2 font-semibold text-zinc-100">
-                <HelpLabel help="lettrage.warnings">Avertissements</HelpLabel>
-              </h2>
-              {data.warnings.length ? (
-                <ul className="space-y-2 text-sm">
-                  {data.warnings.map((w, i) => (
-                    <li key={i} className="flex gap-2 text-amber-200">
-                      <span aria-hidden="true">⚠</span>
-                      <span>
-                        {w.message}
-                        {w.bubble_id !== null && (
-                          <button
-                            type="button"
-                            className="ml-1 text-rose-300 underline hover:text-rose-200"
-                            onClick={() => select(w.bubble_id)}
-                          >
-                            {data.sfx?.some((x) => x.id === w.bubble_id) ? "voir l'onomatopée" : "voir la bulle"}
-                          </button>
-                        )}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-sm text-zinc-400">Aucun : toutes les cases ont une image et tout le texte tient.</p>
-              )}
-            </Card>
+            <LetteringWarnings
+              data={data}
+              warnings={data.warnings}
+              empty="Aucun : toutes les cases ont une image et tout le texte tient."
+              onSelect={select}
+            />
           )}
           <ExportPanel chapterId={chapter.id} pageId={page.id} bleedMm={data?.bleed_mm ?? 3} />
         </div>

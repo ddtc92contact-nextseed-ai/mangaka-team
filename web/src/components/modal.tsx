@@ -19,7 +19,8 @@ export function Modal({
   title: string;
   children: ReactNode;
   footer?: ReactNode;
-  size?: "md" | "xl";
+  /** « full » : presque tout l'écran, hauteur fixe (le contenu se cale dessus). */
+  size?: "md" | "xl" | "full";
 }) {
   const ref = useRef<HTMLDialogElement>(null);
 
@@ -39,11 +40,11 @@ export function Modal({
       }}
       aria-labelledby="modal-title"
       className={`m-auto max-h-[92vh] w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-zinc-700 bg-zinc-900 p-0 text-zinc-100 shadow-2xl backdrop:bg-black/70 ${
-        size === "xl" ? "max-w-6xl" : "max-w-lg"
+        size === "full" ? "h-[92vh] max-w-[min(96vw,120rem)]" : size === "xl" ? "max-w-6xl" : "max-w-lg"
       }`}
     >
       {open && (
-        <div className="flex max-h-[92vh] flex-col">
+        <div className={`flex max-h-[92vh] flex-col ${size === "full" ? "h-full" : ""}`}>
           <header className="flex items-center justify-between gap-4 border-b border-zinc-800 px-5 py-3">
             <h2 id="modal-title" className="font-semibold text-zinc-50">
               {title}
