@@ -1891,6 +1891,8 @@ export interface KnowledgeCollection {
   token_count: number;
   /** Sous le seuil « petite collection » : injectée entière dans les agents. */
   whole: boolean;
+  /** Pack de savoir-faire livré (presets/knowledge_packs/) : lecture seule, réécrite par « Mettre à jour les packs ». */
+  pack?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -1916,6 +1918,9 @@ export interface KnowledgeDocumentSummary {
   token_count: number;
   chunk_count: number;
   index_error: string | null;
+  /** Document d'un pack livré (lecture seule) et identifiant de sa fiche (ex. « SHOT_CU_001 »). */
+  pack?: string | null;
+  pack_key?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -1923,6 +1928,10 @@ export interface KnowledgeDocumentSummary {
 export interface KnowledgeDocument extends KnowledgeDocumentSummary {
   content: string;
   collection_name: string;
+  /** Champs du bloc meta d'une fiche de pack (retiré du texte injecté). */
+  meta?: Record<string, unknown>;
+  /** Mots-clés cherchés mais jamais injectés (titre, pont de vocabulaire). */
+  keywords?: string;
   chunks: KnowledgeChunk[];
 }
 
@@ -1941,6 +1950,8 @@ export interface Passage {
   vector_score: number | null;
   keyword_score: number | null;
   mode: "retrieved" | "whole";
+  /** Passage d'une fiche de pack livré. */
+  pack?: string | null;
   selected: boolean;
 }
 
@@ -2032,6 +2043,21 @@ export interface KnowledgeStatus {
     fragment_budget_tokens: number | null;
     fragment_top_k: number | null;
   }[];
+  /** Dernier import des packs de savoir-faire livrés (démarrage ou « Mettre à jour les packs »). */
+  packs?: PackReport[];
+}
+
+export interface PackReport {
+  pack: string;
+  collections: number;
+  documents: number;
+  created: number;
+  updated: number;
+  deleted: number;
+  unchanged: number;
+  skipped_sections: string[];
+  warnings: string[];
+  error: string | null;
 }
 
 /** Savoir-faire d'une case pour un destinataire (rédacteur de prompt ou note des fragments). */
@@ -2336,6 +2362,7 @@ export const api = {
   deleteDocument: (id: number) => request<void>(`/knowledge/documents/${id}`, { method: "DELETE" }),
   reindexKnowledge: () =>
     request<{ documents: number; chunks: number; errors: string[] }>("/knowledge/reindex", { method: "POST" }),
+  updateKnowledgePacks: () => request<PackReport[]>("/knowledge/packs/update", { method: "POST" }),
   searchKnowledge: (body: SearchInput) => request<SearchResult>("/knowledge/search", json("POST", body)),
   getBible: (projectId: number) => request<Bible>(`/projects/${projectId}/bible`),
   saveBible: (projectId: number, body: BibleInput) => request<Bible>(`/projects/${projectId}/bible`, json("PUT", body)),

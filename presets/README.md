@@ -36,6 +36,7 @@ Après modification d'un preset, redémarre le moteur (`npm run dev`).
 | `reference_sheets/*.yaml` | Types de fiches de référence de « Créer des références » (portrait, turnaround, expressions, vue 3/4, plan large, autre angle) : gabarit de prompt, taille, workflow facultatif |
 
 | `knowledge.yaml` | Savoir-faire (RAG local) : découpage des documents, recherche hybride, seuil « petite collection », budget de la bible, collections lues par chaque agent |
+| `knowledge_packs/*.yaml` + `*.md` | Packs de savoir-faire livrés (fiches de mise en scène manga) : importés au démarrage dans des collections « pack » en lecture seule |
 
 ## Format de page
 
@@ -1571,6 +1572,72 @@ une série, documents `.md` / `.txt` / `.pdf` (texte extrait par pypdf) ou texte
 - Chaque appel du LLM garde les passages et la bible reçus (table `llm_runs`) : l'écran Scénario
   les affiche sous « Sources utilisées ». Le panneau « Tester la recherche » montre le classement
   avec les scores (vecteurs, mots-clés, hybride).
+
+### Packs de savoir-faire (`knowledge_packs/`)
+
+Un pack est un gros fichier Markdown de fiches livré avec l'appli, et un manifeste YAML qui le range en
+collections. Le pack livré, `manga_visual_knowledge` (cadrages, angles, corps et gestes, action,
+composition, découpage, émotions, anti-répétition, exemples analysés), donne 13 collections
+« Mise en scène · … » et environ 70 documents.
+
+**Format du fichier** (`manga_visual_knowledge.md`) : une section par `## titre` ; dans une section, une
+fiche par `### ID — titre`, qui commence par une ligne `` `path: …` `` et un bloc ```` ```meta ```` en JSON
+(`id`, `type`, `intent`, `shot_scale`, `camera_angle`, `pairs_with`…).
+
+**Manifeste** (`manga_visual_knowledge.yaml`) :
+
+```yaml
+id: manga_visual_knowledge          # identifiant du pack (minuscules, chiffres, _ et -)
+file: manga_visual_knowledge.md     # à côté du manifeste
+collections:                        # sections `##` → collection ; `sections` : début du titre de la section
+  - name: Mise en scène · Cadrages
+    sections: ["01_cadrages"]
+  - name: Mise en scène · Vocabulaire
+    sections: ["0.B", "0.C"]        # plusieurs sections dans une collection
+skip: ["0.A", "0.D", "Annexe C"]    # sections volontairement ignorées
+vocabulary:                         # pont de vocabulaire : code du meta → terme de l'appli
+  shot_scale: { close_up: gros plan, detail: insert }
+  camera_angle: { low: en contre-plongée, dutch: cadre penché }
+```
+
+**Ce que fait l'import** (au démarrage du moteur, et bouton « Mettre à jour les packs » de l'écran
+Savoir-faire, `POST /knowledge/packs/update`) :
+
+- une fiche `###` = un document, titré par le titre de la fiche (`SHOT_CU_001 — Gros plan (visage)`) ; une
+  section sans fiche (annexes, vocabulaire) = un document ;
+- le bloc meta et la ligne `path:` sont **retirés du texte** découpé, vectorisé et injecté ; leurs champs sont
+  gardés sur le document (page du document) et donnent ses étiquettes (id, type, plan, angle, intentions).
+  Un autre bloc JSON (exemple de format, section 0.C) devient une liste « champ : valeur » : aucun JSON
+  n'arrive dans un prompt ;
+- **pont de vocabulaire** : les codes `shot_scale` / `camera_angle` d'une fiche sont traduits dans les
+  termes de la direction artistique (`plan large`, `gros plan`, `en contre-plongée`, `vue subjective`…, liste
+  validée contre `art_direction.PLANS` / `ANGLES`) et ajoutés, avec le titre, aux **mots-clés** du document :
+  colonne `keywords` de l'index FTS (poids ×4), jamais dans le texte injecté. Chaque terme est aussi indexé en
+  un seul jeton (`grosplan`, `contreplongee`) que retrouvent les bigrammes de la requête : une case « gros
+  plan » « en contre-plongée » remonte SHOT_CU_001 et ANG_LOW_001 avant les fiches qui disent juste « plan » ;
+- **idempotent** : un fichier inchangé ne change rien ; une fiche modifiée est seule réécrite et réindexée ;
+  une fiche ou une collection retirée disparaît. Les collections et documents du pack sont marqués « pack »
+  et sont **en lecture seule** dans l'UI et l'API (409) ; les collections et documents de l'utilisateur ne
+  sont jamais touchés (une collection créée à la main avec le nom d'une collection du pack la bloque : le pack
+  le signale et n'y verse rien) ;
+- **non importés** : l'en-tête YAML et le chapeau `#` du fichier, le chapeau d'une section à fiches (texte
+  avant la première `###`), les sections de `skip` (mode d'emploi de l'indexation, index des fiches, sources),
+  et toute section que le manifeste ne cite pas (signalée dans le compte rendu de l'import) ;
+- les fiches d'un pack vont au scénariste, au DA et au **rédacteur** de prompt, jamais dans la note courte du
+  prompt par fragments (collée telle quelle dans le prompt du modèle d'image). Les fiches citent des champs que
+  l'appli n'a pas (`narrative_role`, `variation_reason`, `panel_weight`…) : les prompts du DA et du rédacteur
+  précisent qu'elles sont des conseils et qu'il faut répondre dans le format demandé.
+
+**Mettre à jour le pack** : remplace `manga_visual_knowledge.md` (même structure), ajuste le manifeste si une
+section change de nom, puis « Mettre à jour les packs » (ou redémarre le moteur). Embeddings indisponibles
+pendant l'import : les fiches sont cherchables par mots-clés et signalées « à réindexer ». `KNOWLEDGE_PACKS=false`
+dans `.env` désactive l'import au démarrage (les tests du moteur l'ont désactivé par défaut).
+
+Collections lues par défaut (`knowledge.yaml`, « L'équipe » prime toujours) : scénariste + Fondamentaux,
+Émotions, Exemples ; DA + Fondamentaux, Cadrages, Angles, Action, Composition, Découpage, Émotions,
+Anti-répétition, Exemples, Vocabulaire, Checklist (budget relevé à 3 500 jetons : Vocabulaire et Checklist,
+≈ 1 200 jetons, sont de petites collections injectées entières) ; rédacteur de prompt + Cadrages, Angles,
+Corps et gestes, Action, Composition, Émotions, Pont ComfyUI (≈ 420 jetons, entière).
 
 ### Embeddings : mode réel
 

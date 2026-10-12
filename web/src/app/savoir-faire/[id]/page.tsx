@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { useConfirm } from "@/components/confirm";
 import { HelpLabel } from "@/components/info-tip";
-import { DocumentDropzone, RetrievalTester, SOURCE_LABELS, Tags, formatTokens } from "@/components/knowledge";
+import { DocumentDropzone, PackBadge, RetrievalTester, SOURCE_LABELS, Tags, formatTokens } from "@/components/knowledge";
 import { useToast } from "@/components/toast";
 import { Alert, Button, Card, EmptyState, Field, Input, Loading, PageHeader, Select, Textarea } from "@/components/ui";
 import { api, EngineError, errorMessage, parseTags, type KnowledgeCollection } from "@/lib/api";
@@ -64,19 +64,28 @@ export default function CollectionPage() {
               {c.chunk_count > 1 ? "s" : ""} · {formatTokens(c.token_count)}
             </span>
             {c.whole && <span className="text-sky-300">injectée entière (petite collection)</span>}
+            <PackBadge pack={c.pack} />
           </span>
         }
         actions={
-          <>
-            <Button variant="secondary" onClick={() => setEditing((v) => !v)}>
-              {editing ? "Fermer" : "Modifier"}
-            </Button>
-            <Button variant="danger" onClick={remove}>
-              Supprimer
-            </Button>
-          </>
+          c.pack ? undefined : (
+            <>
+              <Button variant="secondary" onClick={() => setEditing((v) => !v)}>
+                {editing ? "Fermer" : "Modifier"}
+              </Button>
+              <Button variant="danger" onClick={remove}>
+                Supprimer
+              </Button>
+            </>
+          )
         }
       />
+      {c.pack && (
+        <p className="-mt-4 mb-6 max-w-3xl text-sm text-violet-300" data-testid="pack-notice">
+          Collection du pack livré « {c.pack} » : ses fiches viennent de presets/knowledge_packs/ et se mettent à jour
+          avec « Mettre à jour les packs » (Bibliothèque). Elles ne se modifient pas ici.
+        </p>
+      )}
       {error && (
         <div className="mb-4">
           <Alert>{error}</Alert>
@@ -116,6 +125,7 @@ export default function CollectionPage() {
                   >
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-medium text-zinc-100">{d.title}</span>
+                      <PackBadge pack={d.pack} />
                       <span className="text-xs text-zinc-500">{SOURCE_LABELS[d.source] ?? d.source}</span>
                       <Tags tags={d.tags} />
                       <span className="ml-auto text-xs text-zinc-400">
@@ -137,16 +147,18 @@ export default function CollectionPage() {
           </Card>
         </section>
 
-        <aside className="space-y-6">
-          <Card>
-            <h2 className="mb-4 font-semibold text-zinc-100">Envoyer des fichiers</h2>
-            <UploadForm collectionId={id} onUploaded={refresh} />
-          </Card>
-          <Card>
-            <h2 className="mb-4 font-semibold text-zinc-100">Coller un texte</h2>
-            <PasteForm collectionId={id} onCreated={refresh} />
-          </Card>
-        </aside>
+        {!c.pack && (
+          <aside className="space-y-6">
+            <Card>
+              <h2 className="mb-4 font-semibold text-zinc-100">Envoyer des fichiers</h2>
+              <UploadForm collectionId={id} onUploaded={refresh} />
+            </Card>
+            <Card>
+              <h2 className="mb-4 font-semibold text-zinc-100">Coller un texte</h2>
+              <PasteForm collectionId={id} onCreated={refresh} />
+            </Card>
+          </aside>
+        )}
       </div>
     </>
   );

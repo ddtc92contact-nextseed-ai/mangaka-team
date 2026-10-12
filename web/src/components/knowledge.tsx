@@ -25,6 +25,19 @@ function formatScore(value: number | null): string {
   return value === null ? "—" : value.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+/** Badge « pack » : collection, document ou passage d'un pack de savoir-faire livré (lecture seule). */
+export function PackBadge({ pack }: { pack?: string | null }) {
+  if (!pack) return null;
+  return (
+    <span
+      className="shrink-0 rounded-full bg-violet-500/15 px-2 py-0.5 text-xs text-violet-300"
+      title={`Pack livré « ${pack} » : mis à jour depuis presets/knowledge_packs/, non modifiable ici`}
+    >
+      pack
+    </span>
+  );
+}
+
 export function Tags({ tags }: { tags: string[] }) {
   if (!tags.length) return null;
   return (
@@ -65,6 +78,7 @@ export function PassageList({
               <span className="font-medium text-zinc-100">« {p.document_title} »</span>
               {p.heading && <span className="text-xs text-zinc-400">{p.heading}</span>}
               <span className="text-xs text-zinc-500">collection « {p.collection_name} »</span>
+              <PackBadge pack={p.pack} />
               {p.mode === "whole" && (
                 <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-xs text-sky-300">collection entière</span>
               )}

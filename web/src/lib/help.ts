@@ -287,6 +287,8 @@ export const HELP = {
     "Une collection plus petite que ce seuil est injectée entière, sans recherche : utile pour une courte charte que l'agent doit toujours avoir sous les yeux.",
   "knowledge.agents":
     "Les collections que chaque agent lit, son budget de texte et le nombre de passages au plus. Se règle dans « L'équipe », agent par agent.",
+  "knowledge.packs":
+    "Fiches livrées avec l'appli (presets/knowledge_packs/) : importées au démarrage, en lecture seule ici. « Mettre à jour les packs » relit les fichiers et ne réindexe que les fiches modifiées ; tes propres collections ne sont jamais touchées.",
   "knowledge.tags":
     "Mots-clés libres pour retrouver et trier tes documents. Ils comptent aussi dans la partie « mots-clés » de la recherche.",
   // l'équipe

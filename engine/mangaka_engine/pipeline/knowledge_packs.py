@@ -208,9 +208,9 @@ def clean_body(lines: list[str]) -> tuple[str, dict[str, Any], str | None]:
 
 
 def _keywords(title: str, meta: dict[str, Any], vocabulary: PackVocabulary) -> str:
-    """Titre de la fiche + termes de l'appli de son plan et de son angle, chacun aussi en un seul jeton
+    """Titre de la fiche + termes de l'appli de son plan et de son angle, ces derniers aussi en un seul jeton
     (« gros plan grosplan ») pour que la requête « gros plan » le préfère aux fiches qui disent juste « plan »."""
-    terms = [title, fused_term(title)]
+    terms = [title]
     for code, table in (
         (meta.get("shot_scale"), vocabulary.shot_scale),
         (meta.get("camera_angle"), vocabulary.camera_angle),
