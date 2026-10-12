@@ -40,7 +40,7 @@ export default function ChapterInfoPage() {
       const plural = count > 1 ? "s" : "";
       const ok = await confirm({
         title: `Réécrire ${count} prompt${plural} ?`,
-        message: `${count} case${plural} du chapitre ${count > 1 ? "ont" : "a"} un prompt rédigé par l'IA. ${count > 1 ? "Ils seront rédigés" : "Il sera rédigé"} de nouveau, avec le savoir-faire et le cadrage actuels, à la prochaine génération de chaque case. Les prompts retouchés à la main ne bougent pas.`,
+        message: `${count} case${plural} du chapitre ${count > 1 ? "ont" : "a"} un prompt rédigé par l'IA. ${count > 1 ? "Ils seront rédigés" : "Il sera rédigé"} de nouveau, avec le savoir-faire et le cadrage actuels, à la prochaine génération de ${count > 1 ? "chaque" : "sa"} case. Les prompts retouchés à la main ne bougent pas.`,
         confirmLabel: `Réécrire ${count} prompt${plural}`,
       });
       if (!ok) return;
