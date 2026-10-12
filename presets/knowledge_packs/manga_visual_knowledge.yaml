@@ -1,0 +1,61 @@
+# Pack de savoir-faire « mise en scène manga » : fiches de cadrage, angles, gestes, action, composition,
+# découpage, émotions et anti-répétition, importées dans la bibliothèque « Savoir-faire » au démarrage du
+# moteur (et par « Mettre à jour les packs »). Format et règles : presets/README.md › Packs de savoir-faire.
+id: manga_visual_knowledge
+file: manga_visual_knowledge.md
+
+# Sections `##` → collection. Une section qui contient des fiches `###` donne un document par fiche ;
+# sinon la section entière est un document. `match` : début du titre de la section.
+collections:
+  - name: Mise en scène · Fondamentaux
+    sections: ["00_fondamentaux"]
+  - name: Mise en scène · Cadrages
+    sections: ["01_cadrages"]
+  - name: Mise en scène · Angles
+    sections: ["02_angles_camera"]
+  - name: Mise en scène · Corps et gestes
+    sections: ["03_corps_et_gestes"]
+  - name: Mise en scène · Action
+    sections: ["04_action_et_mouvement"]
+  - name: Mise en scène · Composition
+    sections: ["05_composition"]
+  - name: Mise en scène · Découpage
+    sections: ["06_decoupage_manga"]
+  - name: Mise en scène · Émotions
+    sections: ["07_emotions"]
+  - name: Mise en scène · Anti-répétition
+    sections: ["08_anti_repetition"]
+  - name: Mise en scène · Exemples
+    sections: ["09_exemples_analyses"]
+  - name: Mise en scène · Vocabulaire
+    sections: ["0.B", "0.C"]
+  - name: Mise en scène · Checklist
+    sections: ["Annexe A"]
+  - name: Mise en scène · Pont ComfyUI
+    sections: ["Annexe B"]
+
+# Non importées : mode d'emploi de l'indexation, index des fiches, sources (l'en-tête YAML du fichier
+# et le chapeau `#` ne le sont jamais).
+skip: ["0.A", "0.D", "Annexe C"]
+
+# Pont de vocabulaire : codes `shot_scale` / `camera_angle` du bloc meta d'une fiche → termes de l'appli
+# (art_direction.PLANS / ANGLES). Ajoutés à l'index des mots-clés seulement (jamais au texte injecté) :
+# une case en « gros plan » « en contre-plongée » retrouve les fiches correspondantes.
+vocabulary:
+  shot_scale:
+    extreme_long: plan large
+    long: plan large
+    full: plan moyen
+    medium_full: plan moyen
+    medium: plan moyen
+    medium_close: plan rapproché
+    close_up: gros plan
+    extreme_close_up: gros plan
+    detail: insert
+  camera_angle:
+    high: en plongée
+    birds_eye: en plongée
+    low: en contre-plongée
+    worms_eye: en contre-plongée
+    pov: vue subjective
+    dutch: cadre penché
