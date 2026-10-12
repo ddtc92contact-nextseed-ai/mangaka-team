@@ -3,10 +3,10 @@
 import Link from "next/link";
 import { useState, type FormEvent } from "react";
 import { HelpLabel } from "@/components/info-tip";
-import { RetrievalTester, SUGGESTED_COLLECTIONS, formatTokens } from "@/components/knowledge";
+import { PackBadge, RetrievalTester, SUGGESTED_COLLECTIONS, formatTokens } from "@/components/knowledge";
 import { useToast } from "@/components/toast";
 import { Alert, Button, Card, EmptyState, Field, Input, Loading, PageHeader, Select, Textarea } from "@/components/ui";
-import { api, EngineError, errorMessage, type KnowledgeStatus } from "@/lib/api";
+import { api, EngineError, errorMessage, type KnowledgeStatus, type PackReport } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
 
 export default function KnowledgeLibraryPage() {
@@ -40,8 +40,11 @@ export default function KnowledgeLibraryPage() {
                   >
                     <div className="flex items-start justify-between gap-2">
                       <span className="font-medium text-zinc-100">{c.name}</span>
-                      <span className="shrink-0 rounded-full bg-zinc-800 px-2 py-0.5 text-xs text-zinc-300">
-                        {c.project_title ? `Série : ${c.project_title}` : "Globale"}
+                      <span className="flex shrink-0 gap-1">
+                        <PackBadge pack={c.pack} />
+                        <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-xs text-zinc-300">
+                          {c.project_title ? `Série : ${c.project_title}` : "Globale"}
+                        </span>
                       </span>
                     </div>
                     {c.description && <p className="mt-1 line-clamp-2 text-sm text-zinc-400">{c.description}</p>}
@@ -77,6 +80,15 @@ export default function KnowledgeLibraryPage() {
               <HelpLabel help="knowledge.collections">Nouvelle collection</HelpLabel>
             </h2>
             <NewCollectionForm projects={projects.data ?? []} onCreated={collections.reload} />
+          </Card>
+          <Card>
+            <h2 className="mb-3 font-semibold text-zinc-100">
+              <HelpLabel help="knowledge.packs">Packs de savoir-faire</HelpLabel>
+            </h2>
+            <PacksPanel
+              reports={status.data?.packs ?? []}
+              onUpdated={() => (status.reload(), collections.reload())}
+            />
           </Card>
           <Card>
             <h2 className="mb-3 font-semibold text-zinc-100">
@@ -171,6 +183,72 @@ function NewCollectionForm({
         {busy ? "Création…" : "Créer la collection"}
       </Button>
     </form>
+  );
+}
+
+function packSummary(r: PackReport): string {
+  if (r.error) return `Pack « ${r.pack} » non importé : ${r.error}`;
+  const changes = [
+    r.created && `${r.created} ajoutée${r.created > 1 ? "s" : ""}`,
+    r.updated && `${r.updated} mise${r.updated > 1 ? "s" : ""} à jour`,
+    r.deleted && `${r.deleted} retirée${r.deleted > 1 ? "s" : ""}`,
+  ].filter(Boolean);
+  return (
+    `« ${r.pack} » : ${r.collections} collections, ${r.documents} fiches` +
+    (changes.length ? ` (${changes.join(", ")})` : " (à jour)")
+  );
+}
+
+function PacksPanel({ reports, onUpdated }: { reports: PackReport[]; onUpdated: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [latest, setLatest] = useState<PackReport[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const toast = useToast();
+  const shown = latest ?? reports;
+
+  async function update() {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await api.updateKnowledgePacks();
+      setLatest(r);
+      const failed = r.some((p) => p.error);
+      toast(failed ? "Mise à jour des packs incomplète" : "Packs à jour", failed ? "error" : "success");
+      onUpdated();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-3 text-sm" data-testid="packs">
+      <p className="text-xs text-zinc-400">
+        Fiches de mise en scène livrées avec l&apos;appli, rangées en collections « pack » (lecture seule). Tes collections
+        ne sont jamais touchées.
+      </p>
+      {shown.length ? (
+        <ul className="space-y-2">
+          {shown.map((r) => (
+            <li key={r.pack}>
+              <p className={r.error ? "text-red-400" : "text-zinc-200"}>{packSummary(r)}</p>
+              {r.warnings.map((w) => (
+                <p key={w} className="text-xs text-amber-300">
+                  {w}
+                </p>
+              ))}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-xs text-zinc-500">Aucun pack importé depuis le démarrage.</p>
+      )}
+      {error && <Alert>{error}</Alert>}
+      <Button variant="secondary" onClick={update} disabled={busy} data-testid="update-packs">
+        {busy ? "Mise à jour…" : "Mettre à jour les packs"}
+      </Button>
+    </div>
   );
 }
 

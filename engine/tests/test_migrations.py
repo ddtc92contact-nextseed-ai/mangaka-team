@@ -836,3 +836,43 @@ def test_v25_database_gets_the_panel_crop_with_panels_centred(make_settings: Cal
     fresh = settings.database_path.parent / "fresh.db"
     create_db_engine(fresh).dispose()
     assert _columns(settings.database_path) == _columns(fresh)
+
+
+def test_v26_database_gets_pack_columns_and_a_rebuilt_keyword_index(make_settings: Callable[..., Settings]) -> None:
+    """v26 → v27 : packs de savoir-faire (collection et document « pack », meta, mots-clés) ; l'index FTS est
+    reconstruit avec la colonne `keywords` et garde les passages existants, qui restent ceux de l'utilisateur."""
+    settings = make_settings()
+    with TestClient(create_app(settings)) as c:
+        col = c.post("/knowledge/collections", json={"name": "Rythme"}).json()
+        c.post(
+            f"/knowledge/collections/{col['id']}/documents",
+            json={"title": "Fin", "content": "Termine sur un cliffhanger."},
+        )
+    con = sqlite3.connect(settings.database_path)
+    for trigger in ("knowledge_chunks_ai", "knowledge_chunks_ad", "knowledge_chunks_au"):
+        con.execute(f"DROP TRIGGER {trigger}")
+    con.execute("DROP TABLE knowledge_fts")
+    con.execute("DROP INDEX ix_knowledge_collections_pack")
+    con.execute("ALTER TABLE knowledge_collections DROP COLUMN pack")
+    for column in ("pack_key", "meta", "keywords"):
+        con.execute(f"ALTER TABLE knowledge_documents DROP COLUMN {column}")
+    con.execute("ALTER TABLE knowledge_chunks DROP COLUMN keywords")
+    con.execute(
+        "CREATE VIRTUAL TABLE knowledge_fts USING fts5(heading, text, tokenize = 'unicode61 remove_diacritics 2')"
+    )
+    con.execute("INSERT INTO knowledge_fts(rowid, heading, text) SELECT id, heading, text FROM knowledge_chunks")
+    con.execute("PRAGMA user_version = 26")
+    con.commit()
+    con.close()
+
+    with TestClient(create_app(settings)) as c:
+        [listed] = c.get("/knowledge/collections").json()
+        assert listed["pack"] is None and listed["document_count"] == 1
+        hits = c.post("/knowledge/search", json={"query": "cliffhanger", "collection_ids": [col["id"]]}).json()
+        assert hits["passages"][0]["document_title"] == "Fin" and hits["passages"][0]["keyword_score"] == 1.0
+        doc = c.post(f"/knowledge/collections/{col['id']}/documents", json={"title": "Neuf", "content": "Un gag."})
+        assert doc.json()["pack"] is None and doc.json()["meta"] == {}
+    assert _version(settings.database_path) == SCHEMA_VERSION
+    fresh = settings.database_path.parent / "fresh.db"
+    create_db_engine(fresh).dispose()
+    assert _columns(settings.database_path) == _columns(fresh)

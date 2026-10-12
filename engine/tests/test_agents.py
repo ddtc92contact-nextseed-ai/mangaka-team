@@ -77,7 +77,14 @@ def test_agent_detail_shows_settings_with_their_preset_source(c: TestClient) -> 
     system = _setting(d, "system")
     assert system["type"] == "prompt" and "series_title" in system["variables"]
     shipped = {
-        "collections": ["Écriture de scénario", "Rythme et découpage", "Humour jeunesse"],
+        "collections": [
+            "Écriture de scénario",
+            "Rythme et découpage",
+            "Humour jeunesse",
+            "Mise en scène · Fondamentaux",
+            "Mise en scène · Émotions",
+            "Mise en scène · Exemples",
+        ],
         "top_k": 6,
         "budget_tokens": 2500,
     }

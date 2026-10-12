@@ -75,6 +75,7 @@ user: |
 
   Savoir-faire de l'équipe (fiches de méthode : applique-les sans les citer) :
   $savoir_faire
+  Ces fiches sont des conseils, pas un format : elles citent des champs que tu n'as pas (narrative_role, variation_reason, panel_weight…) ; réponds uniquement dans le format demandé ci-dessous.
 
   Direction artistique du chapitre précédent (à ne pas répéter) :
   $previous_direction

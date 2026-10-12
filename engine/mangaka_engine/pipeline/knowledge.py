@@ -45,6 +45,7 @@ from ..store.models import (
 from .library import SeriesLibrary
 
 CHARS_PER_TOKEN = 4
+KEYWORDS_WEIGHT = 4.0  # poids BM25 de la colonne `keywords` de l'index FTS (texte et titre de section : 1)
 SOURCES = {".md": "md", ".markdown": "md", ".txt": "txt", ".pdf": "pdf"}
 # Chapitre « validé » : son résumé rejoint la bible de la série.
 VALIDATED_STATUSES = (ChapterStatus.ready, ChapterStatus.published)
@@ -226,6 +227,7 @@ def index_document(
                 index=i,
                 heading=piece.heading,
                 text=piece.text,
+                keywords=doc.keywords or "",
                 token_count=piece.tokens,
                 embedding=_to_blob(vectors[i]) if vectors else None,
                 embedding_model=embedder.model_id if vectors and embedder else None,
@@ -254,6 +256,7 @@ class Passage:
     vector_score: float | None = None
     keyword_score: float | None = None
     mode: str = "retrieved"  # retrieved | whole (petite collection injectée entière)
+    pack: str | None = None  # pack de savoir-faire livré de la collection (presets/knowledge_packs/)
 
     def source(self) -> str:
         return " › ".join(p for p in (self.document_title, self.heading) if p)
@@ -268,9 +271,20 @@ class Passage:
         return out
 
 
+def fused_term(term: str) -> str:
+    """Terme de plusieurs mots en un seul jeton (« gros plan » → « grosplan », « en contre-plongée » →
+    « contreplongee ») : mot-clé d'un pack, retrouvé par les bigrammes de la requête (`fts_query`)."""
+    return "".join(normalize_words(term))
+
+
 def fts_query(query: str) -> str | None:
-    words = list(dict.fromkeys(normalize_words(query)))
-    return " OR ".join(f'"{w}"' for w in words[:40]) or None
+    """Mots de la requête, plus leurs bigrammes fusionnés : « gros plan » cherche aussi « grosplan », qui
+    n'existe que dans les mots-clés des packs (pont de vocabulaire) et y vaut bien plus que « plan » seul."""
+    plain = normalize_words(query)
+    words = list(dict.fromkeys(plain))
+    bigrams = [a + b for a, b in zip(plain, plain[1:], strict=False) if a != b]
+    terms = list(dict.fromkeys([*words[:40], *bigrams[:20]]))
+    return " OR ".join(f'"{w}"' for w in terms) or None
 
 
 def _keyword_scores(session: Session, query: str, chunk_ids: set[int]) -> dict[int, float]:
@@ -278,7 +292,11 @@ def _keyword_scores(session: Session, query: str, chunk_ids: set[int]) -> dict[i
     if not match or not chunk_ids:
         return {}
     rows = session.execute(
-        text("SELECT rowid, bm25(knowledge_fts) FROM knowledge_fts WHERE knowledge_fts MATCH :q"), {"q": match}
+        # Colonnes : titre de section, texte, mots-clés (titre et pont de vocabulaire d'un pack, plus parlants).
+        text(
+            f"SELECT rowid, bm25(knowledge_fts, 1.0, 1.0, {KEYWORDS_WEIGHT}) FROM knowledge_fts WHERE knowledge_fts MATCH :q"
+        ),
+        {"q": match},
     ).all()
     raw = {int(r[0]): -float(r[1]) for r in rows if int(r[0]) in chunk_ids}
     best = max(raw.values(), default=0.0)
@@ -321,7 +339,7 @@ def rank(
     if not ids:
         return Ranking([])
     rows = session.execute(
-        select(KnowledgeChunk, KnowledgeDocument.title, KnowledgeCollection.name)
+        select(KnowledgeChunk, KnowledgeDocument.title, KnowledgeCollection.name, KnowledgeCollection.pack)
         .join(KnowledgeDocument, KnowledgeChunk.document_id == KnowledgeDocument.id)
         .join(KnowledgeCollection, KnowledgeChunk.collection_id == KnowledgeCollection.id)
         .where(KnowledgeChunk.collection_id.in_(ids))
@@ -332,7 +350,7 @@ def rank(
     kw = _keyword_scores(session, query, {c.id for c in chunks}) if query.strip() else {}
     wv, wk = settings.retrieval.vector_weight, settings.retrieval.keyword_weight
     passages = []
-    for chunk, title, name in rows:
+    for chunk, title, name, pack in rows:
         v, k = vec.get(chunk.id), kw.get(chunk.id, 0.0)
         score = (wv * (v or 0.0) + wk * k) / (wv + wk) if query.strip() else None
         passages.append(
@@ -348,6 +366,7 @@ def rank(
                 score=score,
                 vector_score=v,
                 keyword_score=k if query.strip() else None,
+                pack=pack,
             )
         )
     if query.strip():
@@ -666,6 +685,8 @@ class KnowledgeBase:
     profile_lookup: ProfileLookup | None = None
     profile_top_k: TopKLookup | None = None
     profile_budget: BudgetLookup | None = None
+    # Dernier import des packs de savoir-faire (démarrage ou « Mettre à jour les packs ») : PackReport.
+    pack_reports: list[Any] = field(default_factory=list)
 
     def top_k(self, session: Session, role: str, project_id: int | None) -> int:
         """Top-k de l'agent : profil (« L'équipe ») > knowledge.yaml (celui du rédacteur pour `image_prompt`)."""
@@ -738,9 +759,12 @@ class KnowledgeBase:
                     budget_tokens=out.writer_budget,
                 )
             if out.fragment_budget > 0:
+                # Jamais de fiche d'un pack (théorie de mise en scène en français) dans le prompt du modèle
+                # d'image : seul le rédacteur les lit.
+                packs = {p.collection_id for p in ranking.ranked if p.pack}
                 out.fragment_passages, out.fragment_tokens = choose_passages(
-                    ranking.ranked,
-                    ranking.whole_collections,
+                    [p for p in ranking.ranked if not p.pack],
+                    [cid for cid in ranking.whole_collections if cid not in packs],
                     self.settings,
                     top_k=out.fragment_top_k,
                     budget_tokens=out.fragment_budget,

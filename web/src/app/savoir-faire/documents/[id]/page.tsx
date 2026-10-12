@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { useConfirm } from "@/components/confirm";
-import { SOURCE_LABELS, Tags, formatTokens } from "@/components/knowledge";
+import { PackBadge, SOURCE_LABELS, Tags, formatTokens } from "@/components/knowledge";
 import { useToast } from "@/components/toast";
 import { Alert, Button, Card, Field, Input, Loading, PageHeader, Textarea } from "@/components/ui";
 import { api, EngineError, errorMessage, parseTags, type KnowledgeDocument } from "@/lib/api";
@@ -51,13 +51,16 @@ export default function DocumentPage() {
             </Link>
             <span>{SOURCE_LABELS[d.source] ?? d.source}</span>
             {d.original_name && <span>{d.original_name}</span>}
+            <PackBadge pack={d.pack} />
             <Tags tags={d.tags} />
           </span>
         }
         actions={
-          <Button variant="danger" onClick={remove}>
-            Supprimer
-          </Button>
+          d.pack ? undefined : (
+            <Button variant="danger" onClick={remove}>
+              Supprimer
+            </Button>
+          )
         }
       />
       {error && (
@@ -66,10 +69,14 @@ export default function DocumentPage() {
         </div>
       )}
       <div className="grid gap-6 lg:grid-cols-2">
-        <Card>
-          <h2 className="mb-4 font-semibold text-zinc-100">Modifier</h2>
-          <DocumentForm key={d.updated_at} doc={d} onSaved={doc.setData} />
-        </Card>
+        {d.pack ? (
+          <PackFiche doc={d} />
+        ) : (
+          <Card>
+            <h2 className="mb-4 font-semibold text-zinc-100">Modifier</h2>
+            <DocumentForm key={d.updated_at} doc={d} onSaved={doc.setData} />
+          </Card>
+        )}
         <section aria-label="Passages">
           <h2 className="mb-1 text-lg font-semibold text-zinc-100">
             {d.chunks.length} passage{d.chunks.length > 1 ? "s" : ""}
@@ -100,6 +107,57 @@ export default function DocumentPage() {
         </section>
       </div>
     </>
+  );
+}
+
+/** Libellés des champs du bloc meta d'une fiche de pack. */
+const META_LABELS: Record<string, string> = {
+  id: "Identifiant",
+  path: "Chemin d'origine",
+  type: "Type",
+  agents: "Agents visés",
+  intent: "Intentions",
+  shot_scale: "Échelle de plan",
+  camera_angle: "Angle",
+  motion_level: "Mouvement",
+  genres: "Genres",
+  avoid_when: "À éviter quand",
+  pairs_with: "Va avec",
+};
+
+function metaValue(value: unknown): string {
+  if (Array.isArray(value)) return value.map(String).join(", ");
+  if (value && typeof value === "object") return JSON.stringify(value);
+  return String(value ?? "");
+}
+
+/** Fiche d'un pack livré : lecture seule, champs du bloc meta et mots-clés de recherche. */
+function PackFiche({ doc }: { doc: KnowledgeDocument }) {
+  const meta = Object.entries(doc.meta ?? {}).filter(([, v]) => metaValue(v));
+  return (
+    <Card>
+      <h2 className="mb-1 font-semibold text-zinc-100">Fiche du pack « {doc.pack} »</h2>
+      <p className="mb-4 text-xs text-zinc-400">
+        Lecture seule : modifie presets/knowledge_packs/ puis « Mettre à jour les packs » (Bibliothèque). Le bloc meta
+        de la fiche est retiré du texte injecté dans les agents ; ses champs sont gardés ici.
+      </p>
+      {meta.length > 0 && (
+        <dl className="mb-4 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm" data-testid="pack-meta">
+          {meta.map(([key, value]) => (
+            <div key={key} className="contents">
+              <dt className="text-zinc-500">{META_LABELS[key] ?? key}</dt>
+              <dd className="break-words font-mono text-xs leading-5 text-zinc-200">{metaValue(value)}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {doc.keywords && (
+        <p className="text-xs text-zinc-400">
+          <span className="text-zinc-500">Mots-clés de recherche (jamais injectés) : </span>
+          {doc.keywords}
+        </p>
+      )}
+    </Card>
   );
 }
 

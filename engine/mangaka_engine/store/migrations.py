@@ -43,6 +43,9 @@
 - 25 : dialogue avec l'IA par case (historique des échanges, direction et référence imposées à la case) ;
   rien d'imposé sur les cases existantes.
 - 26 : cadrage manuel de l'image par case (centre + zoom) ; les cases existantes restent centrées.
+- 27 : packs de savoir-faire (presets/knowledge_packs/) : collection et document marqués « pack », champs
+  meta d'une fiche, mots-clés indexés en FTS sans être injectés (colonne `keywords` de l'index, reconstruit
+  depuis les passages). Les collections et documents existants restent ceux de l'utilisateur.
 
 Une base neuve est créée directement à la dernière version. Chaque migration tourne dans une
 transaction unique, clés étrangères désactivées (recette « 12 étapes » de SQLite pour reconstruire
@@ -87,7 +90,7 @@ from .slugs import RESERVED_ENTRIES, RESERVED_SERIES, slugify, unique_slug
 
 log = logging.getLogger("mangaka_engine")
 
-SCHEMA_VERSION = 26
+SCHEMA_VERSION = 27
 
 
 class MigrationError(RuntimeError):
@@ -190,16 +193,19 @@ def _v5_to_v6(cur: sqlite3.Cursor) -> None:
 
 # Index plein texte des passages (recherche par mots-clés, BM25). Table FTS5 autonome dont le rowid est
 # l'id du passage ; les triggers la suivent, y compris lors des suppressions en cascade (document,
-# collection, série). `remove_diacritics 2` : « décor » trouve « decor ».
+# collection, série). `remove_diacritics 2` : « décor » trouve « decor ». `keywords` (v27) : mots-clés du
+# document (titre et pont de vocabulaire d'un pack), cherchés mais jamais injectés.
 FTS_DDL = (
-    "CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts USING fts5(heading, text,"
+    "CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts USING fts5(heading, text, keywords,"
     " tokenize = 'unicode61 remove_diacritics 2')",
     "CREATE TRIGGER IF NOT EXISTS knowledge_chunks_ai AFTER INSERT ON knowledge_chunks BEGIN"
-    " INSERT INTO knowledge_fts(rowid, heading, text) VALUES (new.id, new.heading, new.text); END",
+    " INSERT INTO knowledge_fts(rowid, heading, text, keywords) VALUES (new.id, new.heading, new.text,"
+    " new.keywords); END",
     "CREATE TRIGGER IF NOT EXISTS knowledge_chunks_ad AFTER DELETE ON knowledge_chunks BEGIN"
     " DELETE FROM knowledge_fts WHERE rowid = old.id; END",
-    "CREATE TRIGGER IF NOT EXISTS knowledge_chunks_au AFTER UPDATE OF heading, text ON knowledge_chunks BEGIN"
-    " UPDATE knowledge_fts SET heading = new.heading, text = new.text WHERE rowid = new.id; END",
+    "CREATE TRIGGER IF NOT EXISTS knowledge_chunks_au AFTER UPDATE OF heading, text, keywords ON knowledge_chunks"
+    " BEGIN UPDATE knowledge_fts SET heading = new.heading, text = new.text, keywords = new.keywords"
+    " WHERE rowid = new.id; END",
 )
 
 
@@ -408,6 +414,35 @@ def _v25_to_v26(cur: sqlite3.Cursor) -> None:
         cur.execute("ALTER TABLE panels ADD COLUMN crop JSON")
 
 
+def _v26_to_v27(cur: sqlite3.Cursor) -> None:
+    # Tables créées par la v6 depuis le modèle courant : colonnes (et index FTS à trois colonnes) déjà là.
+    columns = {
+        table: {row[1] for row in cur.execute(f"PRAGMA table_info({table})")}
+        for table in ("knowledge_collections", "knowledge_documents", "knowledge_chunks")
+    }
+    if "pack" not in columns["knowledge_collections"]:
+        cur.execute("ALTER TABLE knowledge_collections ADD COLUMN pack VARCHAR(100)")
+        cur.execute("CREATE INDEX ix_knowledge_collections_pack ON knowledge_collections (pack)")
+    for column, kind in (
+        ("pack_key", "VARCHAR(120)"),
+        ("meta", "JSON NOT NULL DEFAULT '{}'"),
+        ("keywords", "TEXT NOT NULL DEFAULT ''"),
+    ):
+        if column not in columns["knowledge_documents"]:
+            cur.execute(f"ALTER TABLE knowledge_documents ADD COLUMN {column} {kind}")
+    if "keywords" not in columns["knowledge_chunks"]:
+        cur.execute("ALTER TABLE knowledge_chunks ADD COLUMN keywords TEXT NOT NULL DEFAULT ''")
+    # Index FTS reconstruit avec la colonne `keywords`, puis rempli depuis les passages.
+    for trigger in ("knowledge_chunks_ai", "knowledge_chunks_ad", "knowledge_chunks_au"):
+        cur.execute(f"DROP TRIGGER IF EXISTS {trigger}")
+    cur.execute("DROP TABLE IF EXISTS knowledge_fts")
+    for stmt in FTS_DDL:
+        cur.execute(stmt)
+    cur.execute(
+        "INSERT INTO knowledge_fts(rowid, heading, text, keywords) SELECT id, heading, text, keywords FROM knowledge_chunks"
+    )
+
+
 MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     # version de départ → (version d'arrivée, fonction)
     0: (2, _v0_to_v2),
@@ -436,6 +471,7 @@ MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     23: (24, _v23_to_v24),
     24: (25, _v24_to_v25),
     25: (26, _v25_to_v26),
+    26: (27, _v26_to_v27),
 }
 
 

@@ -1401,6 +1401,7 @@ class CollectionOut(BaseModel):
     chunk_count: int
     token_count: int
     whole: bool  # sous le seuil « petite collection » : injectée entière
+    pack: str | None = None  # pack de savoir-faire livré : collection en lecture seule, réécrite par une mise à jour
     created_at: datetime
     updated_at: datetime
 
@@ -1436,6 +1437,8 @@ class DocumentSummaryOut(BaseModel):
     token_count: int
     chunk_count: int
     index_error: str | None
+    pack: str | None = None  # document d'un pack (lecture seule)
+    pack_key: str | None = None  # identifiant de la fiche dans le pack
     created_at: datetime
     updated_at: datetime
 
@@ -1443,6 +1446,8 @@ class DocumentSummaryOut(BaseModel):
 class DocumentOut(DocumentSummaryOut):
     content: str
     collection_name: str
+    meta: dict[str, Any] = Field(default_factory=dict)  # champs du bloc meta d'une fiche de pack
+    keywords: str = ""  # mots-clés cherchés mais jamais injectés (titre, pont de vocabulaire)
     chunks: list[ChunkOut]
 
 
@@ -1467,6 +1472,7 @@ class PassageOut(BaseModel):
     vector_score: float | None
     keyword_score: float | None
     mode: Literal["retrieved", "whole"]
+    pack: str | None = None
     selected: bool = False
 
 
@@ -1583,6 +1589,19 @@ class KnowledgeAgentOut(BaseModel):
     fragment_top_k: int | None = None
 
 
+class PackReportOut(BaseModel):
+    pack: str
+    collections: int
+    documents: int
+    created: int
+    updated: int
+    deleted: int
+    unchanged: int
+    skipped_sections: list[str]
+    warnings: list[str]
+    error: str | None
+
+
 class KnowledgeStatusOut(BaseModel):
     provider: str | None
     model: str | None
@@ -1595,6 +1614,7 @@ class KnowledgeStatusOut(BaseModel):
     small_collection_tokens: int
     vector_backend: str
     agents: list[KnowledgeAgentOut]
+    packs: list[PackReportOut] = Field(default_factory=list)  # dernier import des packs livrés
 
 
 class ReindexOut(BaseModel):

@@ -636,6 +636,9 @@ class KnowledgeCollection(TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(120))
     description: Mapped[str] = mapped_column(Text, default="")
     project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    # Pack de savoir-faire livré (presets/knowledge_packs/) qui possède la collection : réécrite par la mise à
+    # jour du pack, en lecture seule dans l'UI. Nul : collection de l'utilisateur, jamais touchée par un pack.
+    pack: Mapped[str | None] = mapped_column(String(100), default=None, index=True)
 
     documents: Mapped[list[KnowledgeDocument]] = relationship(
         back_populates="collection", cascade="all, delete-orphan", order_by="KnowledgeDocument.id"
@@ -655,6 +658,11 @@ class KnowledgeDocument(TimestampMixin, Base):
     token_count: Mapped[int] = mapped_column(Integer, default=0)
     # Dernière erreur d'indexation (embeddings indisponibles : la recherche par mots-clés reste possible).
     index_error: Mapped[str | None] = mapped_column(Text, default=None)
+    # Document d'un pack : identifiant de la fiche dans le pack (ex. « SHOT_CU_001 », ou la section), champs
+    # du bloc meta retiré du texte, et mots-clés ajoutés à l'index FTS seulement (titre, pont de vocabulaire).
+    pack_key: Mapped[str | None] = mapped_column(String(120), default=None)
+    meta: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    keywords: Mapped[str] = mapped_column(Text, default="")
 
     collection: Mapped[KnowledgeCollection] = relationship(back_populates="documents")
     chunks: Mapped[list[KnowledgeChunk]] = relationship(
@@ -674,6 +682,8 @@ class KnowledgeChunk(Base):
     index: Mapped[int] = mapped_column(Integer)
     heading: Mapped[str] = mapped_column(Text, default="")  # « Titre › Sous-titre »
     text: Mapped[str] = mapped_column(Text)
+    # Mots-clés du document (packs) : indexés en FTS avec le passage, jamais injectés dans un prompt.
+    keywords: Mapped[str] = mapped_column(Text, default="")
     token_count: Mapped[int] = mapped_column(Integer, default=0)
     embedding: Mapped[bytes | None] = mapped_column(LargeBinary, default=None)
     embedding_model: Mapped[str | None] = mapped_column(String(200), default=None)

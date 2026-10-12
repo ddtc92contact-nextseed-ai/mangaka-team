@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
+
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
@@ -18,6 +20,7 @@ from ..pipeline.knowledge import (
     select_passages,
     title_from,
 )
+from ..pipeline.knowledge_packs import update_packs
 from ..store.models import (
     AssetKind,
     Chapter,
@@ -50,6 +53,7 @@ from .schemas import (
     DocumentUpdate,
     KnowledgeAgentOut,
     KnowledgeStatusOut,
+    PackReportOut,
     PassageOut,
     ReindexOut,
     SearchIn,
@@ -75,6 +79,16 @@ def get_document_or_404(session: Session, document_id: int) -> KnowledgeDocument
     if doc is None:
         raise HTTPException(status_code=404, detail="Document introuvable")
     return doc
+
+
+def _read_only(collection: KnowledgeCollection) -> None:
+    """Collection d'un pack livré : réécrite à chaque mise à jour du pack, donc non modifiable à la main."""
+    if collection.pack:
+        raise HTTPException(
+            status_code=409,
+            detail=f"« {collection.name} » vient du pack « {collection.pack} » : modifie le fichier du pack "
+            "(presets/knowledge_packs/) puis « Mettre à jour les packs »",
+        )
 
 
 def _collections_out(session: Session, ctx: AppContext, collections: list[KnowledgeCollection]) -> list[CollectionOut]:
@@ -107,6 +121,7 @@ def _collections_out(session: Session, ctx: AppContext, collections: list[Knowle
             chunk_count=chunks.get(c.id, 0),
             token_count=tokens[c.id],
             whole=0 < tokens[c.id] <= threshold,
+            pack=c.pack,
             created_at=c.created_at,
             updated_at=c.updated_at,
         )
@@ -164,6 +179,7 @@ def update_collection(
     ctx: AppContext = Depends(get_ctx),
 ) -> CollectionOut:
     collection = get_collection_or_404(session, collection_id)
+    _read_only(collection)
     changes = body.model_dump(exclude_unset=True)
     if "name" in changes and changes["name"] is None:
         raise FieldError("name", "ne peut pas être vide")
@@ -180,7 +196,9 @@ def update_collection(
 
 @router.delete("/knowledge/collections/{collection_id}", status_code=204)
 def delete_collection(collection_id: int, session: Session = Depends(get_session)) -> Response:
-    session.delete(get_collection_or_404(session, collection_id))
+    collection = get_collection_or_404(session, collection_id)
+    _read_only(collection)
+    session.delete(collection)
     session.commit()
     return Response(status_code=204)
 
@@ -197,6 +215,8 @@ def _summary(doc: KnowledgeDocument, chunk_count: int) -> DocumentSummaryOut:
         token_count=doc.token_count,
         chunk_count=chunk_count,
         index_error=doc.index_error,
+        pack=doc.collection.pack if doc.pack_key else None,
+        pack_key=doc.pack_key,
         created_at=doc.created_at,
         updated_at=doc.updated_at,
     )
@@ -208,6 +228,8 @@ def document_out(doc: KnowledgeDocument, ctx: AppContext) -> DocumentOut:
         **_summary(doc, len(doc.chunks)).model_dump(),
         content=doc.content,
         collection_name=doc.collection.name,
+        meta=dict(doc.meta or {}),
+        keywords=doc.keywords or "",
         chunks=[
             ChunkOut(
                 id=c.id,
@@ -251,6 +273,7 @@ def create_document(
 ) -> DocumentOut:
     """Texte collé (Markdown accepté) : enregistré puis découpé et indexé."""
     collection = get_collection_or_404(session, collection_id)
+    _read_only(collection)
     doc = KnowledgeDocument(title=body.title, source="text", content=body.content, tags=_clean_tags(body.tags))
     collection.documents.append(doc)
     session.flush()
@@ -268,6 +291,7 @@ async def upload_documents(
     ctx: AppContext = Depends(get_ctx),
 ) -> list[DocumentOut]:
     collection = get_collection_or_404(session, collection_id)
+    _read_only(collection)
     if len(files) > MAX_FILES_PER_UPLOAD:
         raise FieldError("files", f"au plus {MAX_FILES_PER_UPLOAD} fichiers par envoi")
     max_bytes = ctx.settings.max_upload_mb * 1024 * 1024
@@ -315,6 +339,7 @@ def update_document(
 ) -> DocumentOut:
     """Modifier le texte ou le titre réindexe le document ; les étiquettes seules, non."""
     doc = get_document_or_404(session, document_id)
+    _read_only(doc.collection)
     changes = body.model_dump(exclude_unset=True)
     for key in ("title", "content"):
         if key in changes and changes[key] is None:
@@ -332,7 +357,9 @@ def update_document(
 
 @router.delete("/knowledge/documents/{document_id}", status_code=204)
 def delete_document(document_id: int, session: Session = Depends(get_session)) -> Response:
-    session.delete(get_document_or_404(session, document_id))
+    doc = get_document_or_404(session, document_id)
+    _read_only(doc.collection)
+    session.delete(doc)
     session.commit()
     return Response(status_code=204)
 
@@ -360,6 +387,17 @@ def reindex(
             errors.append(f"{doc.title} : {doc.index_error}")
     session.commit()
     return ReindexOut(documents=len(docs), chunks=sum(len(d.chunks) for d in docs), errors=errors)
+
+
+@router.post("/knowledge/packs/update", response_model=list[PackReportOut])
+def update_knowledge_packs(
+    session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
+) -> list[PackReportOut]:
+    """« Mettre à jour les packs » : relit presets/knowledge_packs/ ; seules les fiches modifiées sont réindexées."""
+    reports = update_packs(session, ctx.settings.presets_dir, ctx.knowledge.embedder, ctx.knowledge.settings)
+    session.commit()
+    ctx.knowledge.pack_reports = reports
+    return [PackReportOut(**asdict(r)) for r in reports]
 
 
 # --- recherche (panneau de test) et état ---------------------------------------------
@@ -455,6 +493,7 @@ def status(session: Session = Depends(get_session), ctx: AppContext = Depends(ge
         small_collection_tokens=settings.small_collection_tokens,
         vector_backend="numpy",
         agents=agents,
+        packs=[PackReportOut(**asdict(r)) for r in ctx.knowledge.pack_reports],
     )
 
 
