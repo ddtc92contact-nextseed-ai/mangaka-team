@@ -238,14 +238,26 @@ variety_rules:
   require_action: true            # `action` obligatoire et non vide
   weak_actions: [regarde, observe, est debout, se tient, …]   # refusés dans une action courte…
   weak_max_words: 4               # …d'au plus 4 mots (« Aiko regarde Kenji »)
+  max_wide_medium_share: 0.5      # pages dirigées ensemble : au plus 50 % de plans larges et moyens (une au moins permise)
+  wide_medium_plans: [plan large, plan d'ensemble, plan moyen]
+  min_tight_per_page: 1           # au moins un plan serré par page…
+  tight_min_panels: 3             # …dès 3 cases
+  tight_plans: [gros plan, très gros plan, plan rapproché, insert]
+  max_wide_in_a_row: 1            # par page : jamais 2 plans larges d'affilée
+  wide_plans: [plan large, plan d'ensemble]
 ```
+
+Retour du 12/10 : un tiers de plans larges, un tiers de plans moyens, personnages en pied. Les trois dernières
+règles bornent l'échelle des plans ; le prompt système demande le plan serré pour l'émotion, la révélation et
+la réplique clé, et le plan large pour installer un lieu ou suivre une chorégraphie. Les seuils numériques sont
+réglables dans « L'équipe » (groupe « Mise en scène » du Directeur artistique).
 
 Une règle enfreinte relance l'agent avec une erreur lisible (« page 2 : cases 1 à 3 au même plan « gros
 plan » (2 d'affilée au plus : varie le cadrage) »). Après les relances, la dernière proposition valide est
 **gardée** avec ses avertissements, affichés en tête de la page dans l'écran Direction artistique
-(`warnings` de la page ; « chapitre : … » pour la part de cases de face) ; ils sont recalculés quand
+(`warnings` de la page ; « chapitre : … » pour la part de cases de face ou de plans larges et moyens) ; ils sont recalculés quand
 l'auteur retouche la page. Les règles sont aussi écrites en clair dans le prompt (`$variety_rules`). Sans
-bloc `variety_rules`, aucune règle. Le LLM factice les respecte (angles en alternance, une action par case). `variety` (sobre, equilibree,
+bloc `variety_rules`, aucune règle. Le LLM factice les respecte (angles en alternance, une action par case, plans larges resserrés). `variety` (sobre, equilibree,
 audacieuse) règle l'audace, modifiable dans « L'équipe » (globalement ou par série), comme le modèle, la
 température et les consignes.
 
@@ -1635,8 +1647,12 @@ dans `.env` désactive l'import au démarrage (les tests du moteur l'ont désact
 
 Collections lues par défaut (`knowledge.yaml`, « L'équipe » prime toujours) : scénariste + Fondamentaux,
 Émotions, Exemples ; DA + Fondamentaux, Cadrages, Angles, Action, Composition, Découpage, Émotions,
-Anti-répétition, Exemples, Vocabulaire, Checklist (budget relevé à 3 500 jetons : Vocabulaire et Checklist,
-≈ 1 200 jetons, sont de petites collections injectées entières) ; rédacteur de prompt + Cadrages, Angles,
+Anti-répétition, Exemples (budget de 3 500 jetons, fiches cherchées **page par page** : la requête de chaque
+page est son scénario — descriptions, gestes, personnages, répliques —, sans doublon, au plus `top_k` fiches
+par page ; une petite collection d'un pack n'y est jamais injectée entière). Vocabulaire et Checklist décrivent
+le format d'un storyboarder (champs que l'appli n'a pas) : lues par aucun agent, toujours cherchables dans
+Savoir-faire. « Sources utilisées » de l'écran Direction artistique liste les fiches de chaque page.
+Rédacteur de prompt + Cadrages, Angles,
 Corps et gestes, Action, Composition, Émotions, Pont ComfyUI (≈ 420 jetons, entière).
 
 ### Embeddings : mode réel

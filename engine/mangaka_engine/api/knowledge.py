@@ -582,6 +582,7 @@ def chapter_sources(
         job_id=run.job_id,
         agent=run.agent,
         model=run.model,
+        query=run.query or "",
         collections=list(run.collections or []),
         passages=[passage_out(p, True) for p in run.passages or []],
         bible=BibleSummary(**run.bible) if run.bible else None,

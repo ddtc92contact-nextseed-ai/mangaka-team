@@ -529,7 +529,7 @@ def test_variety_rules_live_in_the_preset() -> None:
 
 def test_variety_flags_repeats_frontal_share_eye_level_and_actions() -> None:
     assert RULES is not None
-    ok = [_pa("plan large", "de trois quarts"), _pa("gros plan", "en contre-plongée"), _pa("plan large", "de face")]
+    ok = [_pa("plan large", "de trois quarts"), _pa("gros plan", "en contre-plongée"), _pa("plan rapproché", "de face")]
     assert da.check_variety([(1, ok)], RULES) == ({}, [])
     by_page, chapter = da.check_variety(
         [
@@ -611,3 +611,104 @@ def test_action_and_warnings_through_the_api(c: TestClient) -> None:
     assert "cases 1 à 3 au même plan « gros plan »" in warnings and "« Aiko regarde » trop statique" in warnings
     assert f"{ids[0]}.action" in edited["locks"]
     assert next(pa for pa in edited["panels"] if pa["panel_id"] == ids[0])["action"] == "Aiko regarde"
+
+
+# --- échelle des plans : plans larges et moyens, plans serrés -------------------------------------
+def _plans(*plans: str) -> list[dict[str, str]]:
+    angles = ["de trois quarts", "en contre-plongée", "de profil", "en plongée", "de dos", "cadre penché"]
+    return [_pa(p, angles[i % len(angles)]) for i, p in enumerate(plans)]
+
+
+def test_wide_and_medium_share_is_capped_on_the_chapter() -> None:
+    assert RULES is not None and RULES.max_wide_medium_share == 0.5
+    ok = [(1, _plans("plan large", "gros plan", "plan moyen", "insert")), (2, _plans("plan rapproché", "plan moyen"))]
+    assert da.check_variety(ok, RULES) == ({}, [])
+    loose = [(1, _plans("plan large", "gros plan", "plan moyen", "plan moyen")), (2, _plans("plan moyen", "insert"))]
+    by_page, chapter = da.check_variety(loose, RULES)
+    assert by_page == {}
+    assert chapter == [
+        "trop de plans larges et moyens (plan large / plan d'ensemble / plan moyen) : 4 sur 6 "
+        "(3 au plus, 50 %) : resserre sur les visages, les gestes et les objets"
+    ]
+    # seuil du preset : 70 % permis
+    assert da.check_variety(loose, RULES.model_copy(update={"max_wide_medium_share": 0.7})) == ({}, [])
+
+
+def test_every_page_of_three_panels_needs_a_tight_shot() -> None:
+    assert RULES is not None and (RULES.min_tight_per_page, RULES.tight_min_panels) == (1, 3)
+    for tight in ("gros plan", "très gros plan", "plan rapproché", "insert"):
+        assert da.check_variety([(1, _plans("plan large", tight, "contre-plongée"))], RULES) == ({}, [])
+    page = _plans("plan large", "contre-plongée", "plan moyen")
+    by_page, _ = da.check_variety([(1, page), (2, _plans("plan moyen", "plongée"))], RULES)
+    assert list(by_page) == [1]  # deux cases : pas d'exigence
+    assert by_page[1] == [
+        "aucun plan serré (au moins 1 dès 3 cases : gros plan, très gros plan, plan rapproché, insert) : "
+        "serre le cadre sur l'émotion, la révélation ou la réplique clé"
+    ]
+    two = RULES.model_copy(update={"min_tight_per_page": 2})
+    by_page, _ = da.check_variety([(1, _plans("gros plan", "plan large", "plongée"))], two)
+    assert by_page[1][0].startswith("1 plan serré seulement (au moins 2 dès 3 cases")
+    off = RULES.model_copy(update={"min_tight_per_page": 0, "max_wide_medium_share": 1})
+    assert da.check_variety([(1, page)], off) == ({}, [])
+
+
+def test_no_two_wide_shots_in_a_row() -> None:
+    assert RULES is not None and RULES.max_wide_in_a_row == 1
+    ok = _plans("plan large", "gros plan", "plan large", "insert")
+    assert da.check_variety([(1, ok)], RULES) == ({}, [])
+    by_page, _ = da.check_variety([(1, _plans("gros plan", "plan large", "plan d'ensemble", "insert"))], RULES)
+    assert by_page[1] == ["cases 2 à 3 en plan large d'affilée (1 au plus : intercale un plan plus serré)"]
+    two = RULES.model_copy(update={"max_wide_in_a_row": 2, "max_wide_medium_share": 1})
+    assert da.check_variety([(1, _plans("gros plan", "plan large", "plan d'ensemble", "insert"))], two) == ({}, [])
+
+
+def test_new_rules_are_in_the_prompt_and_retried() -> None:
+    assert RULES is not None
+    text = da.variety_text(RULES)
+    assert "au plus 50 % des cases du chapitre en plan large / plan d'ensemble / plan moyen" in text
+    assert "au moins 1 plan serré par page (dès 3 cases)" in text and "jamais plus de 1 case d'affilée" in text
+    assert "serres le cadre" in PROMPT.system and "plan large pour installer un lieu" in PROMPT.system
+    ctx = _ctx(rules=RULES)
+    wide = _valid(ctx)
+    for page in wide["pages"]:
+        for i, pa in enumerate(page["panels"]):
+            pa["plan"] = ("plan large", "plan moyen", "plongée")[i % 3]
+    answers = iter([json.dumps(wide, ensure_ascii=False), json.dumps(_valid(ctx), ensure_ascii=False)])
+    llm = MockLLMProvider(lambda _m, _j: next(answers))
+    run = run_direction(llm, PROMPT, ctx, lambda *_: None)
+    assert run.attempts == 2 and run.variety == []
+    retry = llm.calls[1][-1].content
+    assert "page 1 : aucun plan serré" in retry and "trop de plans larges et moyens" in retry
+
+
+def test_page_query_is_built_from_the_page_scenario() -> None:
+    page = _brief(1, 2)
+    page.panels[0].update(description="Aiko pleure sous la pluie", staging="genoux à terre", characters=["Aiko"])
+    page.panels[1]["dialogues"] = ["Kenji : Je ne partirai pas."]
+    query = da.page_query(page)
+    assert query.splitlines()[0] == "mise en scène, cadrage, dialogue, champ contrechamp, réplique, temps fort, impact"
+    assert "Aiko pleure sous la pluie — genoux à terre — Aiko" in query and "Je ne partirai pas." in query
+    assert "Kenji :" not in query
+
+
+def test_art_direction_knowledge_is_retrieved_per_page(make_settings: Callable[..., Any]) -> None:
+    with TestClient(create_app(make_settings(knowledge_packs=True))) as c:
+        sid = _series(c)
+        chapter_id = _scripted_chapter(c, sid, pages=2)
+        _direct(c, chapter_id)
+        llm = c.app.state.ctx.providers.llm  # type: ignore[attr-defined]
+        user = next(m.content for m in llm.calls[-1] if m.role == "user")
+        savoir_faire = user.split("Savoir-faire de l'équipe")[1].split("Direction artistique du chapitre")[0]
+        assert "· page 1" in savoir_faire and "· page 2" in savoir_faire
+        assert "Vocabulaire" not in savoir_faire and "Checklist" not in savoir_faire
+
+        sources = c.get(f"/chapters/{chapter_id}/sources?agent=art_direction").json()
+        assert sources["agent"] == "art_direction" and sources["passages"]
+        assert all(p["pages"] and p["mode"] == "retrieved" for p in sources["passages"])
+        assert {n for p in sources["passages"] for n in p["pages"]} == {1, 2}
+        pages = c.get(f"/chapters/{chapter_id}/pages").json()
+        for number, line in enumerate(sources["query"].split("\nPage ")[:2], start=1):
+            assert line.removeprefix("Page ").startswith(f"{number} : mise en scène, cadrage")
+        first = next(p for p in pages if p["number"] == 1)["panels"][0]["description"]
+        assert first and first in sources["query"].split("\nPage 2 : ")[0]
+        assert not {"Mise en scène · Vocabulaire", "Mise en scène · Checklist"} & set(sources["collections"])

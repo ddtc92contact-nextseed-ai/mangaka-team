@@ -23,7 +23,7 @@ import io
 import json
 import math
 import re
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import PurePath
@@ -259,6 +259,7 @@ class Passage:
     keyword_score: float | None = None
     mode: str = "retrieved"  # retrieved | whole (petite collection injectée entière)
     pack: str | None = None  # pack de savoir-faire livré de la collection (presets/knowledge_packs/)
+    pages: list[int] = field(default_factory=list)  # recherche par page : pages pour lesquelles il a été retenu
 
     def source(self) -> str:
         return " › ".join(p for p in (self.document_title, self.heading) if p)
@@ -449,6 +450,60 @@ def choose_passages(
     return chosen, used
 
 
+def choose_page_passages(
+    rankings: Mapping[int, Sequence[Passage]],
+    whole: Sequence[Passage],
+    settings: KnowledgeSettings,
+    *,
+    top_k: int,
+    budget_tokens: int,
+) -> tuple[list[Passage], int]:
+    """Recherche par page dans un seul budget : les passages `whole` (petites collections) d'abord, puis, page
+    après page et tour après tour, le meilleur passage suivant de chaque page (au plus `top_k` par page).
+    Un passage déjà retenu pour une autre page n'est pas répété : la page s'ajoute à ses `pages`."""
+    chosen: dict[int, Passage] = {}
+    used = 0
+    for p in whole:
+        p.mode = "whole"
+        if used + p.tokens <= budget_tokens:
+            chosen[p.chunk_id] = p
+            used += p.tokens
+    cursor = dict.fromkeys(rankings, 0)
+    picked = dict.fromkeys(rankings, 0)
+    active = list(rankings)
+    while active:
+        for number in list(active):
+            ranked = rankings[number]
+            while True:
+                i = cursor[number]
+                if (
+                    picked[number] >= top_k
+                    or i >= len(ranked)
+                    or (ranked[i].score or 0.0) < settings.retrieval.min_score
+                ):
+                    active.remove(number)
+                    break
+                cursor[number] += 1
+                p = ranked[i]
+                if p.chunk_id in chosen:
+                    if p.mode != "whole" and number not in chosen[p.chunk_id].pages:
+                        chosen[p.chunk_id].pages.append(number)
+                    picked[number] += 1
+                    break
+                if used + p.tokens > budget_tokens:
+                    continue
+                p.pages = [number]
+                chosen[p.chunk_id] = p
+                used += p.tokens
+                picked[number] += 1
+                break
+    # Petites collections d'abord, puis les fiches dans l'ordre des pages.
+    for p in chosen.values():
+        p.pages.sort()
+    order = sorted(chosen.values(), key=lambda p: (p.mode != "whole", min(p.pages, default=0)))
+    return order, used
+
+
 # --- collections d'un agent ---------------------------------------------------------
 # Lecture du champ « Savoir-faire » du profil d'un agent (écran « L'équipe ») : renvoie la liste des
 # noms de collections, ou None si l'agent n'a pas de profil (on retombe alors sur knowledge.yaml).
@@ -619,6 +674,7 @@ class AgentKnowledge:
     collections: list[str]
     bible: BibleText | None
     warning: str | None = None
+    page_queries: dict[int, str] = field(default_factory=dict)  # recherche par page (`for_pages`)
 
     def savoir_faire(self) -> str:
         return format_passages(self.passages)
@@ -631,8 +687,9 @@ def format_passages(passages: Sequence[Passage]) -> str:
     """Passages numérotés avec leur source, pour un prompt de LLM."""
     blocks = []
     for i, p in enumerate(passages, start=1):
+        pages = f" · page{'s' if len(p.pages) > 1 else ''} {', '.join(map(str, p.pages))}" if p.pages else ""
         blocks.append(
-            f"[{i}] « {p.document_title} »{' — ' + p.heading if p.heading else ''} ({p.collection_name})\n{p.text}"
+            f"[{i}] « {p.document_title} »{' — ' + p.heading if p.heading else ''} ({p.collection_name}){pages}\n{p.text}"
         )
     return "\n\n".join(blocks)
 
@@ -730,6 +787,59 @@ class KnowledgeBase:
             collections=[c.name for c in collections],
             bible=bible,
             warning=selection.warning,
+        )
+
+    def for_pages(
+        self,
+        session: Session,
+        role: str,
+        project_id: int | None,
+        queries: Sequence[tuple[int, str]],
+        *,
+        include_bible: bool = True,
+    ) -> AgentKnowledge:
+        """Savoir-faire cherché page par page (numéro de page, requête tirée du scénario de la page), dans le
+        budget total de l'agent, sans doublon : une page de dialogue et une page d'action ne reçoivent pas les
+        mêmes fiches. Les petites collections d'un pack (vocabulaire, checklist…) ne sont jamais injectées
+        entières : leurs fiches sont cherchées comme les autres."""
+        agent = self.settings.agent(role)
+        profile = self.profile_lookup(session, role, project_id) if self.profile_lookup else None
+        collections = agent_collections(session, agent, project_id, profile=profile)
+        ids = [c.id for c in collections]
+        sizes = collection_tokens(session, ids)
+        whole = [c.id for c in collections if not c.pack and 0 < sizes[c.id] <= self.settings.small_collection_tokens]
+        searched = [cid for cid in ids if cid not in whole]
+        rankings: dict[int, list[Passage]] = {}
+        warning = None
+        for number, query in queries:
+            ranking = rank(session, query, searched, self.embedder, self.settings)
+            rankings[number] = ranking.passages
+            warning = warning or ranking.warning
+        whole_passages = sorted(
+            rank(session, "", whole, None, self.settings).passages,
+            key=lambda p: (whole.index(p.collection_id), p.chunk_id),
+        )
+        passages, used = choose_page_passages(
+            rankings,
+            whole_passages,
+            self.settings,
+            top_k=self.top_k(session, role, project_id),
+            budget_tokens=self.budget_tokens(session, role, project_id),
+        )
+        bible = None
+        if include_bible and agent.bible and project_id is not None:
+            limit = agent.bible_max_tokens if agent.bible_max_tokens is not None else self.settings.bible_max_tokens
+            bible = render_bible(session, project_id, max_tokens=limit)
+        page_queries = dict(queries)
+        return AgentKnowledge(
+            role=role,
+            query="\n".join(f"Page {n} : {q}" for n, q in page_queries.items()),
+            passages=passages,
+            tokens=used,
+            collections=[c.name for c in collections],
+            bible=bible,
+            warning=warning,
+            page_queries=page_queries,
         )
 
     def for_panel(self, session: Session, project_id: int, query: str, character_ids: Sequence[int]) -> PanelKnowledge:

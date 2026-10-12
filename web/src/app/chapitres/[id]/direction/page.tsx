@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState, type ReactNode } from "react";
 import { InfoTip } from "@/components/info-tip";
+import { PassageList, formatTokens } from "@/components/knowledge";
 import { PageSvg } from "@/components/page-svg";
 import { useToast } from "@/components/toast";
 import { Alert, Button, ButtonLink, Card, EmptyState, Input, Loading, ProgressBar, Select } from "@/components/ui";
@@ -15,6 +16,8 @@ import {
   type Job,
   type PageData,
   type PageDirection,
+  type Passage,
+  type ScriptSources,
 } from "@/lib/api";
 import {
   DA_INTENSITIES,
@@ -48,6 +51,8 @@ export default function DirectionPage() {
     [chapter.project_id],
   );
   const lastJob = useEngineData(() => api.chapterJobs(chapter.id, STEP).then((j) => j[0] ?? null), [chapter.id]);
+  // Ce que l'agent a reçu à son dernier passage : fiches du savoir-faire, cherchées page par page.
+  const sources = useEngineData(() => api.chapterSources(chapter.id, STEP), [chapter.id]);
   const [started, setStarted] = useState<Job | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [highlight, setHighlight] = useState<number | null>(null);
@@ -57,7 +62,10 @@ export default function DirectionPage() {
 
   const current = started ?? lastJob.data ?? null;
   const job = useJob(current, (done) => {
-    if (done.status === "succeeded") direction.reload();
+    if (done.status === "succeeded") {
+      direction.reload();
+      sources.reload();
+    }
   });
   const running = job !== null && !isFinished(job);
 
@@ -228,8 +236,63 @@ export default function DirectionPage() {
           />
         )}
       </div>
+
+      {sources.data && <UsedSources sources={sources.data} pageNumbers={list.map((p) => p.number)} />}
     </div>
   );
+}
+
+/** Fiches du savoir-faire reçues par le directeur artistique, regroupées par page (recherche par page). */
+function UsedSources({ sources, pageNumbers }: { sources: ScriptSources; pageNumbers: number[] }) {
+  const [open, setOpen] = useState(false);
+  const count = sources.passages.length;
+  const whole = sources.passages.filter((p) => p.mode === "whole" || !p.pages?.length);
+  const groups: [string, Passage[]][] = [
+    ...(whole.length ? [["Toutes les pages", whole] as [string, Passage[]]] : []),
+    ...pageNumbers
+      .map((n) => [`Page ${n}`, sources.passages.filter((p) => p.pages?.includes(n))] as [string, Passage[]])
+      .filter(([, list]) => list.length),
+  ];
+  return (
+    <Card data-testid="used-sources">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="font-semibold text-zinc-100">Sources utilisées</h2>
+          <p className="text-xs text-zinc-500">
+            Dernière direction du {engineDate(sources.created_at).toLocaleString("fr-FR")} · {count} fiche
+            {count > 1 ? "s" : ""} du savoir-faire, cherchée{count > 1 ? "s" : ""} page par page ·{" "}
+            {sources.bible ? `bible de la série (${formatTokens(sources.bible.tokens)})` : "pas de bible pour cette série"}
+          </p>
+        </div>
+        <Button variant="secondary" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+          {open ? "Masquer" : "Voir les sources"}
+        </Button>
+      </div>
+      {open && (
+        <div className="mt-4 space-y-4">
+          {groups.length ? (
+            groups.map(([label, list]) => (
+              <section key={label} className="space-y-2" data-testid="used-sources-page">
+                <h3 className="text-sm font-medium text-zinc-200">
+                  {label} · {list.length} fiche{list.length > 1 ? "s" : ""}
+                </h3>
+                <PassageList passages={list} excerpt={300} showScores={false} testId="used-passages" />
+              </section>
+            ))
+          ) : (
+            <p className="text-sm text-zinc-500">
+              Aucune fiche : ajoute du savoir-faire dans les collections lues par le directeur artistique.
+            </p>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+/** Les dates du moteur sont en UTC sans fuseau (« 2026-10-10T11:49:57 ») : à lire comme telles. */
+function engineDate(at: string): Date {
+  return new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(at) ? at : `${at}Z`);
 }
 
 /** Confirmation courte d'une retouche de la proposition. */

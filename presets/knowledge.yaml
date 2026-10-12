@@ -26,8 +26,10 @@ bible_max_tokens: 2500
 # series_collections : ajoute les collections rattachées à la série du chapitre (jamais celles d'une autre série).
 #
 # Les collections « Mise en scène · … » viennent du pack livré presets/knowledge_packs/manga_visual_knowledge
-# (importé au démarrage, « Mettre à jour les packs » dans Savoir-faire). « Vocabulaire », « Checklist » et
-# « Pont ComfyUI » sont de petites collections (moins de small_collection_tokens) : injectées entières.
+# (importé au démarrage, « Mettre à jour les packs » dans Savoir-faire). « Pont ComfyUI » est une petite
+# collection (moins de small_collection_tokens) : injectée entière. « Vocabulaire » et « Checklist » décrivent
+# le format de sortie d'un storyboarder (champs que l'appli n'a pas) : lues par aucun agent, mais toujours
+# consultables et cherchables dans Savoir-faire.
 agents:
   script:
     label: Scénariste (étape 1)
@@ -41,7 +43,8 @@ agents:
     series_collections: true
     budget_tokens: 2500
     top_k: 6
-  # Budget relevé pour le pack : Vocabulaire et Checklist (≈ 1 200 jetons, injectées entières) + 4 à 5 fiches.
+  # Savoir-faire cherché page par page (requête : le scénario de la page), dans ce budget total, sans doublon ;
+  # top_k : fiches au plus par page. Une petite collection d'un pack n'est jamais injectée entière ici.
   art_direction:
     label: Directeur artistique (avant l'étape 2)
     collections:
@@ -56,8 +59,6 @@ agents:
       - Mise en scène · Émotions
       - Mise en scène · Anti-répétition
       - Mise en scène · Exemples
-      - Mise en scène · Vocabulaire
-      - Mise en scène · Checklist
     series_collections: true
     budget_tokens: 3500
     top_k: 5

@@ -1973,6 +1973,8 @@ export interface Passage {
   mode: "retrieved" | "whole";
   /** Passage d'une fiche de pack livré. */
   pack?: string | null;
+  /** Recherche par page (direction artistique) : pages pour lesquelles le passage a été retenu. */
+  pages?: number[];
   selected: boolean;
 }
 
@@ -2034,6 +2036,8 @@ export interface ScriptSources {
   job_id: number | null;
   agent: string;
   model: string | null;
+  /** Requête de recherche (direction artistique : une ligne « Page N : … » par page). */
+  query?: string;
   collections: string[];
   passages: Passage[];
   bible: BibleSummary | null;
@@ -2390,7 +2394,8 @@ export const api = {
   searchKnowledge: (body: SearchInput) => request<SearchResult>("/knowledge/search", json("POST", body)),
   getBible: (projectId: number) => request<Bible>(`/projects/${projectId}/bible`),
   saveBible: (projectId: number, body: BibleInput) => request<Bible>(`/projects/${projectId}/bible`, json("PUT", body)),
-  chapterSources: (chapterId: number) => request<ScriptSources | null>(`/chapters/${chapterId}/sources`),
+  chapterSources: (chapterId: number, agent = "script") =>
+    request<ScriptSources | null>(`/chapters/${chapterId}/sources?agent=${encodeURIComponent(agent)}`),
 };
 
 function agentScope(projectId?: number | null): string {
