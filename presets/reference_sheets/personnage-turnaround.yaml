@@ -4,6 +4,9 @@ name: Plein pied face / profil / dos (turnaround)
 description: "Le même personnage en pied, vu de face, de profil et de dos, côte à côte."
 kinds: [character]
 order: 20
+# Plans de case que sert cette fiche : envoyée seulement pour ces plans (ou si le personnage n'a pas d'autre
+# image) — trois figures en pied tirent la case vers le plein pied, quel que soit le plan écrit.
+shots: [plan large, plan d'ensemble, plan américain]
 # Sous-dossier de la bibliothèque lisible (references/personnages/<nom>/plein-pied/).
 folder: plein-pied
 # 4:3 (1328×992 ≈ 1,32 Mpx, même budget que l'ancien 1536×864 en 16:9) : 15 % de hauteur en plus, chaque

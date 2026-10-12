@@ -30,6 +30,8 @@ from ..pipeline.generation import (
     enqueue_angle,
     enqueue_panel,
     entry_kind,
+    knowledge_stamp,
+    mark_prompts_pending,
     panel_brief,
     panel_cast,
     panel_knowledge,
@@ -42,6 +44,7 @@ from ..pipeline.generation import (
     quality_preset_id,
     refresh_states,
     resolve_preset_id,
+    rewritable_prompts,
     run_dialog_request,
     run_prompt_request,
     update_panel_prompt,
@@ -93,6 +96,7 @@ from .schemas import (
     PanelUpdate,
     PassageOut,
     PresetEstimateOut,
+    PromptSourcesOut,
     QueueItemOut,
     QueueOut,
     RebuildPromptIn,
@@ -100,6 +104,7 @@ from .schemas import (
     RepairIn,
     RepairInfoOut,
     RepairTarget,
+    RewritePromptsOut,
     WorkflowPresetOut,
 )
 
@@ -215,8 +220,9 @@ def panel_detail(session: Session, ctx: AppContext, panel: Panel) -> PanelDetail
         dialog_overrides=dialog_overrides(session, presets, panel),
         prompt_source=panel.prompt_source if panel.prompt_source in ("ia", "fragments") else None,  # type: ignore[arg-type]
         ai_prompt=bool(page.chapter.project.ai_prompt),
-        prompt_pending=prompt_pending(presets, session, panel),
+        prompt_pending=prompt_pending(presets, session, panel, ctx.knowledge),
         prompt_warning=panel.prompt_warning,
+        prompt_sources=prompt_sources_out(panel),
         generation_preset=panel.generation_preset,
         resolved_preset=resolved if resolved in presets.workflows else None,
         target=panel_target(presets, page, panel),
@@ -227,6 +233,23 @@ def panel_detail(session: Session, ctx: AppContext, panel: Panel) -> PanelDetail
         print_info=panel_print_info(presets, ctx.files, panel),  # type: ignore[arg-type]
         upscaler=upscaler,
         composition_lock=lock_out(session, presets, panel),
+    )
+
+
+def prompt_sources_out(panel: Panel) -> PromptSourcesOut | None:
+    """« Sources utilisées » du prompt actuel (rédigé par l'IA), None sinon."""
+    sources = panel.prompt_sources
+    if not isinstance(sources, dict) or not sources.get("written_at"):
+        return None
+    return PromptSourcesOut(
+        written_at=sources["written_at"],
+        query=str(sources.get("query") or ""),
+        collections=list(sources.get("collections") or []),
+        passages=[PassageOut(**p, selected=True) for p in sources.get("passages") or []],
+        tokens=int(sources.get("tokens") or 0),
+        budget_tokens=int(sources.get("budget_tokens") or 0),
+        bible=str(sources.get("bible") or ""),
+        edited=bool(panel.final_prompt_manual),
     )
 
 
@@ -496,6 +519,7 @@ def _rebuild_with_instruction(
     # Série par fragments : gardé comme une édition (sinon remplacé par les fragments à la génération).
     apply_dialog_proposal(panel, proposal, manual=not ai_prompt_enabled(panel))
     panel.prompt_key = panel_brief(presets, session, panel).key()
+    panel.prompt_knowledge = knowledge_stamp(session, ctx.knowledge, request.project_id)
     session.add(
         PanelDialogTurn(
             panel_id=panel.id,
@@ -633,6 +657,23 @@ def generate_chapter(
         )
     )
     return _generate_pages(session, ctx, pages, body or BatchGenerateIn())
+
+
+@router.get("/chapters/{chapter_id}/prompts/rewrite", response_model=RewritePromptsOut)
+def count_rewritable_prompts(chapter_id: int, session: Session = Depends(get_session)) -> RewritePromptsOut:
+    """Nombre de cases que « Réécrire les prompts du chapitre » remettrait à rédiger (confirmation)."""
+    chapter = get_chapter_or_404(session, chapter_id)
+    return RewritePromptsOut(count=len(rewritable_prompts(session, chapter)), ai_prompt=bool(chapter.project.ai_prompt))
+
+
+@router.post("/chapters/{chapter_id}/prompts/rewrite", response_model=RewritePromptsOut)
+def rewrite_chapter_prompts(chapter_id: int, session: Session = Depends(get_session)) -> RewritePromptsOut:
+    """« Réécrire les prompts du chapitre » : chaque prompt rédigé par l'IA et non retouché à la main sera
+    rédigé de nouveau (savoir-faire et cadrage actuels) à la prochaine génération de sa case."""
+    chapter = get_chapter_or_404(session, chapter_id)
+    count = mark_prompts_pending(session, chapter)
+    session.commit()
+    return RewritePromptsOut(count=count, ai_prompt=bool(chapter.project.ai_prompt))
 
 
 # --- réparation ciblée -----------------------------------------------------------------

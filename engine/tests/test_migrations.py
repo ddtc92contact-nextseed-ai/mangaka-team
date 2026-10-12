@@ -876,3 +876,28 @@ def test_v26_database_gets_pack_columns_and_a_rebuilt_keyword_index(make_setting
     fresh = settings.database_path.parent / "fresh.db"
     create_db_engine(fresh).dispose()
     assert _columns(settings.database_path) == _columns(fresh)
+
+
+def test_v27_database_gets_the_knowledge_stamp_of_written_prompts(make_settings: Callable[..., Settings]) -> None:
+    """v27 → v28 : empreinte du savoir-faire et « Sources utilisées » du prompt rédigé, vides sur les cases
+    existantes (leurs prompts rédigés par l'IA seront rédigés de nouveau à la prochaine génération)."""
+    settings = make_settings()
+    with TestClient(create_app(settings)) as c:
+        s = c.post("/projects", json={**STYLE, "title": "Ancienne"}).json()
+        ch = c.post(f"/projects/{s['id']}/chapters", json={"title": "Un"}).json()
+        pages = c.put(f"/chapters/{ch['id']}/pages", json={"pages": [{"panels": [{"description": "Aiko"}]}]}).json()
+        pid = pages[0]["panels"][0]["id"]
+    con = sqlite3.connect(settings.database_path)
+    for column in ("prompt_knowledge", "prompt_sources"):
+        con.execute(f"ALTER TABLE panels DROP COLUMN {column}")
+    con.execute("PRAGMA user_version = 27")
+    con.commit()
+    con.close()
+
+    with TestClient(create_app(settings)) as c:
+        panel = c.get(f"/panels/{pid}").json()
+        assert panel["prompt_sources"] is None and panel["description"] == "Aiko"
+    assert _version(settings.database_path) == SCHEMA_VERSION
+    fresh = settings.database_path.parent / "fresh.db"
+    create_db_engine(fresh).dispose()
+    assert _columns(settings.database_path) == _columns(fresh)

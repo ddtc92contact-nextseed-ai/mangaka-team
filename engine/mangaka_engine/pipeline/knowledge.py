@@ -18,7 +18,9 @@ Les jetons sont estimés (≈ 4 caractères par jeton) : aucun tokenizer n'est c
 
 from __future__ import annotations
 
+import hashlib
 import io
+import json
 import math
 import re
 from collections.abc import Callable, Iterable, Sequence
@@ -28,7 +30,7 @@ from pathlib import PurePath
 from typing import Any
 
 import numpy as np
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from ..presets import KnowledgeAgent, KnowledgeSettings
@@ -776,6 +778,53 @@ class KnowledgeBase:
             out.fragment_bible = bible_character_notes(session, project_id, character_ids, max_tokens=limit)
             out.writer_bible = bible_character_notes(session, project_id, character_ids, max_tokens=writer_limit)
         return out
+
+    def writer_stamp(self, session: Session, project_id: int | None) -> str:
+        """Empreinte du savoir-faire du rédacteur de prompt pour une série : collections de l'agent
+        « image_prompt » (profil ou knowledge.yaml), leurs documents (nombre, dernier changement) et passages
+        (nombre, jetons, vecteurs), budget et top-k du rédacteur, réglages de la recherche et modèle
+        d'embeddings. Elle change avec un import ou une mise à jour de pack, un document ajouté, modifié ou
+        retiré, une réindexation ou un budget réglé dans « L'équipe » — et ne change pas sinon : le prompt
+        rédigé d'une case n'est redemandé que si elle change (pas à chaque génération)."""
+        agent = self.settings.agent(IMAGE_AGENT)
+        profile = self.profile_lookup(session, IMAGE_AGENT, project_id) if self.profile_lookup else None
+        collections = agent_collections(session, agent, project_id, profile=profile)
+        ids = [c.id for c in collections]
+        docs = {
+            cid: [count, str(latest)]
+            for cid, count, latest in session.execute(
+                select(
+                    KnowledgeDocument.collection_id,
+                    func.count(KnowledgeDocument.id),
+                    func.max(KnowledgeDocument.updated_at),
+                )
+                .where(KnowledgeDocument.collection_id.in_(ids))
+                .group_by(KnowledgeDocument.collection_id)
+            )
+        }
+        chunks = {
+            cid: [count, int(tokens or 0), int(embedded or 0), str(models or "")]
+            for cid, count, tokens, embedded, models in session.execute(
+                select(
+                    KnowledgeChunk.collection_id,
+                    func.count(KnowledgeChunk.id),
+                    func.sum(KnowledgeChunk.token_count),
+                    func.count(KnowledgeChunk.embedding),
+                    func.group_concat(KnowledgeChunk.embedding_model.distinct()),
+                )
+                .where(KnowledgeChunk.collection_id.in_(ids))
+                .group_by(KnowledgeChunk.collection_id)
+            )
+        }
+        raw = {
+            "collections": [[c.id, c.name, docs.get(c.id), chunks.get(c.id)] for c in collections],
+            "budget": self.budget_tokens(session, IMAGE_AGENT, project_id),
+            "top_k": self.top_k(session, IMAGE_AGENT, project_id),
+            "retrieval": self.settings.retrieval.model_dump(mode="json"),
+            "small_collection_tokens": self.settings.small_collection_tokens,
+            "embedder": self.embedder.model_id if self.embedder is not None else None,
+        }
+        return hashlib.sha256(json.dumps(raw, sort_keys=True, default=str).encode()).hexdigest()[:32]
 
 
 IMAGE_AGENT = "image_prompt"  # rôle du constructeur de prompt image dans presets/knowledge.yaml

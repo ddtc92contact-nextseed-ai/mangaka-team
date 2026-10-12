@@ -80,7 +80,10 @@ def test_camera_terms_translate_plan_and_angle() -> None:
         action="Aiko bondit, sabre levé",
         settings=reg.image_prompt,
     )
-    assert prompt.startswith("Close-up. Camera angle: low-angle view looking up. Aiko saute.")
+    assert prompt.startswith(
+        "Close-up, the face fills the frame, shoulders cut by the frame edge. Camera angle: low-angle view looking up. "
+        "Aiko saute."
+    )
     assert "Action and pose: Aiko bondit, sabre levé." in prompt
 
 

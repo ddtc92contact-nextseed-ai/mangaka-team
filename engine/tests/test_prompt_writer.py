@@ -388,7 +388,10 @@ def test_mock_panel_prompt_sent_to_comfyui_is_english_with_image_roles_first() -
         references=slots,
         settings=reg.image_prompt,
     )
-    assert brief.camera == "medium shot, low-angle view looking up" and brief.action.startswith("Aiko bondit")
+    assert (
+        brief.camera == "medium shot, framed from the waist up, legs out of frame, low-angle view looking up"
+        and brief.action.startswith("Aiko bondit")
+    )
     run = write_prompt(MockLLMProvider(), reg.prompt("redacteur-image"), brief)
     sent = frame_references(run.output.prompt, slots, reg.image_prompt)
     assert run.output.language == "en" and 180 <= word_count(run.output.prompt) <= 320
@@ -398,5 +401,5 @@ def test_mock_panel_prompt_sent_to_comfyui_is_english_with_image_roles_first() -
     assert roles.index("<image2> is the identity reference for Kenji") < roles.index(
         "<image3> is the location reference for Gare"
     )
-    assert "medium shot, low-angle view looking up" in sent
+    assert "medium shot, framed from the waist up, legs out of frame, low-angle view looking up" in sent
     assert french_hits(sent) == 0 and not re.search(r"[éèàùçâêîôû«»]", sent)

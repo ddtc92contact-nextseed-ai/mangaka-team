@@ -834,6 +834,8 @@ class PanelDetailOut(BaseModel):
     ai_prompt: bool = False
     prompt_pending: bool = False
     prompt_warning: str | None = None
+    # « Sources utilisées » du prompt actuel : savoir-faire reçu par le rédacteur et date de la rédaction.
+    prompt_sources: PromptSourcesOut | None = None
     generation_preset: str | None
     resolved_preset: str | None
     target: dict[str, int] | None
@@ -1487,6 +1489,27 @@ class PanelKnowledgePart(BaseModel):
     text_tokens: int
     bible: str  # notes de la bible sur les personnages de la case ($bible)
     bible_tokens: int
+
+
+class PromptSourcesOut(BaseModel):
+    """Ce que le rédacteur de prompt a reçu pour le prompt actuel d'une case (« Sources utilisées »)."""
+
+    written_at: datetime
+    query: str = ""
+    collections: list[str] = Field(default_factory=list)
+    passages: list[PassageOut] = Field(default_factory=list)
+    tokens: int = 0
+    budget_tokens: int = 0
+    bible: str = ""
+    # Prompt retouché depuis (à la main ou par le dialogue) : ces sources sont celles de la rédaction d'origine.
+    edited: bool = False
+
+
+class RewritePromptsOut(BaseModel):
+    """« Réécrire les prompts du chapitre » : cases dont le prompt rédigé par l'IA sera rédigé de nouveau."""
+
+    count: int
+    ai_prompt: bool
 
 
 class PanelKnowledgeOut(BaseModel):

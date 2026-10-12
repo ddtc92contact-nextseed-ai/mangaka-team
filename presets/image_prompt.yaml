@@ -88,15 +88,17 @@ references:
 
 # Plans et angles (direction artistique, scénario) → termes de cadrage anglais ($shot, $plan, $angle et
 # le rédacteur de prompt). Clés comparées sans casse ; une valeur absente passe telle quelle.
+# Chaque plan serré dit où le cadre coupe le corps (12/10/2026) : « medium shot » seul laissait Qwen-Image
+# dessiner les personnages en pied, surtout avec une référence plein pied.
 camera_terms:
   plan large: wide shot
   plan d'ensemble: establishing extreme wide shot
-  plan moyen: medium shot
-  plan américain: medium-long shot (cowboy shot, framed from mid-thigh up)
-  plan rapproché: medium close-up
-  gros plan: close-up
-  très gros plan: extreme close-up
-  insert: insert shot (extreme close-up on a detail)
+  plan moyen: medium shot, framed from the waist up, legs out of frame
+  plan américain: medium-long shot (cowboy shot, framed from mid-thigh up, feet out of frame)
+  plan rapproché: medium close-up, head and shoulders, framed from the chest up
+  gros plan: close-up, the face fills the frame, shoulders cut by the frame edge
+  très gros plan: extreme close-up, a part of the face (eyes, mouth) fills the whole frame
+  insert: insert shot (extreme close-up on a detail that fills the frame)
   plongée: high-angle shot
   contre-plongée: low-angle shot
   de face: frontal view at eye level
@@ -108,3 +110,10 @@ camera_terms:
   vue subjective: point-of-view shot (first-person perspective)
   cadre penché: dutch angle (tilted frame)
   vue aérienne: bird's-eye view
+
+# Plans plus serrés que le plan américain : termes ajoutés au prompt négatif de la case (contre le plein
+# pied). Avec cfg 1 (Turbo, Rapide, croquis) le négatif n'est pas lu : la phrase de cadrage du prompt
+# positif (camera_terms ci-dessus, reprise par le rédacteur de prompt) reste le levier principal.
+tight_shots:
+  shots: [plan moyen, plan rapproché, gros plan, très gros plan, insert]
+  negative: [full body, full-length, feet visible, standing pose facing viewer]
