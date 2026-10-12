@@ -243,6 +243,8 @@ function IndexStatus({
                 {a.collections.length ? a.collections.join(", ") : "aucune collection"}
                 {a.series_collections && " + collections de la série"}
                 {a.bible && " + bible"} · {formatTokens(a.budget_tokens)} · top {a.top_k}
+                {a.fragment_budget_tokens !== null &&
+                  ` pour le rédacteur de prompt · note des fragments : ${formatTokens(a.fragment_budget_tokens)}, top ${a.fragment_top_k}`}
                 {a.source === "profile" ? " · profil de l'agent" : " · presets/knowledge.yaml"}
               </p>
             </li>

@@ -42,8 +42,9 @@ export function displayValue(value: unknown, max = 120): string {
   else if (typeof value === "number") text = value.toLocaleString("fr-FR", { maximumFractionDigits: 4 });
   else if (Array.isArray(value)) text = value.map((v) => (typeof v === "string" ? v : JSON.stringify(v))).join(" · ");
   else if (typeof value === "object" && "collections" in value && "top_k" in value) {
-    const k = value as { collections: string[]; top_k: number };
-    text = `${k.collections.join(", ") || "aucune collection"} (top-k ${k.top_k})`;
+    const k = value as { collections: string[]; top_k: number; budget_tokens?: number | null };
+    const budget = typeof k.budget_tokens === "number" ? `, ${k.budget_tokens.toLocaleString("fr-FR")} jetons` : "";
+    text = `${k.collections.join(", ") || "aucune collection"} (top-k ${k.top_k}${budget})`;
   } else if (typeof value === "object") text = JSON.stringify(value);
   else text = String(value);
   text = text.replace(/\s+/g, " ").trim();

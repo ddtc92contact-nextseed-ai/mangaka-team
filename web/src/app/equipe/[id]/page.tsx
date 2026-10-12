@@ -154,6 +154,22 @@ function initialValues(settings: AgentSetting[]): FormValues {
   return Object.fromEntries(settings.map((s) => [s.key, toFormValue(s, s.value)]));
 }
 
+function knowledgeForm(k: Knowledge) {
+  return {
+    collections: k.collections.join(", "),
+    top_k: String(k.top_k),
+    budget_tokens: k.budget_tokens === null || k.budget_tokens === undefined ? "" : String(k.budget_tokens),
+  };
+}
+
+/** Budget saisi : vide → null (valeur livrée) ; un texte non numérique part tel quel, refusé en 422 lisible. */
+function budgetValue(raw: string): number | null {
+  const text = raw.trim().replace(/\s/g, "");
+  if (text === "") return null;
+  const n = Number(text);
+  return (Number.isFinite(n) ? n : text) as number;
+}
+
 function AgentForm({
   agent,
   projectId,
@@ -165,10 +181,7 @@ function AgentForm({
 }) {
   const initial = useMemo(() => initialValues(agent.settings), [agent.settings]);
   const [values, setValues] = useState<FormValues>(initial);
-  const [knowledge, setKnowledge] = useState({
-    collections: agent.knowledge.value.collections.join(", "),
-    top_k: String(agent.knowledge.value.top_k),
-  });
+  const [knowledge, setKnowledge] = useState(() => knowledgeForm(agent.knowledge.value));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [message, setMessage] = useState<{ tone: "info" | "error"; text: string } | null>(null);
   const [busy, setBusy] = useState<"save" | "trial" | "reset" | null>(null);
@@ -183,6 +196,7 @@ function AgentForm({
       .map((c) => c.trim())
       .filter(Boolean),
     top_k: Number(knowledge.top_k),
+    budget_tokens: budgetValue(knowledge.budget_tokens),
   };
   const knowledgeDirty = JSON.stringify(knowledgeValue) !== JSON.stringify(agent.knowledge.value);
 
@@ -305,10 +319,10 @@ function AgentForm({
               <Link href="/savoir-faire" className="text-rose-300 hover:underline">
                 bibliothèque de savoir-faire
               </Link>{" "}
-              lues par l&apos;agent (par nom, sans tenir compte de la casse) et nombre de passages. Valeur livrée :
-              presets/knowledge.yaml ; ce profil prime dessus.
+              lues par l&apos;agent (par nom, sans tenir compte de la casse), nombre de passages et budget de jetons.
+              Valeur livrée : presets/knowledge.yaml ; ce profil prime dessus.
             </p>
-            <div className="grid gap-5 md:grid-cols-[2fr_1fr]">
+            <div className="grid gap-5 md:grid-cols-[2fr_1fr_1fr]">
               <Field
                 label="Collections (noms, séparés par des virgules)"
                 htmlFor="knowledge-collections"
@@ -329,7 +343,27 @@ function AgentForm({
                   onChange={(e) => setKnowledge((k) => ({ ...k, top_k: e.target.value }))}
                 />
               </Field>
+              <Field
+                label="Budget (jetons)"
+                htmlFor="knowledge-budget"
+                error={errors["knowledge.budget_tokens"]}
+                help="equipe.budget"
+              >
+                <Input
+                  id="knowledge-budget"
+                  inputMode="numeric"
+                  value={knowledge.budget_tokens}
+                  onChange={(e) => setKnowledge((k) => ({ ...k, budget_tokens: e.target.value }))}
+                  placeholder="valeur livrée"
+                />
+              </Field>
             </div>
+            <p className="mt-3 text-xs text-zinc-500">
+              Plus de jetons : des fiches entières et plus de méthode appliquée, mais un appel plus long et plus
+              coûteux. Moins : seulement l&apos;essentiel.
+              {agent.id === "dessinateur" &&
+                " Pour le Dessinateur, c'est le savoir-faire du rédacteur de prompt (IA, ≈ 1 200 conseillé) ; la note courte du prompt par fragments, collée telle quelle dans le prompt d'image, reste fixée dans presets/knowledge.yaml."}
+            </p>
           </fieldset>
 
           {agent.secrets.length > 0 && (
@@ -379,10 +413,7 @@ function AgentForm({
               disabled={busy !== null || (!dirty && !knowledgeDirty)}
               onClick={() => {
                 setValues(initial);
-                setKnowledge({
-                  collections: agent.knowledge.value.collections.join(", "),
-                  top_k: String(agent.knowledge.value.top_k),
-                });
+                setKnowledge(knowledgeForm(agent.knowledge.value));
                 setErrors({});
               }}
             >

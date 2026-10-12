@@ -36,6 +36,7 @@ import { ChangeAngleBlock } from "./change-angle";
 import { CompositionBlock, LockBadge } from "./composition-block";
 import { CropBlock } from "./crop-editor";
 import { DialogBlock } from "./dialog-block";
+import { PanelKnowledgeBlock } from "./knowledge-block";
 import type { PanelView } from "./page-canvas";
 import { PanelQC } from "./panel-qc";
 import { RepairDialog, type RepairPreset } from "./repair-dialog";
@@ -478,6 +479,8 @@ export function PanelInspector({
               </div>
             )}
           </div>
+
+          <PanelKnowledgeBlock key={panelId} panelId={panelId} />
 
           <DialogBlock
             panelId={panelId}
