@@ -834,6 +834,8 @@ export interface PanelDetail {
   prompt_pending?: boolean;
   /** Rédaction en échec : prompt par fragments utilisé (message lisible). */
   prompt_warning?: string | null;
+  /** « Sources utilisées » du prompt actuel : savoir-faire reçu par le rédacteur, date de la rédaction. */
+  prompt_sources?: PromptSources | null;
   generation_preset: string | null;
   resolved_preset: string | null;
   target: { width: number; height: number } | null;
@@ -1937,6 +1939,25 @@ export interface KnowledgeDocument extends KnowledgeDocumentSummary {
 
 export type DocumentInput = { title: string; content: string; tags: string[] };
 
+/** Ce que le rédacteur de prompt a reçu pour le prompt actuel d'une case. */
+export interface PromptSources {
+  written_at: string;
+  query: string;
+  collections: string[];
+  passages: Passage[];
+  tokens: number;
+  budget_tokens: number;
+  bible: string;
+  /** Prompt retouché depuis (à la main ou par le dialogue). */
+  edited: boolean;
+}
+
+/** « Réécrire les prompts du chapitre » : cases concernées. */
+export interface RewritePrompts {
+  count: number;
+  ai_prompt: boolean;
+}
+
 export interface Passage {
   chunk_id: number;
   document_id: number;
@@ -2263,6 +2284,9 @@ export const api = {
   projectEstimate: (id: number) => request<Estimate>(`/projects/${id}/estimate`),
   generatePage: (id: number, body: { force?: boolean; count?: number } = {}) =>
     request<BatchGenerateResult>(`/pages/${id}/generate`, json("POST", body)),
+  rewritablePrompts: (id: number) => request<RewritePrompts>(`/chapters/${id}/prompts/rewrite`),
+  rewriteChapterPrompts: (id: number) =>
+    request<RewritePrompts>(`/chapters/${id}/prompts/rewrite`, { method: "POST" }),
   generateChapter: (id: number, body: { force?: boolean; count?: number } = {}) =>
     request<BatchGenerateResult>(`/chapters/${id}/generate`, json("POST", body)),
   chapterProductionPlan: (id: number) => request<ChapterProductionPlan>(`/chapters/${id}/produce`),

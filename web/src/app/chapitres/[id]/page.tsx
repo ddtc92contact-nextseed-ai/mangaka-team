@@ -7,6 +7,7 @@ import { ChapterForm } from "@/components/chapter-form";
 import { GenerateChapterButton } from "@/components/generate-chapter";
 import { InfoTip } from "@/components/info-tip";
 import { ProductionLink } from "@/components/production-link";
+import { useToast } from "@/components/toast";
 import { Alert, Button, ButtonLink, Card } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { useChapter } from "./chapter-context";
@@ -18,6 +19,43 @@ export default function ChapterInfoPage() {
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const confirm = useConfirm();
+  const toast = useToast();
+  const [rewriting, setRewriting] = useState(false);
+  const [rewritten, setRewritten] = useState<string | null>(null);
+
+  async function rewritePrompts() {
+    setError(null);
+    setRewritten(null);
+    setRewriting(true);
+    try {
+      const { count, ai_prompt } = await api.rewritablePrompts(chapter.id);
+      if (!ai_prompt) {
+        setRewritten("Cette série assemble ses prompts par fragments : rien à réécrire (active « Prompt rédigé par l'IA » dans la fiche série).");
+        return;
+      }
+      if (count === 0) {
+        setRewritten("Aucun prompt rédigé par l'IA à réécrire dans ce chapitre (les prompts retouchés à la main ne sont jamais touchés).");
+        return;
+      }
+      const plural = count > 1 ? "s" : "";
+      const ok = await confirm({
+        title: `Réécrire ${count} prompt${plural} ?`,
+        message: `${count} case${plural} du chapitre ${count > 1 ? "ont" : "a"} un prompt rédigé par l'IA. ${count > 1 ? "Ils seront rédigés" : "Il sera rédigé"} de nouveau, avec le savoir-faire et le cadrage actuels, à la prochaine génération de chaque case. Les prompts retouchés à la main ne bougent pas.`,
+        confirmLabel: `Réécrire ${count} prompt${plural}`,
+      });
+      if (!ok) return;
+      const res = await api.rewriteChapterPrompts(chapter.id);
+      const n = res.count;
+      setRewritten(
+        `${n} prompt${n > 1 ? "s" : ""} à réécrire : ${n > 1 ? "ils seront rédigés" : "il sera rédigé"} de nouveau à la prochaine génération de ${n > 1 ? "leur" : "sa"} case.`,
+      );
+      toast(`${n} prompt${n > 1 ? "s" : ""} à réécrire`);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setRewriting(false);
+    }
+  }
 
   async function remove() {
     const ok = await confirm({
@@ -88,6 +126,21 @@ export default function ChapterInfoPage() {
               <Alert tone="info">
                 {queued} <ProductionLink chapterId={chapter.id} />
               </Alert>
+            </div>
+          )}
+          {rewritten && (
+            <div className="mt-3">
+              <Alert tone="info">
+                <span data-testid="rewrite-prompts-result">{rewritten}</span>
+              </Alert>
+            </div>
+          )}
+          {chapter.panel_count > 0 && (
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <Button variant="secondary" onClick={rewritePrompts} disabled={rewriting} data-testid="rewrite-prompts">
+                {rewriting ? "Comptage…" : "Réécrire les prompts du chapitre"}
+              </Button>
+              <InfoTip help="chapitre_infos.rewrite_prompts" label="Réécrire les prompts du chapitre" />
             </div>
           )}
           {chapter.panel_count > 0 && (
