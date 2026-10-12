@@ -25,6 +25,7 @@ import { useEngineData } from "@/lib/hooks";
 import { cssClipPath, panelPolygon } from "@/lib/layout";
 import { buildPanelViews, runningLabel, type PanelView } from "../atelier/page-canvas";
 import { useChapter } from "../chapter-context";
+import { StepAlert } from "../step-alert";
 
 export default function SketchRoute() {
   return (
@@ -336,7 +337,7 @@ function SketchTriage() {
         )}
       </p>
 
-      {error && <Alert>{error}</Alert>}
+      {error && <StepAlert message={error} />}
       {notice && !error && (
         <Alert tone="info">
           {notice.text} {notice.queued && <ProductionLink chapterId={chapter.id} pageId={page.id} />}

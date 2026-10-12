@@ -1,8 +1,9 @@
 // Rangement des fichiers de la série (dossiers de ComfyUI, « Nettoyer les variantes non retenues »).
 import type { CleanupResult, LibraryResult } from "./api";
 
+export const CLEANUP_CONFIRM_TITLE = "Nettoyer les variantes non retenues ?";
+
 export const CLEANUP_CONFIRM =
-  "Nettoyer les variantes non retenues ?\n\n" +
   "Les variantes de « Créer des références » et les essais de la planche de style qui n'ont pas été gardés " +
   "sont effacés définitivement, et les fichiers de transit de la série dans ComfyUI sont vidés.\n\n" +
   "Restent : les références gardées, les versions des cases (retenues ou non) et leur historique, et la " +

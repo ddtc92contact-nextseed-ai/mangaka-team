@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { AnnotationBadge, AnnotationBar } from "@/components/annotation";
+import { useConfirm } from "@/components/confirm";
 import { Modal } from "@/components/modal";
 import { DetectionOverlay, QCBadge } from "@/components/qc";
 import { Alert, Button, Select } from "@/components/ui";
@@ -74,6 +75,7 @@ export function VersionsStrip({
   const [compareId, setCompareId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const confirm = useConfirm();
 
   const sorted = [...images].sort((a, b) => b.version - a.version);
   const viewed = images.find((i) => i.id === viewId) ?? null;
@@ -114,19 +116,21 @@ export function VersionsStrip({
       else if (action === "validate" && onValidateSketch) await onValidateSketch(img);
     });
 
-  const remove = (img: PanelImage) =>
-    run(async () => {
-      if (
-        !window.confirm(
-          `Supprimer la version ${img.version} (seed ${img.seed ?? "—"}) ? L'image est effacée définitivement.${
-            img.selected ? " C'est la version choisie : la case n'en aura plus." : ""
-          }`,
-        )
-      )
-        return;
+  async function remove(img: PanelImage) {
+    const ok = await confirm({
+      title: `Supprimer la version ${img.version} ?`,
+      message: `Version ${img.version} (seed ${img.seed ?? "—"}) : l'image est effacée définitivement.${
+        img.selected ? " C'est la version choisie : la case n'en aura plus." : ""
+      }`,
+      confirmLabel: "Supprimer la version",
+      danger: true,
+    });
+    if (!ok) return;
+    await run(async () => {
       await onDelete(img);
       close();
     });
+  }
 
   if (!images.length) {
     return <p className="text-xs text-zinc-500">Aucune version pour l&apos;instant : lance une génération.</p>;

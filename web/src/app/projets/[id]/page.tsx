@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useRef, useState } from "react";
+import { useConfirm } from "@/components/confirm";
 import { AgentOverrides } from "@/components/agent-overrides";
 import { ChapterList } from "@/components/chapter-list";
 import { LibraryList, LibraryTabs } from "@/components/library";
@@ -30,6 +31,7 @@ export default function ProjectPage() {
   // Style de mise en page changé : « Remettre en page les pages non générées » est proposé.
   const [relayoutOffer, setRelayoutOffer] = useState(false);
   const noticesRef = useRef<HTMLDivElement>(null);
+  const confirm = useConfirm();
 
   function onProject(p: Project, styleChanged: boolean) {
     project.setData(p);
@@ -41,7 +43,13 @@ export default function ProjectPage() {
 
   async function remove() {
     if (!project.data) return;
-    if (!window.confirm(`Supprimer « ${project.data.title} », ses chapitres et sa bibliothèque (personnages, objets, décors) ? Action définitive.`)) return;
+    const ok = await confirm({
+      title: `Supprimer « ${project.data.title} » ?`,
+      message: "La série, ses chapitres et sa bibliothèque (personnages, objets, décors) seront supprimés. Action définitive.",
+      confirmLabel: "Supprimer la série",
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await api.deleteProject(id);
       router.push("/projets");

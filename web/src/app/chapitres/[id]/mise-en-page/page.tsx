@@ -10,6 +10,7 @@ import { useEngineData } from "@/lib/hooks";
 import { INTENSITIES, RYTHMES } from "@/lib/layout";
 import { PAGE_KINDS } from "@/lib/script";
 import { useChapter } from "../chapter-context";
+import { StepAlert } from "../step-alert";
 
 export default function LayoutPreviewPage() {
   const { chapter } = useChapter();
@@ -176,7 +177,7 @@ export default function LayoutPreviewPage() {
             </ButtonLink>
           )}
         </div>
-        {error && <Alert>{error}</Alert>}
+        {error && <StepAlert message={error} />}
         {anyStale && !error && (
           <Alert tone="info">
             Certaines pages sont obsolètes (format, sens de lecture ou style de mise en page de la série modifié) : clique

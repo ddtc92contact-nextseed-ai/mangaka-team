@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { useConfirm } from "@/components/confirm";
 import { ChapterForm } from "@/components/chapter-form";
 import { GenerateChapterButton } from "@/components/generate-chapter";
 import { InfoTip } from "@/components/info-tip";
@@ -16,9 +17,16 @@ export default function ChapterInfoPage() {
   const router = useRouter();
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const confirm = useConfirm();
 
   async function remove() {
-    if (!window.confirm(`Supprimer le chapitre ${chapter.number} et toutes ses pages ? Action définitive.`)) return;
+    const ok = await confirm({
+      title: `Supprimer le chapitre ${chapter.number} ?`,
+      message: "Le chapitre et toutes ses pages seront supprimés. Action définitive.",
+      confirmLabel: "Supprimer le chapitre",
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await api.deleteChapter(chapter.id);
       router.push(`/projets/${chapter.project_id}`);
