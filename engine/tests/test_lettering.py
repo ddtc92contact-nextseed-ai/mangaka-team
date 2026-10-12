@@ -13,6 +13,7 @@ from mangaka_engine.pipeline.lettering import (
     BubbleSpec,
     Letterer,
     PanelSpec,
+    SfxSpec,
     miter_ratio,
     normalize_text,
     split_options,
@@ -323,3 +324,35 @@ def test_face_boxes_read_qc_detections() -> None:
     det = Detections(800, 600, faces=[QCBox(100, 50, 300, 250, 0.9, "face")], hands=[QCBox(1, 2, 30, 40, 0.8)])
     img = PanelImage(params={}, detections=det.as_dict() | {"provider": "mock"})
     assert face_boxes(img, (800, 600)) == [Box(100, 50, 300, 250)]
+
+
+def test_big_sfx_beyond_dialogue_cap_letters(presets: PresetRegistry) -> None:
+    """Régression #117 : une onomatopée > 72 pt (plafond du dialogue) se lettre, à la main comme en auto."""
+    sfx = presets.lettering.sfx.model_copy(update={"scale_max": 5.0})  # taille auto = max_size_pt (96)
+    letterer = Letterer(FontBook(presets), presets.lettering.model_copy(update={"sfx": sfx}), 300)
+    big = Box(100, 100, 2400, 3400)
+    panel = _panel(
+        [],
+        box=big,
+        zone=None,
+        sfx=[
+            SfxSpec(id=1, text="BOUM !", intensity="choc", size_pt=98.0, center=(1250, 1200)),
+            SfxSpec(id=2, text="CRAC", intensity="choc"),
+        ],
+    )
+    res = letterer.letter_page([panel], "ltr")
+    sizes = {s.id: s.size_pt for s in res.sfx}
+    assert sizes[1] == 98.0 and sizes[2] == sfx.max_size_pt == 96
+    assert not [w for w in res.warnings if w.code == "sfx_failed"]
+    assert all(s.style.size_pt > 72 for s in res.sfx)
+
+
+def test_an_element_that_cannot_be_lettered_is_a_warning_not_a_crash(letterer: Letterer) -> None:
+    bubbles = [*_bubbles(2), BubbleSpec(id=9, kind="inconnu", text="Fantôme", order=2)]
+    panel = _panel(bubbles, sfx=[SfxSpec(id=20, text="BAM", size_pt=500.0), SfxSpec(id=21, text="PAF")])
+    res = letterer.letter_page([panel], "ltr")
+    assert [b.id for b in res.bubbles] == [1, 2]
+    assert [s.id for s in res.sfx] == [21]
+    failed = {w.code: w for w in res.warnings if w.code in ("bubble_failed", "sfx_failed")}
+    assert failed["bubble_failed"].bubble_id == 9 and "impossible à lettrer" in failed["bubble_failed"].message
+    assert failed["sfx_failed"].bubble_id == 20 and "« BAM »" in failed["sfx_failed"].message

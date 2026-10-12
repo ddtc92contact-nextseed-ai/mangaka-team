@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import re
 import unicodedata
 import zipfile
@@ -54,6 +55,8 @@ from .layout import clamp_to_live, live_rect, page_frame
 from .lettering import Box, BubbleSpec, Letterer, LetteringError, LetteringWarning, PanelSpec, SfxSpec
 from .pages import is_stale
 from .sketch import latest_sketch, validated_sketch
+
+log = logging.getLogger("mangaka_engine")
 
 STEP = "export"
 
@@ -563,6 +566,13 @@ def low_dpi_warnings(presets: PresetRegistry, files: FileStore, page: Page) -> l
     return out
 
 
+def page_error(exc: Exception) -> str:
+    """Cause lisible (en français) d'un rendu de page impossible ; le détail technique va au journal."""
+    if isinstance(exc, LetteringError | PresetError):
+        return str(exc)
+    return f"erreur interne du moteur ({exc.__class__.__name__}) — détail dans le journal du moteur"
+
+
 def export_job(
     db: Database,
     presets: PresetRegistry,
@@ -592,20 +602,36 @@ def export_job(
             target.parent.mkdir(parents=True, exist_ok=True)
             buf = io.BytesIO()
             warnings: list[dict[str, Any]] = []
+            failed: list[str] = []
             with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
                 for i, page in enumerate(pages):
                     report(round(100 * i / len(pages)), f"Page {page.number} ({i + 1}/{len(pages)})…")
                     try:
                         art = page_inputs(presets, files, page, fonts).art
-                    except PresetError as exc:
-                        raise LetteringError(str(exc)) from None
-                    rendered = render_art(presets, fonts, art, bleed=bleed, crop_marks=crop_marks)
+                        rendered = render_art(presets, fonts, art, bleed=bleed, crop_marks=crop_marks)
+                    except Exception as exc:  # noqa: BLE001 — une page en échec ne bloque pas les autres
+                        reason = page_error(exc)
+                        if not isinstance(exc, LetteringError | PresetError):
+                            log.exception("export : page %s impossible à rendre", page.number, exc_info=exc)
+                        failed.append(f"page {page.number} : {reason}")
+                        warnings.append(
+                            {
+                                "code": "page_failed",
+                                "message": f"Page absente de l'export : {reason}",
+                                "panel_id": None,
+                                "bubble_id": None,
+                                "page_number": page.number,
+                            }
+                        )
+                        continue
                     warnings += low_dpi_warnings(presets, files, page)
                     stem = page_file_stem(page.number)
                     zf.writestr(f"{stem}.png", rendered.png)
                     zf.writestr(f"{stem}.svg", rendered.svg)
                     store_render(files, page, rendered, bleed=bleed, crop_marks=crop_marks)
                     warnings += [{**w.to_json(), "page_number": page.number} for w in rendered.warnings]
+            if len(failed) == len(pages):
+                raise LetteringError("aucune page n'a pu être rendue — " + " ; ".join(failed))
             target.write_bytes(buf.getvalue())
             job = session.get(Job, job_id)
             params = dict(job.params or {}) if job else {}
@@ -615,8 +641,9 @@ def export_job(
             project_id = chapter.project_id
         if on_done is not None:
             on_done(project_id)
-        n = len(pages)
+        n = len(pages) - len(failed)
         tail = f" · {len(warnings)} avertissement{'s' if len(warnings) > 1 else ''}" if warnings else ""
-        return f"{n} page{'s' if n > 1 else ''} exportée{'s' if n > 1 else ''}{tail}"
+        missing = f" · {len(failed)} page{'s' if len(failed) > 1 else ''} en échec" if failed else ""
+        return f"{n} page{'s' if n > 1 else ''} exportée{'s' if n > 1 else ''}{missing}{tail}"
 
     return run
