@@ -37,10 +37,18 @@ agents:
     series_collections: true
     budget_tokens: 1500
     top_k: 4
+  # Deux budgets coupés dans la même recherche : le rédacteur de prompt (LLM, rédaction automatique et
+  # « Dialogue ») lit les passages entiers avec leur source ; le prompt par fragments (repli quand le
+  # rédacteur est désactivé ou en panne, `$savoir_faire` d'image_prompt.yaml) garde une note courte en
+  # une ligne, pour ne jamais coller de théorie en français dans le prompt du modèle d'image.
+  # Le budget et le top-k réglés dans « L'équipe » (Dessinateur) sont ceux du rédacteur.
   image_prompt:
     label: Prompts image (étape 3)
     collections: [Design de personnages, Mise en page]
-    series_collections: false
-    budget_tokens: 160    # le prompt d'une case reste court
+    series_collections: true
+    budget_tokens: 160            # fragments : note courte du prompt d'une case
     top_k: 2
-    bible_max_tokens: 120 # notes de la bible sur les personnages de la case
+    bible_max_tokens: 120         # fragments : notes de la bible sur les personnages de la case
+    writer_budget_tokens: 1200    # rédacteur : passages entiers, avec leur source
+    writer_top_k: 5
+    writer_bible_max_tokens: 400  # rédacteur : notes de la bible sur les personnages de la case

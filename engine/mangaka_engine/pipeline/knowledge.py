@@ -389,10 +389,24 @@ def select_passages(
     sizes = collection_tokens(session, ids)
     whole = [cid for cid in ids if 0 < sizes[cid] <= settings.small_collection_tokens]
     ranking = rank(session, query, ids, embedder, settings)
+    chosen, used = choose_passages(ranking.passages, whole, settings, top_k=top_k, budget_tokens=budget_tokens)
+    return Selection(chosen, used, ranking.passages, whole, ranking.warning)
+
+
+def choose_passages(
+    ranked: Sequence[Passage],
+    whole: Sequence[int],
+    settings: KnowledgeSettings,
+    *,
+    top_k: int,
+    budget_tokens: int,
+) -> tuple[list[Passage], int]:
+    """Passages retenus d'un classement déjà fait (une seule recherche pour plusieurs budgets) :
+    les petites collections `whole` entières d'abord, puis les `top_k` meilleurs, dans le budget."""
     chosen: list[Passage] = []
     used = 0
     by_doc_order = sorted(
-        (p for p in ranking.passages if p.collection_id in whole),
+        (p for p in ranked if p.collection_id in whole),
         key=lambda p: (whole.index(p.collection_id), p.chunk_id),
     )
     for p in by_doc_order:
@@ -401,7 +415,7 @@ def select_passages(
             chosen.append(p)
             used += p.tokens
     retrieved = 0
-    for p in ranking.passages:
+    for p in ranked:
         if p.collection_id in whole:
             continue
         if retrieved >= top_k or (p.score or 0.0) < settings.retrieval.min_score:
@@ -411,7 +425,7 @@ def select_passages(
         chosen.append(p)
         used += p.tokens
         retrieved += 1
-    return Selection(chosen, used, ranking.passages, whole, ranking.warning)
+    return chosen, used
 
 
 # --- collections d'un agent ---------------------------------------------------------
@@ -420,6 +434,7 @@ def select_passages(
 # Le troisième argument est la série (profil global + surcharge de la série).
 ProfileLookup = Callable[[Session, str, int | None], Sequence[str] | None]
 TopKLookup = Callable[[Session, str, int | None], int | None]
+BudgetLookup = Callable[[Session, str, int | None], int | None]
 
 
 def agent_collections(
@@ -609,6 +624,40 @@ def compact_passages(passages: Sequence[Passage], *, max_tokens: int) -> str:
 
 
 @dataclass
+class PanelKnowledge:
+    """Savoir-faire d'une case, en deux budgets coupés dans le même classement :
+
+    - le rédacteur de prompt (LLM, rédaction automatique et « Dialogue ») reçoit les passages entiers avec
+      leur source (`writer_*`, réglés dans « L'équipe ») et des notes de bible plus longues ;
+    - le prompt par fragments (`$savoir_faire` d'image_prompt.yaml, repli sans rédacteur) garde une note
+      courte en une ligne (`fragment_*`), pour ne jamais coller de théorie dans le prompt du modèle d'image.
+    """
+
+    query: str = ""
+    collections: list[str] = field(default_factory=list)
+    writer_passages: list[Passage] = field(default_factory=list)
+    writer_tokens: int = 0
+    writer_budget: int = 0
+    writer_top_k: int = 0
+    writer_bible: str = ""
+    fragment_passages: list[Passage] = field(default_factory=list)
+    fragment_tokens: int = 0
+    fragment_budget: int = 0
+    fragment_top_k: int = 0
+    fragment_note: str = ""
+    fragment_bible: str = ""
+    warning: str | None = None
+
+    def writer(self) -> tuple[str, str]:
+        """($savoir_faire, $bible) du rédacteur de prompt."""
+        return format_passages(self.writer_passages), self.writer_bible
+
+    def fragments(self) -> tuple[str, str]:
+        """($savoir_faire, $bible) du prompt par fragments."""
+        return self.fragment_note, self.fragment_bible
+
+
+@dataclass
 class KnowledgeBase:
     """Ce dont les agents ont besoin pour lire le savoir-faire : réglages, embeddings, profils."""
 
@@ -616,13 +665,26 @@ class KnowledgeBase:
     embedder: EmbeddingProvider | None
     profile_lookup: ProfileLookup | None = None
     profile_top_k: TopKLookup | None = None
+    profile_budget: BudgetLookup | None = None
+
+    def top_k(self, session: Session, role: str, project_id: int | None) -> int:
+        """Top-k de l'agent : profil (« L'équipe ») > knowledge.yaml (celui du rédacteur pour `image_prompt`)."""
+        agent = self.settings.agent(role)
+        profile = self.profile_top_k(session, role, project_id) if self.profile_top_k else None
+        return profile or agent.main_top_k or self.settings.retrieval.top_k
+
+    def budget_tokens(self, session: Session, role: str, project_id: int | None) -> int:
+        """Budget de jetons de l'agent : profil (« L'équipe ») > knowledge.yaml (celui du rédacteur pour
+        `image_prompt`)."""
+        agent = self.settings.agent(role)
+        profile = self.profile_budget(session, role, project_id) if self.profile_budget else None
+        return profile if profile is not None else agent.main_budget_tokens
 
     def for_agent(
         self, session: Session, role: str, project_id: int | None, query: str, *, include_bible: bool = True
     ) -> AgentKnowledge:
         agent = self.settings.agent(role)
         profile = self.profile_lookup(session, role, project_id) if self.profile_lookup else None
-        profile_top_k = self.profile_top_k(session, role, project_id) if self.profile_top_k else None
         collections = agent_collections(session, agent, project_id, profile=profile)
         selection = select_passages(
             session,
@@ -630,8 +692,8 @@ class KnowledgeBase:
             [c.id for c in collections],
             self.embedder,
             self.settings,
-            top_k=profile_top_k or agent.top_k or self.settings.retrieval.top_k,
-            budget_tokens=agent.budget_tokens,
+            top_k=self.top_k(session, role, project_id),
+            budget_tokens=self.budget_tokens(session, role, project_id),
         )
         bible = None
         if include_bible and agent.bible and project_id is not None:
@@ -647,19 +709,49 @@ class KnowledgeBase:
             warning=selection.warning,
         )
 
-    def for_panel(self, session: Session, project_id: int, query: str, character_ids: Sequence[int]) -> tuple[str, str]:
-        """($savoir_faire, $bible) du prompt image d'une case : passages en une ligne et notes de la bible
-        sur ses personnages, chacun dans le budget de l'agent « image_prompt »."""
+    def for_panel(self, session: Session, project_id: int, query: str, character_ids: Sequence[int]) -> PanelKnowledge:
+        """Savoir-faire et notes de la bible d'une case (agent « image_prompt ») : une seule recherche, puis
+        les passages du rédacteur et la note courte des fragments, chacun dans son budget."""
         agent = self.settings.agent(IMAGE_AGENT)
-        notes = ""
-        if agent.budget_tokens > 0:
-            found = self.for_agent(session, IMAGE_AGENT, project_id, query, include_bible=False)
-            notes = compact_passages(found.passages, max_tokens=agent.budget_tokens)
-        bible = ""
+        out = PanelKnowledge(
+            query=query,
+            writer_budget=self.budget_tokens(session, IMAGE_AGENT, project_id),
+            writer_top_k=self.top_k(session, IMAGE_AGENT, project_id),
+            fragment_budget=agent.budget_tokens,
+            fragment_top_k=agent.top_k or self.settings.retrieval.top_k,
+        )
+        if out.writer_budget > 0 or out.fragment_budget > 0:
+            profile = self.profile_lookup(session, IMAGE_AGENT, project_id) if self.profile_lookup else None
+            collections = agent_collections(session, agent, project_id, profile=profile)
+            out.collections = [c.name for c in collections]
+            # Le classement est fait une fois ; chaque budget y choisit ses passages.
+            ranking = select_passages(
+                session, query, [c.id for c in collections], self.embedder, self.settings, top_k=0, budget_tokens=0
+            )
+            out.warning = ranking.warning
+            if out.writer_budget > 0:
+                out.writer_passages, out.writer_tokens = choose_passages(
+                    ranking.ranked,
+                    ranking.whole_collections,
+                    self.settings,
+                    top_k=out.writer_top_k,
+                    budget_tokens=out.writer_budget,
+                )
+            if out.fragment_budget > 0:
+                out.fragment_passages, out.fragment_tokens = choose_passages(
+                    ranking.ranked,
+                    ranking.whole_collections,
+                    self.settings,
+                    top_k=out.fragment_top_k,
+                    budget_tokens=out.fragment_budget,
+                )
+                out.fragment_note = compact_passages(out.fragment_passages, max_tokens=out.fragment_budget)
         if agent.bible:
             limit = agent.bible_max_tokens if agent.bible_max_tokens is not None else self.settings.bible_max_tokens
-            bible = bible_character_notes(session, project_id, character_ids, max_tokens=limit)
-        return notes, bible
+            writer_limit = agent.writer_bible_max_tokens if agent.writer_bible_max_tokens is not None else limit
+            out.fragment_bible = bible_character_notes(session, project_id, character_ids, max_tokens=limit)
+            out.writer_bible = bible_character_notes(session, project_id, character_ids, max_tokens=writer_limit)
+        return out
 
 
 IMAGE_AGENT = "image_prompt"  # rôle du constructeur de prompt image dans presets/knowledge.yaml

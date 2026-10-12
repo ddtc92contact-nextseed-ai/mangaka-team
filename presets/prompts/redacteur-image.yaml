@@ -26,7 +26,9 @@
 #   $references      (images envoyées et leur rôle : « - <image1> is the identity reference for Aiko… »)
 #   $image_tags      (« <image1>, <image2> » : les seules images à citer)
 #   $style           (mots-clés de style de la série : à recopier tels quels)
-#   $bible $savoir_faire
+#   $bible           (notes de la bible sur les personnages de la case ; writer_bible_max_tokens de knowledge.yaml)
+#   $savoir_faire    (passages entiers du savoir-faire « image_prompt », numérotés avec leur source ;
+#                     writer_budget_tokens / writer_top_k de knowledge.yaml, réglables dans « L'équipe »)
 #   $context_json    (le même contexte, en JSON)
 # Gabarit de relance après une réponse invalide : $error (erreurs de validation).
 id: redacteur-image

@@ -298,6 +298,10 @@ export const HELP = {
     "Les collections de savoir-faire que l'agent lit avant de travailler, par leur nom. Laisse vide pour qu'il n'en lise aucune.",
   "equipe.top_k":
     "Nombre maximal de passages de savoir-faire joints à chaque appel. Plus il y en a, plus l'agent a de contexte, mais plus l'appel est long.",
+  "equipe.budget":
+    "Jetons de savoir-faire joints à chaque appel (≈ 4 caractères par jeton) : plus, ce sont des fiches entières et plus de méthode appliquée, mais un appel plus long ; moins, seulement l'essentiel. Pour le Dessinateur, c'est ce que lit le rédacteur de prompt (≈ 1 200 conseillé), la note courte des fragments restant fixée dans presets/knowledge.yaml ; vide : la valeur livrée.",
+  "atelier.knowledge":
+    "Les fiches de savoir-faire retrouvées pour cette case (plan, angle, description, personnages…) : passages entiers envoyés au rédacteur de prompt (IA), et note courte en une ligne pour le prompt par fragments.",
   "equipe.trial":
     "Fait tourner l'agent sur un exemple avec les réglages du formulaire, même non enregistrés, et montre ce qu'il reçoit et ce qu'il produit. Rien n'est modifié dans tes séries.",
   "equipe.versions":

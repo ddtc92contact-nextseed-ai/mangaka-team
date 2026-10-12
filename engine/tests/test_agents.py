@@ -76,7 +76,11 @@ def test_agent_detail_shows_settings_with_their_preset_source(c: TestClient) -> 
     assert temp["value"] == 0.7 and temp["origin"] == "preset" and temp["source"].startswith("presets/prompts/script")
     system = _setting(d, "system")
     assert system["type"] == "prompt" and "series_title" in system["variables"]
-    shipped = {"collections": ["Écriture de scénario", "Rythme et découpage", "Humour jeunesse"], "top_k": 6}
+    shipped = {
+        "collections": ["Écriture de scénario", "Rythme et découpage", "Humour jeunesse"],
+        "top_k": 6,
+        "budget_tokens": 2500,
+    }
     assert d["knowledge"] == {"value": shipped, "origin": "preset", "inherited": shipped}  # knowledge.yaml
     assert d["secrets"] == [{"env": "DEEPSEEK_API_KEY", "label": "Clé d'API DeepSeek", "present": True}]
     templates = _setting(c.get("/agents/metteur-en-page").json(), "templates")
@@ -191,7 +195,11 @@ def test_series_reset_returns_to_the_global_profile(c: TestClient) -> None:
 def test_knowledge_is_stored_even_without_a_knowledge_base(c: TestClient) -> None:
     r = _save(c, "dessinateur", {}, knowledge={"collections": ["style-shonen", "anatomie"], "top_k": 8})
     assert r.status_code == 200, r.text
-    assert r.json()["knowledge"]["value"] == {"collections": ["style-shonen", "anatomie"], "top_k": 8}
+    assert r.json()["knowledge"]["value"] == {
+        "collections": ["style-shonen", "anatomie"],
+        "top_k": 8,
+        "budget_tokens": 1200,
+    }
     bad = _save(c, "dessinateur", {}, knowledge={"collections": [], "top_k": 0})
     assert bad.status_code == 422 and bad.json()["errors"][0]["field"] == "knowledge.top_k"
 

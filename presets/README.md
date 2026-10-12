@@ -1538,12 +1538,32 @@ une série, documents `.md` / `.txt` / `.pdf` (texte extrait par pypdf) ou texte
   BM25 normalisé (le meilleur passage par mots-clés vaut 1), `top_k` passages au plus, dans le
   `budget_tokens` de l'agent. Une collection de moins de `small_collection_tokens` jetons est
   injectée **entière**, sans recherche.
-- **Agents** (`agents`) : `script` (étape 1, variable `$savoir_faire` de `prompts/script.yaml`) et
-  `image_prompt` (étape 3, `$savoir_faire` / `$bible` de `image_prompt.yaml`). Collections par nom
-  (casse ignorée) ; `series_collections: true` ajoute celles de la série du chapitre — jamais
-  celles d'une autre série. Le champ « Savoir-faire » d'un profil d'agent (écran « L'équipe »,
-  `knowledge_role` de `agents/*.yaml`) prime sur cette liste et sur `top_k`, surcharge de série comprise
-  (`KnowledgeBase.profile_lookup`).
+- **Agents** (`agents`) : `script` (étape 1, variable `$savoir_faire` de `prompts/script.yaml`),
+  `art_direction` (`prompts/direction-artistique.yaml`) et `image_prompt` (étape 3, voir ci-dessous).
+  Collections par nom (casse ignorée) ; `series_collections: true` ajoute celles de la série du
+  chapitre — jamais celles d'une autre série. Le champ « Savoir-faire » d'un profil d'agent (écran
+  « L'équipe », `knowledge_role` de `agents/*.yaml`) prime sur cette liste, sur `top_k` et sur le
+  budget de jetons, surcharge de série comprise (`KnowledgeBase.profile_lookup` / `profile_top_k` /
+  `profile_budget`). Budget valide : 0 à 16 000 jetons (sinon 422 en français) ; champ vidé = valeur
+  de ce fichier.
+- **Deux budgets pour une case** (`image_prompt`). Une seule recherche par case, puis deux sélections
+  dans le même classement :
+  - **rédacteur de prompt** (LLM : rédaction automatique et « Dialogue », `$savoir_faire` / `$bible`
+    de `prompts/redacteur-image*.yaml`) : `writer_budget_tokens` (1 200), `writer_top_k` (5),
+    `writer_bible_max_tokens` (400). Les passages arrivent **entiers, numérotés avec leur source**
+    (« [1] « Titre » — section (collection) », comme pour le scénariste et le DA) : un LLM qui écrit
+    un paragraphe de 180 à 320 mots lit sans peine 1 à 2 k jetons de fiches de cadrage, d'angles, de
+    gestuelle… C'est ce budget (et ce top-k) que règle « L'équipe » › Dessinateur ;
+  - **prompt par fragments** (`$savoir_faire` / `$bible` d'`image_prompt.yaml`, et repli quand le
+    rédacteur est désactivé ou en panne) : `budget_tokens` (160), `top_k` (2), `bible_max_tokens`
+    (120), comme avant — une **note courte en une ligne**, car ce texte est collé tel quel dans le
+    prompt du modèle d'image : de la théorie en français y nuirait.
+
+  La requête d'une case reprend le plan du scénario, la direction artistique appliquée (plan, angle,
+  ambiance, action : un « gros plan » en « contre-plongée » retrouve les fiches qui en parlent), la
+  description, les personnages, le décor et les objets. `series_collections: true` : les collections
+  rattachées à la série de la case s'ajoutent. L'atelier (« Savoir-faire de la case », sous le prompt
+  final ; `GET /panels/{id}/knowledge`) montre ce que reçoit chacun, avec les jetons.
 - **Bible de série** (page de la série) : univers, ton, règles, gags et motifs, notes par fiche
   personnage, et le résumé de chaque chapitre passé à « Prêt » ou « Publié ». Toujours injectée
   dans les agents de sa série (`$bible`), coupée à `bible_max_tokens` en retirant d'abord les plus

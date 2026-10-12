@@ -93,7 +93,7 @@ from .art_direction import DIALOG_FIELDS, applied_panel_direction
 from .camera import CameraError, angle_prompt, camera_plan, direction_target, merge_loras, ordered_views
 from .inpaint import png_bytes, recompose, soften_mask
 from .jobs import JobReporter
-from .knowledge import KnowledgeBase
+from .knowledge import KnowledgeBase, PanelKnowledge
 from .layout import target_size
 from .library import panel_assets, style_for
 from .names import CharacterMatcher
@@ -221,20 +221,35 @@ def _prompt_entry(entry: LibraryEntry) -> PromptCharacter:
     return PromptCharacter(entry.name, entry.visual_description, (*(entry.prompt_keywords or []), *triggers))
 
 
+def panel_query(session: Session, panel: Panel, characters: Sequence[Character]) -> str:
+    """Requête du savoir-faire pour une case : plan du scénario, direction artistique appliquée (plan, angle,
+    ambiance, action — un « gros plan » en « contre-plongée » retrouve les fiches qui en parlent),
+    description, personnages, décor et objets."""
+    da = applied_panel_direction(panel)
+    decor, objects = panel_assets(session, panel, panel.page.chapter.project_id)
+    parts = [
+        panel.shot_type or "",
+        *(str(da.get(k) or "") for k in ("plan", "angle", "ambiance", "action")),
+        panel.description or "",
+        *(c.name for c in characters),
+        *(a.name for a in ([decor] if decor else []) + objects),
+    ]
+    return " ".join(p.strip() for p in parts if p and p.strip())
+
+
 def panel_knowledge(
     session: Session, knowledge: KnowledgeBase | None, panel: Panel, characters: Sequence[Character]
-) -> tuple[str, str]:
-    """($savoir_faire, $bible) du prompt image ; une panne du savoir-faire ne bloque jamais une génération."""
+) -> PanelKnowledge:
+    """Savoir-faire et bible de la case (rédacteur et fragments) ; une panne du savoir-faire ne bloque jamais
+    une génération."""
     if knowledge is None:
-        return "", ""
-    query = " ".join(p for p in (panel.shot_type or "", panel.description, *(c.name for c in characters)) if p)
-    decor, objects = panel_assets(session, panel, panel.page.chapter.project_id)
-    query = " ".join([query, *(a.name for a in ([decor] if decor else []) + objects)])
+        return PanelKnowledge()
+    query = panel_query(session, panel, characters)
     try:
         return knowledge.for_panel(session, panel.page.chapter.project_id, query, [c.id for c in characters])
     except Exception:  # noqa: BLE001 — le prompt se construit sans notes plutôt que d'échouer
         log.warning("savoir-faire indisponible pour le prompt de la case %s", panel.id, exc_info=True)
-        return "", ""
+        return PanelKnowledge(query=query)
 
 
 def split_trigger_words(raw: str | None) -> tuple[str, ...]:
@@ -579,7 +594,7 @@ def update_panel_prompt(
     if not reset and text and panel.prompt_source == "ia" and ai_prompt_enabled(panel):
         return panel.final_prompt or ""
     cast = panel_cast(session, panel)
-    notes = panel_knowledge(session, knowledge, panel, cast.characters)
+    notes = panel_knowledge(session, knowledge, panel, cast.characters).fragments()
     panel.final_prompt = build_panel_prompt(presets, panel, cast.characters, notes, cast.decor, cast.objects)
     panel.final_prompt_manual = False
     panel.prompt_source = "fragments"
@@ -634,7 +649,7 @@ def panel_brief(
     project = panel.page.chapter.project
     present = {c.id for c in cast.characters}
     series = list(session.scalars(select(Character).where(Character.project_id == project.id).order_by(Character.id)))
-    savoir_faire, bible = panel_knowledge(session, knowledge, panel, cast.characters)
+    savoir_faire, bible = panel_knowledge(session, knowledge, panel, cast.characters).writer()
     da = applied_panel_direction(panel)
     return PromptBrief.build(
         description=panel.description,

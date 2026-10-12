@@ -1470,6 +1470,30 @@ class PassageOut(BaseModel):
     selected: bool = False
 
 
+class PanelKnowledgePart(BaseModel):
+    """Savoir-faire d'une case pour un destinataire (rédacteur de prompt ou note des fragments)."""
+
+    passages: list[PassageOut]
+    tokens: int  # jetons des passages retenus
+    budget_tokens: int
+    top_k: int
+    text: str  # ce que reçoit le destinataire ($savoir_faire)
+    text_tokens: int
+    bible: str  # notes de la bible sur les personnages de la case ($bible)
+    bible_tokens: int
+
+
+class PanelKnowledgeOut(BaseModel):
+    """Ce que lit le Dessinateur pour une case : une recherche, deux budgets."""
+
+    panel_id: int
+    query: str
+    collections: list[str]
+    writer: PanelKnowledgePart
+    fragments: PanelKnowledgePart
+    warning: str | None = None
+
+
 class BibleSummary(BaseModel):
     text: str
     tokens: int
@@ -1551,9 +1575,12 @@ class KnowledgeAgentOut(BaseModel):
     collections: list[str]  # noms demandés (profil ou knowledge.yaml)
     source: Literal["profile", "preset"]
     series_collections: bool
-    budget_tokens: int
+    budget_tokens: int  # pour `image_prompt` : celui du rédacteur de prompt
     top_k: int
     bible: bool
+    # `image_prompt` seulement : note courte du prompt par fragments (None : pas de rédacteur à part).
+    fragment_budget_tokens: int | None = None
+    fragment_top_k: int | None = None
 
 
 class KnowledgeStatusOut(BaseModel):

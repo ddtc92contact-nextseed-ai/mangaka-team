@@ -1684,6 +1684,8 @@ export interface AgentSetting {
 export interface Knowledge {
   collections: string[];
   top_k: number;
+  /** Budget de jetons (Dessinateur : celui du rédacteur de prompt) ; null : celui de knowledge.yaml. */
+  budget_tokens: number | null;
 }
 
 export interface AgentDetail extends AgentSummary {
@@ -2026,7 +2028,31 @@ export interface KnowledgeStatus {
     budget_tokens: number;
     top_k: number;
     bible: boolean;
+    /** Prompts image : note courte du prompt par fragments (null : pas de rédacteur à part). */
+    fragment_budget_tokens: number | null;
+    fragment_top_k: number | null;
   }[];
+}
+
+/** Savoir-faire d'une case pour un destinataire (rédacteur de prompt ou note des fragments). */
+export interface PanelKnowledgePart {
+  passages: Passage[];
+  tokens: number;
+  budget_tokens: number;
+  top_k: number;
+  text: string;
+  text_tokens: number;
+  bible: string;
+  bible_tokens: number;
+}
+
+export interface PanelKnowledge {
+  panel_id: number;
+  query: string;
+  collections: string[];
+  writer: PanelKnowledgePart;
+  fragments: PanelKnowledgePart;
+  warning: string | null;
 }
 
 export const api = {
@@ -2155,6 +2181,7 @@ export const api = {
     request<LoraCatalog>(`/comfyui/loras${refresh ? "?refresh=true" : ""}`, { signal: AbortSignal.timeout(15_000) }),
   startComfyTrial: (preset: string) => request<Job>("/comfyui/trial", json("POST", { preset })),
   getPanel: (id: number) => request<PanelDetail>(`/panels/${id}`),
+  panelKnowledge: (id: number) => request<PanelKnowledge>(`/panels/${id}/knowledge`),
   updatePanel: (
     id: number,
     body: {
