@@ -275,7 +275,8 @@ def _routes(kind: str) -> APIRouter:
         ctx: AppContext = Depends(get_ctx),
     ) -> list[JobOut]:
         """« Nouvel angle » : une nouvelle vue de la fiche sous l'angle choisi (LoRA Multiple-Angles, palier Qualité),
-        rangée parmi ses images de référence, étiquetée par son angle ; progression : /jobs/{id}/events."""
+        candidate de l'historique : « Valider » (`/keep`) la range parmi ses images de référence, étiquetée par son
+        angle ; progression : /jobs/{id}/events."""
         _require_comfyui(ctx)
         entry = _entry_or_404(session, kind, entry_id)
         start = None
