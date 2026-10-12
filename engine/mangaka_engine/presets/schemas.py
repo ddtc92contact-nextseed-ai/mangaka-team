@@ -1090,6 +1090,18 @@ class TextStyle(_Strict):
         return self
 
 
+# Plus grande onomatopée possible : borne de `SfxSettings.max_size_pt` et de la taille saisie à la main.
+SFX_MAX_SIZE_PT = 300
+
+
+class SfxTextStyle(TextStyle):
+    """Style d'une onomatopée : même modèle que le texte des bulles, mais bien plus grand
+    (le plafond de 72 pt du dialogue ne vaut pas pour un « BOUM » pleine case)."""
+
+    size_pt: float = Field(gt=0, le=SFX_MAX_SIZE_PT)
+    min_size_pt: float = Field(gt=0, le=SFX_MAX_SIZE_PT)
+
+
 class Hyphenation(_Strict):
     language: str = "fr"
     min_word_chars: int = Field(default=6, ge=2, description="Mots plus courts : jamais coupés")
@@ -1198,7 +1210,7 @@ class SfxSettings(_Strict):
     scale_min: float = Field(default=0.6, gt=0, le=5, description="Facteur minimal (petite case)")
     scale_max: float = Field(default=1.5, gt=0, le=5, description="Facteur maximal (grande case)")
     min_size_pt: float = Field(default=12, gt=0, le=200)
-    max_size_pt: float = Field(default=96, gt=0, le=300)
+    max_size_pt: float = Field(default=96, gt=0, le=SFX_MAX_SIZE_PT)
     max_width: float = Field(default=0.9, gt=0, le=2, description="Largeur maximale / largeur de la case")
     fill: str = Field(default="#ffffff", pattern=HEX_COLOR)
     outline: str = Field(default="#111111", pattern=HEX_COLOR)

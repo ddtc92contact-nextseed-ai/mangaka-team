@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import FileResponse
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -23,6 +24,7 @@ from ..pipeline.render import (
 from ..pipeline.render import export_job as make_export_job
 from ..presets import PresetError, PresetRegistry
 from ..store.models import Bubble, BubbleKind, Job, JobStatus, Page, Panel
+from ..validation import translate_error
 from .chapters import get_chapter_or_404, get_page_or_404
 from .deps import AppContext, get_ctx, get_session
 from .errors import FieldError
@@ -48,6 +50,12 @@ def _fonts(ctx: AppContext, presets: PresetRegistry | None = None) -> FontBook:
         raise HTTPException(status_code=503, detail=str(exc)) from None
 
 
+def _invalid_data(exc: ValidationError) -> str:
+    """Donnée enregistrée hors des bornes (jamais une stack trace ni un message anglais côté client)."""
+    details = "; ".join(f"{'.'.join(str(p) for p in e.get('loc', ()))} : {translate_error(e)}" for e in exc.errors())
+    return f"données de lettrage invalides ({details})"
+
+
 def _lettering(ctx: AppContext, page: Page) -> dict[str, Any]:
     presets = _presets(ctx, page)
     fonts = _fonts(ctx, presets)
@@ -55,6 +63,8 @@ def _lettering(ctx: AppContext, page: Page) -> dict[str, Any]:
         return lettering_json(page, page_inputs(presets, ctx.files, page, fonts, preview=True), fonts, presets)
     except (LetteringError, PresetError) as exc:
         raise FieldError("lettering", str(exc)) from None
+    except ValidationError as exc:
+        raise FieldError("lettering", _invalid_data(exc)) from None
 
 
 def _render_out(info: dict[str, Any]) -> dict[str, Any]:
@@ -252,6 +262,8 @@ def render_page(
         info = render_page_to_files(_presets(ctx, page), ctx.files, page, bleed=body.bleed, crop_marks=body.crop_marks)
     except (LetteringError, PresetError) as exc:
         raise FieldError("render", str(exc)) from None
+    except ValidationError as exc:
+        raise FieldError("render", _invalid_data(exc)) from None
     sync_library(ctx, session, page.chapter.project)  # planches/page-NN.png|svg de la bibliothèque lisible
     return _render_out(info)
 

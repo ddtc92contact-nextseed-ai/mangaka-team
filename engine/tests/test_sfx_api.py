@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import io
 import xml.etree.ElementTree as ET
+import zipfile
 from typing import Any
 
 import httpx
 from fastapi.testclient import TestClient
+from PIL import Image, ImageChops
 
 from mangaka_engine.store.models import Bubble, BubbleKind
 from tests.conftest import STYLE
@@ -212,3 +215,75 @@ def test_break_out_toggle_keeps_hand_slanted_cuts(client: TestClient) -> None:
     assert angle != 0
     out = _ok(client.put(f"/panels/{page['panels'][0]['id']}/frame", json={"break_out": True}))
     assert out["layout"]["gutters"][0]["angle_deg"] == angle and out["layout"]["panels"][0]["break_out"]
+
+
+def _sfx_groups(svg: str) -> list[ET.Element]:
+    root = ET.fromstring(svg)
+    return [g for g in root.iter("{http://www.w3.org/2000/svg}g") if "onomatopee" in (g.get("class") or "")]
+
+
+def test_sfx_above_72pt_letters_renders_and_exports(client: TestClient) -> None:
+    """Régression #117 : une onomatopée de plus de 72 pt ne fait plus échouer lettrage, rendu ni export."""
+    data = _setup(client)
+    page = data["page"]
+    let = _ok(client.get(f"/pages/{page['id']}/lettering"))
+    auto = let["sfx"][0]  # « VROUM ! » en taille automatique
+    # la plus grande case : 98 pt y tiennent sans être réduits
+    box = max(page["layout"]["panels"], key=lambda p: (p["x2"] - p["x1"]) * (p["y2"] - p["y1"]))
+    let = _ok(client.post(f"/panels/{box['panel_id']}/sfx", json={"text": "BAM", "intensity": "choc"}), 201)
+    boum = next(x for x in let["sfx"] if x["text"] == "BAM")
+    x, y = (box["x1"] + box["x2"]) / 2, (box["y1"] + box["y2"]) / 2
+    let = _ok(client.patch(f"/bubbles/{boum['id']}", json={"sfx": {"size_pt": 98, "x": x, "y": y}}))
+    assert not [w for w in let["warnings"] if w["code"] == "sfx_failed"], let["warnings"]
+    big = next(f for f in let["sfx"] if f["id"] == boum["id"])
+    assert big["manual_size"] and big["font"]["size_pt"] == 98
+    # 300 pt (maximum saisi à la main) : réduite pour tenir dans sa case, avec un avertissement, jamais une 500
+    let = _ok(client.patch(f"/bubbles/{auto['id']}", json={"sfx": {"size_pt": 300}}))
+    assert not [w for w in let["warnings"] if w["code"] == "sfx_failed"], let["warnings"]
+    let = _ok(client.get(f"/pages/{page['id']}/lettering"))
+    assert len(let["sfx"]) == 2
+    # rendu : PNG et SVG contiennent les deux onomatopées
+    info = _ok(client.post(f"/pages/{page['id']}/render"))
+    groups = _sfx_groups(client.get(info["svg_url"]).text)
+    assert any("BAM" in "".join(g.itertext()) for g in groups)
+    assert len(groups) == 2
+    with_sfx = Image.open(io.BytesIO(client.get(info["png_url"]).content)).convert("RGB")
+    # export du chapitre : terminé, avec la page
+    job = _ok(client.post(f"/chapters/{data['chapter']['id']}/export"), 202)
+    client.app.state.ctx.jobs.wait(job["id"], 60)  # type: ignore[attr-defined]
+    done = _ok(client.get(f"/jobs/{job['id']}"))
+    assert done["status"] == "succeeded", done["error"]
+    zf = zipfile.ZipFile(io.BytesIO(client.get(f"/exports/{job['id']}/file").content))
+    assert len(_sfx_groups(zf.read("page-001.svg").decode())) == 2
+    exported = Image.open(io.BytesIO(zf.read("page-001.png"))).convert("RGB")
+    # sans les onomatopées, la planche n'est plus la même : elles sont bien dessinées dans le PNG
+    for fx in let["sfx"]:
+        _ok(client.delete(f"/bubbles/{fx['id']}"))
+    info = _ok(client.post(f"/pages/{page['id']}/render"))
+    bare = Image.open(io.BytesIO(client.get(info["png_url"]).content)).convert("RGB")
+    assert ImageChops.difference(with_sfx, bare).getbbox() is not None
+    assert ImageChops.difference(exported, with_sfx).getbbox() is None
+
+
+def test_unreadable_sfx_in_base_is_a_warning_not_a_500(client: TestClient) -> None:
+    """Donnée hors bornes en base (écrite sans passer par l'API) : la page se lettre, se rend et s'exporte."""
+    data = _setup(client)
+    page = data["page"]
+    with client.app.state.ctx.db.session_scope() as session:  # type: ignore[attr-defined]
+        sfx = session.query(Bubble).filter(Bubble.kind == BubbleKind.sfx).one()
+        sfx.sfx = {**(sfx.sfx or {}), "size_pt": 5000}
+        sfx_id = sfx.id
+        session.commit()
+    let = _ok(client.get(f"/pages/{page['id']}/lettering"))
+    warn = next(w for w in let["warnings"] if w["code"] == "sfx_failed")
+    assert warn["bubble_id"] == sfx_id and "VROUM" in warn["message"] and "impossible à lettrer" in warn["message"]
+    assert let["sfx"] == [] and let["bubbles"]
+    _ok(client.post(f"/pages/{page['id']}/render"))
+    job = _ok(client.post(f"/chapters/{data['chapter']['id']}/export"), 202)
+    client.app.state.ctx.jobs.wait(job["id"], 60)  # type: ignore[attr-defined]
+    done = _ok(client.get(f"/jobs/{job['id']}"))
+    assert done["status"] == "succeeded", done["error"]
+    assert any(w["code"] == "sfx_failed" for w in done["params"]["warnings"])
+    # une requête invalide reste une 422 en français
+    bad = client.patch(f"/bubbles/{sfx_id}", json={"sfx": {"size_pt": 301}})
+    assert bad.status_code == 422 and bad.json()["detail"] == "Données invalides"

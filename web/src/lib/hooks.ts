@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { errorMessage } from "./api";
+import { fullErrorMessage } from "./api";
 
 /** Charge une ressource du moteur ; `reload()` relance la requête. */
 export function useEngineData<T>(load: () => Promise<T>, deps: unknown[] = []) {
@@ -19,7 +19,7 @@ export function useEngineData<T>(load: () => Promise<T>, deps: unknown[] = []) {
         setError(null);
       })
       .catch((e) => {
-        if (!cancelled) setError(errorMessage(e));
+        if (!cancelled) setError(fullErrorMessage(e));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
