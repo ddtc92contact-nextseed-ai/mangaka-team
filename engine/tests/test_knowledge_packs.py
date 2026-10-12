@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from mangaka_engine.config import Settings
 from mangaka_engine.main import create_app
-from mangaka_engine.pipeline.knowledge import KnowledgeBase, rank
+from mangaka_engine.pipeline.knowledge import KnowledgeBase, index_document, rank
 from mangaka_engine.pipeline.knowledge_packs import load_pack, update_packs
 from mangaka_engine.presets import KnowledgeAgent, KnowledgeSettings, PresetRegistry
 from mangaka_engine.providers.embedding import MockEmbeddingProvider
@@ -241,7 +241,13 @@ def test_default_wiring_shows_pack_collections_for_the_three_agents(pack_client:
     script = set(agents["script"]["collections"])
     assert {"Mise en scène · Fondamentaux", "Mise en scène · Émotions", "Mise en scène · Exemples"} <= script
     da = set(agents["art_direction"]["collections"])
-    assert set(PACK_COLLECTIONS) - da == {"Mise en scène · Corps et gestes", "Mise en scène · Pont ComfyUI"}
+    # Vocabulaire et Checklist (format d'un storyboarder) : plus injectées entières dans la direction artistique.
+    assert set(PACK_COLLECTIONS) - da == {
+        "Mise en scène · Corps et gestes",
+        "Mise en scène · Pont ComfyUI",
+        "Mise en scène · Vocabulaire",
+        "Mise en scène · Checklist",
+    }
     writer = set(agents["image_prompt"]["collections"])
     assert {c for c in PACK_COLLECTIONS if c in writer} == {
         "Mise en scène · Cadrages",
@@ -305,18 +311,61 @@ def test_panel_writer_reads_pack_fiches_but_fragments_never_do(make_settings: Ca
         assert "Style notes" not in prompt
 
 
-def test_art_direction_receives_whole_small_pack_collections(db: Database) -> None:
+DIALOGUE_PAGE = (
+    "mise en scène, cadrage, dialogue, champ contrechamp, réplique\n"
+    "Aiko et Kenji se disputent autour de la table — Aiko, Kenji\nTu m'as menti depuis le début !"
+)
+ACTION_PAGE = (
+    "mise en scène, cadrage, temps fort, impact\n"
+    "Aiko esquive le sabre et contre-attaque d'un coup de pied — Aiko\nLe rival est projeté contre le mur"
+)
+
+
+def test_art_direction_fiches_are_chosen_per_page(db: Database) -> None:
     settings = PresetRegistry.load(PRESETS_DIR).knowledge
     with db.session_scope() as session:
         update_packs(session, PRESETS_DIR, MockEmbeddingProvider(), settings)
         session.commit()
+        keys = dict(session.execute(select(KnowledgeDocument.id, KnowledgeDocument.pack_key)).all())
         kb = KnowledgeBase(settings, MockEmbeddingProvider())
-        got = kb.for_agent(session, "art_direction", None, "combat sous la pluie, esquive puis impact")
-        names = {p.collection_name for p in got.passages}
-        assert {"Mise en scène · Vocabulaire", "Mise en scène · Checklist"} <= names  # entières
-        assert any(p.mode == "retrieved" and p.pack for p in got.passages)  # et des fiches cherchées
+        got = kb.for_pages(session, "art_direction", None, [(1, DIALOGUE_PAGE), (2, ACTION_PAGE)])
+        by_page = {n: {keys[p.document_id] for p in got.passages if n in p.pages} for n in (1, 2)}
+        # page de dialogue : champ / contrechamp ; page d'action : esquive, raccourci
+        assert "SHOT_OTS_001" in by_page[1] and "SHOT_OTS_001" not in by_page[2]
+        assert {"ACT_004", "ANG_FORCE_001"} <= by_page[2] and "ACT_004" not in by_page[1]
+        # un seul budget, sans doublon ; Vocabulaire et Checklist ne sont plus lues par la direction artistique
         assert got.tokens <= settings.agent("art_direction").budget_tokens
-        assert "```meta" not in got.savoir_faire() and '{"' not in got.savoir_faire()
+        assert len({p.chunk_id for p in got.passages}) == len(got.passages)
+        assert all(p.mode == "retrieved" and p.pages for p in got.passages)
+        assert not {"Mise en scène · Vocabulaire", "Mise en scène · Checklist"} & set(got.collections)
+        assert got.page_queries == {1: DIALOGUE_PAGE, 2: ACTION_PAGE}
+        assert got.query.startswith("Page 1 : ") and "\nPage 2 : " in got.query
+        text = got.savoir_faire()
+        assert "· page 1\n" in text and "· page 2\n" in text
+        assert "```meta" not in text and '{"' not in text
+
+
+def test_small_pack_collections_are_never_injected_whole_per_page(db: Database) -> None:
+    """Profil « L'équipe » enregistré avec l'ancienne liste (Vocabulaire, Checklist) : leurs fiches restent
+    cherchables, mais jamais injectées entières ; une petite collection de l'utilisateur l'est toujours."""
+    settings = PresetRegistry.load(PRESETS_DIR).knowledge
+    with db.session_scope() as session:
+        update_packs(session, PRESETS_DIR, MockEmbeddingProvider(), settings)
+        mine = KnowledgeCollection(name="Mes notes")
+        session.add(mine)
+        session.flush()
+        doc = KnowledgeDocument(collection_id=mine.id, title="Ma règle", source="text", content="Pas de pluie.")
+        session.add(doc)
+        session.flush()
+        index_document(session, doc, MockEmbeddingProvider(), settings)
+        session.commit()
+        old = [*settings.agent("art_direction").collections, "Mise en scène · Vocabulaire", "Mise en scène · Checklist"]
+        kb = KnowledgeBase(settings, MockEmbeddingProvider(), profile_lookup=lambda *_: [*old, "Mes notes"])
+        got = kb.for_pages(session, "art_direction", None, [(1, DIALOGUE_PAGE), (2, ACTION_PAGE)])
+        whole = [p for p in got.passages if p.mode == "whole"]
+        assert [p.collection_name for p in whole] == ["Mes notes"] and whole[0].pages == []
+        assert "Mise en scène · Vocabulaire" in got.collections
+        assert got.tokens <= settings.agent("art_direction").budget_tokens
 
 
 def test_profile_still_overrides_the_default_collections(db: Database) -> None:

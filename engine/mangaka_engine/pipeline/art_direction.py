@@ -15,9 +15,13 @@ Sortie JSON validée par Pydantic puis contre le chapitre (pages, nombre de case
 la bibliothèque) ;
 invalide → nouvel essai avec l'erreur (`max_retries`, 2 au maximum) → sinon `ArtDirectionError`.
 
+Savoir-faire : cherché page par page (`page_query` : le scénario de la page), dans le budget de l'agent,
+sans doublon ; la trace du passage (« Sources utilisées ») note les pages de chaque fiche.
+
 Mise en scène variée (`variety_rules` du preset, `check_variety`) : pas plus de N cases d'affilée au même
-plan ou au même angle dans une page, une part plafonnée de cases « de face », au moins une case hors
-hauteur d'œil par page, une `action` de case qui décrit un mouvement du corps. Une règle enfreinte
+plan ou au même angle dans une page, une part plafonnée de cases « de face » et de plans larges ou moyens,
+au moins une case hors hauteur d'œil et un plan serré par page, pas deux plans larges d'affilée, une
+`action` de case qui décrit un mouvement du corps. Une règle enfreinte
 relance l'agent avec l'erreur ; après les relances, la proposition est gardée avec un avertissement par
 page (`warnings`), visible dans l'écran Direction artistique.
 
@@ -58,7 +62,7 @@ from .layout import LayoutError
 from .library import SeriesLibrary
 from .pages import applied_values, is_stale, layout_page
 from .script import DIRECTION_LABELS, _render
-from .style import NO_GUIDELINES, style_brief, style_names
+from .style import NO_GUIDELINES, style_brief
 
 AGENT = "art_direction"  # rôle de l'agent dans presets/knowledge.yaml
 STEP = "art_direction"  # étape des jobs
@@ -279,9 +283,22 @@ class DirectionContext:
         }
 
 
-def knowledge_query(presets: PresetRegistry, chapter: Chapter) -> str:
-    style = style_names(presets, chapter.project)
-    return "\n".join(p for p in ("mise en scène, cadrage, rythme", chapter.title, chapter.synopsis, style) if p)
+def page_query(brief: PageBrief) -> str:
+    """Requête de savoir-faire d'une page : son scénario (descriptions, émotions, gestes, personnages,
+    répliques), précédé d'indices de mise en scène (dialogue, temps fort) pour retrouver les bonnes fiches
+    (champ / contrechamp d'une page de dialogue, impact et raccourci d'une page d'action)."""
+    panels = brief.panels
+    hints = ["mise en scène, cadrage"]
+    if any(pa.get("dialogues") for pa in panels):
+        hints.append("dialogue, champ contrechamp, réplique")
+    if any(pa.get("intensity") == "choc" or (pa.get("importance") or 0) >= 3 for pa in panels):
+        hints.append("temps fort, impact")
+    lines = [", ".join(hints)]
+    for pa in panels:
+        parts = [pa.get("description") or "", pa.get("staging") or "", ", ".join(pa.get("characters") or [])]
+        lines.append(" — ".join(p for p in parts if p))
+        lines += [d.split(" : ", 1)[-1] for d in (pa.get("dialogues") or [])[:2]]
+    return "\n".join(line for line in lines if line.strip())
 
 
 def story_pages(chapter: Chapter) -> list[Page]:
@@ -292,6 +309,7 @@ def _panel_brief(panel: Panel) -> dict[str, Any]:
     return {
         "panel_id": panel.id,
         "description": panel.description,
+        "staging": panel.staging or "",
         "characters": list(panel.character_names or []),
         "decor": panel.decor_id,
         "objets": list(panel.object_ids or []),
@@ -405,7 +423,8 @@ def build_context(
         variety=prompt.variety or "equilibree",
         variant=variant,
         single_page=single,
-        knowledge=knowledge.for_agent(session, AGENT, series.id, knowledge_query(presets, chapter))
+        # Savoir-faire cherché page par page (une page de dialogue n'appelle pas les fiches d'une page d'action).
+        knowledge=knowledge.for_pages(session, AGENT, series.id, [(b.number, page_query(b)) for b in briefs])
         if knowledge
         else None,
         library=SeriesLibrary.load(session, series.id),
@@ -596,10 +615,38 @@ def variety_text(rules: VarietyRules | None) -> str:
             f"- au moins {rules.min_off_eye_level_per_page} case par page (dès {rules.off_eye_level_min_panels} cases) "
             f"hors hauteur d'œil : plan ou angle parmi {', '.join(rules.off_eye_level)} ;"
         )
+    if rules.max_wide_medium_share < 1:
+        lines.append(
+            f"- au plus {round(rules.max_wide_medium_share * 100)} % des cases du chapitre en "
+            f"{' / '.join(rules.wide_medium_plans)} (personnages en pied) ;"
+        )
+    if rules.min_tight_per_page:
+        lines.append(
+            f"- au moins {rules.min_tight_per_page} plan serré par page (dès {rules.tight_min_panels} cases) : "
+            f"{', '.join(rules.tight_plans)} — pour l'émotion, la révélation ou la réplique clé ;"
+        )
+    lines.append(
+        f"- jamais plus de {rules.max_wide_in_a_row} case{'s' if rules.max_wide_in_a_row > 1 else ''} "
+        f"d'affilée en {' / '.join(rules.wide_plans)} dans une page ;"
+    )
     if rules.require_action:
         weak = f" (pas « {' », « '.join(rules.weak_actions[:4])} »)" if rules.weak_actions else ""
         lines.append(f"- chaque case a une « action » : un mouvement ou une pose du corps{weak}.")
     return "\n".join(lines)
+
+
+def _wide_runs(plans: Sequence[str], wide: set[str], limit: int) -> list[tuple[int, int]]:
+    """Suites de plus de `limit` plans larges d'affilée : (première case, dernière case), numérotées à 1."""
+    out: list[tuple[int, int]] = []
+    start: int | None = None
+    for i, plan in enumerate([*plans, ""]):
+        if _key(plan) in wide:
+            start = i if start is None else start
+            continue
+        if start is not None and i - start > limit:
+            out.append((start + 1, i))
+        start = None
+    return out
 
 
 def _weak_action(action: str, rules: VarietyRules) -> str | None:
@@ -633,7 +680,10 @@ def check_variety(
         return by_page, chapter
     frontal = {_key(a) for a in rules.frontal_angles}
     off_level = {_key(a) for a in rules.off_eye_level}
-    total = front = 0
+    wide_medium = {_key(p) for p in rules.wide_medium_plans}
+    tight = {_key(p) for p in rules.tight_plans}
+    wide = {_key(p) for p in rules.wide_plans}
+    total = front = loose = 0
     for number, panels in pages:
         problems: list[str] = []
         plans = [str(pa.get("plan") or "") for pa in panels]
@@ -654,6 +704,19 @@ def check_variety(
                     f"aucune case hors hauteur d'œil (au moins {rules.min_off_eye_level_per_page} : "
                     f"plan ou angle parmi {', '.join(rules.off_eye_level)})"
                 )
+        for first, last in _wide_runs(plans, wide, rules.max_wide_in_a_row):
+            problems.append(
+                f"cases {first} à {last} en plan large d'affilée ({rules.max_wide_in_a_row} au plus : "
+                "intercale un plan plus serré)"
+            )
+        if rules.min_tight_per_page and len(panels) >= rules.tight_min_panels:
+            close = sum(1 for p in plans if _key(p) in tight)
+            if close < rules.min_tight_per_page:
+                problems.append(
+                    f"{'aucun plan serré' if not close else f'{close} plan serré seulement'} "
+                    f"(au moins {rules.min_tight_per_page} dès {rules.tight_min_panels} cases : "
+                    f"{', '.join(rules.tight_plans)}) : serre le cadre sur l'émotion, la révélation ou la réplique clé"
+                )
         if rules.require_action:
             for i, pa in enumerate(panels, start=1):
                 action = str(pa.get("action") or "").strip()
@@ -666,6 +729,7 @@ def check_variety(
                     )
         total += len(panels)
         front += sum(1 for a in angles if _key(a) in frontal)
+        loose += sum(1 for p in plans if _key(p) in wide_medium)
         if problems:
             by_page[number] = problems
     allowed = max(1, math.floor(rules.max_frontal_share * total + 1e-9))
@@ -673,6 +737,13 @@ def check_variety(
         chapter.append(
             f"trop de cases {' / '.join(rules.frontal_angles)} : {front} sur {total} "
             f"({allowed} au plus, {round(rules.max_frontal_share * 100)} %) : varie les angles"
+        )
+    allowed = max(1, math.floor(rules.max_wide_medium_share * total + 1e-9))
+    if total and loose > allowed:
+        chapter.append(
+            f"trop de plans larges et moyens ({' / '.join(rules.wide_medium_plans)}) : {loose} sur {total} "
+            f"({allowed} au plus, {round(rules.max_wide_medium_share * 100)} %) : resserre sur les visages, "
+            "les gestes et les objets"
         )
     return by_page, chapter
 

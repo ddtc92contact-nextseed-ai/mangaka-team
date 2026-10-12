@@ -1473,6 +1473,7 @@ class PassageOut(BaseModel):
     keyword_score: float | None
     mode: Literal["retrieved", "whole"]
     pack: str | None = None
+    pages: list[int] = Field(default_factory=list)  # recherche par page (direction artistique)
     selected: bool = False
 
 
@@ -1569,6 +1570,7 @@ class SourcesOut(BaseModel):
     job_id: int | None
     agent: str
     model: str | None
+    query: str = ""  # requête de recherche (direction artistique : une ligne « Page N : … » par page)
     collections: list[str]
     passages: list[PassageOut]
     bible: BibleSummary | None

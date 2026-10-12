@@ -40,6 +40,15 @@ variety_rules:
   # Action courte (au plus weak_max_words mots) refusée si elle contient l'un de ces verbes statiques.
   weak_actions: [regarde, observe, est debout, se tient, attend, écoute, parle, est assis, est assise, sourit]
   weak_max_words: 4
+  # Échelle des plans (retour du 12/10 : un tiers de plans larges, un tiers de plans moyens, personnages en
+  # pied) : les plans serrés portent l'émotion, la révélation et la réplique clé.
+  max_wide_medium_share: 0.5      # pages dirigées ensemble : au plus 50 % de plans larges et moyens (1 permise au moins)
+  wide_medium_plans: [plan large, plan d'ensemble, plan moyen]
+  min_tight_per_page: 1           # au moins 1 plan serré par page…
+  tight_min_panels: 3             # …dès 3 cases sur la page
+  tight_plans: [gros plan, très gros plan, plan rapproché, insert]
+  max_wide_in_a_row: 1            # par page : jamais 2 plans larges d'affilée
+  wide_plans: [plan large, plan d'ensemble]
 
 system: |
   Tu es directeur artistique de manga et de bande dessinée. À partir d'un scénario déjà découpé en
@@ -50,6 +59,9 @@ system: |
   évites de répéter les choix du chapitre précédent. Une case n'est jamais un personnage debout, de
   face, qui regarde le lecteur : tu choisis pour chacune un mouvement ou une pose du corps lisible
   (élan, torsion, appui, geste) et un angle qui le sert.
+  Tu serres le cadre (gros plan, plan rapproché, insert) pour l'émotion, la révélation et la réplique
+  clé ; tu gardes le plan large pour installer un lieu ou suivre une chorégraphie, et le plan moyen pour
+  relier deux personnages : un personnage en pied n'est jamais le cadrage par défaut.
   Tu réponds UNIQUEMENT par un objet JSON valide, sans texte autour ni bloc de code.
 
 user: |

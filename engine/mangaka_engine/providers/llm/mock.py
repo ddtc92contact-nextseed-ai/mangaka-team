@@ -296,7 +296,53 @@ def mock_art_direction(ctx: dict[str, Any]) -> dict[str, Any]:
             }
         )
     _limit_frontal(out)
+    _tighten(out, ctx.get("variety_rules") or {})
     return {"pages": out}
+
+
+_DA_TIGHT = ["gros plan", "plan rapproché", "insert"]
+
+
+def _tighten(pages: list[dict[str, Any]], rules: dict[str, Any]) -> None:
+    """Échelle des plans (variety_rules) : pas deux plans larges d'affilée, un plan serré par page dès 3 cases,
+    au plus la moitié de plans larges et moyens sur le chapitre. Seuls des plans larges ou moyens deviennent
+    serrés (jamais une plongée : la case hors hauteur d'œil reste), sans répéter le plan d'une voisine."""
+    wide = set(rules.get("wide_plans") or ["plan large", "plan d'ensemble"])
+    loose = set(rules.get("wide_medium_plans") or ["plan large", "plan d'ensemble", "plan moyen"])
+    tight = set(rules.get("tight_plans") or _DA_TIGHT)
+    in_a_row = int(rules.get("max_wide_in_a_row") or 1)
+    min_panels = int(rules.get("tight_min_panels") or 3)
+    min_tight = int(rules.get("min_tight_per_page", 1))
+    share = float(rules.get("max_wide_medium_share", 0.5))
+
+    def tighten(panels: list[dict[str, Any]], i: int) -> None:
+        near = {q["plan"] for q in panels[max(0, i - 1) : i + 2]}
+        panels[i]["plan"] = next(p for p in _DA_TIGHT if p not in near)
+
+    for p in pages:
+        panels = p["panels"]
+        run = 0
+        for i, pa in enumerate(panels):
+            run = run + 1 if pa["plan"] in wide else 0
+            if run > in_a_row:
+                tighten(panels, i)
+                run = 0
+        if len(panels) >= min_panels:
+            for i in reversed(range(len(panels))):
+                if sum(1 for q in panels if q["plan"] in tight) >= min_tight:
+                    break
+                if panels[i]["plan"] in loose:
+                    tighten(panels, i)
+    total = sum(len(p["panels"]) for p in pages)
+    allowed = max(1, int(share * total + 1e-9))
+    # La première case d'une page garde son plan d'installation, sauf s'il le faut vraiment.
+    for first in (1, 0):
+        for p in pages:
+            for i in range(len(p["panels"]) - 1, first - 1, -1):
+                if sum(1 for q in pages for pa in q["panels"] if pa["plan"] in loose) <= allowed:
+                    return
+                if p["panels"][i]["plan"] in loose:
+                    tighten(p["panels"], i)
 
 
 def _limit_frontal(pages: list[dict[str, Any]], share: float = 0.35) -> None:

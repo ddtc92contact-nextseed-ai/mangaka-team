@@ -1319,6 +1319,17 @@ class VarietyRules(_Strict):
     require_action: bool = True
     weak_actions: list[str] = Field(default_factory=list)
     weak_max_words: int = Field(default=4, ge=1, le=20)
+    # Échelle des plans (personnages en pied trop souvent) : part maximale des plans larges et moyens sur les
+    # pages dirigées ensemble (au moins une case permise ; 1 = pas de limite)…
+    max_wide_medium_share: float = Field(default=0.5, ge=0, le=1)
+    wide_medium_plans: list[str] = Field(default_factory=lambda: ["plan large", "plan d'ensemble", "plan moyen"])
+    # …au moins `min_tight_per_page` plan(s) serré(s) par page d'au moins `tight_min_panels` cases (0 = aucun)…
+    min_tight_per_page: int = Field(default=1, ge=0, le=20)
+    tight_min_panels: int = Field(default=3, ge=1, le=20)
+    tight_plans: list[str] = Field(default_factory=lambda: ["gros plan", "très gros plan", "plan rapproché", "insert"])
+    # …et jamais plus de `max_wide_in_a_row` plan(s) large(s) d'affilée dans une page.
+    max_wide_in_a_row: int = Field(default=1, ge=1, le=20)
+    wide_plans: list[str] = Field(default_factory=lambda: ["plan large", "plan d'ensemble"])
 
 
 class PromptPreset(_Strict):
