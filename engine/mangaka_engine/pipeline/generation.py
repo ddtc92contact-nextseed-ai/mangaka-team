@@ -48,6 +48,7 @@ import threading
 import time
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import PurePosixPath
 from typing import Any
 
@@ -105,6 +106,7 @@ from .prompt import (
     build_prompt,
     frame_references,
     merge_negative,
+    shot_in,
 )
 from .prompt_dialog import (
     DIRECTION_LABELS,
@@ -469,11 +471,12 @@ def choose_references(
     target: AngleTarget | None = None,
     catalog: CameraLoraCatalog | None = None,
     preferred: dict[int, int] | None = None,
+    shots: dict[int, int] | None = None,
 ) -> ReferenceChoice:
     """Images envoyées (`pick_references`) et fiches qui avaient une image mais n'ont eu aucun emplacement,
     dans l'ordre d'importance. L'ordre garantit qu'un personnage présent n'est jamais écarté tant qu'un
     décor, un objet ou le style occupe un emplacement."""
-    sent = pick_references(entries, slots, per_entry, target=target, catalog=catalog, preferred=preferred)
+    sent = pick_references(entries, slots, per_entry, target=target, catalog=catalog, preferred=preferred, shots=shots)
     served = {id(entry) for entry, _ in sent}
     dropped = [e for e in entries if e.reference_images and id(e) not in served]
     return ReferenceChoice(sent=sent, dropped=dropped)
@@ -492,6 +495,7 @@ def pick_references(
     target: AngleTarget | None = None,
     catalog: CameraLoraCatalog | None = None,
     preferred: dict[int, int] | None = None,
+    shots: dict[int, int] | None = None,
 ) -> list[tuple[LibraryEntry, CharacterImage | SeriesAssetImage]]:
     """Remplit les emplacements par tours, dans l'ordre de priorité des fiches.
 
@@ -511,31 +515,91 @@ def pick_references(
     `target` (angle de la direction artistique de la case, voir `panel_angle_target`) : la vue de chaque
     fiche la plus proche de cet angle passe en tête (vues étiquetées, `catalog`) ; sinon la principale.
 
+    `shots` (id d'une image de personnage → rang pour le plan de la case, voir `shot_ranks`) : les images
+    qui servent ce plan (0) passent en tête, puis les autres (1) ; celles faites pour d'autres plans (2 :
+    plein pied pour un gros plan) ne sont envoyées que si le personnage n'en a pas d'autre. Prime sur la
+    vue de l'angle, jamais sur le choix du dialogue.
+
     `preferred` (id du personnage → id de son image, choisi par le dialogue avec l'IA sur la case, voir
-    `Panel.reference_choice`) : cette image passe en tête de son personnage, avant la vue de l'angle.
+    `Panel.reference_choice`) : cette image passe en tête de son personnage, avant tout le reste.
     """
     fiches = [c for c in characters if not is_style(c)]
-    views = {
-        id(c): ordered_views(c.reference_images, catalog, target) if catalog is not None else list(c.reference_images)
-        for c in fiches
-    }
+    views: dict[int, list[CharacterImage | SeriesAssetImage]] = {}
     for c in fiches:
+        images = ordered_views(c.reference_images, catalog, target) if catalog is not None else list(c.reference_images)
+        if shots and isinstance(c, Character):
+            images = by_shot(images, shots)
         image_id = (preferred or {}).get(c.id) if isinstance(c, Character) else None
         chosen = next((img for img in c.reference_images if img.id == image_id), None)
         if chosen is not None:
-            views[id(c)] = [chosen, *(img for img in views[id(c)] if img is not chosen)]
+            images = [chosen, *(img for img in images if img is not chosen)]
+        views[id(c)] = images
     out: list[tuple[LibraryEntry, CharacterImage | SeriesAssetImage]] = []
     depth = 0
-    rounds = 1 if per_entry == "principale" else max((len(c.reference_images) for c in fiches), default=0)
-    while len(out) < slots and depth < rounds and any(depth < len(c.reference_images) for c in fiches):
+    rounds = 1 if per_entry == "principale" else max((len(v) for v in views.values()), default=0)
+    while len(out) < slots and depth < rounds and any(depth < len(views[id(c)]) for c in fiches):
         for c in fiches:
-            if depth < len(c.reference_images) and len(out) < slots:
+            if depth < len(views[id(c)]) and len(out) < slots:
                 out.append((c, views[id(c)][depth]))
         depth += 1
     for style in (c for c in characters if is_style(c)):
         if len(out) < slots and style.reference_images:
             out.append((style, style.reference_images[0]))
     return out
+
+
+def by_shot[I: CharacterImage | SeriesAssetImage](images: Sequence[I], shots: dict[int, int]) -> list[I]:
+    """Images d'une fiche dans l'ordre du plan (`shots`, voir `pick_references`) : celles faites pour d'autres
+    plans sont retirées, sauf s'il ne reste qu'elles."""
+    ordered = sorted(images, key=lambda img: shots.get(img.id, 1))  # tri stable : l'angle garde son ordre
+    suited = [img for img in ordered if shots.get(img.id, 1) < 2]
+    return suited or ordered
+
+
+def panel_plan(panel: Panel) -> str:
+    """Plan de la case : celui de la direction artistique appliquée (ou du dialogue), sinon du scénario."""
+    return str(applied_panel_direction(panel).get("plan") or panel.shot_type or "").strip()
+
+
+def reference_sheets_of(session: Session, image_ids: Iterable[int]) -> dict[int, str]:
+    """Fiche de référence (id du type, `presets/reference_sheets/`) qui a produit chaque image de personnage
+    gardée ; une image importée n'en a pas."""
+    ids = list(image_ids)
+    if not ids:
+        return {}
+    return {
+        v.kept_image_id: v.sheet
+        for v in session.scalars(
+            select(ReferenceVariant).where(
+                ReferenceVariant.entry_kind == "character", ReferenceVariant.kept_image_id.in_(ids)
+            )
+        )
+        if v.kept_image_id is not None
+    }
+
+
+def shot_ranks(presets: PresetRegistry, plan: str | None, sheets: dict[int, str]) -> dict[int, int]:
+    """Rang de chaque image (id → 0 : sa fiche sert ce plan, 1 : sans préférence, 2 : sa fiche sert
+    d'autres plans) d'après `shots` des fiches de référence ; {} si aucune fiche ne connaît ce plan."""
+    if not plan or not any(shot_in(plan, sheet.shots) for sheet in presets.reference_sheets.values()):
+        return {}
+    out: dict[int, int] = {}
+    for image_id, sheet_id in sheets.items():
+        sheet = presets.reference_sheets.get(sheet_id)
+        if sheet is not None and sheet.shots:
+            out[image_id] = 0 if shot_in(plan, sheet.shots) else 2
+    return out
+
+
+def panel_shot_ranks(
+    session: Session, presets: PresetRegistry, panel: Panel, entries: Sequence[LibraryEntry]
+) -> dict[int, int]:
+    """`shot_ranks` des images des personnages de la case, pour son plan."""
+    plan = panel_plan(panel)
+    if not plan:
+        return {}
+    ids = [img.id for e in entries if isinstance(e, Character) for img in e.reference_images]
+    return shot_ranks(presets, plan, reference_sheets_of(session, ids))
 
 
 def collect_loras(panel: Panel, characters: Sequence[LibraryEntry]) -> list[LoraSpec]:
@@ -587,6 +651,8 @@ def update_panel_prompt(
     """
     if reset:
         panel.prompt_key = None
+        panel.prompt_knowledge = None
+        panel.prompt_sources = None
         panel.prompt_warning = None
     text = (panel.final_prompt or "").strip()
     if panel.final_prompt_manual and text:
@@ -629,15 +695,47 @@ def drop_written_prompts(presets: PresetRegistry, session: Session, project_id: 
     return len(panels)
 
 
+def manual_prompt(panel: Panel) -> bool:
+    """Prompt édité à la main (ou appliqué depuis le dialogue) : jamais réécrit sans « Reconstruire »."""
+    return bool(panel.final_prompt_manual and (panel.final_prompt or "").strip())
+
+
+def knowledge_stamp(session: Session, knowledge: KnowledgeBase | None, project_id: int) -> str | None:
+    """Empreinte du savoir-faire du rédacteur pour la série (`KnowledgeBase.writer_stamp`) ; None sans base
+    de connaissances ou en panne (le prompt rédigé n'est alors jamais redemandé pour elle)."""
+    if knowledge is None:
+        return None
+    try:
+        return knowledge.writer_stamp(session, project_id)
+    except Exception:  # noqa: BLE001 — une panne du savoir-faire ne bloque jamais une case
+        log.warning("empreinte du savoir-faire indisponible (série %s)", project_id, exc_info=True)
+        return None
+
+
+def writer_sources(found: PanelKnowledge) -> dict[str, Any]:
+    """« Sources utilisées » d'une rédaction : passages et notes de la bible reçus par le rédacteur."""
+    return {
+        "query": found.query,
+        "collections": list(found.collections),
+        "passages": [p.as_dict() for p in found.writer_passages],
+        "tokens": found.writer_tokens,
+        "budget_tokens": found.writer_budget,
+        "bible": found.writer_bible,
+    }
+
+
 def panel_brief(
     presets: PresetRegistry,
     session: Session,
     panel: Panel,
     knowledge: KnowledgeBase | None = None,
     preset_id: str | None = None,
+    *,
+    found: PanelKnowledge | None = None,
 ) -> PromptBrief:
     """Données de la case pour le rédacteur : celles du prompt par fragments, plus les images de référence
-    du workflow (`preset_id`, sinon celui résolu pour la case) et les personnages de la série absents."""
+    du workflow (`preset_id`, sinon celui résolu pour la case) et les personnages de la série absents.
+    `found` : savoir-faire déjà cherché pour la case (sinon cherché ici, avec `knowledge`)."""
     cast = panel_cast(session, panel, presets)
     entries = cast.entries
     loaded = presets.workflows.get(preset_id or resolve_preset_id(presets, panel, entries))
@@ -649,7 +747,9 @@ def panel_brief(
     project = panel.page.chapter.project
     present = {c.id for c in cast.characters}
     series = list(session.scalars(select(Character).where(Character.project_id == project.id).order_by(Character.id)))
-    savoir_faire, bible = panel_knowledge(session, knowledge, panel, cast.characters).writer()
+    if found is None:
+        found = panel_knowledge(session, knowledge, panel, cast.characters)
+    savoir_faire, bible = found.writer()
     da = applied_panel_direction(panel)
     return PromptBrief.build(
         description=panel.description,
@@ -674,16 +774,46 @@ def panel_brief(
     )
 
 
-def prompt_pending(presets: PresetRegistry, session: Session, panel: Panel) -> bool:
-    """Le prompt de la case sera rédigé par l'IA à la prochaine génération (jamais rédigé, ou la case a
-    changé depuis)."""
+def prompt_pending(
+    presets: PresetRegistry, session: Session, panel: Panel, knowledge: KnowledgeBase | None = None
+) -> bool:
+    """Le prompt de la case sera rédigé par l'IA à la prochaine génération : jamais rédigé, la case a changé
+    depuis, « Réécrire les prompts du chapitre », ou (avec `knowledge`) le savoir-faire du rédacteur a changé
+    depuis la rédaction. Jamais pour un prompt édité à la main."""
     if not ai_prompt_enabled(panel) or WRITER_PROMPT_ID not in presets.prompts:
         return False
-    if panel.final_prompt_manual and (panel.final_prompt or "").strip():
+    if manual_prompt(panel):
         return False
     if panel.prompt_source != "ia" and not panel.prompt_warning:
         return True
-    return panel.prompt_key != panel_brief(presets, session, panel).key()
+    if panel.prompt_key != panel_brief(presets, session, panel).key():
+        return True
+    stamp = knowledge_stamp(session, knowledge, panel.page.chapter.project_id)
+    return stamp is not None and panel.prompt_knowledge != stamp
+
+
+def rewritable_prompts(session: Session, chapter: Chapter) -> list[Panel]:
+    """Cases du chapitre dont le prompt a été rédigé par l'IA (ou a tenté de l'être) et n'a pas été retouché
+    à la main : celles que « Réécrire les prompts du chapitre » remet à rédiger."""
+    if not chapter.project.ai_prompt:
+        return []
+    panels = session.scalars(
+        select(Panel)
+        .join(Page, Panel.page_id == Page.id)
+        .where(Page.chapter_id == chapter.id)
+        .order_by(Page.number, Panel.index)
+    ).all()
+    return [p for p in panels if not manual_prompt(p) and (p.prompt_source == "ia" or p.prompt_warning)]
+
+
+def mark_prompts_pending(session: Session, chapter: Chapter) -> int:
+    """« Réécrire les prompts du chapitre » : chaque prompt rédigé par l'IA (non retouché) sera rédigé de
+    nouveau à la prochaine génération de sa case ; le texte actuel reste affiché d'ici là. Renvoie le nombre
+    de cases."""
+    panels = rewritable_prompts(session, chapter)
+    for panel in panels:
+        panel.prompt_key = None
+    return len(panels)
 
 
 @dataclass
@@ -694,6 +824,9 @@ class PromptRequest:
     project_id: int
     key: str
     brief: PromptBrief
+    # Empreinte du savoir-faire du rédacteur (None : sans base de connaissances) et passages reçus.
+    stamp: str | None = None
+    sources: dict[str, Any] = field(default_factory=dict)
 
 
 def prompt_request(
@@ -710,13 +843,20 @@ def prompt_request(
     chaque génération. `force` (« Reconstruire le prompt ») : toujours redemandé."""
     if not ai_prompt_enabled(panel) or WRITER_PROMPT_ID not in presets.prompts:
         return None
-    if panel.final_prompt_manual and (panel.final_prompt or "").strip():
+    if manual_prompt(panel):
         return None
+    project_id = panel.page.chapter.project_id
     key = panel_brief(presets, session, panel, None, preset_id).key()
-    if not force and panel.prompt_key == key and (panel.prompt_source == "ia" or panel.prompt_warning):
+    stamp = knowledge_stamp(session, knowledge, project_id)
+    fresh = panel.prompt_key == key and (stamp is None or panel.prompt_knowledge == stamp)
+    if not force and fresh and (panel.prompt_source == "ia" or panel.prompt_warning):
         return None
-    brief = panel_brief(presets, session, panel, knowledge, preset_id)  # avec la bible et le savoir-faire
-    return PromptRequest(panel_id=panel.id, project_id=panel.page.chapter.project_id, key=key, brief=brief)
+    # Avec la bible et le savoir-faire (cherché une fois : il part au rédacteur et dans les sources).
+    found = panel_knowledge(session, knowledge, panel, panel_characters(session, panel))
+    brief = panel_brief(presets, session, panel, knowledge, preset_id, found=found)
+    return PromptRequest(
+        panel_id=panel.id, project_id=project_id, key=key, brief=brief, stamp=stamp, sources=writer_sources(found)
+    )
 
 
 def run_prompt_request(
@@ -749,13 +889,14 @@ def apply_prompt_request(
     knowledge: KnowledgeBase | None = None,
 ) -> None:
     """Stocke le prompt rédigé sur la case ; en échec, le prompt par fragments et un avertissement."""
-    if panel.final_prompt_manual and (panel.final_prompt or "").strip():
+    if manual_prompt(panel):
         return  # édité à la main pendant la rédaction : l'édition l'emporte
     if run is not None:
         panel.final_prompt = run.output.prompt
         panel.final_prompt_manual = False
         panel.prompt_source = "ia"
         panel.prompt_warning = None
+        panel.prompt_sources = {**request.sources, "written_at": datetime.now(UTC).isoformat(timespec="seconds")}
     else:
         update_panel_prompt(presets, session, panel, knowledge, reset=True)
         panel.prompt_warning = (
@@ -763,21 +904,14 @@ def apply_prompt_request(
             "« Reconstruire le prompt » pour réessayer."
         )
     panel.prompt_key = request.key
+    panel.prompt_knowledge = request.stamp
 
 
 # --- dialogue avec l'IA sur une case (pipeline/prompt_dialog.py) -------------------------------
 def image_labels(session: Session, presets: PresetRegistry, character: Character) -> dict[int, str]:
     """Nom lisible de chaque image gardée d'un personnage : la fiche de référence qui l'a produite
     (« Portrait de face »), sinon son angle, sinon le nom du fichier importé ; et sa place."""
-    ids = [img.id for img in character.reference_images]
-    sheets = {
-        v.kept_image_id: v.sheet
-        for v in session.scalars(
-            select(ReferenceVariant).where(
-                ReferenceVariant.entry_kind == "character", ReferenceVariant.kept_image_id.in_(ids)
-            )
-        )
-    }
+    sheets = reference_sheets_of(session, [img.id for img in character.reference_images])
     out: dict[int, str] = {}
     for i, img in enumerate(character.reference_images, start=1):
         sheet = presets.reference_sheets.get(sheets.get(img.id) or "")
@@ -792,14 +926,16 @@ def reference_options(session: Session, presets: PresetRegistry, panel: Panel) -
     envoyée aujourd'hui (choix du dialogue, sinon la vue la plus proche de l'angle, sinon la principale)."""
     target = panel_angle_target(presets, panel)
     preferred = reference_preferences(panel)
+    characters = panel_characters(session, panel)
+    shots = panel_shot_ranks(session, presets, panel, characters)
     options: list[ReferenceOption] = []
-    for character in panel_characters(session, panel):
+    for character in characters:
         images = list(character.reference_images)
         if len(images) < 2:
             continue
         chosen = next((img for img in images if img.id == preferred.get(character.id)), None)
         if chosen is None:
-            chosen = ordered_views(images, presets.camera_loras, target)[0]
+            chosen = by_shot(ordered_views(images, presets.camera_loras, target), shots)[0]
         labels = image_labels(session, presets, character)
         options += [
             ReferenceOption(character.id, character.name, img.id, labels[img.id], current=img is chosen)
@@ -1312,6 +1448,7 @@ class GenerationExecutor:
                     target=target,
                     catalog=catalog,
                     preferred=reference_preferences(panel),
+                    shots=panel_shot_ranks(session, presets, panel, entries),
                 )
                 dropped = [dropped_reference(e) for e in choice.dropped]
                 for entry, image in choice.sent:
@@ -1346,8 +1483,11 @@ class GenerationExecutor:
                 slots = [ReferenceSlot(r["kind"], r["name"]) for r in references]
                 prompt = frame_references(prompt, slots, presets.image_prompt)
                 prompt = append_instruction(prompt, rendering.tonality if rendering is not None else "")
+            # Plan serré : termes contre le plein pied (sauf réparation et « Changer l'angle » : leur cadrage).
             negative = build_negative_prompt(
-                str(loaded.preset.defaults.get("negative_prompt", "")), presets.image_prompt
+                str(loaded.preset.defaults.get("negative_prompt", "")),
+                presets.image_prompt,
+                plan=panel_plan(panel) if repair is None and not angle_id else None,
             )
             cfg = series_cfg(chapter.project, loaded)
             if rendering is not None and loaded.preset.negative_active(cfg):

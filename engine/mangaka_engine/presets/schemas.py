@@ -1441,6 +1441,14 @@ class ReferencePromptSettings(_Strict):
         return value
 
 
+class TightShotSettings(_Strict):
+    """`tight_shots` d'image_prompt.yaml : plans (direction artistique, scénario ; sans casse) dont le prompt
+    négatif reçoit `negative` (« full body, feet visible… »)."""
+
+    shots: list[str] = Field(default_factory=list)
+    negative: list[str] = Field(default_factory=list)
+
+
 class ImagePromptSettings(_Strict):
     """Construction du prompt final d'une case (voir pipeline/prompt.py)."""
 
@@ -1483,6 +1491,10 @@ class ImagePromptSettings(_Strict):
     # (`$shot`, `$plan`, `$angle` et le rédacteur de prompt). Clés comparées sans casse ; une valeur
     # absente passe telle quelle.
     camera_terms: dict[str, str] = Field(default_factory=dict)
+    # Plans serrés (plus serrés que le plan américain) : termes ajoutés au prompt négatif de la case pour
+    # combattre le plein pied (lus seulement à vrai CFG : à cfg 1, la phrase de cadrage du prompt positif,
+    # `camera_terms`, est le seul levier).
+    tight_shots: TightShotSettings = Field(default_factory=TightShotSettings)
 
     @field_validator("parts")
     @classmethod
@@ -1533,6 +1545,11 @@ class ReferenceSheet(_Strict):
     # Mots (insensibles à la casse, mots entiers) qui signalent une silhouette grande ou massive : ceux trouvés
     # remplissent $large_build (ex. « réduis les figures pour qu'elles tiennent en entier »).
     large_build_keywords: list[str] = Field(default_factory=list)
+    # Plans de case (direction artistique, scénario ; sans casse) que sert cette fiche : pour une case à l'un
+    # de ces plans, l'image d'un personnage tirée de cette fiche passe en tête (portrait pour un gros plan,
+    # plein pied pour un plan large). Pour un plan absent de la liste, l'image n'est envoyée que si le
+    # personnage n'en a pas d'autre. Vide : aucune préférence (l'image garde sa place).
+    shots: list[str] = Field(default_factory=list)
     # Sous-dossier de la fiche dans la bibliothèque lisible (`references/personnages/<nom>/<dossier>/`, voir
     # pipeline/comfy_library.py) ; absent : l'id sans la sorte (`personnage-portrait` → `portrait`).
     folder: str | None = Field(default=None, pattern=r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")

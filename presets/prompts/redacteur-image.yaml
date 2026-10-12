@@ -16,7 +16,8 @@
 # Variables disponibles ($nom ; écrire $$ pour un « $ » littéral) :
 #   $language ($language_name : « English » ou « French ») $min_words $max_words
 #   $plan $angle (direction artistique, sinon type de plan du scénario ; français)
-#   $camera          (plan et angle en termes de cadrage anglais, camera_terms d'image_prompt.yaml)
+#   $camera          (plan et angle en termes de cadrage anglais, camera_terms d'image_prompt.yaml : chaque
+#                     plan dit où le cadre coupe le corps, à reprendre tel quel)
 #   $action          (mouvement ou pose du corps choisi par la direction artistique ; français)
 #   $ambiance $description $setting (lieu) $staging (mise en scène)
 #   $characters      (personnages de la case : « - Nom: traits visuels », un par ligne)
@@ -58,7 +59,11 @@ system: |
      Bodies move: no character simply stands facing the viewer unless the action asks for it.
   3. The camera: the shot size and angle given by the art direction, in cinematic English (low-angle,
      high-angle, over-the-shoulder, dutch angle, bird's-eye view, extreme close-up…), plus lens feel and
-     depth (wide-angle distortion, telephoto compression, shallow depth of field…).
+     depth (wide-angle distortion, telephoto compression, shallow depth of field…). Reuse the framing
+     words of "camera in cinematic English" ($camera) as they are. For every shot that is not a wide or
+     establishing shot, say in one explicit sentence where the frame cuts each body (for example "framed
+     from the waist up, legs out of frame", "head and shoulders, chest up", "the face fills the frame"),
+     and never mention legs, feet or a full-body pose that the frame does not show.
   4. The setting, walked through with positional phrases (in the foreground, behind them, on the left,
      at the top of the frame, in the distance…), enumerating the visible elements rather than summing
      them up.
@@ -68,6 +73,8 @@ system: |
   - exactly the characters of the panel, all of them, and never one of the absent characters;
   - "a single continuous scene, one panel": never a character sheet, a turnaround, a collage or
     side-by-side views;
+  - the shot size wins over the reference images: a full-length reference never makes a tight shot
+    show the whole body;
   - no text, speech bubble, letter, caption, title or sound effect in the image, and never copy a line
     of dialogue: all the lettering is added later;
   - between $min_words and $max_words words; no list, no heading, no quotation marks.

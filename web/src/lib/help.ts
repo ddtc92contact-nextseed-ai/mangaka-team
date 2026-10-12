@@ -55,6 +55,8 @@ export const HELP = {
     "La date de sortie prévue : le tableau de bord affiche les chapitres à sortir dans les 7 prochains jours.",
   "chapitre_infos.summary":
     "Résumé écrit par le LLM au découpage. Les chapitres suivants le relisent pour garder la continuité de l'histoire.",
+  "chapitre_infos.rewrite_prompts":
+    "Un prompt rédigé par l'IA est gardé tel quel d'une génération à l'autre. Il est rédigé de nouveau tout seul quand la case ou le savoir-faire du Dessinateur change (pack importé, fiche ajoutée, budget réglé dans « L'équipe »). Ce bouton force la réécriture de tous les prompts rédigés par l'IA du chapitre, à la prochaine génération de chaque case. Les prompts retouchés à la main ne bougent jamais.",
   "chapitre_infos.generate_all":
     "Met en file tout le chapitre en un clic : les pages sans mise en page sont mises en page d'abord, puis chaque case sans version choisie des pages de l'histoire et bonus part en génération (en croquis d'abord si le palier croquis est activé). Une génération à la fois ; une confirmation montre le nombre de cases et la durée estimée.",
 
@@ -302,6 +304,8 @@ export const HELP = {
     "Nombre maximal de passages de savoir-faire joints à chaque appel. Plus il y en a, plus l'agent a de contexte, mais plus l'appel est long.",
   "equipe.budget":
     "Jetons de savoir-faire joints à chaque appel (≈ 4 caractères par jeton) : plus, ce sont des fiches entières et plus de méthode appliquée, mais un appel plus long ; moins, seulement l'essentiel. Pour le Dessinateur, c'est ce que lit le rédacteur de prompt (≈ 1 200 conseillé), la note courte des fragments restant fixée dans presets/knowledge.yaml ; vide : la valeur livrée.",
+  "atelier.prompt_sources":
+    "Les fiches de savoir-faire que le rédacteur de prompt a vraiment reçues pour écrire le prompt actuel de cette case, et la date de la rédaction. Les fiches du pack livré apparaissent avec leur collection « Mise en scène · … ».",
   "atelier.knowledge":
     "Les fiches de savoir-faire retrouvées pour cette case (plan, angle, description, personnages…) : passages entiers envoyés au rédacteur de prompt (IA), et note courte en une ligne pour le prompt par fragments.",
   "equipe.trial":

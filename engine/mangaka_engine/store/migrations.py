@@ -46,6 +46,9 @@
 - 27 : packs de savoir-faire (presets/knowledge_packs/) : collection et document marqués « pack », champs
   meta d'une fiche, mots-clés indexés en FTS sans être injectés (colonne `keywords` de l'index, reconstruit
   depuis les passages). Les collections et documents existants restent ceux de l'utilisateur.
+- 28 : empreinte du savoir-faire du prompt rédigé et ses « Sources utilisées », par case. Aucune empreinte sur
+  les cases existantes : leurs prompts rédigés par l'IA (non retouchés) seront rédigés de nouveau, avec le
+  savoir-faire actuel, à leur prochaine génération.
 
 Une base neuve est créée directement à la dernière version. Chaque migration tourne dans une
 transaction unique, clés étrangères désactivées (recette « 12 étapes » de SQLite pour reconstruire
@@ -90,7 +93,7 @@ from .slugs import RESERVED_ENTRIES, RESERVED_SERIES, slugify, unique_slug
 
 log = logging.getLogger("mangaka_engine")
 
-SCHEMA_VERSION = 27
+SCHEMA_VERSION = 28
 
 
 class MigrationError(RuntimeError):
@@ -443,6 +446,14 @@ def _v26_to_v27(cur: sqlite3.Cursor) -> None:
     )
 
 
+def _v27_to_v28(cur: sqlite3.Cursor) -> None:
+    existing = {row[1] for row in cur.execute("PRAGMA table_info(panels)")}
+    if "prompt_knowledge" not in existing:
+        cur.execute("ALTER TABLE panels ADD COLUMN prompt_knowledge VARCHAR(64)")
+    if "prompt_sources" not in existing:
+        cur.execute("ALTER TABLE panels ADD COLUMN prompt_sources JSON")
+
+
 MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     # version de départ → (version d'arrivée, fonction)
     0: (2, _v0_to_v2),
@@ -472,6 +483,7 @@ MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     24: (25, _v24_to_v25),
     25: (26, _v25_to_v26),
     26: (27, _v26_to_v27),
+    27: (28, _v27_to_v28),
 }
 
 

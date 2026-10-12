@@ -412,6 +412,14 @@ class Panel(TimestampMixin, Base):
     prompt_source: Mapped[str | None] = mapped_column(String(20), default=None)
     prompt_key: Mapped[str | None] = mapped_column(String(64), default=None)
     prompt_warning: Mapped[str | None] = mapped_column(Text, default=None)
+    # Empreinte du savoir-faire que lisait le rédacteur au moment de la rédaction (collections de l'agent
+    # « image_prompt », leurs documents et passages, budget et top-k du rédacteur) : quand elle change (pack
+    # importé ou mis à jour, document ajouté ou retiré, réindexation, budget réglé dans « L'équipe »), le
+    # prompt rédigé est redemandé à la prochaine génération. None : rédigé avant (ou jamais).
+    prompt_knowledge: Mapped[str | None] = mapped_column(String(64), default=None)
+    # « Sources utilisées » du prompt rédigé : {"written_at", "query", "collections", "passages", "bible"} —
+    # ce que le rédacteur a reçu pour le prompt actuel ; None : prompt jamais rédigé par l'IA.
+    prompt_sources: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
     generation_preset: Mapped[str | None] = mapped_column(String(100), default=None)
     # Croquis validé au tri (composition retenue, id de `panel_images` de sorte croquis) ; None = aucun.
     sketch_image_id: Mapped[int | None] = mapped_column(Integer, default=None)

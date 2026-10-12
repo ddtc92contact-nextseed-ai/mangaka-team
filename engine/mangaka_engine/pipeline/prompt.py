@@ -158,12 +158,25 @@ def build_prompt(
     return " ".join(p for p in parts if p)
 
 
-def build_negative_prompt(base: str, settings: ImagePromptSettings | None = None) -> str:
-    """Ajoute au prompt négatif les termes « pas de texte » qui n'y sont pas déjà."""
+def shot_in(value: str | None, shots: Sequence[str]) -> bool:
+    """Le plan `value` (« Gros plan ») est l'un de `shots` (sans casse ni espaces superflus)."""
+    key = _term_key(value or "")
+    return bool(key) and key in {_term_key(s) for s in shots}
+
+
+def is_tight_shot(plan: str | None, settings: ImagePromptSettings | None = None) -> bool:
+    """Plan plus serré que le plan américain (`tight_shots.shots` d'image_prompt.yaml)."""
+    return shot_in(plan, (settings or ImagePromptSettings()).tight_shots.shots)
+
+
+def build_negative_prompt(base: str, settings: ImagePromptSettings | None = None, plan: str | None = None) -> str:
+    """Ajoute au prompt négatif les termes « pas de texte » qui n'y sont pas déjà, et pour un plan serré
+    (`plan`, voir `is_tight_shot`) les termes contre le plein pied (`tight_shots.negative`)."""
     settings = settings or ImagePromptSettings()
     terms = [t.strip() for t in (base or "").split(",") if t.strip()]
     present = {t.casefold() for t in terms}
-    for term in settings.forbidden_text_terms:
+    extra = settings.tight_shots.negative if is_tight_shot(plan, settings) else []
+    for term in [*settings.forbidden_text_terms, *extra]:
         if term.casefold() not in present:
             terms.append(term)
             present.add(term.casefold())

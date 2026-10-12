@@ -5,6 +5,10 @@ name: Portrait de face
 description: "Buste de face, regard caméra, fond neutre : la référence principale du visage."
 kinds: [character]
 order: 10
+# Plans de case que sert cette fiche (« Références par plan », pipeline/generation.py) : pour un plan serré,
+# le portrait du personnage passe en tête de ses images — une référence plein pied tire la case vers le
+# plein pied, quel que soit le plan écrit dans le prompt.
+shots: [gros plan, très gros plan, plan rapproché, insert, plan moyen]
 width: 1024
 height: 1024
 # null : palier des fiches (`workflow_library` de defaults.yaml : Turbo), sinon celui de la série,
