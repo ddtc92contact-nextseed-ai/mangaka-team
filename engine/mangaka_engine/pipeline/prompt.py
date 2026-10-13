@@ -18,10 +18,12 @@ from __future__ import annotations
 
 import re
 import string
+import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from ..presets import ImagePromptSettings
+from ..presets.schemas import ReferencePromptSettings
 
 
 @dataclass(frozen=True)
@@ -172,14 +174,19 @@ def is_tight_shot(plan: str | None, settings: ImagePromptSettings | None = None)
     return shot_in(plan, (settings or ImagePromptSettings()).tight_shots.shots)
 
 
-def build_negative_prompt(base: str, settings: ImagePromptSettings | None = None, plan: str | None = None) -> str:
+def build_negative_prompt(
+    base: str, settings: ImagePromptSettings | None = None, plan: str | None = None, *, monochrome: bool = False
+) -> str:
     """Ajoute au prompt négatif les termes « pas de texte » et « pas de photo » (`negative_photo_terms`) qui
-    n'y sont pas déjà, et pour un plan serré (`plan`, voir `is_tight_shot`) les termes contre le plein pied
-    (`tight_shots.negative`)."""
+    n'y sont pas déjà, pour un plan serré (`plan`, voir `is_tight_shot`) les termes contre le plein pied
+    (`tight_shots.negative`), et pour une série en noir et blanc (`monochrome`) les termes contre la couleur
+    (`monochrome_negative_terms`)."""
     settings = settings or ImagePromptSettings()
     terms = [t.strip() for t in (base or "").split(",") if t.strip()]
     present = {t.casefold() for t in terms}
     extra = settings.tight_shots.negative if is_tight_shot(plan, settings) else []
+    if monochrome:
+        extra = [*extra, *settings.monochrome_negative_terms]
     for term in [*settings.forbidden_text_terms, *settings.negative_photo_terms, *extra]:
         if term.casefold() not in present:
             terms.append(term)
@@ -221,35 +228,49 @@ def defines_references(prompt: str, count: int) -> bool:
     return count > 0 and head.startswith("<image1>") and image_tags(prompt) == list(range(1, count + 1))
 
 
-def frame_references(prompt: str, slots: Sequence[ReferenceSlot], settings: ImagePromptSettings | None = None) -> str:
+def frame_references(
+    prompt: str,
+    slots: Sequence[ReferenceSlot],
+    settings: ImagePromptSettings | None = None,
+    *,
+    monochrome: bool = False,
+) -> str:
     """Prompt envoyé à un workflow avec références : le rôle de chaque image (« <image1> is the identity
     reference for Urus… ») avant le prompt de la case, la consigne « identité seulement » après.
 
     Un prompt qui définit déjà le rôle de chaque image envoyée en tête (`defines_references` : prompt
     rédigé par l'IA) ne reçoit que la consigne. Sans image de référence, le prompt est renvoyé tel quel.
+    `monochrome` : série en noir et blanc, lignes de `references.monochrome` (sans « colours »).
     """
     if not slots:
         return prompt
-    refs = (settings or ImagePromptSettings()).references
-    lines = [
-        string.Template(getattr(refs, slot.kind, refs.character)).substitute(slot=str(i), name=_clean(slot.name))
-        for i, slot in enumerate(slots, start=1)
-    ]
+    refs = (settings or ImagePromptSettings()).references.for_palette(monochrome)
+    lines = [reference_line(refs, slot, i) for i, slot in enumerate(slots, start=1)]
     values = {
         "images": refs.separator.join(line.strip() for line in lines if line.strip()),
         "count": str(len(slots)),
-        "sorting": refs.separator.join(sorting_lines(slots, settings)),
+        "sorting": refs.separator.join(sorting_lines(slots, settings, monochrome=monochrome)),
     }
     body = _sentence(prompt)
     before = "" if defines_references(body, len(slots)) else _join(refs.before, values)
     return " ".join(p for p in (before, body, _join(refs.after, values)) if p)
 
 
-def sorting_lines(slots: Sequence[ReferenceSlot], settings: ImagePromptSettings | None = None) -> list[str]:
+def reference_line(refs: ReferencePromptSettings, slot: ReferenceSlot, number: int) -> str:
+    """Ligne d'une image envoyée (« <image1> is the identity reference for Urus: keep… »), selon sa sorte
+    (inconnue : celle des personnages)."""
+    return string.Template(getattr(refs, slot.kind, refs.character)).substitute(
+        slot=str(number), name=_clean(slot.name)
+    )
+
+
+def sorting_lines(
+    slots: Sequence[ReferenceSlot], settings: ImagePromptSettings | None = None, *, monochrome: bool = False
+) -> list[str]:
     """Consigne de tri de chaque image envoyée (« From <image1> take only the face… of Urus; ignore its
     layout… »), dans l'ordre des emplacements, d'après `references.sorting` du preset (sorte inconnue :
     celle des personnages) ; une sorte sans consigne n'en donne aucune."""
-    sorting = (settings or ImagePromptSettings()).references.sorting
+    sorting = (settings or ImagePromptSettings()).references.for_palette(monochrome).sorting
     lines = (
         string.Template(getattr(sorting, slot.kind, sorting.character)).substitute(slot=str(i), name=_clean(slot.name))
         for i, slot in enumerate(slots, start=1)
@@ -271,6 +292,87 @@ def append_instruction(prompt: str, instruction: str) -> str:
         return prompt
     body = _sentence(prompt)
     return f"{body} {extra}" if body else extra
+
+
+def term_pattern(term: str) -> re.Pattern[str]:
+    """Un terme en mots entiers, sans casse (« green » ne trouve ni « greenhouse » ni « blue-green »)."""
+    words = r"\s+".join(re.escape(w) for w in term.split())
+    return re.compile(rf"(?<![\w-]){words}(?![\w-])", re.IGNORECASE)
+
+
+def found_terms(text: str, terms: Sequence[str]) -> list[str]:
+    """Termes de `terms` présents dans `text` (mots entiers, sans casse), sans doublon."""
+    return [t for t in dict.fromkeys(t.strip() for t in terms if t.strip()) if term_pattern(t).search(text)]
+
+
+_HOLE = "\x00"
+# Mot de liaison ou article laissé seul par un terme retiré en fin de groupe (« outfit and colours; » →
+# « outfit; », « with a warm color palette. » → « . »).
+_DANGLING = re.compile(
+    rf"\b(?:and|or|with|in|of|a|an|the|its|their|et|ou|aux?|en|un|une|le|la|les|des|du)\s*{_HOLE}"
+    rf"(?=[\s{_HOLE}]*(?:[,;:.!?)]|$))",
+    re.IGNORECASE,
+)
+
+_STITCHES = [
+    (re.compile(rf"[ \t]*\([ \t]*{_HOLE}[ \t]*\)"), ""),  # « (green) » → « »
+    (re.compile(rf"(?<=[.!?])[ \t]*{_HOLE}[ \t]*[.!?]"), ""),  # phrase vidée : « Light. green. » → « Light. »
+    (re.compile(rf"^[ \t]*{_HOLE}[ \t]*[,;:.!?]?[ \t]*"), ""),
+    (re.compile(rf"(?<=[(:;,])([ \t]*){_HOLE}[ \t]*,[ \t]*"), r"\1"),  # « outfit, colours, materials »
+    (re.compile(rf"[,;:]?[ \t]*{_HOLE}[ \t]*(?=[,;:.!?)]|$)"), ""),  # « screentones, colours) », « outfit; »
+    (re.compile(rf"[ \t]*{_HOLE}[ \t]*"), " "),  # « the thick green liquid » → « the thick liquid »
+]
+
+
+def remove_terms(text: str, terms: Sequence[str], keep: Sequence[str] = ()) -> str:
+    """`text` sans les termes de `terms` (mots entiers, sans casse ; les plus longs d'abord), ponctuation
+    recousue : « the thick green liquid » → « the thick liquid », « outfit and colours; » → « outfit; ».
+    Un terme contenu dans l'un des noms de `keep` (personnage « Violet ») n'est pas retiré."""
+    kept = [name_words for name_words in (n.casefold().split() for n in keep) if name_words]
+    chosen = [
+        t
+        for t in dict.fromkeys(t.strip() for t in terms if t.strip())
+        if not any(set(t.casefold().split()) <= set(words) for words in kept)
+    ]
+    out = text
+    for term in sorted(chosen, key=len, reverse=True):
+        out = term_pattern(term).sub(_HOLE, out)
+    if _HOLE not in out:
+        return text
+    out = re.sub(rf"{_HOLE}(?:[ \t]*{_HOLE})+", _HOLE, out)  # termes voisins : un seul trou
+    while (shorter := _DANGLING.sub(_HOLE, out)) != out:
+        out = shorter
+    # La ponctuation n'est recousue qu'autour des trous : le reste du texte (espace française avant « ; »…)
+    # ne bouge pas.
+    for pattern, repl in _STITCHES:
+        out = pattern.sub(repl, out)
+    return out.strip()
+
+
+def _mood_key(text: str) -> str:
+    decomposed = unicodedata.normalize("NFKD", text or "")
+    plain = "".join(ch for ch in decomposed if not unicodedata.combining(ch)).casefold()
+    return " ".join(re.sub(r"[^\w*]+", " ", plain.replace("_", " ")).split())
+
+
+def mood_dropped_terms(ambiance: str | None, settings: ImagePromptSettings | None = None) -> list[str]:
+    """Mots-clés du ton à retirer pour une case dont l'ambiance (direction artistique) contredit le ton de la
+    série (`mood_conflicts` d'image_prompt.yaml) : l'ambiance de la case gagne."""
+    text = _mood_key(ambiance or "")
+    if not text:
+        return []
+    dropped: list[str] = []
+    for rule in (settings or ImagePromptSettings()).mood_conflicts:
+        for mood in rule.moods:
+            key = _mood_key(mood)
+            if not key:
+                continue
+            words = r"\s+".join(re.escape(w) for w in key.rstrip("*").split())
+            tail = r"\w*" if key.endswith("*") else r"(?!\w)"
+            if re.search(rf"(?<!\w){words}{tail}", text):
+                dropped += [d for d in rule.drop if d.strip()]
+                break
+    return list(dict.fromkeys(dropped))
 
 
 def merge_negative(base: str, extra: str) -> str:

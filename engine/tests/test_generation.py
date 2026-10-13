@@ -251,8 +251,12 @@ def test_generate_panel_mock_end_to_end(make_client: Callable[..., TestClient]) 
     panel = _ok(c.get(f"/panels/{p1['id']}"))
     # Prompt envoyé = prompt de la case encadré par les images de référence (nommées dans l'ordre).
     assert panel["state"] == "review" and panel["final_prompt"] == params["panel_prompt"]
-    role = "<image1> is the identity reference for Aiko: keep the face, hair, outfit and colours; ignore its pose, "
-    assert params["prompt"].startswith(role + "framing and background. " + params["panel_prompt"])
+    # Série en noir et blanc (rendu par défaut) : pas de « colours » dans le rôle des fiches.
+    role = "<image1> is the identity reference for Aiko: keep the face, hair and outfit; ignore its pose, "
+    # … et sans mot de couleur à l'envoi (« kimono rouge » de la fiche) : le prompt de la case, lui, ne change pas.
+    assert "kimono rouge" in params["panel_prompt"] and "rouge" not in params["prompt"]
+    sent_case = params["panel_prompt"].replace("kimono rouge", "kimono")
+    assert params["prompt"].startswith(role + "framing and background. " + sent_case)
     assert "not a character sheet, not a turnaround, not a collage" in params["prompt"]
     assert panel["final_prompt_manual"] is False and panel["label"].endswith("p. 1 · case 1")
     pages = _ok(c.get(f"/chapters/{data['chapter']['id']}/pages"))

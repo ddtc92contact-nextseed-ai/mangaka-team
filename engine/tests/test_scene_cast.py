@@ -222,14 +222,16 @@ def test_two_character_panel_gets_two_references_named_in_slot_order(client: Tes
     assert [r["image_id"] for r in refs] == [urus["reference_images"][0]["id"], kael["reference_images"][0]["id"]]
     prompt = img["params"]["prompt"]
     assert prompt.startswith(
-        "<image1> is the identity reference for Urus: keep the face, hair, outfit and colours; ignore its pose, "
+        "<image1> is the identity reference for Urus: keep the face, hair and outfit; ignore its pose, "
         "framing and background. <image2> is the identity reference for Kaël: "
     )
     assert "background. Black and white manga panel, hand-drawn inked line art with halftone screentone" in prompt
     assert "manga style. Wide shot. Urus retrouve Kaël." in prompt
     assert "Setting: clairière au bord d'un lac, fin d'après-midi, herbes hautes." in prompt
     assert "Staging: Urus au premier plan à gauche, ailes déployées ; Kaël sur un rocher à droite." in prompt
-    assert "Two characters: Urus (dragon bleu, cornes torsadées); Kaël (dragon rouge, ailes)." in prompt
+    # Série en noir et blanc : « bleu », « rouge » retirés à l'envoi (le prompt de la case les garde).
+    assert "Two characters: Urus (dragon, cornes torsadées); Kaël (dragon, ailes)." in prompt
+    assert "Two characters: Urus (dragon bleu, cornes torsadées)" in img["params"]["panel_prompt"]
     assert prompt.index("Setting:") < prompt.index("Two characters") < prompt.index("for identity and design only")
     assert img["params"]["panel_prompt"] == _ok(client.get(f"/panels/{panel['id']}"))["final_prompt"]
 

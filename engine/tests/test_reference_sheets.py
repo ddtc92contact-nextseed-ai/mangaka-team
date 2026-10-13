@@ -572,12 +572,13 @@ def _client_with_detector(
 
 
 def test_object_and_decor_sheets_drop_people_keywords_and_use_their_own_negative() -> None:
-    # Shōnen + lumineux : « determined young hero » et « smiles » sont marqués `people` dans les packs.
+    # Shōnen + lumineux : « determined young hero » est marqué `people` dans le pack (le ton lumineux n'a
+    # plus de « smiles » : un sourire appartient à une case, pas à une série).
     series = _series(style_genre="shonen", style_tone="lumineux")
     assert REG.style_genres["shonen"].people_keywords == ["determined young hero"]
-    assert REG.style_tones["lumineux"].people_keywords == ["smiles"]
+    assert REG.style_tones["lumineux"].people_keywords == []
     portrait = sheet_prompt(REG, REG.reference_sheet("personnage-portrait"), _entry("character"), series)
-    assert "determined young hero" in portrait or "smiles" in portrait  # un personnage les garde
+    assert "determined young hero" in portrait  # un personnage le garde
     for sheet_id, kind, negative in (
         ("objet-trois-quarts", "object", OBJECT_NEGATIVE),
         ("decor-plan-large", "decor", DECOR_NEGATIVE),

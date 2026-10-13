@@ -13,6 +13,10 @@
 # paragraphe s'ouvre sur la phrase de style, parle le langage du dessin, et un paragraphe qui contient un
 # terme de forbidden_photo_terms (image_prompt.yaml) est refusé puis redemandé.
 #
+# Série en noir et blanc (13/10/2026) : aucun mot de couleur ($palette_rule) ; un paragraphe qui contient un
+# terme de monochrome_forbidden_terms (image_prompt.yaml) est refusé puis redemandé, et ces termes sont de
+# toute façon retirés du prompt envoyé à ComfyUI.
+#
 # Le prompt rédigé est stocké sur la case (une fois par case) ; la consigne « références pour
 # l'identité seulement » (image_prompt.yaml#references) et les termes « pas de texte » du prompt
 # négatif sont toujours ajoutés au moment de l'envoi à ComfyUI. Un paragraphe qui commence par le rôle
@@ -37,6 +41,8 @@
 #   $bible           (notes de la bible sur les personnages de la case ; writer_bible_max_tokens de knowledge.yaml)
 #   $savoir_faire    (passages entiers du savoir-faire « image_prompt », numérotés avec leur source ;
 #                     writer_budget_tokens / writer_top_k de knowledge.yaml, réglables dans « L'équipe »)
+#   $palette_rule    (série en noir et blanc : règle « aucun mot de couleur », monochrome_writer_rule
+#                     d'image_prompt.yaml ; vide pour une série en couleur)
 #   $context_json    (le même contexte, en JSON)
 # Gabarit de relance après une réponse invalide : $error (erreurs de validation).
 id: redacteur-image
@@ -59,8 +65,8 @@ system: |
   of the drawing board, never the language of a camera. Follow this order:
   0. Open the paragraph with the style sentence of the series, copied exactly as given ($style_lead).
   1. Then the reference roles, one sentence per image that is sent, in slot order, citing it as <imageN>,
-     for example: "<image1> is the identity reference for Aiko: keep her face, hair, outfit and colours;
-     ignore its pose, framing and background." Cite only the images listed ($image_tags) and never
+     for example: "<image1> is the identity reference for Aiko: keep her face, hair and outfit; ignore
+     its pose, framing and background." Cite only the images listed ($image_tags) and never
      re-describe what a reference image already shows: point to it with <imageN> instead. When reference
      images are sent, say once that the whole panel is drawn in the same manga style as the reference
      images.
@@ -94,6 +100,7 @@ system: |
   - no text, speech bubble, letter, caption, title or sound effect in the image, and never copy a line
     of dialogue: all the lettering is added later;
   - between $min_words and $max_words words; no list, no heading, no quotation marks.
+  $palette_rule
   You answer ONLY with a valid JSON object, with no text around it and no code block.
 
 user: |
