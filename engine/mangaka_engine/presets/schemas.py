@@ -1936,6 +1936,9 @@ class AgentPreset(_Strict):
 class KnowledgeChunking(_Strict):
     max_tokens: int = Field(default=350, ge=50, le=4000, description="Taille maximale d'un passage")
     min_tokens: int = Field(default=40, ge=0, le=2000, description="Un passage plus petit est fusionné au suivant")
+    fiche_max_tokens: int = Field(
+        default=800, ge=50, le=4000, description="Fiche d'un pack : un passage, coupée seulement au-delà"
+    )
 
 
 class KnowledgeRetrieval(_Strict):

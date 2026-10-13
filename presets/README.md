@@ -1555,7 +1555,10 @@ une série, documents `.md` / `.txt` / `.pdf` (texte extrait par pypdf) ou texte
 
 - **Découpage** (`chunking`) : aux titres Markdown d'abord (un passage ne mélange jamais deux
   sections), puis aux paragraphes, phrases et mots pour tenir dans `max_tokens`. Jetons estimés à
-  ≈ 4 caractères.
+  ≈ 4 caractères. Une **fiche d'un pack** est un seul passage tant qu'elle tient dans `fiche_max_tokens`
+  (800) ; au-delà seulement elle est coupée aux paragraphes, et son fragment « Prompt (EN) » reste dans le
+  dernier passage, précédé du titre de la fiche. Un découpage changé est refait au prochain import des
+  packs (ou par « Réindexer »), sans doublon.
 - **Index** : chaque passage a un vecteur (float32 en BLOB dans SQLite) et une entrée dans l'index
   plein texte FTS5. La comparaison des vecteurs se fait en **numpy** (force brute) : sqlite-vec
   n'est pas utilisé — aux volumes visés (quelques milliers de passages) c'est instantané, et cela
@@ -1588,7 +1591,16 @@ une série, documents `.md` / `.txt` / `.pdf` (texte extrait par pypdf) ou texte
   La requête d'une case reprend le plan du scénario, la direction artistique appliquée (plan, angle,
   ambiance, action : un « gros plan » en « contre-plongée » retrouve les fiches qui en parlent), la
   description, les personnages, le décor et les objets. `series_collections: true` : les collections
-  rattachées à la série de la case s'ajoutent. L'atelier (« Savoir-faire de la case », sous le prompt
+  rattachées à la série de la case s'ajoutent.
+
+  **Pas de redondance** : une fiche n'est servie qu'une fois (une collection injectée entière, comme
+  « Pont ComfyUI », n'est jamais reprise par la recherche) ; **une seule fiche de plan** (`SHOT_*`) et **une
+  seule fiche d'angle** (`ANG_*`) d'un pack par case — la fiche de référence du plan / de l'angle de la case
+  (`vocabulary.primary` du manifeste : « plan moyen » → SHOT_MS_001, « gros plan » → SHOT_CU_001), servie
+  en premier même si son score est bas. Case sans plan (ou angle) connu : la mieux classée seulement ; angle
+  sans fiche (« de face ») : aucune. Les autres familles (émotions, action, corps…) gardent leur classement,
+  et le budget libéré va aux passages suivants. « Sources utilisées » cite chaque fiche une fois et signale
+  celles écartées comme redondantes. L'atelier (« Savoir-faire de la case », sous le prompt
   final ; `GET /panels/{id}/knowledge`) montre ce que reçoit chacun, avec les jetons.
 - **Bible de série** (page de la série) : univers, ton, règles, gags et motifs, notes par fiche
   personnage, et le résumé de chaque chapitre passé à « Prêt » ou « Publié ». Toujours injectée
@@ -1621,8 +1633,9 @@ collections:                        # sections `##` → collection ; `sections` 
     sections: ["0.B", "0.C"]        # plusieurs sections dans une collection
 skip: ["0.A", "0.D", "Annexe C"]    # sections volontairement ignorées
 vocabulary:                         # pont de vocabulaire : code du meta → terme de l'appli
-  shot_scale: { close_up: gros plan, detail: insert }
+  shot_scale: { close_up: gros plan, extreme_close_up: gros plan, detail: insert }
   camera_angle: { low: en contre-plongée, dutch: cadre penché }
+  primary: { gros plan: close_up }  # fiche de référence d'un terme donné par plusieurs codes
 ```
 
 **Ce que fait l'import** (au démarrage du moteur, et bouton « Mettre à jour les packs » de l'écran

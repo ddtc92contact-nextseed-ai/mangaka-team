@@ -246,6 +246,7 @@ def prompt_sources_out(panel: Panel) -> PromptSourcesOut | None:
         query=str(sources.get("query") or ""),
         collections=list(sources.get("collections") or []),
         passages=[PassageOut(**p, selected=True) for p in sources.get("passages") or []],
+        dropped=[PassageOut(**p) for p in sources.get("dropped") or []],
         tokens=int(sources.get("tokens") or 0),
         budget_tokens=int(sources.get("budget_tokens") or 0),
         bible=str(sources.get("bible") or ""),
@@ -373,10 +374,16 @@ def get_panel_knowledge(
     found = panel_knowledge(session, ctx.knowledge, panel, panel_cast(session, panel).characters)
 
     def part(
-        passages: list[Passage], tokens: int, budget: int, top_k: int, sent: tuple[str, str]
+        passages: list[Passage],
+        tokens: int,
+        budget: int,
+        top_k: int,
+        sent: tuple[str, str],
+        dropped: list[Passage] | None = None,
     ) -> PanelKnowledgePart:
         text, bible = sent
         return PanelKnowledgePart(
+            dropped=[PassageOut(**p.as_dict()) for p in dropped or []],
             passages=[PassageOut(**p.as_dict(), selected=True) for p in passages],
             tokens=tokens,
             budget_tokens=budget,
@@ -392,7 +399,12 @@ def get_panel_knowledge(
         query=found.query,
         collections=found.collections,
         writer=part(
-            found.writer_passages, found.writer_tokens, found.writer_budget, found.writer_top_k, found.writer()
+            found.writer_passages,
+            found.writer_tokens,
+            found.writer_budget,
+            found.writer_top_k,
+            found.writer(),
+            found.writer_dropped,
         ),
         fragments=part(
             found.fragment_passages,

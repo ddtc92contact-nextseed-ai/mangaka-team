@@ -7,6 +7,9 @@
 chunking:
   max_tokens: 350        # taille maximale d'un passage (découpe aux titres, puis aux paragraphes)
   min_tokens: 40         # un passage plus court est fusionné au suivant de la même section
+  # Fiche d'un pack (presets/knowledge_packs/) : une fiche = un passage. Seule une fiche plus longue est coupée,
+  # et son fragment « Prompt (EN) » reste dans le dernier passage, avec le titre de la fiche.
+  fiche_max_tokens: 800
 
 retrieval:
   top_k: 6               # passages au plus, par défaut (surchargé par agent)
