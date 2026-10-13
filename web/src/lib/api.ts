@@ -205,6 +205,28 @@ export interface Viewpoint {
   source: string;
 }
 
+/** Fiche personnage citée par une alerte de nom. */
+export interface CardRef {
+  id: number;
+  name: string;
+}
+
+/**
+ * Nom de personnage lu dans une case qui demande l'avis de l'auteur (moteur : pipeline/names.py) :
+ * ambigu (plusieurs fiches à égalité, la première retenue), sans fiche, ou cité par le texte sans être
+ * déclaré (ni présent, ni hors cadre).
+ */
+export interface NameNote {
+  name: string;
+  source: "image" | "hors cadre" | "bulle" | "description" | "mise en scène";
+  kind: "ambigu" | "sans fiche" | "non déclaré";
+  /** Fiche(s) retenue(s) ; vide : aucune. */
+  chosen: CardRef[];
+  /** Fiches à égalité (nom ambigu). */
+  candidates: CardRef[];
+  message: string;
+}
+
 export interface PanelData {
   id: number;
   index: number;
@@ -217,6 +239,8 @@ export interface PanelData {
   characters: string[];
   /** Noms de `characters` qui ne désignent aucune fiche personnage (à rattacher ou écarter). */
   unmatched_characters?: string[];
+  /** Noms ambigus, sans fiche ou cités sans être déclarés : signalés à l'auteur. */
+  name_notes?: NameNote[];
   /** Cités par la case mais hors cadre : jamais dessinés ni pourvus d'image de référence. Absent à l'envoi = gardés. */
   offscreen_characters?: string[];
   viewpoint?: Viewpoint | null;
@@ -830,6 +854,8 @@ export interface PanelDetail {
   character_ids: number[];
   /** Noms sans fiche personnage : ni références, ni description, ni LoRA à la génération. */
   unmatched_characters: string[];
+  /** Noms ambigus, sans fiche ou cités sans être déclarés : signalés à l'auteur. */
+  name_notes?: NameNote[];
   /** Cités par la case mais hors cadre : ni dessinés, ni image de référence. */
   offscreen_characters?: string[];
   viewpoint?: Viewpoint | null;

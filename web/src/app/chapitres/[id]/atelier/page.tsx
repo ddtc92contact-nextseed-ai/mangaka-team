@@ -7,6 +7,7 @@ import { GenerateChapterButton, missingPanels } from "@/components/generate-chap
 import { InfoTip } from "@/components/info-tip";
 import { hasLettering, LetteredPreview } from "@/components/lettered-preview";
 import { modalOpen } from "@/components/modal";
+import { ChapterNameNotes } from "@/components/name-notes";
 import { ProductionLink } from "@/components/production-link";
 import { queueItems, useQueue } from "@/components/queue";
 import { useToast } from "@/components/toast";
@@ -266,6 +267,8 @@ function Workshop() {
         </Alert>
       )}
       {finishJobs.error && <Alert>Historique des finitions indisponible : {finishJobs.error}</Alert>}
+
+      <ChapterNameNotes pages={list} onOpenPanel={(pageId, panelId) => navigate(pageId, panelId)} />
 
       <QCToolbar
         chapterId={chapter.id}

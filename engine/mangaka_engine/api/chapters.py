@@ -19,7 +19,7 @@ from ..pipeline.knowledge import record_chapter_summary
 from ..pipeline.layout import LayoutError, clamp_to_live
 from ..pipeline.lettering import Box
 from ..pipeline.library import SeriesLibrary
-from ..pipeline.names import CharacterMatcher, name_key, relink_project
+from ..pipeline.names import CharacterMatcher, link_speakers, name_key, panel_ids, relink_project
 from ..pipeline.pages import (
     FRAME_KEYS,
     apply_frame_change,
@@ -51,6 +51,7 @@ from ..store.models import (
 from .deps import AppContext, get_ctx, get_session
 from .errors import FieldError
 from .jobs import job_out
+from .name_notes import name_notes_out
 from .projects import get_project_or_404
 from .schemas import (
     BreakdownIn,
@@ -198,6 +199,7 @@ def page_out(
                 staging=p.staging or "",
                 characters=list(p.character_names or []),
                 unmatched_characters=matcher.unmatched(p.character_names or []),
+                name_notes=name_notes_out(matcher, p),
                 offscreen_characters=list(p.offscreen_names or []),
                 viewpoint=viewpoint_out(p),
                 decor=p.decor_id,
@@ -646,6 +648,13 @@ def replace_pages(
     for p in removed_pages:
         session.delete(p)
     session.flush()
+    # Fiches des présents et des locuteurs, arbitrage compris (contexte : la case et la précédente).
+    previous_panel: Panel | None = None
+    for page in sorted(result, key=lambda p: p.number):
+        for panel in page.panels:
+            panel.character_ids = panel_ids(matcher, panel, previous_panel)
+            link_speakers(matcher, panel, previous_panel)
+            previous_panel = panel
 
     for page in sorted(result, key=lambda p: p.number):
         if page.grid_template:

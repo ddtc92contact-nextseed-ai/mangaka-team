@@ -92,6 +92,7 @@ from .chapters import get_chapter_or_404, get_page_or_404
 from .deps import AppContext, get_ctx, get_session
 from .errors import FieldError
 from .jobs import job_out
+from .name_notes import name_notes_out
 from .schemas import (
     AnnotationOut,
     BatchGenerateIn,
@@ -231,6 +232,7 @@ def panel_detail(session: Session, ctx: AppContext, panel: Panel) -> PanelDetail
         characters=list(panel.character_names or []),
         character_ids=list(panel.character_ids or []),
         unmatched_characters=matcher.unmatched(panel.character_names or []),
+        name_notes=name_notes_out(matcher, panel),
         offscreen_characters=list(panel.offscreen_names or []),
         viewpoint=viewpoint_out(panel),
         spectator_hints=spect.viewers,

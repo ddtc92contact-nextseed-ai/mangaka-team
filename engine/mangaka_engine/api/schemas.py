@@ -282,6 +282,24 @@ class ViewpointOut(BaseModel):
     source: str = "direction"
 
 
+class CardRef(BaseModel):
+    id: int
+    name: str
+
+
+class NameNoteOut(BaseModel):
+    """Nom de personnage lu dans une case qui demande l'avis de l'auteur (pipeline/names.py)."""
+
+    name: str  # tel qu'écrit dans la case
+    source: Literal["image", "hors cadre", "bulle", "description", "mise en scène"]
+    # ambigu : plusieurs fiches à égalité, la première retenue ; sans fiche : aucune ; non déclaré : nommé
+    # par le texte sans être ni présent ni hors cadre (dessiné sans sa référence).
+    kind: Literal["ambigu", "sans fiche", "non déclaré"]
+    chosen: list[CardRef] = Field(default_factory=list)  # fiche(s) retenue(s) ; vide : aucune
+    candidates: list[CardRef] = Field(default_factory=list)  # fiches à égalité (nom ambigu)
+    message: str
+
+
 class PanelIn(_In):
     id: int | None = None
     description: LongText = ""
@@ -385,6 +403,8 @@ class PanelOut(BaseModel):
     # Noms de `characters` qui ne désignent aucune fiche personnage (ni nom, ni alias, ni nom partiel) :
     # sans référence, sans description ni LoRA pour la génération — à rattacher à une fiche.
     unmatched_characters: list[str] = Field(default_factory=list)
+    # Noms ambigus, sans fiche ou cités sans être déclarés : à signaler à l'auteur (jamais perdus en silence).
+    name_notes: list[NameNoteOut] = Field(default_factory=list)
     # Cités par la case mais hors cadre : jamais dessinés ni pourvus d'image de référence.
     offscreen_characters: list[str] = Field(default_factory=list)
     viewpoint: ViewpointOut | None = None
@@ -866,6 +886,7 @@ class PanelDetailOut(BaseModel):
     characters: list[str]
     character_ids: list[int]
     unmatched_characters: list[str] = Field(default_factory=list)  # voir PanelOut
+    name_notes: list[NameNoteOut] = Field(default_factory=list)  # voir PanelOut
     offscreen_characters: list[str] = Field(default_factory=list)  # voir PanelOut
     viewpoint: ViewpointOut | None = None
     # Personnages que le texte met en spectateur (« voient », « regarde »…) : la case attend un point de vue.
