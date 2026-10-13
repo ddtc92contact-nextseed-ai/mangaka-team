@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, object_session, selectinload
 
 from ..pipeline.crop import PanelCrop, bounded
 from ..pipeline.finishing import panel_print_info
+from ..pipeline.journal import record_event
 from ..pipeline.knowledge import record_chapter_summary
 from ..pipeline.layout import LayoutError, clamp_to_live
 from ..pipeline.lettering import Box
@@ -764,6 +765,7 @@ def set_panel_crop(
     if box is not None and box.w > 0 and box.h > 0:
         crop = bounded(crop, size[0], size[1], box.w, box.h, crop_max_zoom(ctx.files, panel, box))
     panel.crop = crop.to_json()
+    record_event(session, verdict="edited", action="crop", image_id=img.id, panel_id=panel.id)
     session.commit()
     return _page_out(ctx, panel.page)
 

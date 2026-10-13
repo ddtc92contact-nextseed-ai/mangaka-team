@@ -94,6 +94,7 @@ from .art_direction import ANGLES, DIALOG_FIELDS, PLANS, applied_panel_direction
 from .camera import CameraError, angle_prompt, camera_plan, direction_target, merge_loras, ordered_views
 from .inpaint import png_bytes, recompose, soften_mask
 from .jobs import JobReporter
+from .journal import PANEL_IMAGE, JournalEntry, failure_text, inherited_facts, panel_facts, prompt_facts
 from .knowledge import KnowledgeBase, PanelKnowledge
 from .layout import target_size
 from .library import panel_assets, style_for
@@ -1296,6 +1297,9 @@ class _Plan:
     # masque envoyés ; les images de référence vont dans le dossier de leur fiche (`subfolder` de chacune).
     upload_folder: str = UPLOAD_SUBFOLDER
     panel_label: str = "case"  # `case-01` : début du nom des fichiers envoyés
+    # Journal des générations : sorte (pipeline/journal.py, KINDS) et faits de la case (ids, plan, prompt…).
+    kind: str = "panel"
+    journal: dict[str, Any] = field(default_factory=dict)
 
 
 def _capitalize(text: str) -> str:
@@ -1371,6 +1375,8 @@ class GenerationExecutor:
                 return  # réparation, passage au propre : leur propre prompt
             if job.params.get("angle"):
                 return  # « Changer l'angle » : le prompt de la version de départ
+            if job.params.get("ab_prompt"):
+                return  # comparaison A/B : prompts figés à la demande
             panel = session.get(Panel, job.panel_id)
             if panel is None:
                 return
@@ -1422,8 +1428,12 @@ class GenerationExecutor:
                     raise GenerationError(f"le workflow {preset_id} sert à réparer une version, pas à générer une case")
                 # Passage au propre : même prompt que le croquis validé ; « Changer l'angle » : celui de la
                 # version de départ (sinon le prompt final de la case).
+                # Comparaison A/B : le prompt de chaque bras, figé à la demande.
                 prompt = str(
-                    job.params.get("sketch_prompt") or job.params.get("angle_scene") or ""
+                    job.params.get("ab_prompt")
+                    or job.params.get("sketch_prompt")
+                    or job.params.get("angle_scene")
+                    or ""
                 ).strip() or update_panel_prompt(presets, session, panel, self.knowledge)
                 size = panel_target(presets, page, panel)
             if size is None:
@@ -1507,6 +1517,8 @@ class GenerationExecutor:
                 plan=panel_plan(panel) if repair is None and not angle_id else None,
             )
             cfg = series_cfg(chapter.project, loaded)
+            if _as_float(job.params.get("ab_cfg")) is not None:
+                cfg = _as_float(job.params.get("ab_cfg"))  # comparaison A/B de deux CFG
             if rendering is not None:
                 # La tonalité a ses termes dans le négatif (lu seulement à vrai CFG, palier Qualité).
                 negative = merge_negative(negative, rendering.tonality_negative)
@@ -1536,7 +1548,20 @@ class GenerationExecutor:
                     else ""
                 )
                 params["filename_prefix"] = transit(f"{page_folder(chapter, page)}/{panel_name(panel, suffix)}")
+            kind = (
+                "inpaint"
+                if repair is not None
+                else "croquis"
+                if loaded.preset.role == "croquis"
+                else "from_sketch"
+                if sketch is not None
+                else "angle"
+                if angle_id
+                else "panel"
+            )
             plan = _Plan(
+                kind=kind,
+                journal={**panel_facts(panel), **self._prompt_facts(session, presets, job, panel, cast, kind, sketch)},
                 loaded=loaded,
                 params=params,
                 references=references,
@@ -1560,6 +1585,38 @@ class GenerationExecutor:
             )
             session.commit()  # prompt final éventuellement reconstruit
             return plan
+
+    def _prompt_facts(
+        self,
+        session: Session,
+        presets: PresetRegistry,
+        job: Job,
+        panel: Panel,
+        cast: PanelCast,
+        kind: str,
+        sketch: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Origine du prompt envoyé, empreinte du rédacteur et savoir-faire reçu (journal des générations)."""
+        ab = job.params.get("ab") if isinstance(job.params.get("ab"), dict) else {}
+        out: dict[str, Any] = {
+            "ab_group": ab.get("group"),
+            "ab_arm": ab.get("arm"),
+            "ab_mode": ab.get("mode"),
+        }
+        if kind == "inpaint":
+            return {**out, "prompt_source": "reparation", "knowledge": []}
+        if job.params.get("sketch_prompt") and sketch is not None:
+            return {**out, **inherited_facts(session, PANEL_IMAGE, sketch.get("image_id"))}
+        if kind == "angle":
+            return {**out, **inherited_facts(session, PANEL_IMAGE, job.params.get("angle_source_id"))}
+        passages: list[dict[str, Any]] = []
+        if panel.prompt_source != "ia" and not manual_prompt(panel) and self.knowledge is not None:
+            found = panel_knowledge(session, self.knowledge, panel, cast.characters)
+            passages = [p.as_dict(excerpt=0) for p in found.fragment_passages]
+        facts = prompt_facts(presets, panel, WRITER_PROMPT_ID, passages)
+        if ab.get("arm") == "B" and ab.get("mode") == "prompt":
+            facts["prompt_source"] = "variante"  # prompt édité à partir de celui du bras A
+        return {**out, **facts}
 
     def _sketch_source(
         self, session: Session, job: Job, panel: Panel, loaded: LoadedWorkflow
@@ -1663,6 +1720,18 @@ class GenerationExecutor:
         return source, source_data, png_bytes(soft), {"width": width, "height": height}
 
     def __call__(self, job_id: int, report: JobReporter, cancel: threading.Event) -> str:
+        entry = JournalEntry("panel", job_id)
+        t0 = time.monotonic()
+        try:
+            return self._run(job_id, report, cancel, entry)
+        except Exception as exc:
+            # Échec ou annulation : une ligne du journal aussi (prompts et réglages déjà connus).
+            entry.set(duration_ms=int((time.monotonic() - t0) * 1000))
+            cancelled = cancel.is_set() or isinstance(exc, ComfyUIInterruptedError)
+            entry.fail(self.db, failure_text(exc, describe_error(exc)), cancelled=cancelled)
+            raise
+
+    def _run(self, job_id: int, report: JobReporter, cancel: threading.Event, entry: JournalEntry) -> str:
         if self.comfyui is None:
             raise GenerationError(f"ComfyUI indisponible : {self.comfyui_error or 'client non configuré'}")
         comfy = self.comfyui
@@ -1672,6 +1741,8 @@ class GenerationExecutor:
         report(2, "Préparation du prompt et du workflow…")
         plan = self._plan(job_id)
         preset = plan.loaded.preset
+        entry.kind = plan.kind
+        entry.set(**plan.journal).references(plan.references)
 
         uploaded: list[str] = []
         for i, (ref, data) in enumerate(zip(plan.references, plan.reference_data, strict=True), start=1):
@@ -1707,6 +1778,7 @@ class GenerationExecutor:
             source_image=sketch_name,
             control=control,
         )
+        entry.workflow(plan.loaded, built)
         if cancel.is_set():
             raise ComfyUIInterruptedError("génération annulée")
 
@@ -1755,10 +1827,12 @@ class GenerationExecutor:
                     data = png_bytes(recompose(source, generated, soft))
             except (UnidentifiedImageError, OSError) as exc:
                 raise GenerationError(f"image renvoyée par ComfyUI illisible : {exc}") from None
+        entry.measure(data, self.presets.tonality)
         stored = self.files.save_image(data, plan.folder)
         if self.folders is not None:
             self.folders.discard_output(refs[0])
         duration_ms = int((time.monotonic() - t0) * 1000)
+        entry.set(duration_ms=duration_ms)
 
         with self.db.session_scope() as session:
             panel = session.get(Panel, plan.panel_id)
@@ -1840,6 +1914,10 @@ class GenerationExecutor:
             )
             session.add(image)
             session.flush()
+            entry.set(
+                image_kind=PANEL_IMAGE, image_id=image.id, version=version, width=stored.width, height=stored.height
+            )
+            entry.add(session)
             job = session.get(Job, job_id)
             # Pas de QC automatique sur un croquis : c'est l'œil de l'auteur qui trie.
             if self.on_generated is not None and job is not None and kind == ImageKind.final:

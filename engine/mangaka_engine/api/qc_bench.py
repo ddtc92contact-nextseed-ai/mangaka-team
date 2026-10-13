@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..pipeline.journal import record_event
 from ..pipeline.qc_bench import (
     BENCH_LAYERS,
     STEP,
@@ -78,6 +79,14 @@ def annotate_panel_image(image_id: int, body: AnnotationIn, session: Session = D
     ann.defects = list(body.defects) if body.label == "bad" else []
     ann.note = body.note
     ann.updated_at = utcnow()
+    record_event(
+        session,
+        verdict="validated" if body.label == "good" else "rejected",
+        action="annotate",
+        image_id=img.id,
+        panel_id=img.panel_id,
+        note=body.note,
+    )
     session.commit()
     out = annotation_out(ann)
     assert out is not None

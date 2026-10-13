@@ -1,0 +1,25 @@
+# Mesures de tonalité de chaque image générée (engine/mangaka_engine/pipeline/journal.py).
+# Calculées sur le CPU avec Pillow (jamais de GPU), juste après la récupération de l'image, et notées
+# dans le journal des générations (export, page Statistiques, détail d'une version dans l'atelier).
+#
+# Mesures (toutes en %, 0–100) :
+#   - dark_pct       : part des pixels plus sombres que `dark_below` (gris 0–255) ;
+#   - black_pct      : part des pixels quasi noirs (gris < `black_below`) ;
+#   - white_pct      : part des pixels blancs (gris ≥ `white_from`) ;
+#   - saturation_pct : saturation moyenne (HSV) — une planche N&B reste près de 0 ;
+#   - line_density_pct : écart moyen entre pixels voisins (horizontaux et verticaux), rapporté à 255 —
+#                        plus il y a de traits et de trames, plus il monte.
+
+dark_below: 128
+black_below: 32
+white_from: 200
+
+# Cible : la planche de référence de l'auteur. L'écart à la cible s'affiche dans le détail d'une version.
+# Une mesure sans cible (null) est affichée sans écart.
+reference: "Planche de référence de David"
+target:
+  dark_pct: 21.7
+  black_pct: 9.5
+  white_pct: null
+  saturation_pct: null
+  line_density_pct: null

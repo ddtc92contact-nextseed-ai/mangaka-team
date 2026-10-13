@@ -50,6 +50,7 @@ from ..pipeline.generation import (
     update_panel_prompt,
 )
 from ..pipeline.inpaint import MaskError, Region, decode_png
+from ..pipeline.journal import note_regenerated, record_event
 from ..pipeline.knowledge import Passage, estimate_tokens
 from ..pipeline.names import CharacterMatcher
 from ..pipeline.prompt_dialog import PromptDialogError
@@ -563,6 +564,7 @@ def regenerate_panel_quality(
     except GenerationError as exc:
         raise FieldError("preset", str(exc)) from None
     jobs = _enqueue(session, ctx, panel, count=1, preset=preset, extra_params={"regenerate": "quality"})
+    note_regenerated(session, panel, "regenerate_quality")
     session.commit()
     ctx.generation.notify()
     return [job_out(j) for j in jobs]
@@ -601,6 +603,7 @@ def change_panel_angle(
         )
     except (GenerationError, PresetError) as exc:
         raise FieldError("angle", str(exc)) from None
+    record_event(session, verdict="edited", action="change_angle", image_id=source.id, panel_id=panel.id)
     session.commit()
     ctx.generation.notify()
     return [job_out(j) for j in jobs]
@@ -621,6 +624,7 @@ def generate_panel(
     jobs = _enqueue(
         session, ctx, panel, count=body.count, seed=body.seed, preset=body.preset, prompt_override=body.prompt_override
     )
+    note_regenerated(session, panel, "regenerate")
     session.commit()
     ctx.generation.notify()
     return [job_out(j) for j in jobs]
@@ -635,6 +639,7 @@ def _generate_pages(session: Session, ctx: AppContext, pages: list[Page], body: 
     jobs: list[Job] = []
     for panel in panels:
         jobs += _enqueue(session, ctx, panel, count=body.count, preset=body.preset)
+        note_regenerated(session, panel, "regenerate")
     session.commit()
     ctx.generation.notify()
     return BatchGenerateOut(
@@ -763,6 +768,7 @@ def repair_panel_image(
         raise FieldError("preset", str(exc)) from None
     except GenerationError as exc:
         raise FieldError("repair", str(exc)[:1].upper() + str(exc)[1:]) from None
+    record_event(session, verdict="edited", action="repair", image_id=img.id, panel_id=img.panel_id)
     session.commit()
     ctx.generation.notify()
     return [job_out(job)]
@@ -805,6 +811,8 @@ def select_panel_image(
     if img.kind == ImageKind.croquis:
         raise FieldError("image_id", "un croquis ne peut pas être choisi : valide-le puis « Passer au propre »")
     panel = img.panel
+    if not img.selected:
+        record_event(session, verdict="validated", action="select", image_id=img.id, panel_id=panel.id)
     for other in panel.images:
         other.selected = other.id == img.id
     drop_finishes(ctx.files, panel, keep_image_id=img.id)
@@ -826,6 +834,7 @@ def delete_panel_image(
     drop_lock_on_delete(ctx.files, img.panel, img.id)  # image guide supprimée : composition libre
     finished = (img.finish or {}).get("path")
     mask = ((img.params or {}).get("repair") or {}).get("mask_path")
+    record_event(session, verdict="rejected", action="delete", image_id=img.id, panel_id=panel_id)
     session.delete(img)
     session.flush()
     refresh_states(session, [panel_id])

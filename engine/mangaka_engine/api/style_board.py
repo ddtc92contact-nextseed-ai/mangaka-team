@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session, selectinload
 
 from ..pipeline.generation import GenerationError
+from ..pipeline.journal import REFERENCE_VARIANT, record_event
 from ..pipeline.style import series_style, style_names
 from ..pipeline.style_board import (
     ENTRY_KIND,
@@ -161,6 +162,7 @@ def choose_trial(trial_id: int, session: Session = Depends(get_session), ctx: Ap
         job = enqueue_choice(session, _presets(ctx, series.id), series, trial)
     except (PresetError, GenerationError) as exc:
         raise HTTPException(status_code=409, detail=_capitalize(str(exc))) from None
+    record_event(session, verdict="validated", action="choose_style", image_kind=REFERENCE_VARIANT, image_id=trial.id)
     session.commit()
     ctx.generation.notify()
     return job_out(job)
