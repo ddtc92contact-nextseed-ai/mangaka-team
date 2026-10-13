@@ -7,6 +7,8 @@ style_options.yaml). Ce module en tire :
   mots déclencheurs du LoRA de style (catalogue style_loras.yaml), puis mots-clés du genre, du rendu,
   du ton et des réglages fins, dans cet ordre, sans doublon, sous le plafond `style_max_chars`
   (image_prompt.yaml) : chaque pack y garde au moins son premier mot-clé ;
+- `$finition` (`series_finition`) : mots-clés du réglage à pièce réservée « finition », juste après la
+  phrase de style et jamais dans `$style`, et ses termes négatifs (`series_finition_negative`) ;
 - le nom des packs et leurs consignes pour les LLM (scénario, direction artistique) ;
 - la validation des combinaisons (API) : ids connus, ton autorisé par le genre, trames en N&B seulement.
 
@@ -23,7 +25,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..presets import PresetRegistry
-from ..presets.schemas import StyleOptionChoice, StylePack, StyleRendering
+from ..presets.schemas import StyleOption, StyleOptionChoice, StylePack, StyleRendering
 from ..store.models import Project
 
 log = logging.getLogger("mangaka_engine")
@@ -101,6 +103,21 @@ def series_rendering(presets: PresetRegistry, series: Project) -> StyleRendering
     )
 
 
+def _chosen_options(
+    presets: PresetRegistry, series: Project, rendering: StyleRendering | None
+) -> list[tuple[StyleOption, StyleOptionChoice]]:
+    """Réglages fins choisis par la série, dans l'ordre du fichier ; sans ceux réservés au N&B sur un rendu
+    couleur."""
+    chosen = series.style_options or {}
+    out = []
+    for key, option in presets.style_options.options.items():
+        choice = option.choices.get(chosen.get(key) or "")
+        if choice is None or (option.monochrome_only and rendering is not None and not rendering.monochrome):
+            continue
+        out.append((option, choice))
+    return out
+
+
 def _words(pack: StylePack | StyleOptionChoice, people: bool) -> list[str]:
     """Mots-clés d'un pack ; sans ceux qui évoquent des personnes si `people` est faux."""
     return [k for k in pack.prompt_keywords if people or k not in pack.people_keywords]
@@ -123,12 +140,9 @@ def style_groups(presets: PresetRegistry, series: Project, *, people: bool = Tru
     tone = presets.style_tones.get(series.style_tone or "")
     if tone is not None:
         groups.append(("tone", _words(tone, people)))
-    chosen = series.style_options or {}
-    for key, option in presets.style_options.options.items():
-        choice = option.choices.get(chosen.get(key) or "")
-        if choice is None or (option.monochrome_only and rendering is not None and not rendering.monochrome):
-            continue
-        groups.append(("option", _words(choice, people)))
+    for option, choice in _chosen_options(presets, series, rendering):
+        if option.piece is None:  # une pièce réservée (finition) n'entre jamais dans $style
+            groups.append(("option", _words(choice, people)))
     missing = [
         f"{field} « {value} »"
         for field, value, known in (
@@ -224,6 +238,32 @@ def series_style_lead(presets: PresetRegistry, series: Project) -> str:
         return ""
     sentence = ", ".join(parts)
     return sentence[:1].upper() + sentence[1:] + "."
+
+
+def _finition(presets: PresetRegistry, series: Project) -> StyleOptionChoice | None:
+    """Choix de la série pour le réglage à pièce réservée `finition` (style_options.yaml), sinon None."""
+    for option, choice in _chosen_options(presets, series, series_rendering(presets, series)):
+        if option.piece == "finition":
+            return choice
+    return None
+
+
+def series_finition(presets: PresetRegistry, series: Project) -> str:
+    """`$finition` des prompts de case : mots-clés de la finition choisie par la série (« croquis »,
+    « pinceau-nerveux », « scan »), joints par « , », sans point final et la majuscule en tête (« Printed on
+    cheap paper, coarse halftone dots… »), juste après la phrase de style ; "" pour « propre » ou sans choix.
+    Jamais dans `$style` : plafonné à `style_max_chars`, il les tronquerait en silence."""
+    choice = _finition(presets, series)
+    text = ", ".join(w for w in (_clean(k) for k in choice.prompt_keywords) if w) if choice is not None else ""
+    return text[:1].upper() + text[1:]
+
+
+def series_finition_negative(presets: PresetRegistry, series: Project) -> list[str]:
+    """Termes du prompt négatif de la finition choisie (vide pour « propre » ou sans choix). Le négatif
+    n'est lu qu'à vrai CFG (cfg > 1, palier Qualité) : en Turbo, Rapide et croquis (cfg 1), seul `$finition`
+    du prompt positif porte la finition."""
+    choice = _finition(presets, series)
+    return list(choice.negative_keywords) if choice is not None else []
 
 
 @dataclass(frozen=True)

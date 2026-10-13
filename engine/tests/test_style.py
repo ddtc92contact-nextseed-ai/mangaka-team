@@ -71,6 +71,7 @@ def test_v1_packs_are_loaded_in_order_with_their_defaults() -> None:
         "trait": ["fin", "moyen", "epais"],
         "trames": ["legeres", "moyennes", "denses"],
         "detail": ["simple", "moyen", "riche"],
+        "finition": ["propre", "croquis", "pinceau-nerveux", "scan"],
     }
     assert REG.style_options.options["trames"].monochrome_only
     fb = REG.style_genres["franco-belge"]
@@ -84,7 +85,8 @@ def test_v1_packs_are_loaded_in_order_with_their_defaults() -> None:
 
 
 def test_v1_packs_carry_the_calibrated_keywords_and_their_language() -> None:
-    choices = [c for o in REG.style_options.options.values() for c in o.choices.values()]
+    # Finition (pièce réservée `$finition`, test_finition.py) : « propre » n'a aucun mot-clé.
+    choices = [c for o in REG.style_options.options.values() if o.piece is None for c in o.choices.values()]
     packs: list[StylePack | StyleOptionChoice] = [
         *REG.style_genres.values(),
         *REG.style_renderings.values(),
@@ -361,7 +363,7 @@ def test_presets_endpoint_lists_the_packs(client: TestClient) -> None:
         ("nb-trames", "N&B à trames")
     ]
     assert {r["id"]: r["monochrome"] for r in data["style_renderings"]}["couleur"] is False
-    assert [o["id"] for o in data["style_options"]] == ["trait", "trames", "detail"]
+    assert [o["id"] for o in data["style_options"]] == ["trait", "trames", "detail", "finition"]
     assert any(lo["file"] == "encre-seinen_v2.safetensors" for lo in data["style_loras"])
 
 

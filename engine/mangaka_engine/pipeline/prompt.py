@@ -108,6 +108,7 @@ def build_prompt(
     objects: Sequence[PromptEntry] = (),
     style: str = "",
     style_lead: str = "",
+    finition: str = "",
     savoir_faire: str = "",
     bible: str = "",
     settings: ImagePromptSettings | None = None,
@@ -118,7 +119,8 @@ def build_prompt(
     type de plan du scénario quand la direction artistique n'en donne pas (plans et angles en anglais,
     `camera_terms`). `decor`, `objects` : fiches de la
     bibliothèque (`$decor`, `$objects`), décrites comme les personnages. `style_lead` : phrase de style
-    de la série (`style.series_style_lead`, `$style_lead`), en tête du prompt.
+    de la série (`style.series_style_lead`, `$style_lead`), en tête du prompt ; `finition` : mots-clés de la
+    finition de la série (`style.series_finition`, `$finition`), juste après.
     """
     settings = settings or ImagePromptSettings()
     desc, savoir_faire, bible = description or "", savoir_faire or "", bible or ""
@@ -149,6 +151,7 @@ def build_prompt(
         ),
         "style": _clean(style),
         "style_lead": _clean(style_lead),
+        "finition": _clean(finition),
         "savoir_faire": _clean(savoir_faire),
         "bible": _clean(bible),
     }

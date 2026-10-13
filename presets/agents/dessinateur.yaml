@@ -79,10 +79,11 @@ settings:
     type: prompt_list
     source: image_prompt.yaml#parts
     variables:
-      [style_lead, plan, angle, ambiance, action, shot, description, setting, staging, character_count, characters, decor, objects, style, savoir_faire, bible]
+      [style_lead, finition, plan, angle, ambiance, action, shot, description, setting, staging, character_count, characters, decor, objects, style, savoir_faire, bible]
     help: >-
       Un morceau dont une variable est vide est omis. $style_lead : phrase de style de la série (rendu + genre),
-      à garder en tête pour que le style manga tienne même sans image de référence.
+      à garder en tête pour que le style manga tienne même sans image de référence. $finition : mots-clés de la
+      finition de la série (croquis, pinceau nerveux, scan), juste après ; jamais dans $style.
   - key: character
     label: Présentation d'un personnage
     group: Prompt
@@ -232,6 +233,7 @@ settings:
       - image_tags
       - style
       - style_lead
+      - finition
       - bible
       - savoir_faire
       - context_json

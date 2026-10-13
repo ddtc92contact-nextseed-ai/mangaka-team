@@ -15,6 +15,8 @@ export const HELP = {
     "La densité des trames grises du noir et blanc : légères pour un rendu aéré, denses pour un rendu sombre. Masqué pour un rendu couleur.",
   "serie.option.detail":
     "Le niveau de détail des arrière-plans : simple pour faire ressortir les personnages, riche pour les planches d'ambiance.",
+  "serie.option.finition":
+    "L'aspect du dessin, ajouté à chaque case de la série juste après la phrase de style : propre (rendu actuel), croquis visible, pinceau nerveux ou scan d'impression des années 90. Le fait main donne plus de trait ; son prompt négatif anti-lisse ne joue qu'au palier Qualité.",
   "serie.lora":
     "Un LoRA est un petit modèle qui impose un style appris (trait, encrage) à toutes les cases de la série. Optionnel : sans lui, seuls les mots du style guident l'image.",
   "serie.lora_weight":
