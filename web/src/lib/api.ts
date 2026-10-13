@@ -1945,6 +1945,8 @@ export interface PromptSources {
   query: string;
   collections: string[];
   passages: Passage[];
+  /** Écartés comme redondants (raison dans `dropped`). */
+  dropped?: Passage[];
   tokens: number;
   budget_tokens: number;
   bible: string;
@@ -1970,11 +1972,14 @@ export interface Passage {
   score: number | null;
   vector_score: number | null;
   keyword_score: number | null;
-  mode: "retrieved" | "whole";
+  /** framing : fiche du plan ou de l'angle de la case (une seule par famille). */
+  mode: "retrieved" | "whole" | "framing";
   /** Passage d'une fiche de pack livré. */
   pack?: string | null;
   /** Recherche par page (direction artistique) : pages pour lesquelles le passage a été retenu. */
   pages?: number[];
+  /** Écarté comme redondant : raison (doublon, autre plan ou angle que la case). */
+  dropped?: string | null;
   selected: boolean;
 }
 
@@ -2095,6 +2100,8 @@ export interface PanelKnowledgePart {
   text_tokens: number;
   bible: string;
   bible_tokens: number;
+  /** Passages qui auraient été servis sans le tri des redondances. */
+  dropped?: Passage[];
 }
 
 export interface PanelKnowledge {

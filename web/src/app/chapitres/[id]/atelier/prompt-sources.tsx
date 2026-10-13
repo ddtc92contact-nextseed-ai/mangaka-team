@@ -3,7 +3,7 @@
 // « Sources utilisées » du prompt actuel de la case : les fiches de savoir-faire que le rédacteur de prompt
 // a vraiment reçues pour l'écrire, et la date de la rédaction (preuve que le pack a servi).
 import { InfoTip } from "@/components/info-tip";
-import { PassageList, formatTokens } from "@/components/knowledge";
+import { PassageList, SourceTitles, formatTokens } from "@/components/knowledge";
 import type { PanelDetail } from "@/lib/api";
 
 /** Les dates du moteur sans fuseau sont en UTC. */
@@ -21,7 +21,7 @@ export function PromptSourcesBlock({ panel }: { panel: PanelDetail }) {
       </p>
     );
   }
-  const count = sources.passages.length;
+  const count = new Set(sources.passages.map((p) => p.document_id)).size;
   const collections = [...new Set(sources.passages.map((p) => p.collection_name))];
   const written = engineDate(sources.written_at).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" });
   return (
@@ -45,7 +45,15 @@ export function PromptSourcesBlock({ panel }: { panel: PanelDetail }) {
           {count > 0 && ` · ${formatTokens(sources.tokens)} sur ${formatTokens(sources.budget_tokens)}`}
         </p>
         {count > 0 && (
-          <PassageList passages={sources.passages} showScores={false} excerpt={240} testId="prompt-sources-passages" />
+          <SourceTitles passages={sources.passages} dropped={sources.dropped} testId="prompt-sources-titles" />
+        )}
+        {count > 0 && (
+          <details>
+            <summary className="cursor-pointer text-zinc-500 hover:text-zinc-300">Lire les passages reçus</summary>
+            <div className="mt-2">
+              <PassageList passages={sources.passages} showScores={false} excerpt={240} testId="prompt-sources-passages" />
+            </div>
+          </details>
         )}
         {sources.bible && <p className="text-zinc-400">Notes de la bible : {sources.bible}</p>}
       </div>

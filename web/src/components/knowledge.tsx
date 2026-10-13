@@ -51,6 +51,72 @@ export function Tags({ tags }: { tags: string[] }) {
   );
 }
 
+/** Badge du mode d'injection d'un passage : collection entière, ou fiche du cadrage de la case. */
+function ModeBadge({ mode }: { mode: Passage["mode"] }) {
+  if (mode === "whole")
+    return <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-xs text-sky-300">collection entière</span>;
+  if (mode === "framing")
+    return (
+      <span
+        className="rounded-full bg-amber-500/15 px-2 py-0.5 text-xs text-amber-300"
+        title="Fiche du plan ou de l'angle de la case : la seule de sa famille, servie en premier"
+      >
+        cadrage de la case
+      </span>
+    );
+  return null;
+}
+
+/** Fiches reçues, une ligne par fiche (ses passages réunis), puis celles écartées comme redondantes. */
+export function SourceTitles({
+  passages,
+  dropped = [],
+  testId = "source-titles",
+}: {
+  passages: Passage[];
+  dropped?: Passage[];
+  testId?: string;
+}) {
+  const fiches = new Map<number, { first: Passage; parts: number; tokens: number }>();
+  for (const p of passages) {
+    const seen = fiches.get(p.document_id);
+    if (seen) {
+      seen.parts += 1;
+      seen.tokens += p.tokens;
+    } else fiches.set(p.document_id, { first: p, parts: 1, tokens: p.tokens });
+  }
+  const ignored = [...new Map(dropped.map((p) => [p.document_id, p])).values()];
+  return (
+    <div className="space-y-2" data-testid={testId}>
+      <ul className="space-y-1">
+        {[...fiches.values()].map(({ first, parts, tokens }) => (
+          <li key={first.document_id} className="flex flex-wrap items-baseline gap-x-2 gap-y-1" data-testid="source-title">
+            <span className="text-zinc-100">« {first.document_title} »</span>
+            <span className="text-zinc-500">{first.collection_name}</span>
+            <ModeBadge mode={first.mode} />
+            <span className="text-zinc-600">
+              {formatTokens(tokens)}
+              {parts > 1 && ` · ${parts} passages`}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {ignored.length > 0 && (
+        <div data-testid={`${testId}-dropped`}>
+          <p className="text-zinc-500">Écartées (redondantes) — leur budget est allé aux fiches suivantes :</p>
+          <ul className="mt-1 space-y-1">
+            {ignored.map((p) => (
+              <li key={p.document_id} className="text-zinc-500" data-testid="source-dropped">
+                <span className="text-zinc-400 line-through decoration-zinc-600">« {p.document_title} »</span> — {p.dropped}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Passages classés : source (document › section), collection, scores, extrait. */
 export function PassageList({
   passages,
@@ -79,9 +145,7 @@ export function PassageList({
               {p.heading && <span className="text-xs text-zinc-400">{p.heading}</span>}
               <span className="text-xs text-zinc-500">collection « {p.collection_name} »</span>
               <PackBadge pack={p.pack} />
-              {p.mode === "whole" && (
-                <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-xs text-sky-300">collection entière</span>
-              )}
+              <ModeBadge mode={p.mode} />
               {p.selected && showScores && (
                 <span className="rounded-full bg-rose-500/15 px-2 py-0.5 text-xs text-rose-300">injecté</span>
               )}
