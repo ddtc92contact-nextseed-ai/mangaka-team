@@ -291,7 +291,7 @@ Champs communs : `id` (minuscules, chiffres, tirets), `name` et `description` **
 dans la fiche série), `prompt_keywords` (liste), `lang` (`fr` ou `en`, obligatoire : langue des
 mots-clés, voir « Calibrage »), `order` (ordre dans la liste déroulante).
 
-Un mot-clé qui évoque des personnes (« sourire », « determined young hero », « expression comique »)
+Un mot-clé qui évoque des personnes (« determined young hero », « expression comique »)
 s'écrit `{text: smiles, people: true}` dans `prompt_keywords` (réglages fins compris). Il reste dans le
 `$style` des cases et des fiches de personnage, mais il est **écarté des fiches d'objet et de décor** :
 sinon le modèle y invente un personnage, qui revient ensuite dans chaque case utilisant la fiche. Une description signale une
@@ -1269,6 +1269,19 @@ lettrage, jamais dessiné par le modèle), `negative_photo_terms` aussi (contre 
 ouvre le prompt, et `strip_quotes` retire les répliques entre guillemets
 de la description. Le prompt est stocké sur la case ; une édition manuelle est conservée jusqu'à
 « reconstruire le prompt ».
+
+**Série en noir et blanc** (`monochrome: true` du pack de rendu) : les lignes des images de référence
+viennent de `references.monochrome` (« keep the face, hair and outfit », sans « colours ») ; les termes de
+`monochrome_forbidden_terms` (noms de couleur, « colorful », « pastel »…) sont retirés du prompt positif **au
+moment de l'envoi à ComfyUI** — prompts déjà stockés compris : « the thick green liquid » devient « the
+thick liquid » — et refusés dans le paragraphe du rédacteur de prompt (règle `monochrome_writer_rule`,
+`$palette_rule`) ; `monochrome_negative_terms` (« color, colored, colorful ») rejoint le prompt négatif.
+Une série en couleur garde son prompt tel quel.
+
+**Ambiance de la case contre ton de la série** (`mood_conflicts`) : quand l'ambiance de la direction
+artistique d'une case contient l'un des `moods` d'une règle (peur, tension, tristesse, colère, menace…),
+les mots-clés `drop` (« bright joyful atmosphere », « warm light », « smiles »…) sont retirés du style de
+cette case et du prompt envoyé : l'ambiance de la case gagne toujours.
 
 `references` cadre les images de référence dans le prompt **envoyé** à un workflow avec références
 (au moment de la génération, le prompt stocké sur la case ne change pas ; la version garde les deux :

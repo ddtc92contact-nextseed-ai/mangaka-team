@@ -13,6 +13,9 @@
   qu'il faut prendre de chacune (`prompt.frame_references`, `references.sorting` d'image_prompt.yaml) ;
 - tonalité du rendu de la série (`tonality` du pack, prompt positif ; `tonality_negative`, prompt
   négatif, lu à vrai CFG) et termes contre le photoréalisme (`negative_photo_terms` d'image_prompt.yaml) ;
+- `sent_prompt` : à l'envoi, prompts déjà stockés compris, les mots-clés du ton que contredit l'ambiance de
+  la case (`mood_conflicts`) et, pour une série en noir et blanc, les termes de couleur
+  (`monochrome_forbidden_terms` ; « color, colored, colorful » au négatif) sont retirés ;
 - `GenerationExecutor` : exécuté par la file sérielle (`pipeline/queue.py`) pour un job :
   envoi des images de référence, construction du workflow (références + LoRA via le preset),
   file ComfyUI, progression, récupération de l'image → nouvelle `PanelImage` (version n+1) ;
@@ -106,6 +109,8 @@ from .prompt import (
     build_prompt,
     frame_references,
     merge_negative,
+    mood_dropped_terms,
+    remove_terms,
     shot_in,
 )
 from .prompt_dialog import (
@@ -120,7 +125,7 @@ from .prompt_dialog import (
 from .prompt_dialog import PROMPT_ID as DIALOG_PROMPT_ID
 from .prompt_writer import PROMPT_ID as WRITER_PROMPT_ID
 from .prompt_writer import PromptBrief, PromptWriterError, WriteRun, write_prompt
-from .style import series_rendering, series_style, series_style_lead
+from .style import series_monochrome, series_rendering, series_style, series_style_lead
 
 log = logging.getLogger("mangaka_engine")
 
@@ -282,12 +287,26 @@ def build_panel_prompt(
         characters=[_prompt_entry(c) for c in characters],
         decor=_prompt_entry(decor) if decor is not None else None,
         objects=[_prompt_entry(o) for o in objects],
-        style=series_style(presets, series),
+        style=series_style(presets, series, drop=mood_dropped_terms(da.get("ambiance"), presets.image_prompt)),
         style_lead=series_style_lead(presets, series),
         savoir_faire=savoir_faire,
         bible=bible,
         settings=presets.image_prompt,
     )
+
+
+def sent_prompt(
+    presets: PresetRegistry, panel: Panel, prompt: str, *, monochrome: bool, keep: Sequence[str] = ()
+) -> str:
+    """Prompt positif tel qu'envoyé à ComfyUI, prompts déjà stockés compris : sans les mots-clés du ton que
+    contredit l'ambiance de la case (`mood_conflicts` d'image_prompt.yaml) et, pour une série en noir et
+    blanc, sans les termes de couleur (`monochrome_forbidden_terms` ; un terme contenu dans un nom de
+    `keep` — fiches de la case — reste)."""
+    settings = presets.image_prompt
+    prompt = remove_terms(prompt, mood_dropped_terms(applied_panel_direction(panel).get("ambiance"), settings))
+    if monochrome:
+        prompt = remove_terms(prompt, settings.monochrome_forbidden_terms, keep=keep)
+    return prompt
 
 
 def resolve_preset_id(
@@ -767,12 +786,13 @@ def panel_brief(
         decor=_prompt_entry(cast.decor) if cast.decor is not None else None,
         objects=[_prompt_entry(o) for o in cast.objects],
         references=references,
-        style=series_style(presets, project),
+        style=series_style(presets, project, drop=mood_dropped_terms(da.get("ambiance"), presets.image_prompt)),
         style_lead=series_style_lead(presets, project),
         bible=bible,
         savoir_faire=savoir_faire,
         prompt=presets.prompts.get(WRITER_PROMPT_ID),
         settings=presets.image_prompt,
+        monochrome=series_monochrome(presets, project),
     )
 
 
@@ -1476,6 +1496,7 @@ class GenerationExecutor:
             job.params = {**(job.params or {}), "references": references, "dropped_references": dropped}
             panel_prompt = prompt
             rendering = series_rendering(presets, chapter.project)
+            monochrome = rendering is not None and rendering.monochrome
             if angle_id:
                 # Mot déclencheur et vocabulaire de caméra en tête, puis la scène de la version de départ.
                 prompt = angle_prompt(catalog.prompts.panel, camera, scene=prompt)
@@ -1483,13 +1504,21 @@ class GenerationExecutor:
                 # Chaque image nommée dans l'ordre des emplacements + ce qu'il faut en prendre, puis
                 # « identité seulement, scène nouvelle » ; enfin la tonalité du rendu (papier blanc).
                 slots = [ReferenceSlot(r["kind"], r["name"]) for r in references]
-                prompt = frame_references(prompt, slots, presets.image_prompt)
+                prompt = frame_references(prompt, slots, presets.image_prompt, monochrome=monochrome)
                 prompt = append_instruction(prompt, rendering.tonality if rendering is not None else "")
+            prompt = sent_prompt(
+                presets,
+                panel,
+                prompt,
+                monochrome=monochrome,
+                keep=[*(e.name for e in cast.entries), *(panel.character_names or [])],
+            )
             # Plan serré : termes contre le plein pied (sauf réparation et « Changer l'angle » : leur cadrage).
             negative = build_negative_prompt(
                 str(loaded.preset.defaults.get("negative_prompt", "")),
                 presets.image_prompt,
                 plan=panel_plan(panel) if repair is None and not angle_id else None,
+                monochrome=monochrome,
             )
             cfg = series_cfg(chapter.project, loaded)
             if rendering is not None:

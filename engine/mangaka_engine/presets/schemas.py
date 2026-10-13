@@ -1426,6 +1426,47 @@ class ReferenceSorting(_Strict):
         return value
 
 
+class ReferenceSortingMonochrome(_Strict):
+    """`references.monochrome.sorting` : consignes de tri d'une série en noir et blanc (absente = la même)."""
+
+    character: str | None = None
+    decor: str | None = None
+    object: str | None = None
+    style: str | None = None
+
+    @field_validator("character", "decor", "object", "style")
+    @classmethod
+    def _check_line(cls, value: str | None) -> str | None:
+        if value is not None:
+            _check_templates([value], REFERENCE_LINE_VARIABLES)
+        return value
+
+
+class ReferenceMonochrome(ReferenceSortingMonochrome):
+    """`references.monochrome` : lignes d'images et consigne `after` d'une série en noir et blanc."""
+
+    sorting: ReferenceSortingMonochrome = Field(default_factory=ReferenceSortingMonochrome)
+    after: list[str] | None = None
+
+    @field_validator("after")
+    @classmethod
+    def _check_after(cls, value: list[str] | None) -> list[str] | None:
+        if value is not None:
+            _check_templates(value, REFERENCE_PART_VARIABLES)
+        return value
+
+
+class MoodConflict(_Strict):
+    """Règle de `mood_conflicts` d'image_prompt.yaml : une case dont l'ambiance (direction artistique)
+    contient l'un des `moods` ne reçoit aucun des mots-clés `drop` du ton de la série."""
+
+    name: str = ""
+    # Mots cherchés dans l'ambiance (sans casse ni accents, mots entiers ; « angoiss* » : préfixe).
+    moods: list[str] = Field(min_length=1)
+    # Mots-clés retirés du style et du prompt envoyé (sans casse, mots entiers).
+    drop: list[str] = Field(min_length=1)
+
+
 class ReferencePromptSettings(_Strict):
     """Cadrage des images de référence dans le prompt envoyé (workflow avec références, voir
     pipeline/prompt.py `frame_references`) : quelle image est quel personnage, et ce qu'elles donnent.
@@ -1436,14 +1477,27 @@ class ReferencePromptSettings(_Strict):
     `sorting`, jointe de même).
     """
 
-    character: str = "<image$slot> is the identity reference for $name."
-    decor: str = "<image$slot> is the location reference for $name."
-    object: str = "<image$slot> is the design reference for the object $name."
-    style: str = "<image$slot> is a style reference only."
+    # Une ligne commence par « <image$slot> is » : le rédacteur de prompt en reprend la suite comme rôle.
+    character: str = (
+        "<image$slot> is the identity reference for $name: keep the face, hair, outfit and colours; "
+        "ignore its pose, framing and background."
+    )
+    decor: str = (
+        "<image$slot> is the location reference for $name: keep its layout, architecture and materials; "
+        "show it from the new camera angle."
+    )
+    object: str = "<image$slot> is the design reference for the object $name: keep its shape, colours and details."
+    style: str = (
+        "<image$slot> is a style reference only (line work, inking, screentones, colours): do not copy its "
+        "characters, scene or composition."
+    )
     sorting: ReferenceSorting = Field(default_factory=ReferenceSorting)
     separator: str = " "
     before: list[str] = Field(default_factory=lambda: ["$images"])
     after: list[str] = Field(default_factory=list)
+    # Série en noir et blanc (`monochrome` du pack de rendu) : ces lignes remplacent celles ci-dessus
+    # (absente = la même), sans « colours » qui pousse Qwen-Image vers la couleur et le lavis gris.
+    monochrome: ReferenceMonochrome = Field(default_factory=lambda: ReferenceMonochrome())
 
     @field_validator("character", "decor", "object", "style")
     @classmethod
@@ -1456,6 +1510,21 @@ class ReferencePromptSettings(_Strict):
     def _check_parts(cls, value: list[str]) -> list[str]:
         _check_templates(value, REFERENCE_PART_VARIABLES)
         return value
+
+    def for_palette(self, monochrome: bool) -> ReferencePromptSettings:
+        """Lignes de la série : celles de `monochrome` par-dessus les autres pour une série en noir et blanc."""
+        if not monochrome:
+            return self
+        bw = self.monochrome
+        lines = {k: v for k in ("character", "decor", "object", "style") if (v := getattr(bw, k)) is not None}
+        sorting = {k: v for k, v in bw.sorting.model_dump().items() if v is not None}
+        return self.model_copy(
+            update={
+                **lines,
+                "sorting": self.sorting.model_copy(update=sorting),
+                **({"after": bw.after} if bw.after is not None else {}),
+            }
+        )
 
 
 class TightShotSettings(_Strict):
@@ -1529,6 +1598,16 @@ class ImagePromptSettings(_Strict):
             "film grain",
         ]
     )
+    # Série en noir et blanc (`monochrome` du pack de rendu) : termes de couleur retirés du prompt positif à
+    # l'envoi à ComfyUI (mots entiers, sans casse), refusés dans le paragraphe du rédacteur…
+    monochrome_forbidden_terms: list[str] = Field(default_factory=list)
+    # … et termes toujours ajoutés au prompt négatif (lu à vrai CFG seulement).
+    monochrome_negative_terms: list[str] = Field(default_factory=list)
+    # Consigne ajoutée aux règles du rédacteur de prompt ($palette_rule) pour une série en noir et blanc.
+    monochrome_writer_rule: str = ""
+    # Ambiance de la case contre ton de la série : l'ambiance gagne, les mots-clés du ton en conflit sont
+    # retirés pour cette case (style, prompt envoyé).
+    mood_conflicts: list[MoodConflict] = Field(default_factory=list)
     # Phrase de style qui ouvre chaque prompt de case : morceaux joints par « , » (un morceau dont une
     # variable est vide est omis). Variables : $rendering (`lead` du rendu de la série), $genre (1er mot-clé
     # du genre, ou de l'ancien style libre).
