@@ -1523,7 +1523,17 @@ export interface LetteredBubble {
   manual: boolean;
   manual_tail: boolean;
   overflow: boolean;
-  font: { family: string; size_pt: number; size_px: number; color: string };
+  // min / max : bornes du style ; un cadre ajusté à la main est rempli entre les deux, sauf taille saisie
+  // à la main (`manual_size`).
+  font: {
+    family: string;
+    size_pt: number;
+    size_px: number;
+    color: string;
+    min_size_pt: number;
+    max_size_pt: number;
+    manual_size: boolean;
+  };
   lines: { text: string; x: number; y: number }[];
   // miter_limit : joints en onglet (pointes vives des queues et des cris), jamais biseautés.
   shape: { path: string; fill: string; stroke: string; stroke_px: number; miter_limit: number };
@@ -1617,6 +1627,8 @@ export interface BubbleUpdate {
   speaker?: string;
   position?: BubbleBox | null;
   tail?: { x: number; y: number } | null;
+  /** Taille du texte saisie à la main (pt) ; null = automatique. */
+  size_pt?: number | null;
   sfx?: SfxUpdate | null;
 }
 
@@ -2061,6 +2073,25 @@ export interface Bible {
 export type BibleInput = Partial<Pick<Bible, "world" | "tone" | "rules" | "motifs" | "chapter_summaries">> & {
   character_notes?: Record<number, string>;
 };
+
+/** Densité des dialogues d'un chapitre (bulles enregistrées, onomatopées à part). */
+export interface DialogueStats {
+  panels: number;
+  replies: number;
+  sfx: number;
+  per_panel: number;
+  mean_words: number;
+  /** Pensées, voix off et narrations. */
+  inner_voice: number;
+  /** Cases dont la seule bulle est une onomatopée. */
+  sfx_only: number;
+}
+
+/** Règles de dialogue du scénariste encore enfreintes (après les relances ou une retouche). */
+export interface DialogueReport {
+  stats: DialogueStats;
+  warnings: string[];
+}
 
 export interface ScriptSources {
   run_id: number;
@@ -2583,6 +2614,7 @@ export const api = {
   searchKnowledge: (body: SearchInput) => request<SearchResult>("/knowledge/search", json("POST", body)),
   getBible: (projectId: number) => request<Bible>(`/projects/${projectId}/bible`),
   saveBible: (projectId: number, body: BibleInput) => request<Bible>(`/projects/${projectId}/bible`, json("PUT", body)),
+  chapterDialogues: (chapterId: number) => request<DialogueReport>(`/chapters/${chapterId}/dialogues`),
   chapterSources: (chapterId: number, agent = "script") =>
     request<ScriptSources | null>(`/chapters/${chapterId}/sources?agent=${encodeURIComponent(agent)}`),
 };
