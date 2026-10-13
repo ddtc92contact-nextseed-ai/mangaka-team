@@ -356,3 +356,126 @@ def test_an_element_that_cannot_be_lettered_is_a_warning_not_a_crash(letterer: L
     failed = {w.code: w for w in res.warnings if w.code in ("bubble_failed", "sfx_failed")}
     assert failed["bubble_failed"].bubble_id == 9 and "impossible à lettrer" in failed["bubble_failed"].message
     assert failed["sfx_failed"].bubble_id == 20 and "« BAM »" in failed["sfx_failed"].message
+
+
+# --- cadre ajusté à la main : le texte remplit la bulle -----------------------------------------
+LINE = "« Où est passé le cœur de la forêt ? » Ça m'étonne, à vrai dire."
+
+
+def _scaled(box: Box, k: float) -> Box:
+    return Box(box.cx - box.w * k / 2, box.cy - box.h * k / 2, box.cx + box.w * k / 2, box.cy + box.h * k / 2)
+
+
+def _in_box(letterer: Letterer, kind: str, box: Box, text: str = LINE, size: float | None = None) -> BubbleLayout:
+    spec = BubbleSpec(1, kind, text, "Aiko", 0, manual_box=box, manual_tail=(box.cx, box.y2 + 80), size_pt=size)
+    return letterer.letter_panel(_panel([spec], box=Box(0, 0, 2400, 2400), zone=None), "ltr").bubbles[0]
+
+
+def _auto_box(letterer: Letterer, kind: str, text: str = LINE) -> BubbleLayout:
+    panel = _panel([BubbleSpec(1, kind, text, "Aiko", 0)], box=Box(0, 0, 2400, 2400), zone=None)
+    return letterer.letter_panel(panel, "ltr").bubbles[0]
+
+
+def _assert_text_inside(letterer: Letterer, b: BubbleLayout, text: str = LINE) -> None:
+    """Chaque ligne (encre : hauteur de capitale + jambages) tient dans la forme, rien n'est coupé."""
+    st = letterer.fonts.style(b.kind)
+    font = letterer.fonts.pil(st, b.size_px)
+    cap, desc = -font.getbbox("H", anchor="ls")[1], font.getbbox("gjpq", anchor="ls")[3]
+    box = b.box
+    for ln in b.lines:
+        corners = [(ln.x + sx * ln.width / 2, ln.y + dy) for sx in (-1, 1) for dy in (-cap, desc)]
+        for x, y in corners:
+            if b.kind == "narration":
+                assert box.x1 <= x <= box.x2 and box.y1 <= y <= box.y2, (ln.text, x, y)
+            else:
+                nx, ny = (x - box.cx) / (box.w / 2), (y - box.cy) / (box.h / 2)
+                assert nx * nx + ny * ny <= 1.0, (b.kind, ln.text, round(nx * nx + ny * ny, 3))
+    drawn = _joined([ln.text for ln in b.lines]).replace(NBSP, " ")
+    expected = normalize_text(text, uppercase=st.uppercase).replace(NBSP, " ")
+    assert drawn == expected
+
+
+@pytest.mark.parametrize("kind", ["speech", "thought", "shout", "narration", "off"])
+def test_enlarged_manual_box_grows_the_text_up_to_the_preset_cap(
+    presets: PresetRegistry, letterer: Letterer, kind: str
+) -> None:
+    st = presets.require_fonts().styles[kind]
+    auto = _auto_box(letterer, kind)
+    assert not auto.manual and auto.size_pt <= st.size_pt
+    bigger = _in_box(letterer, kind, _scaled(auto.box, 1.5))
+    assert bigger.manual and not bigger.overflow and not bigger.to_json()["font"]["manual_size"]
+    assert auto.size_pt < bigger.size_pt <= st.max_size_pt
+    assert bigger.size_px > auto.size_px
+    _assert_text_inside(letterer, bigger)
+    # Bulle énorme : plafonnée, pas de texte géant.
+    huge = _in_box(letterer, kind, _scaled(auto.box, 6))
+    assert huge.size_pt == st.max_size_pt
+    assert huge.to_json()["font"]["max_size_pt"] == st.max_size_pt
+    _assert_text_inside(letterer, huge)
+
+
+@pytest.mark.parametrize("kind", ["speech", "narration"])
+def test_shrunk_manual_box_lowers_the_text_down_to_the_minimum(
+    presets: PresetRegistry, letterer: Letterer, kind: str
+) -> None:
+    st = presets.require_fonts().styles[kind]
+    auto = _auto_box(letterer, kind)
+    sizes = [_in_box(letterer, kind, _scaled(auto.box, k)) for k in (1.5, 1.2, 1.0, 0.9, 0.8)]
+    pts = [b.size_pt for b in sizes]
+    assert pts == sorted(pts, reverse=True) and pts[0] > pts[-1]
+    for b in sizes:
+        assert st.min_size_pt <= b.size_pt <= st.max_size_pt
+        if not b.overflow:
+            _assert_text_inside(letterer, b)
+    # Trop petit même au minimum : taille minimale, tout le texte gardé, avertissement.
+    tiny = _in_box(letterer, kind, _scaled(auto.box, 0.4))
+    assert tiny.size_pt == st.min_size_pt and tiny.overflow
+    assert _joined([ln.text for ln in tiny.lines]).replace(NBSP, " ") == normalize_text(LINE).replace(NBSP, " ")
+
+
+def test_manual_box_keeps_french_accents_and_hyphenates_like_auto_placement(letterer: Letterer) -> None:
+    text = "Extraordinairement incompréhensible, ce cœur de forêt ! Où es-tu, Hélène ?"
+    auto = _auto_box(letterer, "speech", text)
+    big = _in_box(letterer, "speech", _scaled(auto.box, 1.5), text)
+    drawn = " ".join(ln.text for ln in big.lines)
+    for word in ("cœur", "forêt", "Où", "Hélène"):
+        assert word in drawn
+    style = letterer.fonts.style("speech")
+    assert all(letterer.fonts.has_char(style, ch) for ch in "œêùèÉÀÇ")
+    _assert_text_inside(letterer, big, text)
+    shout = _in_box(letterer, "shout", _scaled(_auto_box(letterer, "shout", text).box, 1.5), text)
+    assert "CŒUR" in " ".join(ln.text for ln in shout.lines) and "HÉLÈNE" in " ".join(ln.text for ln in shout.lines)
+
+
+def test_typed_size_wins_over_the_fill_until_back_to_auto(letterer: Letterer) -> None:
+    auto = _auto_box(letterer, "speech")
+    box = _scaled(auto.box, 1.5)
+    typed = _in_box(letterer, "speech", box, size=7.5)
+    assert typed.size_pt == 7.5 and typed.to_json()["font"]["manual_size"]
+    assert _in_box(letterer, "speech", box).size_pt > 7.5
+    # Taille saisie sur une bulle placée automatiquement : gardée aussi.
+    panel = _panel([BubbleSpec(1, "speech", LINE, "Aiko", 0, size_pt=11)], box=Box(0, 0, 2400, 2400), zone=None)
+    placed = letterer.letter_panel(panel, "ltr").bubbles[0]
+    assert placed.size_pt == 11 and not placed.manual
+    # Trop grande pour son cadre : gardée, avertissement (rien de coupé).
+    res = letterer.letter_panel(
+        _panel([BubbleSpec(1, "speech", LINE, "Aiko", 0, manual_box=auto.box, size_pt=30)], box=Box(0, 0, 2400, 2400)),
+        "ltr",
+    )
+    assert res.bubbles[0].size_pt == 30 and res.bubbles[0].overflow
+    assert [w.code for w in res.warnings] == ["text_overflow"]
+
+
+def test_auto_placed_bubbles_keep_their_usual_sizes(letterer: Letterer) -> None:
+    """Le plafond ne vaut que pour un cadre ajusté à la main : le placement automatique part de size_pt."""
+    for kind in ("speech", "thought", "shout", "narration", "off"):
+        assert _auto_box(letterer, kind, "Oui.").size_pt == letterer.fonts.style(kind).size_pt
+
+
+def test_auto_frame_kept_as_manual_keeps_its_text_size(letterer: Letterer) -> None:
+    """Cadre automatique enregistré tel quel (arrondi au pixel, comme l'écran Lettrage) : même taille de texte."""
+    for kind in ("speech", "thought", "shout", "narration", "off"):
+        auto = _auto_box(letterer, kind)
+        xywh = auto.box.as_xywh()
+        box = Box(xywh["x"], xywh["y"], xywh["x"] + xywh["w"], xywh["y"] + xywh["h"])
+        assert _in_box(letterer, kind, box).size_pt >= auto.size_pt

@@ -566,6 +566,8 @@ class Bubble(TimestampMixin, Base):
     kind: Mapped[BubbleKind] = mapped_column(_enum(BubbleKind), default=BubbleKind.speech)
     # Cadre {"x","y","w","h"} et pointe de la queue {"x","y"} en px de la page, avec "manual": true quand
     # ils ont été ajustés à la main dans l'écran Lettrage ; None = placement automatique (étape 5).
+    # `position` peut aussi porter "size_pt", la taille du texte saisie à la main (sans "manual" ni cadre
+    # si la bulle reste placée automatiquement).
     position: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
     tail: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
     # Onomatopée (kind = sfx) : {"intensity", "font", "size_pt", "angle", "skew"} ; une valeur absente ou

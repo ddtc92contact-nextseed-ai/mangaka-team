@@ -88,8 +88,8 @@ def get_lettering(
 def reset_lettering(
     page_id: int, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
 ) -> dict[str, Any]:
-    """« Recalculer le lettrage » : oublie les positions et queues ajustées à la main (et, pour une
-    onomatopée, sa taille, son angle et son cisaillement ; son intensité et sa police restent)."""
+    """« Recalculer le lettrage » : oublie les positions, queues et tailles de texte ajustées à la main (et,
+    pour une onomatopée, sa taille, son angle et son cisaillement ; son intensité et sa police restent)."""
     page = get_page_or_404(session, page_id)
     for panel in page.panels:
         for bubble in panel.bubbles:
@@ -105,10 +105,14 @@ def reset_lettering(
 def update_bubble(
     bubble_id: int, body: BubbleUpdate, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
 ) -> dict[str, Any]:
-    """Édite une bulle (texte, type, locuteur, cadre, pointe de la queue) ; renvoie le lettrage de la page.
+    """Édite une bulle (texte, type, locuteur, cadre, pointe de la queue, taille du texte) ; renvoie le
+    lettrage de la page.
 
     Un cadre ou une pointe envoyés sont conservés tels quels (« ajusté à la main ») ; `null` rend
-    la main au placement automatique.
+    la main au placement automatique. Le texte d'un cadre ajusté à la main le remplit (taille recalculée
+    au lettrage) ; une taille `size_pt` envoyée l'emporte, jusqu'à `size_pt: null` (automatique). Elle
+    est gardée dans `position` et survit au déplacement, au redimensionnement et au retour au placement
+    automatique.
     """
     bubble = session.get(Bubble, bubble_id)
     if bubble is None:
@@ -132,12 +136,20 @@ def update_bubble(
         bubble.speaker_name = changes["speaker"]
     width = page.layout["page"]["width"] if page.layout else None
     height = page.layout["page"]["height"] if page.layout else None
-    if "position" in changes:
-        pos = changes["position"]
-        if pos is not None and width and height:
-            pos["x"] = min(max(pos["x"], -pos["w"] + 10), width - 10)
-            pos["y"] = min(max(pos["y"], -pos["h"] + 10), height - 10)
-        bubble.position = {**pos, "manual": True} if pos is not None else None
+    if "position" in changes or "size_pt" in changes:
+        old = dict(bubble.position or {})
+        size = changes["size_pt"] if "size_pt" in changes else old.get("size_pt")
+        if "position" in changes:
+            pos = changes["position"]
+            if pos is not None and width and height:
+                pos["x"] = min(max(pos["x"], -pos["w"] + 10), width - 10)
+                pos["y"] = min(max(pos["y"], -pos["h"] + 10), height - 10)
+            frame = {**pos, "manual": True} if pos is not None else {}
+        else:
+            frame = {k: v for k, v in old.items() if k != "size_pt"}
+        if size is not None:
+            frame["size_pt"] = round(float(size), 1)
+        bubble.position = frame or None
     if "tail" in changes:
         tail = changes["tail"]
         if tail is not None and width and height:
@@ -149,8 +161,10 @@ def update_bubble(
 
 
 def _update_sfx(bubble: Bubble, body: BubbleUpdate, changes: dict[str, Any], *, fonts: list[str]) -> None:
-    for key in ("kind", "position", "tail", "speaker"):
+    for key in ("kind", "position", "tail", "speaker", "size_pt"):
         if key in changes:
+            if key == "size_pt":
+                raise FieldError(key, "la taille d'une onomatopée se règle dans ses réglages (sfx.size_pt)")
             raise FieldError(key, "une onomatopée n'a ni type de bulle, ni cadre, ni queue, ni locuteur")
     if "text" in changes:
         if len(changes["text"]) > SFX_MAX_CHARS:

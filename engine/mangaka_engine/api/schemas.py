@@ -490,6 +490,8 @@ class BubbleUpdate(_In):
     # Cadre / pointe ajustés à la main ; null = placement automatique.
     position: BubbleBox | None = None
     tail: TailPoint | None = None
+    # Taille du texte saisie à la main (pt) ; null = automatique (remplit un cadre ajusté à la main).
+    size_pt: Annotated[float, Field(ge=4, le=72, allow_inf_nan=False)] | None = None
     # Onomatopée seulement.
     sfx: SfxParams | None = None
 

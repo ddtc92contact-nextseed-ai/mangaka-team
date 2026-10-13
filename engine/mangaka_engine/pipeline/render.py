@@ -191,6 +191,12 @@ def _manual_tail(tail: dict[str, Any] | None) -> tuple[float, float] | None:
         return None
 
 
+def _manual_size(position: dict[str, Any] | None) -> float | None:
+    """Taille du texte saisie à la main (`position.size_pt`, avec ou sans cadre ajusté) ; None = automatique."""
+    size = _num((position or {}).get("size_pt"))
+    return size if size and size > 0 else None
+
+
 def _num(value: Any) -> float | None:
     try:
         v = float(value)
@@ -359,6 +365,7 @@ def page_inputs(
                         order=b.order,
                         manual_box=_manual_box(b.position),
                         manual_tail=_manual_tail(b.tail),
+                        size_pt=_manual_size(b.position),
                     )
                     for b in panel.bubbles
                     if b.kind != BubbleKind.sfx
