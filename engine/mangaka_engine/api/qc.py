@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from ..pipeline.journal import record_event
 from ..pipeline.qc import (
     active_qc_job,
     any_layer_available,
@@ -170,5 +171,13 @@ def override_panel_image_qc(
     if img is None:
         raise HTTPException(status_code=404, detail="Version introuvable")
     override_ok(session, img, note=(body.note if body else None))
+    record_event(
+        session,
+        verdict="validated",
+        action="qc_override",
+        image_id=img.id,
+        panel_id=img.panel_id,
+        note=body.note if body else "",
+    )
     session.commit()
     return panel_image_out(img, ctx.agents.presets_for(img.panel.page.chapter.project_id))

@@ -126,6 +126,198 @@ references:
   after:
     - "$sorting"
     - "Use the reference images for identity and design only (face, hair, body shape, outfit, colours, materials): draw a new scene with new poses, a new camera angle and the whole background described above, everything (extras and places included) drawn in the same manga style as the reference images. Exactly one continuous scene in a single panel: not a character sheet, not a turnaround, not a collage, no side-by-side views, no multiple poses, no plain white background."
+  # Série en noir et blanc (`monochrome: true` du pack de rendu, 13/10/2026) : ces lignes remplacent celles
+  # ci-dessus (une clé absente garde la ligne ci-dessus). « colours » des fiches poussait Qwen-Image vers la
+  # couleur et le lavis gris (33 cases sur 34 au chapitre 3). Le rédacteur de prompt cite les mêmes rôles.
+  monochrome:
+    character: "<image$slot> is the identity reference for $name: keep the face, hair and outfit; ignore its pose, framing and background."
+    object: "<image$slot> is the design reference for the object $name: keep its shape and details."
+    style: "<image$slot> is a style reference only (line work, inking, screentones): do not copy its characters, scene or composition."
+    sorting:
+      style: "From <image$slot> take only the rendering (line work, inking, screentones); never take its characters or its scene."
+    after:
+      - "$sorting"
+      - "Use the reference images for identity and design only (face, hair, body shape, outfit, materials): draw a new scene with new poses, a new camera angle and the whole background described above, everything (extras and places included) drawn in the same manga style as the reference images. Exactly one continuous scene in a single panel: not a character sheet, not a turnaround, not a collage, no side-by-side views, no multiple poses, no plain white background."
+
+# Série en noir et blanc (13/10/2026) : la case 96 demandait « the thick green liquid » et sortait avec une
+# coulée verte (saturation 0,13 à 0,19 ; 0,03 sans les mots de couleur). Ces termes sont retirés du prompt
+# positif AU MOMENT DE L'ENVOI à ComfyUI (prompts déjà stockés compris : « the thick green liquid » → « the
+# thick liquid »), mots entiers, sans casse, les plus longs d'abord ; un terme contenu dans le nom d'un
+# personnage, d'un décor ou d'un objet de la case reste. Un paragraphe du rédacteur de prompt qui en contient
+# est refusé puis redemandé (comme forbidden_photo_terms), et ils sont retirés des données qu'il reçoit.
+# Jamais « black », « white » ni « grey » : ce sont les valeurs du noir et blanc ; ni les matières (« gold »,
+# « bronze », « copper ») ni les mots à double sens (« rose », « olive », « navy »).
+monochrome_forbidden_terms:
+  # couleur en général
+  - colours
+  - colors
+  - colour
+  - color
+  - coloured
+  - colored
+  - colourful
+  - colorful
+  - multicoloured
+  - multicolored
+  - full colour
+  - full color
+  - vibrant colours
+  - vibrant colors
+  - vivid colours
+  - vivid colors
+  - colour palette
+  - color palette
+  - warm colour palette
+  - warm color palette
+  - cool colour palette
+  - cool color palette
+  - warm tones
+  - cool tones
+  - pastel
+  - pastels
+  - pastel colours
+  - pastel colors
+  - saturated
+  - golden hour
+  # noms de couleur
+  - red
+  - reddish
+  - crimson
+  - scarlet
+  - blue
+  - bluish
+  - azure
+  - cyan
+  - turquoise
+  - teal
+  - green
+  - greenish
+  - emerald
+  - yellow
+  - yellowish
+  - golden
+  - amber
+  - orange
+  - purple
+  - violet
+  - lilac
+  - lavender
+  - magenta
+  - pink
+  - brown
+  - beige
+  # français (descriptions de cases et fiches non traduites du prompt par fragments)
+  - couleur
+  - couleurs
+  - coloré
+  - colorée
+  - colorés
+  - colorées
+  - rouge
+  - rouges
+  - bleu
+  - bleue
+  - bleus
+  - bleues
+  - vert
+  - verte
+  - verts
+  - vertes
+  - jaune
+  - jaunes
+  - doré
+  - dorée
+  - dorés
+  - dorées
+  - orangé
+  - orangée
+  - violette
+  - violets
+  - violettes
+  - pourpre
+  - écarlate
+  - marron
+# Toujours ajoutés au prompt négatif d'une série en noir et blanc (lu à vrai CFG seulement, palier Qualité).
+monochrome_negative_terms: [color, colored, colorful]
+# Règle ajoutée aux consignes du rédacteur de prompt pour une série en noir et blanc ($palette_rule de
+# prompts/redacteur-image.yaml ; vide pour une série en couleur).
+monochrome_writer_rule: >-
+  - the panel is black and white: never write a colour word (red, blue, green, golden, colourful, pastel,
+  colour palette…), describe light and matter only in ink, black, white, grey screentone and paper, or the
+  answer is rejected;
+
+# Ambiance de la case contre ton de la série (13/10/2026) : le ton « lumineux » envoyait « bright joyful
+# atmosphere, warm light » jusqu'à la case où un trafiquant blêmit de terreur. Quand l'ambiance de la case
+# (direction artistique) contient l'un des `moods` (sans casse ni accents, mots entiers ; « angoiss* » :
+# tout mot qui commence ainsi), les mots-clés `drop` sont retirés du style de cette case et du prompt envoyé
+# à ComfyUI (prompts déjà stockés compris). L'ambiance de la case gagne toujours sur le ton de la série.
+mood_conflicts:
+  - name: peur, tension, tristesse, colère, menace
+    moods:
+      - peur
+      - apeuré*
+      - terreur
+      - terrifi*
+      - terroris*
+      - effroi
+      - effray*
+      - épouvant*
+      - horreur
+      - horrifi*
+      - angoiss*
+      - panique*
+      - affolé*
+      - tension
+      - tendu*
+      - suspense
+      - inquiet*
+      - inquiét*
+      - anxi*
+      - menace*
+      - menaç*
+      - danger*
+      - sinistre
+      - oppress*
+      - triste*
+      - chagrin
+      - deuil
+      - larme*
+      - pleur*
+      - désespoir
+      - désespér*
+      - mélancoli*
+      - colère
+      - furieu*
+      - fureur
+      - rage
+      - haine
+      - fear*
+      - afraid
+      - scared
+      - terror
+      - terrified
+      - dread
+      - horror
+      - panic*
+      - tense
+      - anxious
+      - menac*
+      - threat*
+      - ominous
+      - sad
+      - sadness
+      - sorrow*
+      - grief
+      - despair
+      - tears
+      - anger
+      - angry
+      - fury
+      - furious
+    drop: [bright joyful atmosphere, warm light, smiles, smiling, smile, joyful, cheerful, neutral calm atmosphere, no strong emotion]
+  - name: joie
+    moods: [joie, joyeu*, heureu*, bonheur, rire, rires, rieur*, fête, festi*, gai, gaie, gaieté, euphori*, joy, joyful, happy, happiness, cheerful, laughter, laughing, celebrat*]
+    drop: [dark dramatic atmosphere]
 
 # Plans et angles (direction artistique, scénario) → termes de cadrage anglais ($shot, $plan, $angle et
 # le rédacteur de prompt). Jamais de vocabulaire d'objectif ou de photo (forbidden_photo_terms) : cadrage

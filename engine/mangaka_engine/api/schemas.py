@@ -1651,3 +1651,180 @@ class ReindexOut(BaseModel):
     documents: int
     chunks: int
     errors: list[str]
+
+
+# --- Traçabilité : journal des générations, verdicts, A/B, statistiques ------------------------
+VerdictName = Literal["validated", "rejected", "regenerated", "edited"]
+JudgeName = Literal["validated", "rejected"]
+ReasonId = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=60)]
+VerdictNote = Annotated[str, StringConstraints(strip_whitespace=True, max_length=1000)]
+
+
+class VerdictReasonOut(BaseModel):
+    id: str
+    label: str
+
+
+class MeasureOut(BaseModel):
+    key: str  # dark_pct | black_pct | white_pct | saturation_pct | line_density_pct
+    label: str
+    target: float | None = None
+
+
+class JournalSettingsOut(BaseModel):
+    """Réglages du journal pour l'interface : raisons d'un rejet, mesures et cible de tonalité."""
+
+    reasons: list[VerdictReasonOut]
+    measures: list[MeasureOut]
+    tonality_reference: str
+    dark_below: int
+    black_below: int
+    white_from: int
+    low_data_below: int
+    kinds: dict[str, str]
+    verdicts: dict[str, str]
+
+
+class GenerationEventOut(BaseModel):
+    id: int
+    created_at: datetime
+    verdict: VerdictName
+    action: str
+    reason: str | None = None
+    reason_label: str | None = None
+    note: str = ""
+
+
+class GenerationLogOut(BaseModel):
+    id: int
+    created_at: datetime
+    kind: str
+    status: str
+    error: str | None = None
+    job_id: int | None = None
+    project_id: int | None = None
+    chapter_id: int | None = None
+    page_id: int | None = None
+    panel_id: int | None = None
+    image_kind: str | None = None
+    image_id: int | None = None
+    version: int | None = None
+    preset: str | None = None
+    tier: str | None = None
+    model: str | None = None
+    steps: int | None = None
+    cfg: float | None = None
+    seed: int | None = None
+    width: int | None = None
+    height: int | None = None
+    denoise: float | None = None
+    positive_prompt: str = ""
+    negative_prompt: str = ""
+    positive_chars: int = 0
+    positive_words: int = 0
+    negative_chars: int = 0
+    negative_words: int = 0
+    prompt_source: str | None = None
+    writer_hash: str | None = None
+    references: list[dict[str, Any]] = Field(default_factory=list)
+    loras: list[dict[str, Any]] = Field(default_factory=list)
+    knowledge: list[dict[str, Any]] = Field(default_factory=list)
+    framing: str | None = None
+    angle: str | None = None
+    mood: str | None = None
+    finish: str | None = None
+    duration_ms: int | None = None
+    measures: dict[str, float | None] = Field(default_factory=dict)
+    gaps: dict[str, float | None] = Field(default_factory=dict)  # valeur − cible, en points
+    ab_group: str | None = None
+    ab_arm: str | None = None
+    ab_mode: str | None = None
+    verdict: JudgeName | None = None  # dernier verdict « jugé » (gardée / rejetée)
+    events: list[GenerationEventOut] = Field(default_factory=list)
+
+
+class ImageJournalOut(BaseModel):
+    """Journal d'une version : la génération qui l'a produite (None : version d'avant le journal)."""
+
+    log: GenerationLogOut | None = None
+
+
+class VerdictIn(_In):
+    verdict: JudgeName
+    reason: ReasonId | None = None
+    note: VerdictNote = ""
+
+
+class ABIn(_In):
+    mode: Literal["prompt", "tier", "cfg"]
+    prompt_b: LongText | None = None
+    presets: list[PresetId] | None = Field(default=None, min_length=2, max_length=2)
+    cfgs: list[Cfg] | None = Field(default=None, min_length=2, max_length=2)
+    seed: int | None = Field(default=None, ge=0, le=2**63 - 1)
+
+
+class ABStartOut(BaseModel):
+    group: str
+    seed: int
+    jobs: list[JobOut]
+
+
+class ABArmOut(BaseModel):
+    arm: Literal["A", "B"]
+    log: GenerationLogOut | None = None
+    image: PanelImageOut | None = None
+
+
+class ABGroupOut(BaseModel):
+    group: str
+    mode: str | None = None
+    seed: int | None = None
+    pending: bool = False  # au moins un bras encore en file ou en cours
+    arms: list[ABArmOut]
+    choice: Literal["A", "B"] | None = None
+
+
+class ABChoiceIn(_In):
+    winner: Literal["A", "B"]
+    reason: ReasonId | None = None
+    note: VerdictNote = ""
+    # Le bras retenu devient aussi la version choisie de la case.
+    select: bool = True
+
+
+class StatsGroupOut(BaseModel):
+    value: str
+    generations: int
+    judged: int
+    validated: int
+    rejected: int
+    validation_rate: float | None = None  # % de gardées parmi les jugées
+    regenerated: int
+    edited: int
+    low_data: bool
+    means: dict[str, float | None]
+
+
+class StatsBreakdownOut(BaseModel):
+    key: str
+    label: str
+    rows: list[StatsGroupOut]
+
+
+class StatsTotalOut(BaseModel):
+    generations: int
+    judged: int
+    validated: int
+    rejected: int
+    validation_rate: float | None = None
+    regenerated: int
+    edited: int
+    low_data: bool
+    means: dict[str, float | None]
+
+
+class StatsOut(BaseModel):
+    total: StatsTotalOut
+    low_data: bool
+    low_data_below: int
+    breakdowns: list[StatsBreakdownOut]

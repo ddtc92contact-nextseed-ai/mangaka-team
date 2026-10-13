@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { AnnotationBadge, AnnotationBar } from "@/components/annotation";
 import { useConfirm } from "@/components/confirm";
+import { VersionJournal } from "@/components/journal";
 import { Modal } from "@/components/modal";
 import { DetectionOverlay, QCBadge } from "@/components/qc";
 import { Alert, Button, Select } from "@/components/ui";
@@ -314,6 +315,7 @@ export function VersionsStrip({
         )}
         {viewed && !compared && (
           <div className="space-y-3">
+            <VersionJournal imageId={viewed.id} version={viewed.version} keyboard inModal />
             <AnnotationBar
               image={viewed}
               onChange={onAnnotated}

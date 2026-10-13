@@ -1,0 +1,23 @@
+# Journal des générations et verdicts de l'auteur (engine/mangaka_engine/pipeline/journal.py).
+# Chaque génération ComfyUI terminée ou en échec ajoute une ligne (jamais réécrite) ; chaque action de
+# l'auteur (garder, rejeter, régénérer, recadrer, réparer, supprimer…) ajoute un événement lié.
+
+# Raisons d'un rejet : liste fermée (boutons de l'atelier, raccourcis 1 à 9 dans l'ordre), « autre » en dernier.
+reasons:
+  - { id: style-pas-manga, label: "Style pas manga" }
+  - { id: visage-rate, label: "Visage raté" }
+  - { id: mauvais-cadrage, label: "Mauvais cadrage" }
+  - { id: couleur-parasite, label: "Couleur parasite" }
+  - { id: anatomie, label: "Anatomie" }
+  - { id: hors-scenario, label: "Hors scénario" }
+  - { id: autre, label: "Autre" }
+
+# Page Statistiques : avertissement « peu de données » sous ce nombre de cases jugées.
+low_data_below: 20
+
+# Tranches de longueur du prompt positif envoyé (en mots), pour la page Statistiques.
+prompt_length_buckets:
+  - { label: "≤ 60 mots", max_words: 60 }
+  - { label: "61–120 mots", max_words: 120 }
+  - { label: "121–200 mots", max_words: 200 }
+  - { label: "> 200 mots" }

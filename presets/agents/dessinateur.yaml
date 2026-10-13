@@ -97,6 +97,13 @@ settings:
     source: image_prompt.yaml#references.character
     variables: [slot, name]
     help: Une ligne par image envoyée au workflow avec références, dans l'ordre des emplacements.
+  - key: reference_line_monochrome
+    label: Image de référence d'un personnage (série en noir et blanc)
+    group: Prompt
+    type: prompt
+    source: image_prompt.yaml#references.monochrome.character
+    variables: [slot, name]
+    help: Remplace la ligne ci-dessus pour une série en noir et blanc (sans « colours »).
   - key: reference_sorting
     label: Tri d'une fiche de personnage (ce qu'il faut en prendre)
     group: Prompt
@@ -132,6 +139,19 @@ settings:
     help: >-
       Un paragraphe du rédacteur qui contient l'un de ces termes (mots entiers, sans casse) est refusé puis
       redemandé : objectif, flou, profondeur de champ… font sortir des photos au lieu de dessins.
+  - key: monochrome_forbidden_terms
+    label: Mots de couleur retirés (série en noir et blanc)
+    group: Prompt
+    type: list
+    source: image_prompt.yaml#monochrome_forbidden_terms
+    help: >-
+      Retirés du prompt envoyé à ComfyUI (prompts déjà stockés compris) et refusés dans le paragraphe du
+      rédacteur, pour une série en noir et blanc : « the thick green liquid » devient « the thick liquid ».
+  - key: monochrome_negative_terms
+    label: Termes « pas de couleur » du prompt négatif (série en noir et blanc)
+    group: Prompt
+    type: list
+    source: image_prompt.yaml#monochrome_negative_terms
   - key: strip_quotes
     label: Retirer les répliques entre guillemets de la description
     group: Prompt
@@ -236,6 +256,7 @@ settings:
       - finition
       - bible
       - savoir_faire
+      - palette_rule
       - context_json
   - key: writer_user
     label: Gabarit de la case

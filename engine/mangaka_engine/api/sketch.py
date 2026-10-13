@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, selectinload
 from ..pipeline.composition import type_problem
 from ..pipeline.estimate import estimate_panels
 from ..pipeline.generation import GenerationError
+from ..pipeline.journal import note_regenerated, record_event
 from ..pipeline.sketch import (
     clean_preset_id,
     enqueue_clean,
@@ -102,6 +103,7 @@ def sketch_panel(
     panel = get_panel_or_404(session, panel_id)
     seed = body.seed if body else None
     job = _run(panel, lambda: enqueue_sketch(session, _presets(ctx, panel), panel, seed=seed, knowledge=ctx.knowledge))
+    note_regenerated(session, panel, "resketch", sketch=True)
     session.commit()
     ctx.generation.notify()
     return [job_out(job)]
@@ -122,9 +124,10 @@ def validate_panel_sketch(
         if image is None or image.panel_id != panel.id:
             raise FieldError("image_id", "croquis introuvable pour cette case")
     try:
-        validate_sketch(panel, image)
+        validated = validate_sketch(panel, image)
     except GenerationError as exc:
         raise FieldError("image_id", str(exc)) from None
+    record_event(session, verdict="validated", action="validate_sketch", image_id=validated.id, panel_id=panel.id)
     session.commit()
     return panel_detail(session, ctx, panel)
 

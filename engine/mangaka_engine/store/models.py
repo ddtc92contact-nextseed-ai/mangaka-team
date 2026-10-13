@@ -11,6 +11,8 @@ Savoir-faire : `KnowledgeCollection` (globale ou d'une série) → `KnowledgeDoc
 · `LLMRun` (passages reçus par chaque appel du LLM).
 Direction artistique : `PageDirection` (une par page : proposition de l'agent, champs verrouillés par
 l'auteur, version appliquée à la mise en page et aux prompts).
+Traçabilité : `GenerationLog` (une ligne par génération ComfyUI, jamais réécrite) → `GenerationEvent`
+(verdicts de l'auteur : gardée, rejetée, régénérée, retouchée).
 Les fichiers binaires (images) vivent dans `data/`, la base ne stocke que leurs chemins relatifs.
 """
 
@@ -758,3 +760,84 @@ class PageDirection(TimestampMixin, Base):
     variant: Mapped[int] = mapped_column(Integer, default=0)  # « Proposer autre chose » : nombre de relances
 
     page: Mapped[Page] = relationship(back_populates="direction")
+
+
+class GenerationLog(Base):
+    """Journal des générations : une ligne par génération ComfyUI terminée ou en échec (case, croquis, passage
+    au propre, réparation, angle, fiche de référence, essai de style, A/B). Jamais réécrite : une
+    régénération ajoute une ligne. Les ids de la série, du chapitre, de la page, de la case et de l'image
+    sont de simples entiers (pas de clé étrangère) : la ligne survit à la suppression de ce qu'elle décrit.
+    Aucune donnée personnelle ni clé : prompts, réglages, mesures."""
+
+    __tablename__ = "generation_logs"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, index=True)
+    kind: Mapped[str] = mapped_column(String(30), index=True)  # voir pipeline/journal.py : KINDS
+    status: Mapped[str] = mapped_column(String(20), default="succeeded")  # succeeded | failed | cancelled
+    error: Mapped[str | None] = mapped_column(Text, default=None)
+    job_id: Mapped[int | None] = mapped_column(Integer, default=None, index=True)
+    project_id: Mapped[int | None] = mapped_column(Integer, default=None, index=True)
+    chapter_id: Mapped[int | None] = mapped_column(Integer, default=None, index=True)
+    page_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    panel_id: Mapped[int | None] = mapped_column(Integer, default=None, index=True)
+    # Image produite : version de case (`panel_image`) ou variante de fiche (`reference_variant`).
+    image_kind: Mapped[str | None] = mapped_column(String(30), default=None)
+    image_id: Mapped[int | None] = mapped_column(Integer, default=None, index=True)
+    version: Mapped[int | None] = mapped_column(Integer, default=None)
+    # Workflow et réglages effectivement envoyés.
+    preset: Mapped[str | None] = mapped_column(String(100), default=None)
+    tier: Mapped[str | None] = mapped_column(String(40), default=None)
+    model: Mapped[str | None] = mapped_column(String(255), default=None)  # fichier du modèle (unet / ckpt)
+    steps: Mapped[int | None] = mapped_column(Integer, default=None)
+    cfg: Mapped[float | None] = mapped_column(Float, default=None)
+    seed: Mapped[int | None] = mapped_column(Integer, default=None)
+    width: Mapped[int | None] = mapped_column(Integer, default=None)
+    height: Mapped[int | None] = mapped_column(Integer, default=None)
+    denoise: Mapped[float | None] = mapped_column(Float, default=None)
+    positive_prompt: Mapped[str] = mapped_column(Text, default="")
+    negative_prompt: Mapped[str] = mapped_column(Text, default="")
+    positive_chars: Mapped[int] = mapped_column(Integer, default=0)
+    positive_words: Mapped[int] = mapped_column(Integer, default=0)
+    negative_chars: Mapped[int] = mapped_column(Integer, default=0)
+    negative_words: Mapped[int] = mapped_column(Integer, default=0)
+    prompt_source: Mapped[str | None] = mapped_column(String(20), default=None)  # ia | fragments | manuel
+    # Empreinte des consignes du rédacteur de prompt (prompts/redacteur-image.yaml + profil « L'équipe »).
+    writer_hash: Mapped[str | None] = mapped_column(String(16), default=None)
+    references: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)  # [{kind, id, image_id}]
+    loras: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)  # [{name, weight, source}]
+    # Savoir-faire reçu : [{document_id, title, collection, tokens}].
+    knowledge: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    framing: Mapped[str | None] = mapped_column(String(100), default=None)  # plan
+    angle: Mapped[str | None] = mapped_column(String(100), default=None)
+    mood: Mapped[str | None] = mapped_column(String(200), default=None)  # ambiance
+    finish: Mapped[str | None] = mapped_column(String(100), default=None)  # finition (si le réglage existe)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, default=None)
+    # Mesures de tonalité (presets/qc_tonality.yaml), en % ; None : génération en échec.
+    dark_pct: Mapped[float | None] = mapped_column(Float, default=None)
+    black_pct: Mapped[float | None] = mapped_column(Float, default=None)
+    white_pct: Mapped[float | None] = mapped_column(Float, default=None)
+    saturation_pct: Mapped[float | None] = mapped_column(Float, default=None)
+    line_density_pct: Mapped[float | None] = mapped_column(Float, default=None)
+    # Comparaison A/B : groupe commun aux deux bras, bras (A | B) et ce qui varie (prompt | tier | cfg).
+    ab_group: Mapped[str | None] = mapped_column(String(40), default=None, index=True)
+    ab_arm: Mapped[str | None] = mapped_column(String(1), default=None)
+    ab_mode: Mapped[str | None] = mapped_column(String(20), default=None)
+
+
+class GenerationEvent(Base):
+    """Verdict de l'auteur sur une génération : chaque action (choisir, valider un croquis, supprimer,
+    régénérer, recadrer, réparer, juger, choix d'un A/B…) ajoute un événement, jamais réécrit."""
+
+    __tablename__ = "generation_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, index=True)
+    log_id: Mapped[int | None] = mapped_column(Integer, default=None, index=True)
+    panel_id: Mapped[int | None] = mapped_column(Integer, default=None, index=True)
+    image_kind: Mapped[str | None] = mapped_column(String(30), default=None)
+    image_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    verdict: Mapped[str] = mapped_column(String(20))  # validated | rejected | regenerated | edited
+    action: Mapped[str] = mapped_column(String(30))  # select | delete | judge | crop | repair | …
+    reason: Mapped[str | None] = mapped_column(String(60), default=None)  # id de journal.yaml
+    note: Mapped[str] = mapped_column(Text, default="")

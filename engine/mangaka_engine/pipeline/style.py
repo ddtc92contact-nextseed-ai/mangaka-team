@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import logging
 import string
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -123,10 +123,13 @@ def _words(pack: StylePack | StyleOptionChoice, people: bool) -> list[str]:
     return [k for k in pack.prompt_keywords if people or k not in pack.people_keywords]
 
 
-def style_groups(presets: PresetRegistry, series: Project, *, people: bool = True) -> list[tuple[str, list[str]]]:
+def style_groups(
+    presets: PresetRegistry, series: Project, *, people: bool = True, drop: Collection[str] = ()
+) -> list[tuple[str, list[str]]]:
     """Mots-clés complets du style, par pack, dans l'ordre fixe : LoRA, genre (ou ancien texte), rendu,
     ton, puis un groupe par réglage fin choisi — (sorte, mots-clés). `people` faux : sans les mots-clés
-    marqués `people` (fiches d'objet et de décor)."""
+    marqués `people` (fiches d'objet et de décor). `drop` : mots-clés écartés (sans casse), ceux du ton
+    que contredit l'ambiance d'une case (`prompt.mood_dropped_terms`)."""
     groups: list[tuple[str, list[str]]] = [("lora", list(lora_triggers(presets, series)))]
     genre = presets.style_genres.get(series.style_genre or "")
     if genre is not None:
@@ -154,7 +157,8 @@ def style_groups(presets: PresetRegistry, series: Project, *, people: bool = Tru
     ]
     if missing:
         log.warning("série %s : pack de style introuvable (%s), ignoré", series.id, ", ".join(missing))
-    return [(kind, [w for w in (_clean(x) for x in g) if w]) for kind, g in groups]
+    dropped = {_clean(d).casefold() for d in drop}
+    return [(kind, [w for w in (_clean(x) for x in g) if w and w.casefold() not in dropped]) for kind, g in groups]
 
 
 def _redundant(word: str, kept: list[str]) -> bool:
@@ -164,7 +168,9 @@ def _redundant(word: str, kept: list[str]) -> bool:
     return any(w in f" {k.casefold()} " for k in kept)
 
 
-def style_keywords(presets: PresetRegistry, series: Project, *, people: bool = True) -> list[str]:
+def style_keywords(
+    presets: PresetRegistry, series: Project, *, people: bool = True, drop: Collection[str] = ()
+) -> list[str]:
     """Mots-clés retenus pour `$style`, dans l'ordre fixe des packs, sans doublon.
 
     Bloc court (`style_max_chars` de image_prompt.yaml) : les mots déclencheurs du LoRA d'abord, puis
@@ -178,7 +184,7 @@ def style_keywords(presets: PresetRegistry, series: Project, *, people: bool = T
     # premier mot-clé utile (« manga » d'un réglage fin s'efface derrière « manga seinen » du genre).
     kinds: list[str] = []
     groups: list[list[str]] = []
-    for kind, group in style_groups(presets, series, people=people):
+    for kind, group in style_groups(presets, series, people=people, drop=drop):
         kinds.append(kind)
         earlier = [w for g in groups for w in g]
         groups.append([])
@@ -210,9 +216,16 @@ def style_keywords(presets: PresetRegistry, series: Project, *, people: bool = T
     return [w for g in kept for w in g]
 
 
-def series_style(presets: PresetRegistry, series: Project, *, people: bool = True) -> str:
-    """`$style` des prompts image de la série (`people` faux : sans les mots-clés qui évoquent des personnes)."""
-    return ", ".join(style_keywords(presets, series, people=people))
+def series_style(presets: PresetRegistry, series: Project, *, people: bool = True, drop: Collection[str] = ()) -> str:
+    """`$style` des prompts image de la série (`people` faux : sans les mots-clés qui évoquent des personnes ;
+    `drop` : mots-clés écartés pour une case, voir `style_groups`)."""
+    return ", ".join(style_keywords(presets, series, people=people, drop=drop))
+
+
+def series_monochrome(presets: PresetRegistry, series: Project) -> bool:
+    """Série en noir et blanc : `monochrome` de son pack de rendu (voir `series_rendering`)."""
+    rendering = series_rendering(presets, series)
+    return rendering is not None and rendering.monochrome
 
 
 def series_style_lead(presets: PresetRegistry, series: Project) -> str:

@@ -13,7 +13,8 @@ Sortie JSON validée par Pydantic (`prompt`, `language`, `notes`) puis contre la
 personnage de la case nommé, aucun personnage de la série absent de la case, chaque image envoyée citée
 (`<image1>`…) et aucune autre, paragraphe anglais sans phrases françaises ni vocabulaire photographique
 (`forbidden_photo_terms` d'image_prompt.yaml : « lens », « depth of field »… poussent Qwen-Image vers le
-photoréalisme), longueur plausible ;
+photoréalisme), et pour une série en noir et blanc sans mot de couleur (`monochrome_forbidden_terms`,
+retirés aussi des données de la case et du rôle des images), longueur plausible ;
 invalide → nouvel essai avec l'erreur (`max_retries`) → sinon `PromptWriterError` (l'appelant retombe
 sur le prompt par fragments, avec un avertissement sur la case).
 
@@ -39,10 +40,20 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, StringConstraints, ValidationError, field_validator
 
 from ..presets import ImagePromptSettings, PromptPreset
+from ..presets.schemas import ReferencePromptSettings
 from ..providers.llm import ChatMessage, LLMError, LLMProvider
 from ..validation import format_errors
 from .names import _contains, name_key
-from .prompt import PromptCharacter, ReferenceSlot, camera_term, image_tags, strip_quoted
+from .prompt import (
+    PromptCharacter,
+    ReferenceSlot,
+    camera_term,
+    found_terms,
+    image_tags,
+    reference_line,
+    remove_terms,
+    strip_quoted,
+)
 from .script import _render
 
 PROMPT_ID = "redacteur-image"  # presets/prompts/redacteur-image.yaml
@@ -57,13 +68,6 @@ DEFAULT_MIN_WORDS, DEFAULT_MAX_WORDS = 180, 320
 # Tolérance sur la longueur visée : en deçà de 60 % du minimum ou au-delà de 150 % du maximum, la
 # réponse est refusée (un paragraphe un peu court ou un peu long reste utilisable).
 MIN_RATIO, MAX_RATIO = 0.6, 1.5
-# Rôle de chaque image envoyée ($references), à reprendre en tête du paragraphe.
-REFERENCE_ROLES = {
-    "character": "the identity reference for {name}: keep the face, hair, outfit and colours; ignore its pose, framing and background",
-    "decor": "the location reference for {name}: keep its layout, architecture and materials; show it from the new camera angle",
-    "object": "the design reference for the object {name}: keep its shape, colours and details",
-    "style": "a style reference only (line work, inking, screentones, colours): do not copy its characters, scene or composition",
-}
 # Mots-outils français : un paragraphe « anglais » qui en contient beaucoup n'a pas été traduit.
 _FRENCH_WORDS = frozenset(
     [
@@ -170,6 +174,13 @@ class PromptBrief:
     savoir_faire: str = ""
     # Termes photographiques refusés dans le paragraphe (`forbidden_photo_terms` d'image_prompt.yaml).
     photo_terms: list[str] = field(default_factory=list)
+    # Série en noir et blanc : termes de couleur refusés dans le paragraphe (`monochrome_forbidden_terms`) et
+    # règle ajoutée aux consignes ($palette_rule, `monochrome_writer_rule`) ; vides pour une série en couleur.
+    colour_terms: list[str] = field(default_factory=list)
+    palette_rule: str = ""
+    # Lignes des images de référence de la série (`references` d'image_prompt.yaml, variante noir et blanc
+    # comprise) : le rôle de chaque image en est tiré.
+    reference_settings: ReferencePromptSettings = field(default_factory=ReferencePromptSettings)
     language: str = DEFAULT_LANGUAGE
     min_words: int = DEFAULT_MIN_WORDS
     max_words: int = DEFAULT_MAX_WORDS
@@ -199,24 +210,40 @@ class PromptBrief:
         savoir_faire: str = "",
         prompt: PromptPreset | None = None,
         settings: ImagePromptSettings | None = None,
+        monochrome: bool = False,
     ) -> PromptBrief:
+        """`monochrome` : série en noir et blanc — rôles des images sans « colours », termes de couleur
+        retirés des données de la case (description, fiches…) et refusés dans le paragraphe."""
+        settings = settings or ImagePromptSettings()
         present = {name_key(c.name) for c in characters}
         chosen = _text(plan) or _text(shot_type)
         camera = [camera_term(v, settings) for v in (chosen, _text(angle)) if v]
+        colour_terms = list(settings.monochrome_forbidden_terms) if monochrome else []
+        names = [e.name for e in [*characters, *objects, *([decor] if decor else [])]] + list(extras)
+
+        def plain(value: str | None) -> str:
+            return _text(remove_terms(value or "", colour_terms, keep=names)) if colour_terms else _text(value)
+
+        def entry(e: PromptCharacter) -> PromptCharacter:
+            if not colour_terms:
+                return e
+            keywords = tuple(k for k in (plain(k) for k in e.prompt_keywords) if k)
+            return PromptCharacter(e.name, plain(e.visual_description), keywords)
+
         return cls(
-            description=_text(description),
-            setting=_text(setting),
-            staging=_text(staging),
+            description=plain(description),
+            setting=plain(setting),
+            staging=plain(staging),
             plan=chosen,
             angle=_text(angle),
             camera=", ".join(dict.fromkeys(camera)),
-            ambiance=_text(ambiance),
-            action=_text(action),
-            characters=list(characters),
+            ambiance=plain(ambiance),
+            action=plain(action),
+            characters=[entry(c) for c in characters],
             extras=list(dict.fromkeys(n for n in (_text(e) for e in extras) if n)),
             absent=list(dict.fromkeys(n for n in absent if n.strip() and name_key(n) not in present)),
-            decor=decor,
-            objects=list(objects),
+            decor=entry(decor) if decor is not None else None,
+            objects=[entry(o) for o in objects],
             references=list(references),
             style=_SPACES.sub(" ", style or "").strip().rstrip(" .;,"),
             style_lead=_SPACES.sub(" ", style_lead or "").strip(),
@@ -224,7 +251,10 @@ class PromptBrief:
             bible=_text(bible),
             # Passages entiers avec leur source (titres entre « ») : ni guillemets retirés ni lignes fusionnées.
             savoir_faire=(savoir_faire or "").strip(),
-            photo_terms=list((settings or ImagePromptSettings()).forbidden_photo_terms),
+            photo_terms=list(settings.forbidden_photo_terms),
+            colour_terms=colour_terms,
+            palette_rule=settings.monochrome_writer_rule.strip() if monochrome else "",
+            reference_settings=settings.references.for_palette(monochrome),
             language=(prompt.language if prompt and prompt.language else DEFAULT_LANGUAGE),
             min_words=(prompt.min_words if prompt and prompt.min_words else DEFAULT_MIN_WORDS),
             max_words=(prompt.max_words if prompt and prompt.max_words else DEFAULT_MAX_WORDS),
@@ -237,7 +267,7 @@ class PromptBrief:
                 "tag": image_tag(i),
                 "kind": slot.kind,
                 "name": slot.name,
-                "role": REFERENCE_ROLES.get(slot.kind, REFERENCE_ROLES["character"]).format(name=slot.name),
+                "role": reference_role(self.reference_settings, slot, i),
             }
             for i, slot in enumerate(self.references, start=1)
         ]
@@ -279,6 +309,14 @@ class PromptBrief:
         que si elle change."""
         raw = json.dumps({**self.as_json(), "revision": WRITER_REVISION}, ensure_ascii=False, sort_keys=True)
         return hashlib.sha256(raw.encode()).hexdigest()[:32]
+
+
+def reference_role(refs: ReferencePromptSettings, slot: ReferenceSlot, number: int) -> str:
+    """Rôle d'une image pour le rédacteur (« the identity reference for Aiko: keep… ») : la ligne de
+    `references` d'image_prompt.yaml, sans « <imageN> is » en tête ni point final."""
+    line = reference_line(refs, slot, number).strip()
+    line = re.sub(rf"^{re.escape(image_tag(number))}\s*(?:is\s+)?", "", line, flags=re.IGNORECASE)
+    return line.rstrip(" .")
 
 
 # --- messages -----------------------------------------------------------------------
@@ -329,6 +367,7 @@ def template_values(brief: PromptBrief) -> dict[str, str]:
         "finition": _or(brief.finition, "(none)"),
         "bible": _or(brief.bible, "(nothing specific)"),
         "savoir_faire": _or(brief.savoir_faire, "(none)"),
+        "palette_rule": brief.palette_rule,
         "context_json": json.dumps(brief.as_json(), ensure_ascii=False, indent=2),
     }
 
@@ -414,6 +453,23 @@ def photo_problems(paragraph: str, brief: PromptBrief) -> list[str]:
     ]
 
 
+def colour_problems(paragraph: str, brief: PromptBrief) -> list[str]:
+    """Série en noir et blanc : termes de couleur du paragraphe (mots entiers, sans casse), hors style de la
+    série et noms des fiches de la case."""
+    if not brief.colour_terms:
+        return []
+    text = _without(paragraph, brief.style, brief.style_lead)
+    names = [e.name for e in [*brief.characters, *brief.objects, *([brief.decor] if brief.decor else [])]]
+    text = _without(text, *names, *brief.extras)
+    found = found_terms(text, brief.colour_terms)
+    if not found:
+        return []
+    return [
+        f"mots de couleur interdits : {', '.join(found)} (la série est en noir et blanc : décris les valeurs en "
+        "encre, noirs, blancs et trames grises, jamais en couleurs)"
+    ]
+
+
 def with_lead(text: str, lead: str) -> str:
     """La phrase de style de la série en tête du paragraphe : déplacée en tête si elle est ailleurs,
     ajoutée sinon."""
@@ -480,6 +536,7 @@ def paragraph_problems(paragraph: str, language: str, brief: PromptBrief) -> lis
         )
     problems += reference_problems(paragraph, len(brief.references))
     problems += photo_problems(paragraph, brief)
+    problems += colour_problems(paragraph, brief)
     if brief.language == "en":
         hits = french_hits(paragraph)
         if hits >= FRENCH_MIN_HITS and hits > FRENCH_MAX_SHARE * word_count(paragraph):

@@ -26,6 +26,8 @@ Après modification d'un preset, redémarre le moteur (`npm run dev`).
 | `prompts/*.yaml` | Prompts des étapes LLM (`script` : découpage d'un chapitre ; `direction-artistique` ; `redacteur-image` : prompt image de chaque case rédigé en un paragraphe ; `redacteur-image-dialogue` : dialogue sur une case dans l'atelier) |
 | `image_prompt.yaml` | Construction du prompt final des cases (étape 3) et termes « pas de texte » du prompt négatif |
 | `qc.yaml` | Contrôle qualité des cases (étape 4) : poids, seuils de verdict, règles des détecteurs, seuil CCIP, zone de doute de la vision, nouveaux essais automatiques |
+| `qc_tonality.yaml` | Mesures de tonalité de chaque image générée (% sombre, % noir, % blanc, saturation, densité de trait) et cible (planche de référence) |
+| `journal.yaml` | Journal des générations : raisons d'un rejet (liste fermée), seuil « peu de données » et tranches de longueur de prompt de la page Statistiques |
 | `workflows/*.yaml` + `*.json` | Workflows ComfyUI : le JSON API exporté + le mapping des paramètres |
 | `upscalers/*.yaml` + `*.json` | Finition d'impression : agrandissement de la version retenue d'une case jusqu'au dpi du format, avant l'assemblage |
 
@@ -291,7 +293,7 @@ Champs communs : `id` (minuscules, chiffres, tirets), `name` et `description` **
 dans la fiche série), `prompt_keywords` (liste), `lang` (`fr` ou `en`, obligatoire : langue des
 mots-clés, voir « Calibrage »), `order` (ordre dans la liste déroulante).
 
-Un mot-clé qui évoque des personnes (« sourire », « determined young hero », « expression comique »)
+Un mot-clé qui évoque des personnes (« determined young hero », « expression comique »)
 s'écrit `{text: smiles, people: true}` dans `prompt_keywords` (réglages fins compris). Il reste dans le
 `$style` des cases et des fiches de personnage, mais il est **écarté des fiches d'objet et de décor** :
 sinon le modèle y invente un personnage, qui revient ensuite dans chaque case utilisant la fiche. Une description signale une
@@ -1277,6 +1279,19 @@ lettrage, jamais dessiné par le modèle), `negative_photo_terms` aussi (contre 
 ouvre le prompt, suivi de `$finition` (mots-clés de la finition de la série, `style_options.yaml › finition`), et `strip_quotes` retire les répliques entre guillemets
 de la description. Le prompt est stocké sur la case ; une édition manuelle est conservée jusqu'à
 « reconstruire le prompt ».
+
+**Série en noir et blanc** (`monochrome: true` du pack de rendu) : les lignes des images de référence
+viennent de `references.monochrome` (« keep the face, hair and outfit », sans « colours ») ; les termes de
+`monochrome_forbidden_terms` (noms de couleur, « colorful », « pastel »…) sont retirés du prompt positif **au
+moment de l'envoi à ComfyUI** — prompts déjà stockés compris : « the thick green liquid » devient « the
+thick liquid » — et refusés dans le paragraphe du rédacteur de prompt (règle `monochrome_writer_rule`,
+`$palette_rule`) ; `monochrome_negative_terms` (« color, colored, colorful ») rejoint le prompt négatif.
+Une série en couleur garde son prompt tel quel.
+
+**Ambiance de la case contre ton de la série** (`mood_conflicts`) : quand l'ambiance de la direction
+artistique d'une case contient l'un des `moods` d'une règle (peur, tension, tristesse, colère, menace…),
+les mots-clés `drop` (« bright joyful atmosphere », « warm light », « smiles »…) sont retirés du style de
+cette case et du prompt envoyé : l'ambiance de la case gagne toujours.
 
 `references` cadre les images de référence dans le prompt **envoyé** à un workflow avec références
 (au moment de la génération, le prompt stocké sur la case ne change pas ; la version garde les deux :

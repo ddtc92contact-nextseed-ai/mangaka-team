@@ -10,6 +10,8 @@ Arborescence attendue :
       fonts.yaml + fonts/      # polices de lettrage (OFL) et style de texte par type de bulle
       lettering.yaml           # formes et placement des bulles, assemblage, repères de coupe
       qc.yaml                  # contrôle qualité des cases (étape 4) : seuils, poids, règles
+      qc_tonality.yaml         # mesures de tonalité de chaque image générée et cible (journal)
+      journal.yaml             # journal des générations : raisons d'un rejet, page Statistiques
       knowledge.yaml           # savoir-faire : découpage, recherche hybride, collections par agent
       page_formats/*.yaml      # formats de page
       layouts/*.yaml           # gabarits de planche
@@ -46,6 +48,7 @@ from .schemas import (
     Defaults,
     FontsPreset,
     ImagePromptSettings,
+    JournalSettings,
     KnowledgeSettings,
     LayoutSettings,
     LayoutStyle,
@@ -63,6 +66,7 @@ from .schemas import (
     StylePack,
     StyleRendering,
     StyleTone,
+    TonalitySettings,
     UpscalerPreset,
     WorkflowPreset,
 )
@@ -114,6 +118,8 @@ class PresetRegistry:
     lettering: LetteringSettings = field(default_factory=LetteringSettings)
     providers: ProvidersPreset | None = None
     qc: QCSettings | None = None
+    tonality: TonalitySettings = field(default_factory=TonalitySettings)
+    journal: JournalSettings = field(default_factory=JournalSettings)
     knowledge: KnowledgeSettings = field(default_factory=KnowledgeSettings)
     defaults: Defaults | None = None
     agents: dict[str, AgentPreset] = field(default_factory=dict)
@@ -322,6 +328,16 @@ class PresetRegistry:
             reg.qc = reg._parse(qc_path, QCSettings)
         else:
             reg.issues.append(PresetIssue(reg._rel(qc_path), "fichier absent : contrôle qualité indisponible"))
+
+        for name, attr, schema in (
+            ("qc_tonality.yaml", "tonality", TonalitySettings),
+            ("journal.yaml", "journal", JournalSettings),
+        ):
+            path = root / name
+            if path.exists():
+                parsed = reg._parse(path, schema)
+                if parsed is not None:
+                    setattr(reg, attr, parsed)
 
         knowledge_path = root / "knowledge.yaml"
         if knowledge_path.exists():

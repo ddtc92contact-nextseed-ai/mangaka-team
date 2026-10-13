@@ -49,6 +49,8 @@
 - 28 : empreinte du savoir-faire du prompt rédigé et ses « Sources utilisées », par case. Aucune empreinte sur
   les cases existantes : leurs prompts rédigés par l'IA (non retouchés) seront rédigés de nouveau, avec le
   savoir-faire actuel, à leur prochaine génération.
+- 29 : traçabilité : journal des générations (`generation_logs`, une ligne par génération, jamais réécrite) et
+  verdicts de l'auteur (`generation_events`). Tables nouvelles et vides : rien d'existant ne change.
 
 Une base neuve est créée directement à la dernière version. Chaque migration tourne dans une
 transaction unique, clés étrangères désactivées (recette « 12 étapes » de SQLite pour reconstruire
@@ -73,6 +75,8 @@ from .models import (
     Chapter,
     Character,
     CharacterImage,
+    GenerationEvent,
+    GenerationLog,
     Job,
     KnowledgeChunk,
     KnowledgeCollection,
@@ -93,7 +97,7 @@ from .slugs import RESERVED_ENTRIES, RESERVED_SERIES, slugify, unique_slug
 
 log = logging.getLogger("mangaka_engine")
 
-SCHEMA_VERSION = 28
+SCHEMA_VERSION = 29
 
 
 class MigrationError(RuntimeError):
@@ -454,6 +458,14 @@ def _v27_to_v28(cur: sqlite3.Cursor) -> None:
         cur.execute("ALTER TABLE panels ADD COLUMN prompt_sources JSON")
 
 
+def _v28_to_v29(cur: sqlite3.Cursor) -> None:
+    tables = {row[0] for row in cur.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    for model in (GenerationLog, GenerationEvent):
+        if model.__tablename__ not in tables:
+            for stmt in _ddl(model.__table__):
+                cur.execute(stmt)
+
+
 MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     # version de départ → (version d'arrivée, fonction)
     0: (2, _v0_to_v2),
@@ -484,6 +496,7 @@ MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     25: (26, _v25_to_v26),
     26: (27, _v26_to_v27),
     27: (28, _v27_to_v28),
+    28: (29, _v28_to_v29),
 }
 
 

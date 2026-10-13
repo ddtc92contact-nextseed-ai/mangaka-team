@@ -13,6 +13,9 @@
   qu'il faut prendre de chacune (`prompt.frame_references`, `references.sorting` d'image_prompt.yaml) ;
 - tonalité du rendu de la série (`tonality` du pack, prompt positif ; `tonality_negative`, prompt
   négatif, lu à vrai CFG) et termes contre le photoréalisme (`negative_photo_terms` d'image_prompt.yaml) ;
+- `sent_prompt` : à l'envoi, prompts déjà stockés compris, les mots-clés du ton que contredit l'ambiance de
+  la case (`mood_conflicts`) et, pour une série en noir et blanc, les termes de couleur
+  (`monochrome_forbidden_terms` ; « color, colored, colorful » au négatif) sont retirés ;
 - `GenerationExecutor` : exécuté par la file sérielle (`pipeline/queue.py`) pour un job :
   envoi des images de référence, construction du workflow (références + LoRA via le preset),
   file ComfyUI, progression, récupération de l'image → nouvelle `PanelImage` (version n+1) ;
@@ -94,6 +97,7 @@ from .art_direction import ANGLES, DIALOG_FIELDS, PLANS, applied_panel_direction
 from .camera import CameraError, angle_prompt, camera_plan, direction_target, merge_loras, ordered_views
 from .inpaint import png_bytes, recompose, soften_mask
 from .jobs import JobReporter
+from .journal import PANEL_IMAGE, JournalEntry, failure_text, inherited_facts, panel_facts, prompt_facts
 from .knowledge import KnowledgeBase, PanelKnowledge
 from .layout import target_size
 from .library import panel_assets, style_for
@@ -106,6 +110,8 @@ from .prompt import (
     build_prompt,
     frame_references,
     merge_negative,
+    mood_dropped_terms,
+    remove_terms,
     shot_in,
 )
 from .prompt_dialog import (
@@ -120,7 +126,14 @@ from .prompt_dialog import (
 from .prompt_dialog import PROMPT_ID as DIALOG_PROMPT_ID
 from .prompt_writer import PROMPT_ID as WRITER_PROMPT_ID
 from .prompt_writer import PromptBrief, PromptWriterError, WriteRun, write_prompt
-from .style import series_finition, series_finition_negative, series_rendering, series_style, series_style_lead
+from .style import (
+    series_finition,
+    series_finition_negative,
+    series_monochrome,
+    series_rendering,
+    series_style,
+    series_style_lead,
+)
 
 log = logging.getLogger("mangaka_engine")
 
@@ -296,13 +309,27 @@ def build_panel_prompt(
         characters=[_prompt_entry(c) for c in characters],
         decor=_prompt_entry(decor) if decor is not None else None,
         objects=[_prompt_entry(o) for o in objects],
-        style=series_style(presets, series),
+        style=series_style(presets, series, drop=mood_dropped_terms(da.get("ambiance"), presets.image_prompt)),
         style_lead=series_style_lead(presets, series),
         finition=series_finition(presets, series),
         savoir_faire=savoir_faire,
         bible=bible,
         settings=presets.image_prompt,
     )
+
+
+def sent_prompt(
+    presets: PresetRegistry, panel: Panel, prompt: str, *, monochrome: bool, keep: Sequence[str] = ()
+) -> str:
+    """Prompt positif tel qu'envoyé à ComfyUI, prompts déjà stockés compris : sans les mots-clés du ton que
+    contredit l'ambiance de la case (`mood_conflicts` d'image_prompt.yaml) et, pour une série en noir et
+    blanc, sans les termes de couleur (`monochrome_forbidden_terms` ; un terme contenu dans un nom de
+    `keep` — fiches de la case — reste)."""
+    settings = presets.image_prompt
+    prompt = remove_terms(prompt, mood_dropped_terms(applied_panel_direction(panel).get("ambiance"), settings))
+    if monochrome:
+        prompt = remove_terms(prompt, settings.monochrome_forbidden_terms, keep=keep)
+    return prompt
 
 
 def resolve_preset_id(
@@ -783,13 +810,14 @@ def panel_brief(
         decor=_prompt_entry(cast.decor) if cast.decor is not None else None,
         objects=[_prompt_entry(o) for o in cast.objects],
         references=references,
-        style=series_style(presets, project),
+        style=series_style(presets, project, drop=mood_dropped_terms(da.get("ambiance"), presets.image_prompt)),
         style_lead=series_style_lead(presets, project),
         finition=series_finition(presets, project),
         bible=bible,
         savoir_faire=savoir_faire,
         prompt=presets.prompts.get(WRITER_PROMPT_ID),
         settings=presets.image_prompt,
+        monochrome=series_monochrome(presets, project),
     )
 
 
@@ -1298,6 +1326,9 @@ class _Plan:
     # masque envoyés ; les images de référence vont dans le dossier de leur fiche (`subfolder` de chacune).
     upload_folder: str = UPLOAD_SUBFOLDER
     panel_label: str = "case"  # `case-01` : début du nom des fichiers envoyés
+    # Journal des générations : sorte (pipeline/journal.py, KINDS) et faits de la case (ids, plan, prompt…).
+    kind: str = "panel"
+    journal: dict[str, Any] = field(default_factory=dict)
 
 
 def _capitalize(text: str) -> str:
@@ -1373,6 +1404,8 @@ class GenerationExecutor:
                 return  # réparation, passage au propre : leur propre prompt
             if job.params.get("angle"):
                 return  # « Changer l'angle » : le prompt de la version de départ
+            if job.params.get("ab_prompt"):
+                return  # comparaison A/B : prompts figés à la demande
             panel = session.get(Panel, job.panel_id)
             if panel is None:
                 return
@@ -1424,8 +1457,12 @@ class GenerationExecutor:
                     raise GenerationError(f"le workflow {preset_id} sert à réparer une version, pas à générer une case")
                 # Passage au propre : même prompt que le croquis validé ; « Changer l'angle » : celui de la
                 # version de départ (sinon le prompt final de la case).
+                # Comparaison A/B : le prompt de chaque bras, figé à la demande.
                 prompt = str(
-                    job.params.get("sketch_prompt") or job.params.get("angle_scene") or ""
+                    job.params.get("ab_prompt")
+                    or job.params.get("sketch_prompt")
+                    or job.params.get("angle_scene")
+                    or ""
                 ).strip() or update_panel_prompt(presets, session, panel, self.knowledge)
                 size = panel_target(presets, page, panel)
             if size is None:
@@ -1493,6 +1530,7 @@ class GenerationExecutor:
             job.params = {**(job.params or {}), "references": references, "dropped_references": dropped}
             panel_prompt = prompt
             rendering = series_rendering(presets, chapter.project)
+            monochrome = rendering is not None and rendering.monochrome
             if angle_id:
                 # Mot déclencheur et vocabulaire de caméra en tête, puis la scène de la version de départ.
                 prompt = angle_prompt(catalog.prompts.panel, camera, scene=prompt)
@@ -1500,15 +1538,25 @@ class GenerationExecutor:
                 # Chaque image nommée dans l'ordre des emplacements + ce qu'il faut en prendre, puis
                 # « identité seulement, scène nouvelle » ; enfin la tonalité du rendu (papier blanc).
                 slots = [ReferenceSlot(r["kind"], r["name"]) for r in references]
-                prompt = frame_references(prompt, slots, presets.image_prompt)
+                prompt = frame_references(prompt, slots, presets.image_prompt, monochrome=monochrome)
                 prompt = append_instruction(prompt, rendering.tonality if rendering is not None else "")
+            prompt = sent_prompt(
+                presets,
+                panel,
+                prompt,
+                monochrome=monochrome,
+                keep=[*(e.name for e in cast.entries), *(panel.character_names or [])],
+            )
             # Plan serré : termes contre le plein pied (sauf réparation et « Changer l'angle » : leur cadrage).
             negative = build_negative_prompt(
                 str(loaded.preset.defaults.get("negative_prompt", "")),
                 presets.image_prompt,
                 plan=panel_plan(panel) if repair is None and not angle_id else None,
+                monochrome=monochrome,
             )
             cfg = series_cfg(chapter.project, loaded)
+            if _as_float(job.params.get("ab_cfg")) is not None:
+                cfg = _as_float(job.params.get("ab_cfg"))  # comparaison A/B de deux CFG
             if rendering is not None:
                 # La tonalité a ses termes dans le négatif (lu seulement à vrai CFG, palier Qualité).
                 negative = merge_negative(negative, rendering.tonality_negative)
@@ -1541,7 +1589,20 @@ class GenerationExecutor:
                     else ""
                 )
                 params["filename_prefix"] = transit(f"{page_folder(chapter, page)}/{panel_name(panel, suffix)}")
+            kind = (
+                "inpaint"
+                if repair is not None
+                else "croquis"
+                if loaded.preset.role == "croquis"
+                else "from_sketch"
+                if sketch is not None
+                else "angle"
+                if angle_id
+                else "panel"
+            )
             plan = _Plan(
+                kind=kind,
+                journal={**panel_facts(panel), **self._prompt_facts(session, presets, job, panel, cast, kind, sketch)},
                 loaded=loaded,
                 params=params,
                 references=references,
@@ -1565,6 +1626,38 @@ class GenerationExecutor:
             )
             session.commit()  # prompt final éventuellement reconstruit
             return plan
+
+    def _prompt_facts(
+        self,
+        session: Session,
+        presets: PresetRegistry,
+        job: Job,
+        panel: Panel,
+        cast: PanelCast,
+        kind: str,
+        sketch: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Origine du prompt envoyé, empreinte du rédacteur et savoir-faire reçu (journal des générations)."""
+        ab = job.params.get("ab") if isinstance(job.params.get("ab"), dict) else {}
+        out: dict[str, Any] = {
+            "ab_group": ab.get("group"),
+            "ab_arm": ab.get("arm"),
+            "ab_mode": ab.get("mode"),
+        }
+        if kind == "inpaint":
+            return {**out, "prompt_source": "reparation", "knowledge": []}
+        if job.params.get("sketch_prompt") and sketch is not None:
+            return {**out, **inherited_facts(session, PANEL_IMAGE, sketch.get("image_id"))}
+        if kind == "angle":
+            return {**out, **inherited_facts(session, PANEL_IMAGE, job.params.get("angle_source_id"))}
+        passages: list[dict[str, Any]] = []
+        if panel.prompt_source != "ia" and not manual_prompt(panel) and self.knowledge is not None:
+            found = panel_knowledge(session, self.knowledge, panel, cast.characters)
+            passages = [p.as_dict(excerpt=0) for p in found.fragment_passages]
+        facts = prompt_facts(presets, panel, WRITER_PROMPT_ID, passages)
+        if ab.get("arm") == "B" and ab.get("mode") == "prompt":
+            facts["prompt_source"] = "variante"  # prompt édité à partir de celui du bras A
+        return {**out, **facts}
 
     def _sketch_source(
         self, session: Session, job: Job, panel: Panel, loaded: LoadedWorkflow
@@ -1668,6 +1761,18 @@ class GenerationExecutor:
         return source, source_data, png_bytes(soft), {"width": width, "height": height}
 
     def __call__(self, job_id: int, report: JobReporter, cancel: threading.Event) -> str:
+        entry = JournalEntry("panel", job_id)
+        t0 = time.monotonic()
+        try:
+            return self._run(job_id, report, cancel, entry)
+        except Exception as exc:
+            # Échec ou annulation : une ligne du journal aussi (prompts et réglages déjà connus).
+            entry.set(duration_ms=int((time.monotonic() - t0) * 1000))
+            cancelled = cancel.is_set() or isinstance(exc, ComfyUIInterruptedError)
+            entry.fail(self.db, failure_text(exc, describe_error(exc)), cancelled=cancelled)
+            raise
+
+    def _run(self, job_id: int, report: JobReporter, cancel: threading.Event, entry: JournalEntry) -> str:
         if self.comfyui is None:
             raise GenerationError(f"ComfyUI indisponible : {self.comfyui_error or 'client non configuré'}")
         comfy = self.comfyui
@@ -1677,6 +1782,8 @@ class GenerationExecutor:
         report(2, "Préparation du prompt et du workflow…")
         plan = self._plan(job_id)
         preset = plan.loaded.preset
+        entry.kind = plan.kind
+        entry.set(**plan.journal).references(plan.references)
 
         uploaded: list[str] = []
         for i, (ref, data) in enumerate(zip(plan.references, plan.reference_data, strict=True), start=1):
@@ -1712,6 +1819,7 @@ class GenerationExecutor:
             source_image=sketch_name,
             control=control,
         )
+        entry.workflow(plan.loaded, built)
         if cancel.is_set():
             raise ComfyUIInterruptedError("génération annulée")
 
@@ -1760,10 +1868,12 @@ class GenerationExecutor:
                     data = png_bytes(recompose(source, generated, soft))
             except (UnidentifiedImageError, OSError) as exc:
                 raise GenerationError(f"image renvoyée par ComfyUI illisible : {exc}") from None
+        entry.measure(data, self.presets.tonality)
         stored = self.files.save_image(data, plan.folder)
         if self.folders is not None:
             self.folders.discard_output(refs[0])
         duration_ms = int((time.monotonic() - t0) * 1000)
+        entry.set(duration_ms=duration_ms)
 
         with self.db.session_scope() as session:
             panel = session.get(Panel, plan.panel_id)
@@ -1845,6 +1955,10 @@ class GenerationExecutor:
             )
             session.add(image)
             session.flush()
+            entry.set(
+                image_kind=PANEL_IMAGE, image_id=image.id, version=version, width=stored.width, height=stored.height
+            )
+            entry.add(session)
             job = session.get(Job, job_id)
             # Pas de QC automatique sur un croquis : c'est l'œil de l'auteur qui trie.
             if self.on_generated is not None and job is not None and kind == ImageKind.final:

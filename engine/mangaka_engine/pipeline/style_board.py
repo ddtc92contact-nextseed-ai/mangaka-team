@@ -39,8 +39,9 @@ from ..store.comfy_folders import style_folder as comfy_style_folder
 from ..store.db import Database
 from ..store.files import FileStore
 from ..store.models import AssetKind, Job, JobStatus, Project, ReferenceVariant, SeriesAsset, SeriesAssetImage
-from .generation import GenerationError, sketch_size
+from .generation import GenerationError, describe_error, sketch_size
 from .jobs import JobReporter
+from .journal import REFERENCE_VARIANT, STYLE_IMAGE, JournalEntry, failure_text
 from .prompt import build_negative_prompt
 from .style import series_style, style_names
 
@@ -288,6 +289,7 @@ class StyleBoardExecutor:
     ) -> None:
         self.db = db
         self.presets_for = presets_for or (lambda _project_id: presets)
+        self.tonality = presets.tonality
         self.files = files
         self.comfyui = comfyui
         self.comfyui_error = comfyui_error
@@ -354,6 +356,17 @@ class StyleBoardExecutor:
             )
 
     def __call__(self, job_id: int, report: JobReporter, cancel: threading.Event) -> str:
+        entry = JournalEntry("style_trial", job_id)
+        t0 = time.monotonic()
+        try:
+            return self._run(job_id, report, cancel, entry)
+        except Exception as exc:
+            entry.set(duration_ms=int((time.monotonic() - t0) * 1000))
+            cancelled = cancel.is_set() or isinstance(exc, ComfyUIInterruptedError)
+            entry.fail(self.db, failure_text(exc, describe_error(exc)), cancelled=cancelled)
+            raise
+
+    def _run(self, job_id: int, report: JobReporter, cancel: threading.Event, entry: JournalEntry) -> str:
         if self.comfyui is None:
             raise GenerationError(f"ComfyUI indisponible : {self.comfyui_error or 'client non configuré'}")
         comfy = self.comfyui
@@ -361,12 +374,17 @@ class StyleBoardExecutor:
         report(2, "Préparation du prompt et du workflow…")
         plan = self._plan(job_id)
         preset = plan.loaded.preset
+        entry.kind = "style_trial" if plan.mode == "trial" else "style_reference"
+        entry.set(project_id=plan.project_id)
 
         source_name: str | None = None
         if plan.source is not None and plan.source_data is not None:
             report(4, "Envoi de l'essai retenu à ComfyUI…")
             source_name = comfy.upload_image(plan.source_data, plan.source["filename"], subfolder=plan.upload_folder)
         built = build_workflow(plan.loaded, plan.params, loras=plan.loras, source_image=source_name)
+        entry.workflow(plan.loaded, built)
+        if plan.source is not None:
+            entry.references([{"kind": "style_trial", "variant_id": plan.source.get("trial_id")}])
         if cancel.is_set():
             raise ComfyUIInterruptedError("génération annulée")
 
@@ -404,9 +422,11 @@ class StyleBoardExecutor:
         report(92, "Récupération de l'image…")
         data = comfy.fetch_image(refs[0])
         folder = style_folder(plan.project_id) + ("/essais" if plan.mode == "trial" else "")
+        entry.measure(data, self.tonality)
         stored = self.files.save_image(data, folder)
         if self.folders is not None:
             self.folders.discard_output(refs[0])
+        entry.set(duration_ms=int((time.monotonic() - t0) * 1000), width=stored.width, height=stored.height)
         record = {
             "preset": preset.id,
             "preset_name": preset.name,
@@ -432,8 +452,11 @@ class StyleBoardExecutor:
             params = dict(job.params or {})
             if plan.mode == "trial":
                 message = self._save_trial(session, job, params, stored, record)
+                entry.set(image_kind=REFERENCE_VARIANT, image_id=job.params.get("trial_id"))
             else:
                 message = self._save_reference(session, job, params, series, stored, record, source_name)
+                entry.set(image_kind=STYLE_IMAGE, image_id=job.params.get("image_id"))
+            entry.add(session)
             session.commit()
         return message
 

@@ -19,6 +19,7 @@ from mangaka_engine.pipeline.prompt_writer import PromptBrief, finish_paragraph
 from mangaka_engine.pipeline.style import (
     series_finition,
     series_finition_negative,
+    series_monochrome,
     series_style,
     series_style_lead,
     style_groups,
@@ -160,6 +161,7 @@ def _prompts(series: Project) -> tuple[str, str, str]:
         style_lead=series_style_lead(REG, series),
         finition=series_finition(REG, series),
         settings=REG.image_prompt,
+        monochrome=series_monochrome(REG, series),
     )
     return fragments, finish_paragraph(PARAGRAPH, brief), brief.key()
 

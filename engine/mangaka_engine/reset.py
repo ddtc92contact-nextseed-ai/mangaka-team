@@ -49,6 +49,9 @@ ACTIVE_JOBS = ("pending", "running")
 
 # Tables vidées entièrement en mode « séries » (ordre : dépendances d'abord).
 SERIES_TABLES = (
+    # Journal des générations et verdicts : décrivent des cases des séries effacées (sauvegardés avant).
+    "generation_events",
+    "generation_logs",
     "panel_image_annotations",
     "qc_bench_runs",
     "llm_runs",
