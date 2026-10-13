@@ -70,15 +70,26 @@ user: |
   - « sfx » d'une case (facultatif) : onomatopées en lettrage hors bulle (« VROUM ! », « CLIC », « BIIIP ! »),
     chacune avec « text » (court, en majuscules) et « intensity » ($intensities) ; jamais dans « description » :
     le dessinateur ne dessine aucun texte, le lettreur les pose ;
-  - « characters » liste TOUS les personnages visibles dans la case, sans en oublier ; pour un
-    personnage qui a une fiche, recopie EXACTEMENT le nom de sa fiche, parmi : $character_names
-    (jamais « le vieux maître » ni « Maître Kaï » : seulement « Kaï ») ; « speaker » suit la même
-    règle ; un figurant sans fiche garde un nom simple ;
+  - « characters » liste les personnages PRÉSENTS À L'IMAGE — ceux que le dessinateur dessine dans
+    cette case, tous, sans en oublier ; « offscreen » liste ceux que la case CITE mais qui restent HORS
+    DU CADRE (ils ne sont pas dessinés). Un personnage cité n'est pas forcément dans l'image :
+    · « Seku et Angus voient au loin les trafiquants jeter des barils dans le volcan » : on montre ce
+      qu'ils voient → characters : les trafiquants ; offscreen : Seku, Angus ;
+    · « Trafiquant 2 panique et recule » → characters : Trafiquant 2 seul ; les héros, s'ils sont dans
+      la scène sans être dans cette case, vont dans offscreen ;
+    · « Trafiquant 1 rampe et s'enfuit » → characters : Trafiquant 1 seul ;
+    · « Le sol tremble, le volcan gronde » → characters : [] (une case de décor n'a AUCUN personnage) ;
+    une case peut montrer un lieu, un objet ou une foule anonyme sans aucun personnage : n'y ajoute
+    jamais les héros par habitude. Nomme dans « description » chaque personnage présent ;
+  - pour un personnage qui a une fiche, recopie EXACTEMENT le nom de sa fiche, parmi : $character_names
+    (jamais « le vieux maître » ni « Maître Kaï » : seulement « Kaï ») ; « offscreen » et « speaker »
+    suivent la même règle ; un figurant sans fiche garde un nom simple ;
   - « setting » : le lieu de la case, toujours rempli, même sans décor récurrent — lieu, moment
     (heure, météo, saison) et éléments visibles du décor (« clairière au bord d'un lac, fin d'après-midi,
     herbes hautes, rochers moussus, montagnes au loin ») ;
   - « staging » : la mise en scène — qui fait quoi, où dans le cadre (premier plan, arrière-plan,
-    gauche, droite), posture, regard et interactions entre les personnages (« Kaï au premier plan à
+    gauche, droite), posture, regard et interactions entre les personnages PRÉSENTS (jamais un
+    personnage hors cadre) (« Kaï au premier plan à
     gauche, bâton levé, regarde Lina assise sur un rocher à droite ») ;
   - « description » raconte l'action de la case ; « setting » et « staging » la complètent sans la répéter ;
   - « decor » : l'id (nombre) du décor récurrent où se passe la case, pris UNIQUEMENT dans la liste
@@ -90,7 +101,7 @@ user: |
 
   Format de réponse :
   {"pages": [{"rythme": "normal", "panels": [{"description": "…", "setting": "…", "staging": "…",
-     "characters": ["…"], "decor": null, "objets": [],
+     "characters": ["…"], "offscreen": [], "decor": null, "objets": [],
      "shot_type": "plan moyen", "importance": 2, "intensity": "normal",
      "dialogues": [{"speaker": "…", "text": "…", "kind": "speech"}],
      "sfx": [{"text": "VROUM !", "intensity": "choc"}]}]}],

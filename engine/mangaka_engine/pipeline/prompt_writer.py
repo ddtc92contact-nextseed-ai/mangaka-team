@@ -160,8 +160,11 @@ class PromptBrief:
     characters: list[PromptCharacter] = field(default_factory=list)
     # Noms écrits par le scénario sans fiche (figurants) : décrits tels quels, sans obligation.
     extras: list[str] = field(default_factory=list)
-    # Personnages de la série absents de la case : à ne jamais nommer.
+    # Personnages de la série absents de la case, et ceux qu'elle cite hors cadre : à ne jamais nommer.
     absent: list[str] = field(default_factory=list)
+    # Consigne de cadrage (anglais, `framing.framing_sentence`) : vue subjective, case sans personnage, « seuls
+    # X dans le cadre » ; "" pour une case ordinaire.
+    framing: str = ""
     decor: PromptCharacter | None = None
     objects: list[PromptCharacter] = field(default_factory=list)
     references: list[ReferenceSlot] = field(default_factory=list)
@@ -200,6 +203,8 @@ class PromptBrief:
         characters: Sequence[PromptCharacter] = (),
         extras: Sequence[str] = (),
         absent: Sequence[str] = (),
+        offscreen: Sequence[str] = (),
+        framing: str = "",
         decor: PromptCharacter | None = None,
         objects: Sequence[PromptCharacter] = (),
         references: Sequence[ReferenceSlot] = (),
@@ -212,10 +217,14 @@ class PromptBrief:
         settings: ImagePromptSettings | None = None,
         monochrome: bool = False,
     ) -> PromptBrief:
-        """`monochrome` : série en noir et blanc — rôles des images sans « colours », termes de couleur
+        """`offscreen` : personnages cités par la case mais hors cadre — ajoutés aux absents (jamais nommés),
+        sauf un nom générique contenu dans celui d'un présent (« trafiquant » quand « Trafiquant 2 » est là).
+        `monochrome` : série en noir et blanc — rôles des images sans « colours », termes de couleur
         retirés des données de la case (description, fiches…) et refusés dans le paragraphe."""
         settings = settings or ImagePromptSettings()
         present = {name_key(c.name) for c in characters}
+        drawn = [name_key(n).split() for n in [*(c.name for c in characters), *extras]]
+        hidden = [n for n in offscreen if not any(_contains(d, name_key(n).split()) for d in drawn)]
         chosen = _text(plan) or _text(shot_type)
         camera = [camera_term(v, settings) for v in (chosen, _text(angle)) if v]
         colour_terms = list(settings.monochrome_forbidden_terms) if monochrome else []
@@ -241,7 +250,8 @@ class PromptBrief:
             action=plain(action),
             characters=[entry(c) for c in characters],
             extras=list(dict.fromkeys(n for n in (_text(e) for e in extras) if n)),
-            absent=list(dict.fromkeys(n for n in absent if n.strip() and name_key(n) not in present)),
+            absent=list(dict.fromkeys(n for n in [*absent, *hidden] if n.strip() and name_key(n) not in present)),
+            framing=_SPACES.sub(" ", framing or "").strip().rstrip(" .;,"),
             decor=entry(decor) if decor is not None else None,
             objects=[entry(o) for o in objects],
             references=list(references),
@@ -294,6 +304,8 @@ class PromptBrief:
             "characters": [entry(c) for c in self.characters],
             "extras": self.extras,
             "absent_characters": self.absent,
+            # Absente pour une case ordinaire : son empreinte (`key`) ne change pas.
+            **({"framing": self.framing} if self.framing else {}),
             "decor": entry(self.decor) if self.decor is not None else None,
             "objects": [entry(o) for o in self.objects],
             "references": self.reference_lines(),
@@ -357,6 +369,7 @@ def template_values(brief: PromptBrief) -> dict[str, str]:
         "characters": "\n".join(chars) or "(no character: the panel shows a place or an object)",
         "character_names": ", ".join(c.name for c in brief.characters) or "(none)",
         "absent_characters": ", ".join(brief.absent) or "(none)",
+        "framing": _or(brief.framing, "(ordinary panel: the characters listed above are in the frame)"),
         "decor": (f"{brief.decor.name} ({_details(brief.decor)})" if brief.decor and _details(brief.decor) else "")
         or (brief.decor.name if brief.decor else "(none)"),
         "objects": lib or "(none)",

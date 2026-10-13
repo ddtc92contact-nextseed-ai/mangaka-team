@@ -6,7 +6,9 @@
 3. réponse JSON validée par Pydantic, puis les ids de décor / d'objets contre la bibliothèque de la
    série ; invalide → nouvel essai avec l'erreur renvoyée au LLM
    (`max_retries` du preset, 2 au maximum) → sinon `ScriptError` lisible ;
-4. enregistrement en Pages + Panels + Bubbles (remplace les pages « story » du chapitre) et
+4. personnages de chaque case : « characters » = présents à l'image, « offscreen » = cités mais hors cadre ;
+   un présent que la description ne cite pas passe hors cadre (`framing.settle_cast`) ;
+5. enregistrement en Pages + Panels + Bubbles (remplace les pages « story » du chapitre) et
    du résumé du chapitre, puis découpage automatique des pages (étape 2).
 """
 
@@ -19,7 +21,16 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, field_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -38,6 +49,7 @@ from ..store.models import (
     Panel,
 )
 from ..validation import format_errors
+from .framing import aliases_from, settle_cast, split_cast
 from .knowledge import AgentKnowledge, KnowledgeBase
 from .library import SeriesLibrary
 from .names import CharacterMatcher
@@ -138,7 +150,13 @@ class ScriptPanel(_LLMModel):
     # interactions) : repris tels quels dans le prompt image, même sans décor de la bibliothèque.
     setting: SceneText = ""
     staging: SceneText = ""
+    # Présents À L'IMAGE (dessinés) ; `offscreen` : cités par la case mais hors cadre (jamais dessinés).
     characters: list[Short] = Field(default_factory=list, max_length=20)
+    offscreen: list[Short] = Field(
+        default_factory=list,
+        max_length=20,
+        validation_alias=AliasChoices("offscreen", "hors_cadre", "offscreen_characters"),
+    )
     shot_type: ShotType
     dialogues: list[ScriptDialogue] = Field(default_factory=list, max_length=12)
     importance: int = Field(default=2, ge=1, le=3)
@@ -171,7 +189,12 @@ class ScriptPanel(_LLMModel):
     def _unique_objects(cls, v: list[int]) -> list[int]:
         return list(dict.fromkeys(v))
 
-    @field_validator("characters")
+    @field_validator("characters", "offscreen", mode="before")
+    @classmethod
+    def _no_names(cls, v: Any) -> Any:
+        return [] if v is None else v
+
+    @field_validator("characters", "offscreen")
     @classmethod
     def _dedupe(cls, v: list[str]) -> list[str]:
         out: list[str] = []
@@ -179,6 +202,12 @@ class ScriptPanel(_LLMModel):
             if name and name not in out:
                 out.append(name)
         return out
+
+    @model_validator(mode="after")
+    def _present_wins(self) -> ScriptPanel:
+        """Un nom à la fois présent et hors cadre est présent."""
+        self.offscreen = split_cast(self.characters, self.offscreen)[1]
+        return self
 
 
 class ScriptPage(_LLMModel):
@@ -198,6 +227,7 @@ ERROR_LABELS = {
     "panels": "case",
     "dialogues": "réplique",
     "characters": "personnage",
+    "offscreen": "personnage hors cadre",
     "sfx": "onomatopée",
     "objets": "objet",
 }
@@ -422,6 +452,7 @@ def save_script(session: Session, chapter: Chapter, output: ScriptOutput) -> lis
     # Noms rapprochés des fiches (casse, accents, alias, nom partiel : pipeline/names.py) ; un nom sans
     # fiche reste dans `character_names` et l'API le signale à l'auteur.
     matcher = CharacterMatcher.for_project(session, chapter.project_id)
+    aliases = aliases_from(matcher)
     # Sans autoflush : la cascade de `session.delete` charge les relations de la page (cases, direction
     # artistique) ; un autoflush à ce moment, page déjà retirée de `chapter.pages`, fait échouer la session
     # (« Failed to add object to the flush context ») et un second « Découper » n'était jamais enregistré.
@@ -440,13 +471,15 @@ def save_script(session: Session, chapter: Chapter, output: ScriptOutput) -> lis
     for p_index, sp in enumerate(output.pages):
         page = Page(chapter_id=chapter.id, number=p_index + 1, kind=PageKind.story, rythme=sp.rythme)
         for i, sc in enumerate(sp.panels):
+            present, offscreen = settle_cast(sc.description, sc.characters, sc.offscreen, aliases)
             panel = Panel(
                 index=i,
                 description=sc.description,
                 setting=sc.setting,
                 staging=sc.staging,
-                character_names=list(sc.characters),
-                character_ids=matcher.ids(sc.characters),
+                character_names=present,
+                offscreen_names=offscreen,
+                character_ids=matcher.ids(present),
                 shot_type=sc.shot_type,
                 importance=sc.importance,
                 intensity=sc.intensity,

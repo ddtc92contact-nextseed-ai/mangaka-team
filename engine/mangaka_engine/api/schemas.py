@@ -264,13 +264,33 @@ MAX_PANEL_OBJECTS = 8
 SceneText = Annotated[str, StringConstraints(strip_whitespace=True, max_length=1500)]
 
 
+ViewpointMode = Literal["reaction", "subjective"]
+
+
+class ViewpointIn(_In):
+    """Point de vue d'un spectateur : « reaction » (plan de réaction, le spectateur est dessiné) ou
+    « subjective » (vue subjective, le spectateur reste hors cadre)."""
+
+    mode: ViewpointMode
+    spectators: Annotated[list[Short], Field(min_length=1, max_length=12)]
+
+
+class ViewpointOut(BaseModel):
+    mode: ViewpointMode
+    spectators: list[str] = Field(default_factory=list)
+    # direction (choisi par la direction artistique) | défaut (l'agent n'a rien choisi) | auteur
+    source: str = "direction"
+
+
 class PanelIn(_In):
     id: int | None = None
     description: LongText = ""
     # Lieu et mise en scène (scénario) : absents = gardés tels quels.
     setting: SceneText | None = None
     staging: SceneText | None = None
+    # Personnages présents à l'image ; `offscreen_characters` : cités hors cadre (absent = gardés tels quels).
     characters: Annotated[list[Short], Field(max_length=20)] = Field(default_factory=list)
+    offscreen_characters: Annotated[list[Short], Field(max_length=20)] | None = None
     shot_type: str | None = None
     importance: Annotated[int, Field(ge=1, le=3)] = 2
     intensity: IntensityName | None = None
@@ -361,10 +381,13 @@ class PanelOut(BaseModel):
     description: str
     setting: str = ""  # lieu : lieu, moment, éléments du décor
     staging: str = ""  # mise en scène : qui fait quoi, où dans le cadre
-    characters: list[str]
+    characters: list[str]  # présents à l'image (dessinés, avec leur image de référence)
     # Noms de `characters` qui ne désignent aucune fiche personnage (ni nom, ni alias, ni nom partiel) :
     # sans référence, sans description ni LoRA pour la génération — à rattacher à une fiche.
     unmatched_characters: list[str] = Field(default_factory=list)
+    # Cités par la case mais hors cadre : jamais dessinés ni pourvus d'image de référence.
+    offscreen_characters: list[str] = Field(default_factory=list)
+    viewpoint: ViewpointOut | None = None
     decor: int | None = None  # décor de la bibliothèque (id)
     objets: list[int] = Field(default_factory=list)  # objets de la bibliothèque (ids)
     shot_type: str | None
@@ -709,6 +732,13 @@ class PanelUpdate(_In):
     # Lieu et mise en scène de la case (prompt image : « Lieu : … », « Mise en scène : … »).
     setting: SceneText | None = None
     staging: SceneText | None = None
+    # Qui est dans l'image : présents (`characters`) et cités hors cadre (`offscreen_characters`) ; un nom
+    # dans les deux listes est présent.
+    characters: Annotated[list[Short], Field(max_length=20)] | None = None
+    offscreen_characters: Annotated[list[Short], Field(max_length=20)] | None = None
+    # Point de vue d'un spectateur, choisi par l'auteur (jamais écrasé par la direction artistique) : range
+    # les spectateurs hors cadre (vue subjective) ou à l'image (plan de réaction) ; null = aucun.
+    viewpoint: ViewpointIn | None = None
     # Débruitage du passage au propre de cette case ; null = celui de la série (sinon du preset).
     sketch_denoise: Denoise | None = None
 
@@ -817,6 +847,11 @@ class PanelDetailOut(BaseModel):
     characters: list[str]
     character_ids: list[int]
     unmatched_characters: list[str] = Field(default_factory=list)  # voir PanelOut
+    offscreen_characters: list[str] = Field(default_factory=list)  # voir PanelOut
+    viewpoint: ViewpointOut | None = None
+    # Personnages que le texte met en spectateur (« voient », « regarde »…) : la case attend un point de vue.
+    spectator_hints: list[str] = Field(default_factory=list)
+    perception: str = ""  # verbe de perception repéré (« voient »)
     decor: LibraryRef | None = None
     objets: list[LibraryRef] = Field(default_factory=list)
     shot_type: str | None

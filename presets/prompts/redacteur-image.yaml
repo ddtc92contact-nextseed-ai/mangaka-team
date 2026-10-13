@@ -31,7 +31,8 @@
 #   $ambiance $description $setting (lieu) $staging (mise en scène)
 #   $characters      (personnages de la case : « - Nom: traits visuels », un par ligne)
 #   $character_names (leurs noms exacts, à recopier)
-#   $absent_characters (personnages de la série absents de la case : à ne jamais nommer)
+#   $absent_characters (personnages de la série absents de la case, et ceux qu'elle cite hors cadre : à ne jamais nommer)
+#   $framing         (consigne de cadrage : vue subjective, case sans personnage, « seuls X dans le cadre »)
 #   $decor $objects  (fiches de la bibliothèque de la série vues dans la case)
 #   $references      (images envoyées et leur rôle : « - <image1> is the identity reference for Aiko… »)
 #   $image_tags      (« <image1>, <image2> » : les seules images à citer)
@@ -92,7 +93,11 @@ system: |
   Hard rules:
   - never any word of optics or photography: describe only what the artist draws on the page, or the
     answer is rejected;
-  - exactly the characters of the panel, all of them, and never one of the absent characters;
+  - exactly the characters of the panel, all of them, and never one of the absent characters: a
+    character the French description mentions but who is absent (an onlooker of a point-of-view panel,
+    someone out of the frame) is never named nor drawn — describe what is seen instead;
+  - follow the framing rule word for word: a point-of-view panel shows only what the onlookers see, a
+    panel without characters shows only the place;
   - "a single continuous scene, one panel": never a character sheet, a turnaround, a collage or
     side-by-side views;
   - the shot size wins over the reference images: a full-length reference never makes a tight shot
@@ -118,6 +123,8 @@ user: |
   $characters
 
   Absent characters (never name nor draw them): $absent_characters
+
+  Framing rule: $framing
 
   Recurring setting: $decor
   Recurring objects: $objects

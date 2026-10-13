@@ -95,6 +95,7 @@ from ..store.models import (
 )
 from .art_direction import ANGLES, DIALOG_FIELDS, PLANS, applied_panel_direction
 from .camera import CameraError, angle_prompt, camera_plan, direction_target, merge_loras, ordered_views
+from .framing import framing_sentence, viewpoint_of
 from .inpaint import png_bytes, recompose, soften_mask
 from .jobs import JobReporter
 from .journal import PANEL_IMAGE, JournalEntry, failure_text, inherited_facts, panel_facts, prompt_facts
@@ -150,8 +151,14 @@ class GenerationError(Exception):
 
 # --- préparation (pur / lecture seule) ------------------------------------------------
 def panel_characters(session: Session, panel: Panel) -> list[Character]:
-    """Fiches des personnages de la case, dans l'ordre de la case."""
+    """Fiches des personnages PRÉSENTS à l'image, dans l'ordre de la case : un personnage cité hors cadre
+    (`Panel.offscreen_names`) n'est jamais dessiné ni pourvu d'image de référence, même si un id périmé
+    traîne dans `character_ids`."""
     ids = [i for i in panel.character_ids or [] if isinstance(i, int)]
+    if ids and panel.offscreen_names:
+        matcher = CharacterMatcher.for_project(session, panel.page.chapter.project_id)
+        hidden = set(matcher.ids(panel.offscreen_names)) - set(matcher.ids(panel.character_names or []))
+        ids = [i for i in ids if i not in hidden]
     if not ids:
         return []
     found = {
@@ -315,6 +322,18 @@ def build_panel_prompt(
         savoir_faire=savoir_faire,
         bible=bible,
         settings=presets.image_prompt,
+        framing=panel_framing_sentence(presets, panel),
+    )
+
+
+def panel_framing_sentence(presets: PresetRegistry, panel: Panel) -> str:
+    """Consigne de cadrage de la case (`framing` d'image_prompt.yaml) : vue subjective, case sans personnage,
+    « seuls X dans le cadre » ; "" pour une case ordinaire (prompt inchangé)."""
+    return framing_sentence(
+        list(panel.character_names or []),
+        list(panel.offscreen_names or []),
+        viewpoint_of(panel),
+        presets.image_prompt.framing,
     )
 
 
@@ -795,6 +814,7 @@ def panel_brief(
         found = panel_knowledge(session, knowledge, panel, cast.characters)
     savoir_faire, bible = found.writer()
     da = applied_panel_direction(panel)
+    hidden = list(panel.offscreen_names or [])
     return PromptBrief.build(
         description=panel.description,
         setting=panel.setting,
@@ -807,6 +827,8 @@ def panel_brief(
         characters=[_prompt_entry(c) for c in cast.characters],
         extras=CharacterMatcher(series).unmatched(panel.character_names or []),
         absent=[c.name for c in series if c.id not in present],
+        offscreen=hidden,
+        framing=panel_framing_sentence(presets, panel),
         decor=_prompt_entry(cast.decor) if cast.decor is not None else None,
         objects=[_prompt_entry(o) for o in cast.objects],
         references=references,

@@ -13,7 +13,7 @@
 #   $previous_direction  (choix du chapitre précédent : rythmes, pages choc, plans — à ne pas répéter)
 #   $variety             (audace demandée, réglage « variety » ci-dessous)
 #   $request             (ce qui est demandé : tout le chapitre, ou une autre proposition pour une page)
-#   $rythmes $intensities $plans $angles $cadres $page_chocs $sfx_intensities (valeurs autorisées)
+#   $rythmes $intensities $plans $angles $cadres $page_chocs $sfx_intensities $points_de_vue (valeurs autorisées)
 #   $variety_rules       (règles de mise en scène variée ci-dessous, en clair)
 #   $context_json        (le même contexte, en JSON)
 #   $bible               (bible de la série) · $savoir_faire (passages du savoir-faire de l'agent « art_direction »)
@@ -130,13 +130,24 @@ user: |
   - « decor » (facultatif) : null pour garder le décor du scénario, sinon l'id d'un décor de la
     bibliothèque ci-dessus — jamais un id absent de la liste ;
   - « objets » (facultatif) : null pour garder les objets du scénario, sinon la liste des ids d'objets
-    de la bibliothèque visibles dans la case — jamais un id absent de la liste.
+    de la bibliothèque visibles dans la case — jamais un id absent de la liste ;
+  - « point_de_vue » : OBLIGATOIRE pour une case marquée SPECTATEUR (le texte dit qu'un personnage voit,
+    regarde, aperçoit, découvre, assiste…), null sinon. Choisis explicitement l'une de ces valeurs :
+    $points_de_vue — « plan de réaction » : le spectateur est dessiné, on montre son visage et ce qu'il
+    ressent ; « vue subjective » : on montre ce qu'il voit, à travers ses yeux, et le spectateur reste
+    HORS CADRE (ni dessiné, ni image de référence). Pour « Seku et Angus voient au loin les trafiquants
+    jeter des barils dans le volcan », la vue subjective montre les trafiquants au loin, pas les héros ;
+  - « spectateurs » : les noms des spectateurs (ceux de la case), ou null pour ceux repérés.
+  Un personnage « hors cadre » n'est jamais dessiné : ne le cite ni dans « action » ni dans la mise en
+  scène. Une case sans personnage à l'image (décor, objet) est permise : son « action » décrit le
+  mouvement du décor ou des éléments (fumée qui jaillit, sol qui se fend).
 
   Format de réponse :
   {"pages": [{"page": 1, "rythme": "montée", "layout_style": null, "template": null, "page_choc": null,
      "rationale": "…",
      "panels": [{"panel": 1, "intensity": "normal", "plan": "plan moyen", "angle": "de trois quarts",
-       "cadre": "normal", "ambiance": "…", "action": "…", "sfx": [], "decor": null, "objets": null}]}]}
+       "cadre": "normal", "ambiance": "…", "action": "…", "sfx": [], "decor": null, "objets": null,
+       "point_de_vue": null, "spectateurs": null}]}]}
 
   <contexte>
   $context_json

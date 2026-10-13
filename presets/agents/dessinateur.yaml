@@ -79,7 +79,7 @@ settings:
     type: prompt_list
     source: image_prompt.yaml#parts
     variables:
-      [style_lead, finition, plan, angle, ambiance, action, shot, description, setting, staging, character_count, characters, decor, objects, style, savoir_faire, bible]
+      [style_lead, finition, plan, framing, angle, ambiance, action, shot, description, setting, staging, character_count, characters, decor, objects, style, savoir_faire, bible]
     help: >-
       Un morceau dont une variable est vide est omis. $style_lead : phrase de style de la série (rendu + genre),
       à garder en tête pour que le style manga tienne même sans image de référence. $finition : mots-clés de la
@@ -247,6 +247,7 @@ settings:
       - characters
       - character_names
       - absent_characters
+      - framing
       - decor
       - objects
       - references
