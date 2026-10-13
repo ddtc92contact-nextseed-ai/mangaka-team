@@ -110,7 +110,7 @@ from .journal import PANEL_IMAGE, JournalEntry, failure_text, inherited_facts, p
 from .knowledge import KnowledgeBase, PanelKnowledge
 from .layout import target_size
 from .library import panel_assets, style_for
-from .names import CharacterMatcher
+from .names import CharacterMatcher, panel_context
 from .pages import applied_values
 from .prompt import (
     PromptCharacter,
@@ -166,7 +166,10 @@ def panel_characters(session: Session, panel: Panel) -> list[Character]:
     ids = [i for i in panel.character_ids or [] if isinstance(i, int)]
     if ids and panel.offscreen_names:
         matcher = CharacterMatcher.for_project(session, panel.page.chapter.project_id)
-        hidden = set(matcher.ids(panel.offscreen_names)) - set(matcher.ids(panel.character_names or []))
+        context = panel_context(matcher, panel)
+        hidden = set(matcher.ids(panel.offscreen_names, context)) - set(
+            matcher.ids(panel.character_names or [], context)
+        )
         ids = [i for i in ids if i not in hidden]
     if not ids:
         return []

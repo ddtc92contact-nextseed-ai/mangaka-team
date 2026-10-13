@@ -23,7 +23,7 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from .names import STOPWORDS, CharacterMatcher, name_key
+from .names import STOPWORDS, CharacterMatcher, name_key, panel_ids
 
 REACTION = "reaction"
 SUBJECTIVE = "subjective"
@@ -247,7 +247,7 @@ def apply_viewpoint(
     panel.character_names = present
     panel.offscreen_names = off
     if matcher is not None:
-        panel.character_ids = matcher.ids(present)
+        panel.character_ids = panel_ids(matcher, panel)
     panel.viewpoint = {"mode": mode, "spectators": viewers, "source": source}
 
 
@@ -259,7 +259,7 @@ def set_cast(
     panel.character_names = p
     panel.offscreen_names = off
     if matcher is not None:
-        panel.character_ids = matcher.ids(p)
+        panel.character_ids = panel_ids(matcher, panel)
 
 
 def viewpoint_of(panel: Any) -> dict[str, Any] | None:

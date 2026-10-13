@@ -46,9 +46,11 @@ def test_matching_case_accents_partial_and_alias() -> None:
     assert m.unmatched(["Urus le dragon", "un passant", "le dragon rouge"]) == ["un passant", "le dragon rouge"]
 
 
-def test_ambiguous_partial_match_is_left_to_the_author() -> None:
+def test_ambiguous_partial_match_is_arbitrated_and_flagged() -> None:
     m = _cards((1, "Urus le dragon", []), (2, "Kael le dragon", []))
-    assert m.match("le dragon") is None  # deux fiches à égalité : jamais de choix au hasard
+    # Deux fiches à égalité : la première est retenue, avec un avertissement (tests/test_name_arbitration.py).
+    tie = m.resolve("le dragon")
+    assert m.match("le dragon") == 1 and tie.ambiguous and tie.candidates == (1, 2)
     assert m.match("Urus") == 1 and m.match("Kael le dragon") == 2
     # La correspondance la plus longue l'emporte.
     m = _cards((1, "Aiko", []), (2, "Aiko Tanaka", []))

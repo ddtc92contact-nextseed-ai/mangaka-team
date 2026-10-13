@@ -61,7 +61,7 @@ from .framing import aliases_from, settle_cast, split_cast
 from .knowledge import AgentKnowledge, KnowledgeBase
 from .layout import LayoutError
 from .library import SeriesLibrary
-from .names import CharacterMatcher
+from .names import CharacterMatcher, link_speakers, panel_ids
 from .pages import layout_pages
 from .style import NO_GUIDELINES, style_brief, style_names
 
@@ -516,6 +516,7 @@ def save_script(session: Session, chapter: Chapter, output: ScriptOutput) -> lis
     session.flush()
 
     created: list[Page] = []
+    previous: Panel | None = None
     for p_index, sp in enumerate(output.pages):
         page = Page(chapter_id=chapter.id, number=p_index + 1, kind=PageKind.story, rythme=sp.rythme)
         for i, sc in enumerate(sp.panels):
@@ -527,7 +528,6 @@ def save_script(session: Session, chapter: Chapter, output: ScriptOutput) -> lis
                 staging=sc.staging,
                 character_names=present,
                 offscreen_names=offscreen,
-                character_ids=matcher.ids(present),
                 shot_type=sc.shot_type,
                 importance=sc.importance,
                 intensity=sc.intensity,
@@ -539,7 +539,6 @@ def save_script(session: Session, chapter: Chapter, output: ScriptOutput) -> lis
                     Bubble(
                         order=j,
                         speaker_name=d.speaker,
-                        speaker_id=matcher.match(d.speaker),
                         text=d.text,
                         kind=BubbleKind(d.kind),
                     )
@@ -553,7 +552,12 @@ def save_script(session: Session, chapter: Chapter, output: ScriptOutput) -> lis
                         sfx={"intensity": fx.intensity} if fx.intensity else None,
                     )
                 )
+            # Fiches des présents et des locuteurs, arbitrage compris (names.py) ; un nom ambigu, sans fiche
+            # ou cité sans être déclaré est signalé à l'auteur par l'API (`name_notes`).
+            panel.character_ids = panel_ids(matcher, panel, previous)
+            link_speakers(matcher, panel, previous)
             page.panels.append(panel)
+            previous = panel
         chapter.pages.append(page)
         created.append(page)
     for i, page in enumerate(kept):
