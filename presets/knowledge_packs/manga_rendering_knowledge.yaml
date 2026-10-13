@@ -1,0 +1,27 @@
+# Pack de savoir-faire « rendu manga » : encrage, trames, papier et impression, finitions, valeurs et masses.
+# Jumeau du pack de mise en scène (manga_visual_knowledge) : même format et mêmes règles (presets/README.md ›
+# Packs de savoir-faire). Importé au démarrage du moteur, et par « Mettre à jour les packs » dans Savoir-faire.
+#
+# Les réglages vivent dans les presets, jamais ici : les mots-clés des finitions sont dans le réglage borné
+# `finition` (style_options.yaml), ajoutés d'office à chaque case. Pas de collection « Pont presets » : une
+# copie des presets dans la base de connaissances dériverait.
+id: manga_rendering_knowledge
+file: manga_rendering_knowledge.md
+
+# Sections `##` → collection. Une section qui contient des fiches `###` donne un document par fiche.
+collections:
+  - name: Rendu · Encrage
+    sections: ["10_encrage"]
+  - name: Rendu · Trames
+    sections: ["11_trames"]
+  - name: Rendu · Papier et impression
+    sections: ["12_papier_et_impression"]
+  - name: Rendu · Finitions
+    sections: ["13_finitions"]
+  - name: Rendu · Valeurs et masses
+    sections: ["14_valeurs_et_masses"]
+
+# Non importé : mode d'emploi de l'indexation.
+skip: ["0.A"]
+
+# Pas de pont de vocabulaire : ce pack ne porte pas de codes de cadrage, il porte des mots de rendu.

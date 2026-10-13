@@ -30,6 +30,12 @@ bible_max_tokens: 2500
 # collection (moins de small_collection_tokens) : injectée entière. « Vocabulaire » et « Checklist » décrivent
 # le format de sortie d'un storyboarder (champs que l'appli n'a pas) : lues par aucun agent, mais toujours
 # consultables et cherchables dans Savoir-faire.
+#
+# Les collections « Rendu · … » viennent du pack presets/knowledge_packs/manga_rendering_knowledge (encrage,
+# trames, papier, finitions, valeurs). Branchement étroit (13/10/2026) : le budget du rédacteur de prompt est
+# déjà plein sur chaque case. Directeur artistique : Valeurs et masses + Encrage ; rédacteur de prompt : Valeurs
+# et masses SEULEMENT ; scénariste : rien. Trames, Papier et impression, Finitions : cherchables dans
+# Savoir-faire, lues par aucun agent (la finition se règle sur la fiche de la série, style_options.yaml).
 agents:
   script:
     label: Scénariste (étape 1)
@@ -59,6 +65,8 @@ agents:
       - Mise en scène · Émotions
       - Mise en scène · Anti-répétition
       - Mise en scène · Exemples
+      - Rendu · Valeurs et masses
+      - Rendu · Encrage
     series_collections: true
     budget_tokens: 3500
     top_k: 5
@@ -81,6 +89,7 @@ agents:
       - Mise en scène · Composition
       - Mise en scène · Émotions
       - Mise en scène · Pont ComfyUI
+      - Rendu · Valeurs et masses
     series_collections: true
     budget_tokens: 160            # fragments : note courte du prompt d'une case
     top_k: 2
