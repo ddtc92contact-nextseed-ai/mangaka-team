@@ -71,8 +71,9 @@ from ..store.models import (
     SeriesAssetImage,
 )
 from .camera import CameraError, angle_prompt, camera_plan, merge_loras
-from .generation import GenerationError, split_trigger_words
+from .generation import GenerationError, describe_error, split_trigger_words
 from .jobs import JobReporter
+from .journal import REFERENCE_VARIANT, JournalEntry, failure_text
 from .library import active_style, style_for
 from .prompt import build_negative_prompt
 from .style import series_style
@@ -665,6 +666,7 @@ class ReferenceExecutor:
         self.folders = folders
         self.variants_kept = variants_kept
         self.presets_for = presets_for or (lambda _project_id: presets)
+        self.tonality = presets.tonality
         self.files = files
         self.comfyui = comfyui
         self.comfyui_error = comfyui_error
@@ -792,6 +794,17 @@ class ReferenceExecutor:
         return style
 
     def __call__(self, job_id: int, report: JobReporter, cancel: threading.Event) -> str:
+        journal = JournalEntry("reference_sheet", job_id)
+        t0 = time.monotonic()
+        try:
+            return self._run(job_id, report, cancel, journal)
+        except Exception as exc:
+            journal.set(duration_ms=int((time.monotonic() - t0) * 1000))
+            cancelled = cancel.is_set() or isinstance(exc, ComfyUIInterruptedError)
+            journal.fail(self.db, failure_text(exc, describe_error(exc)), cancelled=cancelled)
+            raise
+
+    def _run(self, job_id: int, report: JobReporter, cancel: threading.Event, journal: JournalEntry) -> str:
         if self.comfyui is None:
             raise GenerationError(f"ComfyUI indisponible : {self.comfyui_error or 'client non configuré'}")
         comfy = self.comfyui
@@ -806,6 +819,7 @@ class ReferenceExecutor:
             report(4, f"Envoi de {what} à ComfyUI…")
             uploaded.append(comfy.upload_image(data, ref["filename"], subfolder=ref["subfolder"]))
         built = build_workflow(plan.loaded, plan.params, reference_images=uploaded, loras=plan.loras)
+        journal.references(plan.references).workflow(plan.loaded, built)
         if cancel.is_set():
             raise ComfyUIInterruptedError("génération annulée")
 
@@ -846,10 +860,12 @@ class ReferenceExecutor:
         if plan.kind in PEOPLE_CHECK_KINDS:
             report(95, "Recherche de personnages dans la fiche…")
             check = people_check(self.detectors, plan.qc, data, error=self.detectors_error)
+        journal.measure(data, self.tonality)
         stored = self.files.save_image(data, plan.folder)
         if self.folders is not None:
             self.folders.discard_output(refs[0])
         duration_ms = int((time.monotonic() - t0) * 1000)
+        journal.set(duration_ms=duration_ms, width=stored.width, height=stored.height)
 
         with self.db.session_scope() as session:
             job = session.get(Job, job_id)
@@ -897,6 +913,7 @@ class ReferenceExecutor:
             session.add(variant)
             session.flush()
             job.params = {**params, "variant_id": variant.id}
+            journal.set(project_id=variant.project_id, image_kind=REFERENCE_VARIANT, image_id=variant.id).add(session)
             pruned: list[str] = []
             if self.variants_kept is not None:
                 pruned = prune_variants(

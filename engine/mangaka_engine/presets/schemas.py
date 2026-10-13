@@ -1993,3 +1993,67 @@ class KnowledgeSettings(_Strict):
 
     def agent(self, role: str) -> KnowledgeAgent:
         return self.agents.get(role) or KnowledgeAgent(label=role, collections=[], budget_tokens=0)
+
+
+class TonalityTarget(_Strict):
+    """Valeurs visées (planche de référence de l'auteur) ; None : pas de cible pour cette mesure."""
+
+    dark_pct: float | None = Field(default=None, ge=0, le=100)
+    black_pct: float | None = Field(default=None, ge=0, le=100)
+    white_pct: float | None = Field(default=None, ge=0, le=100)
+    saturation_pct: float | None = Field(default=None, ge=0, le=100)
+    line_density_pct: float | None = Field(default=None, ge=0, le=100)
+
+
+class TonalitySettings(_Strict):
+    """Mesures de tonalité de chaque image générée (`presets/qc_tonality.yaml`, Pillow, CPU) : seuils de gris
+    (0–255) et cible à atteindre, affichée en écart dans le détail de la case."""
+
+    dark_below: int = Field(default=128, ge=1, le=255)
+    black_below: int = Field(default=32, ge=1, le=255)
+    white_from: int = Field(default=200, ge=1, le=255)
+    reference: str = ""  # d'où vient la cible (affiché)
+    target: TonalityTarget = Field(default_factory=TonalityTarget)
+
+
+class VerdictReason(_Strict):
+    id: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]*$")
+    label: str = Field(min_length=1, max_length=60)
+
+
+class LengthBucket(_Strict):
+    label: str = Field(min_length=1, max_length=40)
+    max_words: int | None = Field(default=None, ge=1)  # None : sans limite (dernière tranche)
+
+
+class JournalSettings(_Strict):
+    """Journal des générations et verdicts de l'auteur (`presets/journal.yaml`) : raisons d'un rejet (liste
+    fermée), seuil « peu de données » de la page Statistiques et tranches de longueur de prompt."""
+
+    reasons: list[VerdictReason] = Field(default_factory=list)
+    low_data_below: int = Field(default=20, ge=1, le=100000)
+    prompt_length_buckets: list[LengthBucket] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _check(self) -> JournalSettings:
+        ids = [r.id for r in self.reasons]
+        if len(ids) != len(set(ids)):
+            raise ValueError("reasons : identifiants en double")
+        limits = [b.max_words for b in self.prompt_length_buckets]
+        bounded = [m for m in limits if m is not None]
+        if bounded != sorted(set(bounded)) or (None in limits and limits[-1] is not None):
+            raise ValueError("prompt_length_buckets : tranches croissantes, la dernière seule sans limite")
+        return self
+
+    def reason_label(self, reason: str | None) -> str | None:
+        if reason is None:
+            return None
+        return next((r.label for r in self.reasons if r.id == reason), reason)
+
+    def bucket(self, words: int | None) -> str | None:
+        if words is None:
+            return None
+        for b in self.prompt_length_buckets:
+            if b.max_words is None or words <= b.max_words:
+                return b.label
+        return None

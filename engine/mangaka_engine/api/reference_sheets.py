@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from ..pipeline.camera import QUALITY_TIER_LABEL, tier_allows
 from ..pipeline.generation import GenerationError
+from ..pipeline.journal import REFERENCE_VARIANT, record_event
 from ..pipeline.reference_sheets import (
     ENTRY_KINDS,
     FOLDERS,
@@ -375,6 +376,7 @@ def refine_variant(
     variant = _variant_or_404(session, variant_id)
     entry = _entry_or_404(session, variant.entry_kind, variant.entry_id)
     presets = _presets(ctx, entry.project_id)
+    record_event(session, verdict="edited", action="refine", image_kind=REFERENCE_VARIANT, image_id=variant.id)
     if body.sheet:
         try:
             sheet_for(presets, entry, body.sheet)
@@ -414,6 +416,7 @@ def keep(
     except GenerationError as exc:
         session.rollback()
         raise HTTPException(status_code=409, detail=_capitalize(str(exc))) from None
+    record_event(session, verdict="validated", action="keep", image_kind=REFERENCE_VARIANT, image_id=variant.id)
     session.commit()
     return entry_out(_entry_or_404(session, entry_kind(entry), entry.id))
 
@@ -425,6 +428,7 @@ def delete_variant(
     """Retire une variante de l'historique ; une image déjà gardée comme référence reste (c'est une copie)."""
     variant = _variant_or_404(session, variant_id)
     path = variant.path
+    record_event(session, verdict="rejected", action="delete", image_kind=REFERENCE_VARIANT, image_id=variant.id)
     session.delete(variant)
     session.commit()
     ctx.files.delete(path)
