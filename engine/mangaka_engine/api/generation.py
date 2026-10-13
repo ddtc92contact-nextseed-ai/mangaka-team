@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from ..pipeline.art_direction import applied_panel_direction
 from ..pipeline.comfy_trial import STEP as TRIAL_STEP
 from ..pipeline.composition import SOURCE_LABELS, control_settings, drop_lock_on_delete, lock_preset_id, type_problem
 from ..pipeline.composition import STEP as CONTROL_MAP_STEP
@@ -40,12 +41,14 @@ from ..pipeline.generation import (
     enqueue_angle,
     enqueue_panel,
     entry_kind,
+    framing_source,
     knowledge_stamp,
     mark_prompts_pending,
     panel_brief,
     panel_cast,
     panel_knowledge,
     panel_label,
+    panel_plan,
     panel_target,
     panels_to_generate,
     preset_tier,
@@ -212,6 +215,7 @@ def panel_detail(session: Session, ctx: AppContext, panel: Panel) -> PanelDetail
         upscaler: str | None = resolve_upscaler(presets, page.chapter.project).preset.name
     except FinishingError:
         upscaler = None
+    source, source_note = framing_source(panel)
     return PanelDetailOut(
         id=panel.id,
         page_id=page.id,
@@ -233,6 +237,10 @@ def panel_detail(session: Session, ctx: AppContext, panel: Panel) -> PanelDetail
         decor=_ref(cast.decor) if cast.decor is not None else None,
         objets=[_ref(o) for o in cast.objects],
         shot_type=panel.shot_type,
+        framing_plan=panel_plan(panel) or None,
+        framing_angle=str(applied_panel_direction(panel).get("angle") or "") or None,
+        framing_source=source,
+        framing_note=source_note,
         state=panel.state.value,
         bbox=panel.bbox,
         final_prompt=panel.final_prompt,

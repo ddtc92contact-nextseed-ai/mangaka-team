@@ -53,7 +53,7 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
-from typing import Any
+from typing import Any, Literal
 
 from PIL import Image, UnidentifiedImageError
 from sqlalchemy import func, select
@@ -93,7 +93,15 @@ from ..store.models import (
     SeriesAsset,
     SeriesAssetImage,
 )
-from .art_direction import ANGLES, DIALOG_FIELDS, PLANS, applied_panel_direction
+from .art_direction import (
+    ANGLES,
+    DIALOG_FIELDS,
+    PLANS,
+    applied_panel_direction,
+    apply_before_generation,
+    is_out_of_date,
+    to_apply_at_generation,
+)
 from .camera import CameraError, angle_prompt, camera_plan, direction_target, merge_loras, ordered_views
 from .framing import framing_sentence, viewpoint_of
 from .inpaint import png_bytes, recompose, soften_mask
@@ -103,6 +111,7 @@ from .knowledge import KnowledgeBase, PanelKnowledge
 from .layout import target_size
 from .library import panel_assets, style_for
 from .names import CharacterMatcher
+from .pages import applied_values
 from .prompt import (
     PromptCharacter,
     ReferenceSlot,
@@ -244,14 +253,14 @@ def _prompt_entry(entry: LibraryEntry) -> PromptCharacter:
 
 
 def panel_query(session: Session, panel: Panel, characters: Sequence[Character]) -> str:
-    """Requête du savoir-faire pour une case : plan du scénario, direction artistique appliquée (plan, angle,
+    """Requête du savoir-faire pour une case : plan (`panel_plan`), direction artistique appliquée (angle,
     ambiance, action — un « gros plan » en « contre-plongée » retrouve les fiches qui en parlent),
     description, personnages, décor et objets."""
     da = applied_panel_direction(panel)
     decor, objects = panel_assets(session, panel, panel.page.chapter.project_id)
     parts = [
-        panel.shot_type or "",
-        *(str(da.get(k) or "") for k in ("plan", "angle", "ambiance", "action")),
+        panel_plan(panel),
+        *(str(da.get(k) or "") for k in ("angle", "ambiance", "action")),
         panel.description or "",
         *(c.name for c in characters),
         *(a.name for a in ([decor] if decor else []) + objects),
@@ -619,8 +628,35 @@ def by_shot[I: CharacterImage | SeriesAssetImage](images: Sequence[I], shots: di
 
 
 def panel_plan(panel: Panel) -> str:
-    """Plan de la case : celui de la direction artistique appliquée (ou du dialogue), sinon du scénario."""
+    """Plan de la case : celui de la direction artistique appliquée (ou du dialogue), sinon du scénario
+    (repli signalé dans l'atelier : `framing_source`)."""
     return str(applied_panel_direction(panel).get("plan") or panel.shot_type or "").strip()
+
+
+FramingSource = Literal["dialogue", "direction", "scenario", "none"]
+
+
+def framing_source(panel: Panel) -> tuple[FramingSource, str | None]:
+    """D'où viennent le plan et l'angle de la case, et pourquoi le plan du scénario sert de repli :
+    « dialogue » (choix imposé par un dialogue avec l'IA), « direction » (direction artistique appliquée),
+    « scenario » (repli : aucune direction appliquée à la case), « none » (aucun plan)."""
+    if (getattr(panel, "dialog_direction", None) or {}).get("plan"):
+        return "dialogue", None
+    if any(pa.get("panel_id") == panel.id for pa in (applied_values(panel.page) or {}).get("panels") or []):
+        return "direction", None
+    page = panel.page
+    d = page.direction
+    if d is None or not d.values:
+        why = "pas encore de direction artistique pour cette page : lance-la dans l'onglet Direction artistique"
+    elif d.status == "rejected":
+        why = "direction artistique de la page rejetée par l'auteur"
+    elif is_out_of_date(d, page):
+        why = "cases modifiées depuis la proposition de direction artistique : relance l'agent sur la page"
+    elif to_apply_at_generation(page):
+        why = "direction artistique proposée, appliquée d'office au lancement de la génération"
+    else:
+        why = "aucune direction artistique appliquée à cette case"
+    return ("scenario" if panel.shot_type else "none"), why
 
 
 def reference_sheets_of(session: Session, image_ids: Iterable[int]) -> dict[int, str]:
@@ -1127,6 +1163,9 @@ def enqueue_panel(
     if not 1 <= count <= MAX_VARIANTS:
         raise GenerationError(f"entre 1 et {MAX_VARIANTS} variantes par demande")
     page = panel.page
+    # Lancer une génération vaut accord : la direction artistique proposée de la page (sauf rejet) est
+    # appliquée d'office avant la cible et le prompt — plan, angle, action, ambiance, mise en page.
+    apply_before_generation(session, presets, page)
     if panel_target(presets, page, panel) is None:
         raise GenerationError(f"la page {page.number} n'est pas mise en page : lance « Recalculer » d'abord")
     entries = panel_cast(session, panel, presets).entries

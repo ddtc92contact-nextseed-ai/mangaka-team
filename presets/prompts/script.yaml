@@ -7,7 +7,9 @@
 #   $style_guidelines (consignes du genre et du ton : rythme, cases par page, vocabulaire adapté à l'âge)
 #   ($series_style : ancien nom de $style_packs, gardé pour les prompts personnalisés)
 #   $decors $objets (bibliothèque de la série : « - id N · nom : description courte », un par ligne)
-#   $chapter_number $chapter_title $synopsis $target_pages $shot_types $bubble_kinds
+#   $chapter_number $chapter_title $synopsis $target_pages $bubble_kinds
+#   ($shot_types : liste des plans, plus utilisée — la direction artistique cadre les cases ; gardée pour
+#    les prompts personnalisés)
 #   $intensities $rythmes  (indices de mise en page, cf. presets/README.md « Direction artistique »)
 #   $dialogue_rules (règles de dialogue ci-dessous, en clair : densité, brièveté, place, variété)
 #   $context_json  (le même contexte, en JSON)
@@ -44,10 +46,12 @@ dialogue_rules:
   check_room: true          # après la mise en page : chaque bulle tient dans la zone de bulles de sa case
 
 system: |
-  Tu es scénariste et storyboarder de manga professionnel. Tu découpes un chapitre en pages
-  puis en cases, comme pour une publication hebdomadaire. Tu respectes la continuité de la
-  série (personnages, événements des chapitres précédents) et le rythme d'un vrai chapitre :
-  accroche, montée, cliffhanger final.
+  Tu es scénariste de manga professionnel. Tu découpes un chapitre en pages puis en cases,
+  comme pour une publication hebdomadaire : l'histoire, l'intention de chaque case et ce que
+  fait chaque personnage. Tu respectes la continuité de la série (personnages, événements des
+  chapitres précédents) et le rythme d'un vrai chapitre : accroche, montée, cliffhanger final.
+  La composition des images (cadrage, angle, place des personnages dans l'image) revient au
+  directeur artistique, à l'étape suivante : tu ne la décides pas.
   Tu réponds UNIQUEMENT par un objet JSON valide, sans texte autour ni bloc de code.
 
 user: |
@@ -83,7 +87,6 @@ user: |
 
   Contraintes :
   - environ $target_pages pages ; 3 à 7 cases par page (1 seule pour une pleine page) ;
-  - « shot_type » vaut exactement l'une de ces valeurs : $shot_types ;
   - « kind » d'un dialogue vaut exactement l'une de ces valeurs : $bubble_kinds
     (narration = récitatif, off = voix hors champ) ;
   - « importance » vaut 1 (case de transition), 2 (case normale) ou 3 (case forte, grande) ;
@@ -111,10 +114,8 @@ user: |
   - « setting » : le lieu de la case, toujours rempli, même sans décor récurrent — lieu, moment
     (heure, météo, saison) et éléments visibles du décor (« clairière au bord d'un lac, fin d'après-midi,
     herbes hautes, rochers moussus, montagnes au loin ») ;
-  - « staging » : la mise en scène — qui fait quoi, où dans le cadre (premier plan, arrière-plan,
-    gauche, droite), posture, regard et interactions entre les personnages PRÉSENTS (jamais un
-    personnage hors cadre) (« Kaï au premier plan à
-    gauche, bâton levé, regarde Lina assise sur un rocher à droite ») ;
+  - « staging » : ce que fait chaque personnage PRÉSENT (jamais un personnage hors cadre) — geste,
+    posture, regard, réaction, interaction avec les autres — sans dire où il se trouve dans l'image ;
   - « description » raconte l'action de la case ; « setting » et « staging » la complètent sans la répéter ;
   - « decor » : l'id (nombre) du décor récurrent où se passe la case, pris UNIQUEMENT dans la liste
     des décors ci-dessus, ou null si la case se passe ailleurs ;
@@ -130,7 +131,7 @@ user: |
   Format de réponse :
   {"pages": [{"rythme": "normal", "panels": [{"description": "…", "setting": "…", "staging": "…",
      "characters": ["…"], "offscreen": [], "decor": null, "objets": [],
-     "shot_type": "plan moyen", "importance": 2, "intensity": "normal",
+     "importance": 2, "intensity": "normal",
      "dialogues": [{"speaker": "…", "text": "…", "kind": "speech"}, {"speaker": "…", "text": "…", "kind": "shout"}],
      "sfx": [{"text": "VROUM !", "intensity": "choc"}]}]}],
    "summary": "…"}

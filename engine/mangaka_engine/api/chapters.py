@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, object_session, selectinload
 
+from ..pipeline.art_direction import keep_author_plan
 from ..pipeline.crop import PanelCrop, bounded
 from ..pipeline.dialogues import chapter_report
 from ..pipeline.finishing import panel_print_info
@@ -578,7 +579,12 @@ def replace_pages(
             # Hors cadre absent : gardés, sauf ceux devenus présents.
             offscreen = cin.offscreen_characters if cin.offscreen_characters is not None else panel.offscreen_names
             set_cast(panel, cin.characters, offscreen or [], matcher)
-            panel.shot_type = normalize_shot_type(cin.shot_type) or None
+            shot = normalize_shot_type(cin.shot_type) or None
+            if panel.id is not None and shot and shot != panel.shot_type:
+                # Plan retouché à la main : choix verrouillé de la direction artistique de la page, jamais
+                # écrasé par une nouvelle proposition ni une ré-application.
+                keep_author_plan(page, panel.id, shot)
+            panel.shot_type = shot
             panel.importance = cin.importance
             panel.intensity = cin.intensity
             # Bibliothèque : un champ absent garde le décor / les objets de la case.

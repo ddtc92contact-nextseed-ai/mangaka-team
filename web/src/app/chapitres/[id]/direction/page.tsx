@@ -74,7 +74,12 @@ export default function DirectionPage() {
   const selected = list.find((p) => p.page_id === selectedId) ?? list[0] ?? null;
   const pageData = pages.data?.find((p) => p.id === selected?.page_id) ?? null;
   const anyDirection = list.some((p) => p.has_direction);
-  const pendingCount = list.filter((p) => p.has_direction && p.pending && !p.out_of_date).length;
+  const pendingCount = list.filter((p) => p.has_direction && p.pending && !p.out_of_date && p.status !== "rejected").length;
+  const counts = {
+    proposed: list.filter((p) => p.has_direction && !p.out_of_date && p.status !== "rejected" && p.pending).length,
+    applied: list.filter((p) => p.has_direction && p.applied && !p.pending && p.status !== "rejected").length,
+    rejected: list.filter((p) => p.status === "rejected").length,
+  };
 
   const toast = useToast();
 
@@ -102,7 +107,11 @@ export default function DirectionPage() {
   }
 
   const edit = (d: PageDirection, body: DirectionEdit) =>
-    run(async () => replace(await api.editDirection(d.page_id, body)), editMessage(body));
+    run(async () => {
+      replace(await api.editDirection(d.page_id, body));
+      // Valider applique la page (plans des cases, mise en page) ; rejeter rend le plan du scénario.
+      if (body.accept || body.reject !== undefined) pages.reload();
+    }, editMessage(body));
 
   const apply = (pageIds?: number[]) =>
     run(async () => {
@@ -111,7 +120,7 @@ export default function DirectionPage() {
       direction.reload();
       const skipped = res.skipped.map((s) => `page ${s.number} : ${s.reason}`).join(" · ");
       setNotice(`${capitalize(res.message)}.${skipped ? ` ${skipped}.` : ""}`);
-    }, "Direction artistique appliquée à la mise en page");
+    }, "Direction artistique appliquée aux cases");
 
   if ((direction.loading && !data) || (pages.loading && !pages.data)) return <Loading />;
   if (direction.error) return <Alert>Impossible de charger la direction artistique : {direction.error}</Alert>;
@@ -132,10 +141,20 @@ export default function DirectionPage() {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="max-w-2xl space-y-1 text-sm text-zinc-400">
             <p>
-              Le directeur artistique choisit le rythme de chaque page, l&apos;intensité et le cadrage de chaque case, à
-              partir du scénario, de la bible, du style de mise en page de la série et des choix du chapitre précédent.
-              Il ne dessine pas les cases : la mise en page en tire les découpes quand tu appliques ses choix.
+              Le directeur artistique compose les cases : rythme de chaque page, intensité, plan, angle, action et ambiance
+              de chaque case, à partir du scénario, de la bible, du style de mise en page de la série et des choix du
+              chapitre précédent. Ses choix arrivent dans les cases quand tu valides une page, et d&apos;office au
+              lancement de la génération ; rejette une page pour garder le plan du scénario.
             </p>
+            {anyDirection && (
+              <p className="text-xs text-zinc-300" data-testid="direction-counts">
+                <span className="text-sky-300">{counts.proposed} proposée{counts.proposed > 1 ? "s" : ""}</span> ·{" "}
+                <span className="text-emerald-300">
+                  {counts.applied} appliquée{counts.applied > 1 ? "s" : ""}
+                </span>{" "}
+                · <span className="text-rose-300">{counts.rejected} rejetée{counts.rejected > 1 ? "s" : ""}</span>
+              </p>
+            )}
             <p className="text-xs text-zinc-500">
               Audace : {data.variety_label} ·{" "}
               <Link href="/equipe/directeur-artistique" className="text-rose-300 hover:text-rose-200">
@@ -156,9 +175,9 @@ export default function DirectionPage() {
               disabled={busy || running || !pendingCount}
               data-testid="apply-direction"
             >
-              Appliquer à la mise en page{pendingCount ? ` (${pendingCount})` : ""}
+              Appliquer la direction{pendingCount ? ` (${pendingCount})` : ""}
             </Button>
-            <InfoTip help="direction.appliquer" label="Appliquer à la mise en page" />
+            <InfoTip help="direction.appliquer" label="Appliquer la direction" />
           </div>
         </div>
         {job && <JobLine job={job} />}
@@ -210,7 +229,9 @@ export default function DirectionPage() {
                       <p className="font-medium text-zinc-200">Page {d.number}</p>
                       {d.rythme && <RythmeBadge rythme={d.rythme} />}
                       {d.page_choc && <p className="text-rose-300">⚡ {PAGE_CHOCS[d.page_choc]}</p>}
-                      <p className={state.tone}>{state.label}</p>
+                      <p className={state.tone} data-testid="direction-state">
+                        {state.label}
+                      </p>
                     </div>
                   </button>
                 </li>
@@ -232,7 +253,6 @@ export default function DirectionPage() {
             onHighlight={setHighlight}
             onEdit={(body) => edit(selected, body)}
             onRerun={() => start(selected.page_id)}
-            onApply={() => apply([selected.page_id])}
           />
         )}
       </div>
@@ -297,7 +317,8 @@ function engineDate(at: string): Date {
 
 /** Confirmation courte d'une retouche de la proposition. */
 function editMessage(body: DirectionEdit): string {
-  if (body.accept !== undefined) return body.accept ? "Page acceptée" : "Acceptation annulée";
+  if (body.accept) return "Page validée : direction appliquée aux cases";
+  if (body.reject !== undefined) return body.reject ? "Direction de la page rejetée" : "Rejet annulé";
   if (body.lock?.length) return "Choix verrouillé";
   if (body.unlock?.length) return "Choix rendu à l'agent";
   return "Choix enregistré";
@@ -338,7 +359,6 @@ function PageEditor({
   onHighlight,
   onEdit,
   onRerun,
-  onApply,
 }: {
   d: PageDirection;
   page: PageData | null;
@@ -350,8 +370,9 @@ function PageEditor({
   onHighlight: (id: number | null) => void;
   onEdit: (body: DirectionEdit) => void;
   onRerun: () => void;
-  onApply: () => void;
 }) {
+  const state = pageState(d);
+  const rejected = d.status === "rejected";
   const templates = options.templates.filter((t) => t.panel_count === d.panel_count);
   const styleName = (id: string | null) => options.styles.find((s) => s.value === id)?.label ?? id ?? "";
   const toggleLock = (key: string) => onEdit(isLocked(d, key) ? { unlock: [key] } : { lock: [key] });
@@ -362,19 +383,26 @@ function PageEditor({
         <h2 className="mr-auto text-lg font-semibold text-zinc-100">Page {d.number}</h2>
         {d.has_direction && (
           <>
+            <span className={`text-sm font-medium ${state.tone}`} data-testid="page-status">
+              {capitalize(state.label)}
+            </span>
             <Button
               variant="ghost"
-              onClick={() => onEdit({ accept: d.status !== "accepted" })}
+              onClick={() => onEdit({ reject: !rejected })}
               disabled={busy}
-              data-testid="accept-page"
+              data-testid="reject-page"
             >
-              {d.status === "accepted" ? "✓ Acceptée (annuler)" : "Accepter la page"}
+              {rejected ? "Annuler le rejet" : "Rejeter"}
             </Button>
             <Button variant="secondary" onClick={onRerun} disabled={busy} data-testid="rerun-page">
               Proposer autre chose
             </Button>
-            <Button onClick={onApply} disabled={busy || !d.pending || d.out_of_date} data-testid="apply-page">
-              Appliquer cette page
+            <Button
+              onClick={() => onEdit({ accept: true })}
+              disabled={busy || d.out_of_date || (d.applied && !d.pending && !rejected)}
+              data-testid="accept-page"
+            >
+              {d.applied && !d.pending && !rejected ? "✓ Appliquée" : d.applied && !rejected ? "Réappliquer" : "Valider et appliquer"}
             </Button>
           </>
         )}
@@ -418,8 +446,8 @@ function PageEditor({
                   <p className="text-xs text-zinc-500">Page pas encore mise en page.</p>
                 )}
               </Card>
-              <p className="text-xs text-zinc-500">
-                {d.applied ? (d.pending ? "Choix modifiés depuis la dernière application." : "Choix appliqués à la mise en page.") : "Pas encore appliquée à la mise en page."}
+              <p className={`text-xs ${state.tone}`} data-testid="page-status-hint">
+                {state.hint}
               </p>
             </div>
 
@@ -516,7 +544,7 @@ function PageEditor({
                     d={d}
                     pa={pa}
                     description={page?.panels.find((p) => p.id === pa.panel_id)?.description ?? ""}
-                    scriptShot={page?.panels.find((p) => p.id === pa.panel_id)?.shot_type ?? null}
+                    inscribedShot={page?.panels.find((p) => p.id === pa.panel_id)?.shot_type ?? null}
                     options={options}
                     libraryNames={libraryNames}
                     busy={busy}
@@ -586,7 +614,7 @@ function PanelRow({
   d,
   pa,
   description,
-  scriptShot,
+  inscribedShot,
   options,
   libraryNames,
   busy,
@@ -598,7 +626,8 @@ function PanelRow({
   d: PageDirection;
   pa: DaPanel;
   description: string;
-  scriptShot: string | null;
+  /** Plan inscrit dans la case (celui du scénario tant que la direction n'est pas appliquée). */
+  inscribedShot: string | null;
   options: ChapterDirection["options"];
   libraryNames: Record<number, string>;
   busy: boolean;
@@ -631,6 +660,11 @@ function PanelRow({
               {labels?.[v] ?? capitalize(v)}
             </option>
           ))}
+          {(() => {
+            // Plan retouché dans le Scénario hors de la liste de la direction (« très gros plan ») : affiché tel quel.
+            const current = (pa as unknown as Record<string, string | null>)[name];
+            return current && !values.includes(current) ? <option value={current}>{capitalize(current)}</option> : null;
+          })()}
         </Select>
       </LockedField>
     );
@@ -646,7 +680,12 @@ function PanelRow({
       <p className="mb-3 text-sm text-zinc-300">
         <span className="font-semibold text-zinc-100">Case {n}</span>{" "}
         <InfoTip help="direction.panel" label={`Choix de la case ${n}`} />
-        {scriptShot && <span className="text-zinc-500"> · scénario : {scriptShot}</span>}
+        {inscribedShot !== pa.plan && (
+          <span className="text-zinc-500" data-testid="inscribed-shot">
+            {" "}
+            · plan de la case : {inscribedShot ?? "aucun"}
+          </span>
+        )}
         {description && <span className="block text-xs text-zinc-500">{description}</span>}
         {(pa.decor != null || pa.objets != null) && (
           <span className="block text-xs text-amber-200/80" data-testid="direction-library">

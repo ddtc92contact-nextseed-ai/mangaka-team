@@ -43,10 +43,33 @@ export const isLocked = (d: PageDirection, key: string) => d.locks.includes(key)
 /** Clé de verrou d'un champ de case (« 12.plan »). */
 export const panelKey = (panelId: number, field: string) => `${panelId}.${field}`;
 
-export function pageState(d: PageDirection): { label: string; tone: string } {
-  if (!d.has_direction) return { label: "à diriger", tone: "text-zinc-500" };
-  if (d.out_of_date) return { label: "à refaire", tone: "text-amber-300" };
-  if (d.applied && !d.pending) return { label: "appliquée", tone: "text-emerald-300" };
-  if (d.status === "accepted") return { label: "acceptée", tone: "text-sky-300" };
-  return { label: d.applied ? "modifiée" : "proposée", tone: "text-zinc-300" };
+/** État d'une page : proposée, appliquée (aux cases), modifiée depuis, rejetée — avec ce qu'il veut dire. */
+export function pageState(d: PageDirection): { label: string; tone: string; hint: string } {
+  if (!d.has_direction)
+    return { label: "à diriger", tone: "text-zinc-500", hint: "Pas encore de direction : les cases suivent le plan du scénario." };
+  if (d.out_of_date)
+    return {
+      label: "à refaire",
+      tone: "text-amber-300",
+      hint: "Les cases ont changé depuis la proposition : elle ne peut plus s'appliquer.",
+    };
+  if (d.status === "rejected")
+    return {
+      label: "rejetée",
+      tone: "text-rose-300",
+      hint: "Rejetée : jamais appliquée d'office, les cases gardent le plan du scénario.",
+    };
+  if (d.applied && !d.pending)
+    return { label: "appliquée", tone: "text-emerald-300", hint: "Appliquée : plan, angle, action et ambiance sont dans les cases." };
+  if (d.applied)
+    return {
+      label: "modifiée",
+      tone: "text-amber-200",
+      hint: "Appliquée, puis modifiée : les nouveaux choix s'appliqueront d'office au lancement de la génération.",
+    };
+  return {
+    label: "proposée",
+    tone: "text-sky-300",
+    hint: "Proposée : appliquée d'office au lancement de la génération, sauf si tu la rejettes.",
+  };
 }

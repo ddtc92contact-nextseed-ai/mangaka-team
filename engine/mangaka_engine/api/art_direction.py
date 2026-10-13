@@ -60,11 +60,11 @@ class PageDirectionOut(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     has_direction: bool = False
     locks: list[str] = Field(default_factory=list)
-    status: str = "proposed"  # proposed | accepted
+    status: str = "proposed"  # proposed | applied | rejected (« accepted » : ancienne validation)
     variant: int = 0
     out_of_date: bool = False  # cases modifiées depuis la proposition
     applied: bool = False  # déjà appliquée à la mise en page
-    pending: bool = False  # choix différents de ceux appliqués
+    pending: bool = False  # choix différents de ceux appliqués (appliqués d'office à la génération, sauf rejet)
     applied_at: datetime | None = None
 
 
@@ -108,7 +108,10 @@ class DirectionEdit(BaseModel):
     panels: list[da.PanelEdit] = Field(default_factory=list, max_length=20)
     lock: list[str] = Field(default_factory=list, max_length=200)
     unlock: list[str] = Field(default_factory=list, max_length=200)
+    # true : valider la page, c'est l'appliquer aux cases tout de suite ; false : la repasser « proposée ».
     accept: bool | None = None
+    # true : rejeter la direction (plus appliquée, même d'office à la génération) ; false : annuler le rejet.
+    reject: bool | None = None
 
 
 class DirectionApply(BaseModel):
@@ -163,7 +166,7 @@ def direction_out(page: Page) -> PageDirectionOut:
             "variant": d.variant or 0,
             "out_of_date": da.is_out_of_date(d, page),
             "applied": d.applied is not None,
-            "pending": d.applied != d.values,
+            "pending": da.is_pending(d),
             "applied_at": d.applied_at,
         }
     )
@@ -269,17 +272,28 @@ def start_direction(
 def edit_direction(
     page_id: int, body: DirectionEdit, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
 ) -> PageDirectionOut:
-    """Modifie des choix (chaque champ modifié est verrouillé), verrouille / déverrouille, accepte la page."""
+    """Modifie des choix (chaque champ modifié est verrouillé), verrouille / déverrouille, valide la page (elle
+    est appliquée aux cases tout de suite) ou la rejette."""
     page = get_page_or_404(session, page_id)
     presets = ctx.agents.presets_for(page.chapter.project_id)
+    if body.accept and body.reject:
+        raise FieldError("direction", "valider ou rejeter : pas les deux à la fois")
     try:
         d = da.edit_direction(
             presets, page, page_fields=body.page, panels=body.panels, unlock=body.unlock, lock=body.lock
         )
+        if body.reject:
+            da.reject_direction(page)
+        elif body.reject is False or body.accept is False:
+            d.status = "applied" if d.applied is not None else "proposed"
+        if body.accept:
+            if da.is_out_of_date(d, page):
+                raise da.ArtDirectionError("cases modifiées depuis la proposition : relance l'agent sur cette page")
+            result = da.apply_direction(presets, [page], SeriesLibrary.load(session, page.chapter.project_id))
+            if result.skipped:
+                raise da.ArtDirectionError(str(result.skipped[0]["reason"]))
     except da.ArtDirectionError as exc:
         raise FieldError("direction", str(exc)) from None
-    if body.accept is not None:
-        d.status = "accepted" if body.accept else "proposed"
     session.commit()
     return direction_out(page)
 
@@ -292,7 +306,10 @@ def apply_direction(
     session: Session = Depends(get_session),
     ctx: AppContext = Depends(get_ctx),
 ) -> ApplyOut:
-    """« Appliquer à la mise en page » : seules les pages dont la mise en page change sont recalculées."""
+    """« Appliquer la direction » : le plan, l'angle, l'action et l'ambiance arrivent dans les cases, le reste
+    dans la mise en page (seules les pages dont la mise en page change sont recalculées). Sans `page_ids`
+    (tout le chapitre, rattrapage des propositions restées en attente), les pages rejetées par l'auteur sont
+    laissées de côté ; une page demandée par son id est appliquée même rejetée."""
     chapter = get_chapter_or_404(session, chapter_id)
     pages = _load_pages(session, chapter_id)
     if body is not None and body.page_ids is not None:
@@ -307,7 +324,12 @@ def apply_direction(
     if not targets:
         raise FieldError("direction", "aucune direction artistique à appliquer : lance d'abord l'agent")
     library = SeriesLibrary.load(session, chapter.project_id)
-    result = da.apply_direction(ctx.agents.presets_for(chapter.project_id), targets, library)
+    result = da.apply_direction(
+        ctx.agents.presets_for(chapter.project_id),
+        targets,
+        library,
+        skip_rejected=body is None or body.page_ids is None,
+    )
     session.commit()
     parts = []
     if result.applied:

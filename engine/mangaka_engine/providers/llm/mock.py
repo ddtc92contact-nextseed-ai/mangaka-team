@@ -60,7 +60,6 @@ _ANY_MARK = re.compile(r"\s*\[mock:[a-z-]+:\d+\]\s*")
 UNKNOWN_ID = 999_999  # id de décor cité par `[mock:id-invalide:N]` (absent de toute bibliothèque)
 TASKS = ("script", "art_direction", "image_prompt", "image_prompt_dialog")
 
-_SHOTS = ["plan large", "plan moyen", "gros plan", "plan américain", "contre-plongée", "plan rapproché", "plongée"]
 _PANELS_PER_PAGE = [5, 4, 6, 3, 5, 4]
 _KINDS = ["speech", "speech", "thought", "speech", "shout"]
 # Réponses courtes du second personnage de la case (accents compris).
@@ -105,15 +104,22 @@ _SETTINGS = [
     "village de pierre, midi, ruelles pavées, linge aux fenêtres, foule de marché",
     "forêt dense, nuit de pleine lune, troncs immenses, lucioles, brume au sol",
 ]
-_PLACES = ["au premier plan à gauche", "au centre", "à droite, en retrait", "en arrière-plan"]
+# Ce que fait chaque personnage (geste, posture, regard), jamais sa place dans le cadre : le scénario ne
+# compose pas, la direction artistique cadre.
+_GESTURES = [
+    "avance d'un pas décidé",
+    "se penche, la main tendue",
+    "recule, les épaules crispées",
+    "se retourne vivement",
+]
 
 
 def _staging(who: str, other: str, i: int) -> str:
     if other == who:
-        return f"{who} {_PLACES[i % len(_PLACES)]}, en mouvement, regard vers l'horizon"
+        return f"{who} {_GESTURES[i % len(_GESTURES)]}, regard vers l'horizon"
     return (
-        f"{who} {_PLACES[i % len(_PLACES)]}, tourné vers {other} ; "
-        f"{other} {_PLACES[(i + 2) % len(_PLACES)]}, lui répond d'un geste"
+        f"{who} {_GESTURES[i % len(_GESTURES)]}, tourné vers {other} ; "
+        f"{other} {_GESTURES[(i + 2) % len(_GESTURES)]}, lui répond d'un geste"
     )
 
 
@@ -174,7 +180,6 @@ def mock_script(ctx: dict[str, Any], *, sparse: bool = False) -> dict[str, Any]:
                     "setting": _SETTINGS[p % len(_SETTINGS)],
                     "staging": _staging(cast[0], cast[-1], i),
                     "characters": cast,
-                    "shot_type": _SHOTS[(p * 3 + i) % len(_SHOTS)],
                     "importance": importance,
                     "intensity": intensity,
                     "dialogues": dialogues,

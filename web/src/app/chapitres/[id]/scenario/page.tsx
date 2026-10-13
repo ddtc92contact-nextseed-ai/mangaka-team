@@ -704,7 +704,7 @@ function PanelEditor({
             className="min-h-12 text-sm"
             value={panel.staging}
             onChange={(e) => set("staging", e.target.value)}
-            placeholder="Kaï au premier plan à gauche, bâton levé ; Lina sur un rocher à droite, le regarde"
+            placeholder="Kaï lève son bâton, la mâchoire serrée ; Lina se fige, le souffle coupé"
             maxLength={1500}
             disabled={disabled}
           />
