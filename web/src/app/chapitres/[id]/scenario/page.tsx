@@ -12,12 +12,14 @@ import {
   api,
   EngineError,
   errorMessage,
+  type DialogueReport,
   type Intensity,
   type Job,
   type LibraryEntry,
   type Rythme,
   type ScriptSources,
 } from "@/lib/api";
+import { capitalize } from "@/lib/direction";
 import { useEngineData, useUnsavedWarning } from "@/lib/hooks";
 import { isFinished, useJob } from "@/lib/jobs";
 import { INTENSITIES, RYTHMES } from "@/lib/layout";
@@ -52,6 +54,7 @@ export default function ScenarioPage() {
   const library: SceneLibrary = { decors: decors.data ?? [], objets: objets.data ?? [], projectId: chapter.project_id };
   const lastJob = useEngineData(() => api.chapterJobs(chapter.id, "script").then((j) => j[0] ?? null), [chapter.id]);
   const sources = useEngineData(() => api.chapterSources(chapter.id), [chapter.id]);
+  const dialogues = useEngineData(() => api.chapterDialogues(chapter.id), [chapter.id]);
 
   const [synopsis, setSynopsis] = useState(chapter.synopsis);
   const [startError, setStartError] = useState<string | null>(null);
@@ -78,6 +81,7 @@ export default function ScenarioPage() {
       toast("Découpage enregistré automatiquement");
       setEdited(null);
       pages.reload();
+      dialogues.reload();
       reloadChapter();
     }
   });
@@ -132,6 +136,7 @@ export default function ScenarioPage() {
     try {
       const saved = await api.savePages(chapter.id, fromDraft(draft));
       pages.setData(saved);
+      dialogues.reload();
       setEdited(null);
       setSavedAt(Date.now());
       toast("Découpage enregistré");
@@ -249,6 +254,7 @@ export default function ScenarioPage() {
           </EmptyState>
         ) : (
           <div className="space-y-5">
+            {dialogues.data && dialogues.data.stats.panels > 0 && <DialogueCheck report={dialogues.data} />}
             <UnmatchedNames
               chapterId={chapter.id}
               projectId={chapter.project_id}
@@ -306,6 +312,37 @@ export default function ScenarioPage() {
 }
 
 /** Ce que le scénariste a reçu : bible de la série et passages du savoir-faire (titres + extraits). */
+const frNumber = (n: number, digits: number) => n.toLocaleString("fr-FR", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+
+/** Densité des dialogues enregistrés et règles du scénariste encore enfreintes (après relances ou retouches). */
+function DialogueCheck({ report }: { report: DialogueReport }) {
+  const { stats, warnings } = report;
+  return (
+    <div className="space-y-2" data-testid="dialogue-check">
+      <p className="text-xs text-zinc-500">
+        Dialogues : {stats.replies} réplique{stats.replies > 1 ? "s" : ""} pour {stats.panels} case
+        {stats.panels > 1 ? "s" : ""} ({frNumber(stats.per_panel, 2)} par case, onomatopées à part) ·{" "}
+        {frNumber(stats.mean_words, 1)} mots par réplique · {stats.inner_voice} pensée{stats.inner_voice > 1 ? "s" : ""}, voix
+        off ou narration{stats.inner_voice > 1 ? "s" : ""}
+        {stats.sfx_only > 0 && ` · ${stats.sfx_only} case${stats.sfx_only > 1 ? "s" : ""} en onomatopée seule`}
+      </p>
+      {warnings.length > 0 && (
+        <Alert tone="info">
+          <span data-testid="dialogue-warnings">
+            Dialogues encore à revoir après les relances du scénariste : retouche les cases ci-dessous ou relance
+            « Découper ».
+            <ul className="mt-1 list-disc pl-5">
+              {warnings.map((w) => (
+                <li key={w}>{capitalize(w)}</li>
+              ))}
+            </ul>
+          </span>
+        </Alert>
+      )}
+    </div>
+  );
+}
+
 function UsedSources({ sources }: { sources: ScriptSources }) {
   const [open, setOpen] = useState(false);
   const count = sources.passages.length;

@@ -9,6 +9,7 @@
 #   $decors $objets (bibliothèque de la série : « - id N · nom : description courte », un par ligne)
 #   $chapter_number $chapter_title $synopsis $target_pages $shot_types $bubble_kinds
 #   $intensities $rythmes  (indices de mise en page, cf. presets/README.md « Direction artistique »)
+#   $dialogue_rules (règles de dialogue ci-dessous, en clair : densité, brièveté, place, variété)
 #   $context_json  (le même contexte, en JSON)
 #   $bible         (bible de la série : univers, ton, personnages, règles, gags, résumés validés)
 #   $savoir_faire  (passages du savoir-faire de l'agent « script », avec leur source ; voir knowledge.yaml)
@@ -18,6 +19,29 @@ description: Découpage d'un chapitre en pages et cases, avec dialogues et résu
 max_retries: 2            # nouveaux essais après une réponse invalide (2 au maximum)
 temperature: 0.7
 max_previous_chapters: 8  # résumés des chapitres précédents envoyés pour la continuité
+
+# Dialogues, vérifiés sur chaque réponse (pipeline/dialogues.py `check_dialogues`) : une règle enfreinte
+# relance le scénariste avec l'erreur ; après les relances, le découpage est gardé avec un avertissement
+# visible dans l'écran Scénario. Les onomatopées ne comptent pas comme répliques. Sans ce bloc, aucune règle.
+# (Audit du chapitre 3 « vulcano », 13/10 : 0,75 parole par case contre 1,50 au chapitre 1, cinq cases de
+# combat réduites à leur onomatopée, plus aucune pensée, voix off ni narration.)
+dialogue_rules:
+  target_per_panel: 2       # répliques visées dans chaque case où un personnage présent peut parler…
+  min_per_panel: 1.3        # …et au moins 1,3 par case sur le chapitre (bornées par la place des cases)
+  max_words: 12             # mots au plus par réplique (la brièveté fait le rythme : on ajoute des bulles,
+  max_mean_words: 7         # on ne les allonge pas) ; au plus 7 mots en moyenne
+  action_needs_voice: true  # case d'action (choc ou onomatopée) : au moins un mot d'un personnage
+  action_intensities: [choc]
+  require_inner_voice: true # au moins une pensée, voix off ou narration par chapitre (false : l'auteur s'en passe)
+  inner_voice_kinds: [thought, "off", narration]   # « off » entre guillemets (sinon YAML lit un booléen)
+  # Place des bulles (A4 à 300 DPI, répliques de 7 mots, zone de bulles de layout.yaml) : répliques au plus
+  # par case selon le nombre de cases de la page ; une case forte (importance 3) en reçoit une de plus.
+  room:
+    - { max_panels: 4, replies: 3 }
+    - { max_panels: 6, replies: 2 }
+    - { max_panels: 9, replies: 1 }
+  big_panel_bonus: 1
+  check_room: true          # après la mise en page : chaque bulle tient dans la zone de bulles de sa case
 
 system: |
   Tu es scénariste et storyboarder de manga professionnel. Tu découpes un chapitre en pages
@@ -85,14 +109,18 @@ user: |
     des décors ci-dessus, ou null si la case se passe ailleurs ;
   - « objets » : les ids (nombres) des objets récurrents visibles dans la case, pris UNIQUEMENT dans
     la liste des objets ci-dessus ([] s'il n'y en a pas) ; n'invente jamais d'id ;
-  - répliques courtes, en français, comme dans un vrai manga ;
+  - répliques courtes, en français, comme dans un vrai manga ; « dialogues » ne contient jamais
+    d'onomatopée (elles vont dans « sfx ») ;
   - « summary » : résumé du chapitre en 3 à 6 phrases, pour assurer la continuité des chapitres suivants.
+
+  Dialogues (vérifiés : une réponse qui enfreint ces règles est refusée) :
+  $dialogue_rules
 
   Format de réponse :
   {"pages": [{"rythme": "normal", "panels": [{"description": "…", "setting": "…", "staging": "…",
      "characters": ["…"], "decor": null, "objets": [],
      "shot_type": "plan moyen", "importance": 2, "intensity": "normal",
-     "dialogues": [{"speaker": "…", "text": "…", "kind": "speech"}],
+     "dialogues": [{"speaker": "…", "text": "…", "kind": "speech"}, {"speaker": "…", "text": "…", "kind": "shout"}],
      "sfx": [{"text": "VROUM !", "intensity": "choc"}]}]}],
    "summary": "…"}
 
@@ -103,4 +131,5 @@ user: |
 retry: |
   Ta réponse précédente est invalide :
   $error
-  Corrige ces erreurs et renvoie l'objet JSON complet, et uniquement lui.
+  Corrige ces erreurs et renvoie l'objet JSON complet, et uniquement lui. Garde ce qui était juste :
+  pour les dialogues, ajoute ou retire des répliques courtes sans réécrire le reste du découpage.

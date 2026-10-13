@@ -46,6 +46,7 @@ def panel_specs(page: Page) -> list[PanelSpec]:
         PanelSpec(
             importance=p.importance,
             dialogue_chars=sum(len(b.text) for b in p.bubbles if b.kind != BubbleKind.sfx),
+            dialogue_count=sum(1 for b in p.bubbles if b.kind != BubbleKind.sfx),
             panel_id=p.id,
             intensity=p.intensity,
             shot_type=p.shot_type,

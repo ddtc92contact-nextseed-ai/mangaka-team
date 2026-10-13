@@ -49,7 +49,15 @@ from typing import Any, Literal
 
 from pydantic import TypeAdapter, ValidationError
 
-from ..presets.schemas import LayoutSettings, LayoutTemplate, PageFormat, SplitNode, TreeNode, count_panels
+from ..presets.schemas import (
+    MM_PER_INCH,
+    LayoutSettings,
+    LayoutTemplate,
+    PageFormat,
+    SplitNode,
+    TreeNode,
+    count_panels,
+)
 from . import geometry as geo
 
 Direction = Literal["ltr", "rtl"]
@@ -97,6 +105,8 @@ class PanelSpec:
 
     importance: int = 2
     dialogue_chars: int = 0
+    # Nombre de bulles (hors onomatopées) ; 0 = inconnu : zone en fraction de la case seulement.
+    dialogue_count: int = 0
     panel_id: int | None = None
     intensity: str | None = None  # calme | normal | choc (indice de mise en scène du scénario)
     shot_type: str | None = None
@@ -439,8 +449,13 @@ def bubble_zone(
     fmt: PageFormat,
     settings: LayoutSettings,
     polygon: Sequence[geo.Point] | None = None,
+    bubbles: int = 0,
 ) -> Rect | None:
     """Zone réservée aux bulles, en haut de la case, du côté où commence la lecture.
+
+    Surface : une fraction de la case qui croît avec la longueur des dialogues et, quand le nombre de
+    bulles est connu (`bubbles` > 0), au moins la surface absolue qu'elles demandent au lettrage
+    (`bubble_mm2`, `char_mm2`), toujours bornée à `max_fraction`.
 
     Pour une case en biais, la zone reste entièrement dans le polygone (retrait de `padding_mm`) :
     elle est cherchée du haut vers le bas, depuis le côté où commence la lecture, puis réduite par
@@ -455,6 +470,9 @@ def bubble_zone(
         pad, inner_w, inner_h = 0, panel.w, panel.h
     fraction = bz.min_fraction + (bz.max_fraction - bz.min_fraction) * min(1.0, chars / bz.full_at_chars)
     area = fraction * panel.w * panel.h
+    if bubbles > 0:
+        needed = (bubbles * bz.bubble_mm2 + chars * bz.char_mm2) * (fmt.dpi / MM_PER_INCH) ** 2
+        area = min(max(area, needed), bz.max_fraction * panel.w * panel.h)
     zw = inner_w * bz.width_fraction
     zh = area / zw
     max_h = inner_h * bz.max_height_fraction
@@ -540,7 +558,9 @@ def compute_layout(
         if rect.w < 1 or rect.h < 1:
             raise LayoutError("découpe trop inclinée : une case disparaît (réduis le biais)")
         slanted = not geo.is_axis_rect(poly)
-        zone = bubble_zone(rect, spec.dialogue_chars, direction, fmt, settings, poly if slanted else None)
+        zone = bubble_zone(
+            rect, spec.dialogue_chars, direction, fmt, settings, poly if slanted else None, spec.dialogue_count
+        )
         return {
             "index": i,
             "reading_order": i + 1,

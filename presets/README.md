@@ -534,6 +534,36 @@ case 2 › decor : id 9 inconnu (ids possibles : 3, 4, ou null) »), puis erreur
 objets figurent aussi dans la bible injectée aux agents. Mode mock : `[mock:id-invalide:N]` dans le
 synopsis fait citer un décor inexistant aux N premiers essais.
 
+**Densité des dialogues (`dialogue_rules` de `script.yaml`).** Audit du chapitre 3 « vulcano » (13/10) :
+0,75 parole par case contre 1,50 au chapitre 1, cinq cases de combat réduites à leur onomatopée, plus
+aucune pensée, voix off ni narration. Chaque réponse valide du scénariste est vérifiée
+(`pipeline/dialogues.py`, onomatopées jamais comptées comme répliques) :
+
+- `target_per_panel` répliques visées dans chaque case où un personnage présent peut parler, et au moins
+  `min_per_panel` par case sur le chapitre — bornées par la place : `room` donne, selon le nombre de
+  cases de la page, les répliques au plus par case (`big_panel_bonus` de plus pour une case
+  d'importance 3) ;
+- `max_words` mots au plus par réplique, `max_mean_words` en moyenne (on ajoute des bulles, on ne les
+  allonge pas) ;
+- `action_needs_voice` : une case « choc » (`action_intensities`) ou avec onomatopée porte au moins un
+  mot d'un personnage présent (cri, ordre, réaction) ;
+- `require_inner_voice` : au moins une réplique de `inner_voice_kinds` (pensée, voix off, narration) par
+  chapitre — `false` si l'auteur s'en passe ;
+- `check_room` : le découpage est mis en page à blanc et lettré (sans visages) ; chaque bulle doit tenir
+  dans la zone de bulles de sa case (`bubble_zone`).
+
+Une règle enfreinte relance le scénariste avec l'erreur (mêmes `max_retries` et gabarit `retry`) ; après
+les relances, le découpage est gardé, le job le signale (« avec N avertissements de dialogues ») et
+l'écran Scénario affiche la mesure du chapitre et les règles encore enfreintes
+(`GET /chapters/{id}/dialogues`, recalculé à chaque retouche). Les règles sont écrites en clair dans le
+prompt (`$dialogue_rules`) et réglables dans le profil du Scénariste (groupe « Dialogues »). Sans bloc
+`dialogue_rules`, aucune règle. Mode mock : `[mock:dialogues-maigres:N]` dans le synopsis rend les N
+premiers découpages maigres (comme le chapitre 3).
+
+La zone de bulles de `layout.yaml` a, en plus de sa fraction de case, un plancher absolu : `bubble_mm2`
+par bulle et `char_mm2` par caractère (taille réelle du lettrage, toujours bornée à `max_fraction`) —
+sans lui, deux répliques courtes débordaient déjà d'une case d'une planche à 6 cases.
+
 ## Workflow ComfyUI
 
 1. Dans ComfyUI, construis le workflow puis exporte-le au format API (**Workflow → Export (API)**,

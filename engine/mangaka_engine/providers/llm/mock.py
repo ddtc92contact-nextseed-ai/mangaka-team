@@ -26,8 +26,14 @@ essais sont invalides (plan hors liste, puis JSON illisible).
 Pour tester les relances sans vrai LLM, les `invalid_attempts` premiers essais d'une conversation
 renvoient une réponse invalide (variable MOCK_LLM_INVALID_ATTEMPTS, ou `[mock:invalide:N]` dans le
 synopsis du chapitre ; `[mock:da-invalide:N]` pour la seule direction artistique ;
-`[mock:id-invalide:N]` : découpage bien formé qui cite un décor inexistant). L'essai courant se
-déduit des messages : aucun état entre deux appels.
+`[mock:id-invalide:N]` : découpage bien formé qui cite un décor inexistant ;
+`[mock:dialogues-maigres:N]` : découpage valide mais aux dialogues maigres, comme le chapitre 3 « vulcano »
+— une réplique sur deux cases, cases de combat réduites à leur onomatopée, ni pensée ni narration).
+L'essai courant se déduit des messages : aucun état entre deux appels.
+
+Le découpage factice respecte les règles de dialogue livrées (presets/prompts/script.yaml) : deux
+répliques courtes par case (une seule sur une page chargée), un cri dans chaque case « choc », une
+narration en ouverture et des pensées.
 """
 
 from __future__ import annotations
@@ -45,6 +51,7 @@ _CONTEXT = re.compile(r"<contexte>\s*(\{.*\})\s*</contexte>", re.DOTALL)
 _INVALID_MARK = re.compile(r"\[mock:invalide:(\d+)\]")
 _DA_INVALID_MARK = re.compile(r"\[mock:da-invalide:(\d+)\]")
 _ID_INVALID_MARK = re.compile(r"\[mock:id-invalide:(\d+)\]")
+_SPARSE_MARK = re.compile(r"\[mock:dialogues-maigres:(\d+)\]")
 _PROMPT_INVALID_MARK = re.compile(r"\[mock:prompt-invalide:(\d+)\]")
 _PROMPT_INTRUDER_MARK = re.compile(r"\[mock:prompt-intrus:(\d+)\]")
 _DIALOG_INVALID_MARK = re.compile(r"\[mock:dialogue-invalide:(\d+)\]")
@@ -55,6 +62,10 @@ TASKS = ("script", "art_direction", "image_prompt", "image_prompt_dialog")
 _SHOTS = ["plan large", "plan moyen", "gros plan", "plan américain", "contre-plongée", "plan rapproché", "plongée"]
 _PANELS_PER_PAGE = [5, 4, 6, 3, 5, 4]
 _KINDS = ["speech", "speech", "thought", "speech", "shout"]
+# Réponses courtes du second personnage de la case (accents compris).
+_REPLIES = ["Quoi ?!", "Tiens bon !", "Je n'y crois pas…", "Allons-y, vite !", "Attention, derrière toi !", "Ça ira."]
+_SHOUTS = ["À couvert !", "Maintenant !", "Lâche ça !", "Recule !"]
+_MOCK_WORDS = 8  # mots au plus par réplique factice
 _RYTHMES = ["normal", "rapide", "lent", "normal", "rapide"]
 # Onomatopées des cases « choc » (et d'une case calme de temps en temps), accents compris.
 _SFX = ["VROUM !", "CLIC", "BIIIP !", "BAM !", "ÇA CRAQUE !", "BAÏE !"]
@@ -82,6 +93,7 @@ def _task_context(messages: list[ChatMessage]) -> dict[str, Any] | None:
 
 def _sentences(text: str) -> list[str]:
     text = _ID_INVALID_MARK.sub("", _DA_INVALID_MARK.sub("", _INVALID_MARK.sub("", text)))
+    text = _SPARSE_MARK.sub("", text)
     parts = [p.strip() for p in re.split(r"(?<=[.!?…])\s+|\n+", text) if p.strip()]
     return parts or ["La scène s'installe."]
 
@@ -104,7 +116,13 @@ def _staging(who: str, other: str, i: int) -> str:
     )
 
 
-def mock_script(ctx: dict[str, Any]) -> dict[str, Any]:
+def _short(text: str) -> str:
+    words = text.split()
+    return " ".join(words[:_MOCK_WORDS]) + ("…" if len(words) > _MOCK_WORDS else "")
+
+
+def mock_script(ctx: dict[str, Any], *, sparse: bool = False) -> dict[str, Any]:
+    """Découpage factice ; `sparse` : dialogues maigres (une réplique sur deux cases, combat muet)."""
     chapter = ctx.get("chapter") or {}
     names = [c["name"] for c in ctx.get("characters") or [] if c.get("name")] or ["Héros", "Rival"]
     beats = _sentences(str(chapter.get("synopsis") or ""))
@@ -122,23 +140,33 @@ def mock_script(ctx: dict[str, Any]) -> dict[str, Any]:
             beat += 1
             who = names[(p + i) % len(names)]
             other = names[(p + i + 1) % len(names)]
-            dialogues = []
-            if i % 3 != 2:
-                dialogues.append({"speaker": who, "text": text[:80], "kind": _KINDS[(p + i) % len(_KINDS)]})
-            if i == 0 and p == 0:
-                dialogues.insert(
-                    0, {"speaker": "", "text": f"Chapitre {chapter.get('number', '?')}.", "kind": "narration"}
-                )
             importance = 3 if count == 1 or (i == 0 and p % 2 == 0) else (1 if i == count - 1 else 2)
             # Indices de mise en page : une case forte sur deux est un temps d'action, les cases de
             # transition sont calmes.
             intensity = "choc" if importance == 3 and p % 4 != 2 else ("calme" if importance == 1 else "normal")
+            cast = [who] if i % 2 else list(dict.fromkeys([who, other]))
+            dialogues = []
+            if sparse:
+                if (p + i) % 2 == 0 and intensity != "choc":
+                    dialogues.append({"speaker": who, "text": _short(text), "kind": "speech"})
+            else:
+                kind = "shout" if intensity == "choc" else _KINDS[(p + i) % len(_KINDS)]
+                first = _SHOUTS[(p + i) % len(_SHOUTS)] if intensity == "choc" else _short(text)
+                dialogues.append({"speaker": who, "text": first, "kind": kind})
+                if count <= 4 or importance == 3:  # place : une seule réplique sur une page chargée
+                    reply = _REPLIES[(p + i) % len(_REPLIES)] if intensity != "choc" else _short(text)
+                    # Seul dans la case : il se parle à lui-même (pensée).
+                    alone = len(cast) == 1 and kind != "thought"
+                    dialogues.append({"speaker": cast[-1], "text": reply, "kind": "thought" if alone else "speech"})
+                if i == 0 and p == 0:
+                    dialogues.insert(
+                        0, {"speaker": "", "text": f"Chapitre {chapter.get('number', '?')}.", "kind": "narration"}
+                    )
             sfx = []
             if intensity == "choc":
                 sfx.append({"text": _SFX[(p + i) % len(_SFX)], "intensity": "choc"})
             elif intensity == "calme" and p % 3 == 1:
                 sfx.append({"text": "tic… tac…", "intensity": "calme"})
-            cast = [who] if i % 2 else list(dict.fromkeys([who, other]))
             panels.append(
                 {
                     "description": f"{text} ({who}{' et ' + other if other != who else ''}, page {p + 1}, case {i + 1})",
@@ -408,7 +436,9 @@ class MockLLMProvider:
             out = mock_script(ctx)
             out["pages"][0]["panels"][0]["decor"] = UNKNOWN_ID
             return json.dumps(out, ensure_ascii=False)
-        return json.dumps(mock_script(ctx), ensure_ascii=False)
+        mark = _SPARSE_MARK.search(str((ctx.get("chapter") or {}).get("synopsis") or ""))
+        sparse = bool(mark) and attempt <= int(mark.group(1))  # type: ignore[union-attr]
+        return json.dumps(mock_script(ctx, sparse=sparse), ensure_ascii=False)
 
     def _image_prompt_answer(self, messages: list[ChatMessage], ctx: dict[str, Any]) -> str:
         attempt = 1 + sum(1 for m in messages if m.role == "assistant")

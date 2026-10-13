@@ -6,6 +6,10 @@
 3. réponse JSON validée par Pydantic, puis les ids de décor / d'objets contre la bibliothèque de la
    série ; invalide → nouvel essai avec l'erreur renvoyée au LLM
    (`max_retries` du preset, 2 au maximum) → sinon `ScriptError` lisible ;
+   puis les règles de dialogue (`dialogue_rules` du preset, `pipeline/dialogues.py`) : densité, case
+   d'action jamais réduite à son onomatopée, pensée / voix off / narration, place réelle des bulles une
+   fois la page mise en page ; enfreintes → même relance, puis le découpage est gardé avec des
+   avertissements (écran Scénario) ;
 4. enregistrement en Pages + Panels + Bubbles (remplace les pages « story » du chapitre) et
    du résumé du chapitre, puis découpage automatique des pages (étape 2).
 """
@@ -38,7 +42,9 @@ from ..store.models import (
     Panel,
 )
 from ..validation import format_errors
+from .dialogues import DialoguePanel, Reply, check_dialogues, dialogue_text, room_problems
 from .knowledge import AgentKnowledge, KnowledgeBase
+from .layout import LayoutError
 from .library import SeriesLibrary
 from .names import CharacterMatcher
 from .pages import layout_pages
@@ -367,6 +373,7 @@ def render_messages(prompt: PromptPreset, ctx: ScriptContext) -> list[ChatMessag
         "bubble_kinds": ", ".join(BUBBLE_KINDS),
         "intensities": ", ".join(INTENSITIES),
         "rythmes": ", ".join(RYTHMES),
+        "dialogue_rules": dialogue_text(prompt.dialogue_rules),
         "context_json": json.dumps(ctx.as_json(), ensure_ascii=False, indent=2),
         "savoir_faire": (ctx.knowledge.savoir_faire() if ctx.knowledge else "")
         or "(aucun savoir-faire pour cet agent)",
@@ -378,8 +385,29 @@ def render_messages(prompt: PromptPreset, ctx: ScriptContext) -> list[ChatMessag
     ]
 
 
+# --- règles de dialogue ------------------------------------------------------------
+def script_panels(output: ScriptOutput) -> list[DialoguePanel]:
+    """Cases de la réponse du LLM, vues par les règles de dialogue."""
+    return [
+        DialoguePanel(
+            page=p,
+            index=i,
+            panels_on_page=len(page.panels),
+            characters=list(panel.characters),
+            importance=panel.importance,
+            intensity=panel.intensity,
+            replies=[Reply(d.kind, d.text, d.speaker) for d in panel.dialogues],
+            sfx=[fx.text for fx in panel.sfx],
+        )
+        for p, page in enumerate(output.pages, start=1)
+        for i, panel in enumerate(page.panels, start=1)
+    ]
+
+
 # --- appel du LLM avec relances -------------------------------------------------
 Progress = Callable[[int, str], None]
+# Contrôle supplémentaire d'une réponse valide (place réelle des bulles) : problèmes lisibles, [] si rien.
+Check = Callable[[ScriptOutput], list[str]]
 
 
 @dataclass
@@ -387,17 +415,25 @@ class ScriptRun:
     output: ScriptOutput
     attempts: int
     messages: list[ChatMessage]
+    # Règles de dialogue encore enfreintes après les relances (découpage gardé, avertissements).
+    warnings: list[str] = field(default_factory=list)
 
 
-def run_script(llm: LLMProvider, prompt: PromptPreset, ctx: ScriptContext, progress: Progress) -> ScriptRun:
+def run_script(
+    llm: LLMProvider, prompt: PromptPreset, ctx: ScriptContext, progress: Progress, check: Check | None = None
+) -> ScriptRun:
     messages = render_messages(prompt, ctx)
     total = 1 + prompt.max_retries
     last_error = ""
+    # Dernière réponse valide qui n'enfreint que les règles de dialogue : gardée si les relances échouent.
+    fallback: ScriptRun | None = None
     for attempt in range(1, total + 1):
         progress(10 + (attempt - 1) * 25, f"Écriture du découpage par le LLM (essai {attempt}/{total})…")
         try:
             result = llm.complete(messages, json_mode=True, temperature=prompt.temperature)
         except LLMError as exc:
+            if fallback is not None and (not exc.retryable or attempt == total):
+                return fallback  # relance des dialogues sans réponse : on garde le découpage valide
             if not exc.retryable or attempt == total:
                 raise ScriptError(f"Le LLM n'a pas pu répondre : {exc}") from exc
             last_error = str(exc)
@@ -405,6 +441,12 @@ def run_script(llm: LLMProvider, prompt: PromptPreset, ctx: ScriptContext, progr
             continue
         try:
             output = parse_script(result.text, ctx.library)
+            problems = check_dialogues(script_panels(output), prompt.dialogue_rules)
+            if check is not None:
+                problems += check(output)
+            if problems:
+                fallback = ScriptRun(output=output, attempts=attempt, messages=messages, warnings=problems)
+                raise ScriptValidationError("dialogues à revoir : " + " ; ".join(problems[:12]))
         except ScriptValidationError as exc:
             last_error = str(exc)
             if attempt < total:
@@ -413,6 +455,8 @@ def run_script(llm: LLMProvider, prompt: PromptPreset, ctx: ScriptContext, progr
                 messages = [*messages, ChatMessage("assistant", result.text[:20000]), ChatMessage("user", retry)]
             continue
         return ScriptRun(output=output, attempts=attempt, messages=messages)
+    if fallback is not None:
+        return fallback
     raise ScriptError(f"Le LLM a renvoyé un découpage invalide {total} fois de suite. Dernière erreur : {last_error}")
 
 
@@ -528,8 +572,27 @@ def script_job(
             if ctx.knowledge is not None:
                 record_run(session, chapter, ctx.knowledge, job_id=job_id, model=getattr(llm, "model", llm.name))
                 session.commit()
+        rules = prompt.dialogue_rules
+
+        def room(output: ScriptOutput) -> list[str]:
+            """Place réelle : découpage enregistré et mis en page à blanc (annulé), bulles lettrées."""
+            if rules is None or not rules.check_room:
+                return []
+            with db.session_scope() as session:
+                chapter = session.get(Chapter, chapter_id)
+                if chapter is None:
+                    return []
+                try:
+                    pages = save_script(session, chapter, output)
+                    layout_pages(presets, pages)
+                    return room_problems(presets, pages)
+                except LayoutError:
+                    return []  # l'erreur de mise en page sera signalée à l'enregistrement
+                finally:
+                    session.rollback()
+
         # Pas de session ouverte pendant l'appel au LLM (qui peut durer plusieurs minutes).
-        run = run_script(llm, prompt, ctx, progress)
+        run = run_script(llm, prompt, ctx, progress, room)
         # (aucun rapport de progression dans la transaction d'écriture : SQLite n'a qu'un écrivain)
         progress(85, "Enregistrement des pages, cases et bulles, puis mise en page automatique…")
         with db.session_scope() as session:
@@ -541,6 +604,9 @@ def script_job(
             session.commit()
             n_panels = sum(len(p.panels) for p in pages)
         tries = f" en {run.attempts} essais" if run.attempts > 1 else ""
+        if run.warnings:
+            n = len(run.warnings)
+            tries += f", avec {n} avertissement{'s' if n > 1 else ''} de dialogues"
         return f"{len(pages)} pages, {n_panels} cases{tries}"
 
     return run

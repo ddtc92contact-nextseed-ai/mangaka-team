@@ -590,6 +590,10 @@ class BubbleZoneSettings(_Strict):
     full_at_chars: int = Field(default=240, ge=1)
     width_fraction: float = Field(default=0.55, gt=0, le=1)
     max_height_fraction: float = Field(default=0.60, gt=0, le=1)
+    # Surface absolue que demandent les bulles (mm², taille du lettrage) : chaque bulle + chaque caractère.
+    # La zone vaut au moins cette surface (bornée à max_fraction) ; 0 = surface en fraction de la case seulement.
+    bubble_mm2: float = Field(default=0, ge=0)
+    char_mm2: float = Field(default=0, ge=0)
 
     @model_validator(mode="after")
     def _check(self) -> BubbleZoneSettings:
@@ -1371,6 +1375,60 @@ class VarietyRules(_Strict):
     wide_plans: list[str] = Field(default_factory=lambda: ["plan large", "plan d'ensemble"])
 
 
+class DialogueRoom(_Strict):
+    """Répliques au plus dans une case d'une page d'au plus `max_panels` cases (place des bulles)."""
+
+    max_panels: int = Field(ge=1, le=9)
+    replies: int = Field(ge=0, le=12)
+
+
+class DialogueRules(_Strict):
+    """Densité et variété des dialogues imposées au scénariste (`dialogue_rules` de prompts/script.yaml,
+    vérifiées par pipeline/dialogues.py `check_dialogues`).
+
+    Une règle enfreinte relance l'agent avec l'erreur ; après les relances, le découpage est gardé avec un
+    avertissement visible dans l'écran Scénario. Les onomatopées (`sfx`) ne comptent jamais comme répliques.
+    """
+
+    # Répliques visées dans chaque case où un personnage présent peut parler (sans dépasser la place)…
+    target_per_panel: int = Field(default=2, ge=0, le=6)
+    # …et répliques par case au moins sur le chapitre (bornées par la place disponible ; 0 = pas d'exigence).
+    min_per_panel: float = Field(default=1.3, ge=0, le=6)
+    # Brièveté : mots au plus par réplique, et en moyenne sur le chapitre.
+    max_words: int = Field(default=12, ge=1, le=100)
+    max_mean_words: float = Field(default=7, ge=1, le=100)
+    # Case d'action ou de combat (intensité de `action_intensities`, ou une onomatopée) : au moins une parole
+    # d'un personnage présent (cri, ordre, réaction) en plus de l'onomatopée.
+    action_needs_voice: bool = True
+    action_intensities: list[str] = Field(default_factory=lambda: ["choc"])
+    # Au moins une réplique de ces types par chapitre (pensée, voix off, narration) ; false = l'auteur s'en passe.
+    require_inner_voice: bool = True
+    inner_voice_kinds: list[str] = Field(default_factory=lambda: ["thought", "off", "narration"])
+    # Place des bulles : répliques au plus par case selon le nombre de cases de la page (première ligne dont
+    # `max_panels` couvre la page) ; une case forte (importance 3) en reçoit `big_panel_bonus` de plus.
+    room: list[DialogueRoom] = Field(default_factory=list)
+    big_panel_bonus: int = Field(default=1, ge=0, le=6)
+    # Place réelle : après la mise en page, chaque bulle doit tenir dans la zone de bulles de sa case
+    # (lettrage simulé) ; sinon relance, puis avertissement.
+    check_room: bool = True
+
+    @field_validator("inner_voice_kinds")
+    @classmethod
+    def _kinds(cls, v: list[str]) -> list[str]:
+        allowed = ("speech", "thought", "shout", "narration", "off")
+        bad = [k for k in v if k not in allowed]
+        if bad:
+            raise ValueError(f"type de réplique inconnu : {', '.join(bad)} (parmi {', '.join(allowed)})")
+        return v
+
+    def room_for(self, panels_on_page: int, importance: int = 2) -> int | None:
+        """Répliques au plus dans une case (None = pas de limite)."""
+        rule = next((r for r in sorted(self.room, key=lambda r: r.max_panels) if panels_on_page <= r.max_panels), None)
+        if rule is None:
+            return None
+        return rule.replies + (self.big_panel_bonus if importance >= 3 else 0)
+
+
 class PromptPreset(_Strict):
     """Gabarits `string.Template` ($variable) d'une étape LLM."""
 
@@ -1392,6 +1450,8 @@ class PromptPreset(_Strict):
     max_words: int | None = Field(default=None, ge=10, le=1000)
     # Règles de variété de la direction artistique (prompts/direction-artistique.yaml).
     variety_rules: VarietyRules | None = None
+    # Densité et variété des dialogues du scénariste (prompts/script.yaml).
+    dialogue_rules: DialogueRules | None = None
 
     @model_validator(mode="after")
     def _check_words(self) -> PromptPreset:
