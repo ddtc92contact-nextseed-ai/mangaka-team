@@ -129,7 +129,7 @@ export function CastBlock({ detail, onSaved }: { detail: PanelDetail; onSaved: (
           </Select>
           {viewpoint && (
             <p className="text-zinc-500">
-              {viewpointSummary(viewpoint.mode, viewpoint.spectators)} · {VIEWPOINT_SOURCES[viewpoint.source] ?? viewpoint.source}
+              {viewpointSummary(viewpoint.mode, viewpoint.spectators, cast)} · {VIEWPOINT_SOURCES[viewpoint.source] ?? viewpoint.source}
             </p>
           )}
         </div>

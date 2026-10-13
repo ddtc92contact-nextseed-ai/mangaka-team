@@ -54,11 +54,25 @@ export function viewpointSpectators(current: { spectators: string[] } | null | u
   return current?.spectators.length ? current.spectators : hints;
 }
 
-/** Phrase courte de l'inspecteur : « Vue subjective — Seku, Angus hors cadre ». */
-export function viewpointSummary(mode: ViewpointMode, spectators: string[]): string {
-  const who = spectators.join(", ");
-  if (!who) return VIEWPOINT_LABELS[mode];
-  return mode === "subjective"
-    ? `${VIEWPOINT_LABELS[mode]} — ${who} hors cadre`
-    : `${VIEWPOINT_LABELS[mode]} — ${who} à l'image`;
+/**
+ * Phrase courte de l'inspecteur : « Vue subjective — Seku, Angus hors cadre ». Avec le casting de la case,
+ * chaque spectateur est rangé là où il est vraiment (après une bascule partielle, l'un peut être à l'image
+ * et l'autre encore hors cadre) ; sans casting, on suit le mode.
+ */
+export function viewpointSummary(mode: ViewpointMode, spectators: string[], cast?: Cast): string {
+  if (!spectators.length) return VIEWPOINT_LABELS[mode];
+  const inFrame = new Set((cast?.characters ?? []).map(nameKey));
+  const offscreen = new Set((cast?.offscreen ?? []).map(nameKey));
+  const shown: string[] = [];
+  const hidden: string[] = [];
+  for (const s of spectators) {
+    const key = nameKey(s);
+    const isShown = inFrame.has(key) ? true : offscreen.has(key) ? false : mode === "reaction";
+    (isShown ? shown : hidden).push(s);
+  }
+  const parts = [
+    shown.length ? `${shown.join(", ")} à l'image` : "",
+    hidden.length ? `${hidden.join(", ")} hors cadre` : "",
+  ].filter(Boolean);
+  return `${VIEWPOINT_LABELS[mode]} — ${parts.join(", ")}`;
 }

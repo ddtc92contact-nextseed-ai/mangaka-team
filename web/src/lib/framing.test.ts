@@ -27,4 +27,14 @@ test("point de vue : spectateurs du choix, sinon ceux repérés ; résumé en fr
   assert.deepEqual(viewpointSpectators({ spectators: ["Seku"] }, ["Seku", "Angus"]), ["Seku"]);
   assert.equal(viewpointSummary("subjective", ["Seku", "Angus"]), "Vue subjective — Seku, Angus hors cadre");
   assert.equal(viewpointSummary("reaction", ["Seku"]), "Plan de réaction — Seku à l'image");
+  // Bascule partielle : Seku remis dans l'image, Angus encore hors cadre.
+  const cast = { characters: ["Trafiquant 1", "Seku"], offscreen: ["Angus"] };
+  assert.equal(
+    viewpointSummary("reaction", ["Seku", "Angus"], cast),
+    "Plan de réaction — Seku à l'image, Angus hors cadre",
+  );
+  assert.equal(
+    viewpointSummary("subjective", ["Seku", "Angus"], { characters: [], offscreen: ["seku", "Angus"] }),
+    "Vue subjective — Seku, Angus hors cadre",
+  );
 });
