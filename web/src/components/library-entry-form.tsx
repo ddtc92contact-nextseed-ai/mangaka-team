@@ -117,13 +117,13 @@ export function LibraryEntryForm({
           label="Autres noms (alias)"
           htmlFor="aliases"
           error={errors.aliases ?? Object.entries(errors).find(([f]) => f.startsWith("aliases."))?.[1]}
-          hint="Séparés par des virgules. Le scénario qui écrit l’un de ces noms (« le vieux maître ») désigne cette fiche : ses références, sa description et son LoRA servent à la case."
+          hint="Séparés par des virgules. Le scénario qui écrit l’un de ces noms (« le vieux maître ») désigne cette fiche : ses références, sa description et son LoRA servent à la case. Un nom générique partagé par plusieurs fiches (« trafiquant » pour « trafiquant 1 » et « trafiquant 2 ») se met en alias d’une seule : le choix devient sûr, sans alerte « ambigu » dans l’atelier."
         >
           <Input
             id="aliases"
             value={aliases}
             onChange={(e) => setAliases(e.target.value)}
-            placeholder="le vieux maître, Maître Kaï"
+            placeholder="le vieux maître, Maître Kaï, trafiquant"
           />
         </Field>
       )}

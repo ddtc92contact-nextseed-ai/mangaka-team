@@ -11,6 +11,7 @@ import { DpiBadge } from "@/components/print-dpi";
 import { ProductionLink } from "@/components/production-link";
 import { useQueue } from "@/components/queue";
 import { useToast } from "@/components/toast";
+import { NameNotes } from "@/components/name-notes";
 import { UnmatchedNames } from "@/components/unmatched-names";
 import { Alert, Button, Field, Input, Loading, ProgressBar, Select, Textarea } from "@/components/ui";
 import {
@@ -348,6 +349,16 @@ export function PanelInspector({
               characters={characters.data ?? []}
               onLinked={() => {
                 detail.reload();
+                characters.reload();
+                onChanged();
+              }}
+            />
+            <NameNotes
+              detail={d}
+              characters={characters.data ?? []}
+              onChanged={(next) => {
+                if (next) detail.setData(next);
+                else detail.reload();
                 characters.reload();
                 onChanged();
               }}
