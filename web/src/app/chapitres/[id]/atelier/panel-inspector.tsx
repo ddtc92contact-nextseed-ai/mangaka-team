@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { AnnotationBar } from "@/components/annotation";
+import { VersionJournal } from "@/components/journal";
 import { TierRestriction } from "@/components/camera-angle";
 import { InfoTip } from "@/components/info-tip";
 import { NegativeBadge } from "@/components/negative-badge";
@@ -32,6 +33,7 @@ import { useJob } from "@/lib/jobs";
 import { LIBRARY_KINDS } from "@/lib/library";
 import { describeUsedReference, droppedReferencesNote } from "@/lib/used-references";
 import { useChapter } from "../chapter-context";
+import { ABBlock } from "./ab-block";
 import { ChangeAngleBlock } from "./change-angle";
 import { CompositionBlock, LockBadge } from "./composition-block";
 import { CropBlock } from "./crop-editor";
@@ -625,6 +627,25 @@ export function PanelInspector({
               setNotice(message);
             }}
           />
+          <ABBlock
+            panelId={panelId}
+            prompt={promptValue}
+            presets={presets}
+            refreshKey={refreshKey}
+            busy={busy}
+            run={run}
+            onQueued={(message) => {
+              refresh();
+              onChanged();
+              detail.reload();
+              setGenerated(true);
+              setNotice(message);
+            }}
+            onChosen={() => {
+              onChanged();
+              detail.reload();
+            }}
+          />
           {series.anime_consistency && series.anime_consistency_problem && (
             <p className="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400" data-testid="anime-consistency-restriction">
               Cohérence anime de la série :
@@ -644,6 +665,7 @@ export function PanelInspector({
             onCancel={(id) => cancelJob(id)}
           />
 
+          {qcImage && <VersionJournal imageId={qcImage.id} version={qcImage.version} keyboard />}
           {qcImage && <AnnotationBar image={qcImage} onChange={annotated} keyboard onPrev={onPrev} onNext={onNext} />}
 
           <PanelQC

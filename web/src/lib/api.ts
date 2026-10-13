@@ -2106,6 +2106,146 @@ export interface PanelKnowledge {
   warning: string | null;
 }
 
+// --- Traçabilité : journal des générations, verdicts, A/B, statistiques -----------------------
+export type Verdict = "validated" | "rejected" | "regenerated" | "edited";
+export type Judge = "validated" | "rejected";
+export type MeasureKey = "dark_pct" | "black_pct" | "white_pct" | "saturation_pct" | "line_density_pct";
+
+export interface JournalSettings {
+  /** Raisons d'un rejet (liste fermée de presets/journal.yaml), dans l'ordre des raccourcis 1 à 9. */
+  reasons: { id: string; label: string }[];
+  /** Mesures de tonalité et cible (presets/qc_tonality.yaml ; null : pas de cible). */
+  measures: { key: MeasureKey; label: string; target: number | null }[];
+  tonality_reference: string;
+  dark_below: number;
+  black_below: number;
+  white_from: number;
+  /** Sous ce nombre de cases jugées : « peu de données ». */
+  low_data_below: number;
+  kinds: Record<string, string>;
+  verdicts: Record<Verdict, string>;
+}
+
+export interface GenerationEvent {
+  id: number;
+  created_at: string;
+  verdict: Verdict;
+  action: string;
+  reason: string | null;
+  reason_label: string | null;
+  note: string;
+}
+
+/** Une ligne du journal : la génération qui a produit une image (jamais réécrite). */
+export interface GenerationLog {
+  id: number;
+  created_at: string;
+  kind: string;
+  status: "succeeded" | "failed" | "cancelled";
+  error: string | null;
+  panel_id: number | null;
+  image_id: number | null;
+  version: number | null;
+  preset: string | null;
+  tier: string | null;
+  model: string | null;
+  steps: number | null;
+  cfg: number | null;
+  seed: number | null;
+  width: number | null;
+  height: number | null;
+  denoise: number | null;
+  positive_prompt: string;
+  negative_prompt: string;
+  positive_chars: number;
+  positive_words: number;
+  negative_chars: number;
+  negative_words: number;
+  prompt_source: string | null;
+  writer_hash: string | null;
+  references: Record<string, unknown>[];
+  loras: { name: string; weight: number; source: string }[];
+  knowledge: { document_id: number; title: string; collection: string; tokens: number }[];
+  framing: string | null;
+  angle: string | null;
+  mood: string | null;
+  finish: string | null;
+  duration_ms: number | null;
+  measures: Partial<Record<MeasureKey, number | null>>;
+  /** Valeur − cible, en points (null : pas de cible). */
+  gaps: Partial<Record<MeasureKey, number | null>>;
+  ab_group: string | null;
+  ab_arm: "A" | "B" | null;
+  ab_mode: ABMode | null;
+  /** Dernier verdict « jugé » de l'auteur. */
+  verdict: Judge | null;
+  events: GenerationEvent[];
+}
+
+export interface VerdictInput {
+  verdict: Judge;
+  reason?: string | null;
+  note?: string;
+}
+
+export type ABMode = "prompt" | "tier" | "cfg";
+
+export interface ABInput {
+  mode: ABMode;
+  prompt_b?: string;
+  presets?: [string, string];
+  cfgs?: [number, number];
+  seed?: number | null;
+}
+
+export interface ABGroup {
+  group: string;
+  mode: ABMode | null;
+  seed: number | null;
+  /** Un bras au moins est encore en file ou en cours. */
+  pending: boolean;
+  arms: { arm: "A" | "B"; log: GenerationLog | null; image: PanelImage | null }[];
+  choice: "A" | "B" | null;
+}
+
+export interface StatsRow {
+  generations: number;
+  judged: number;
+  validated: number;
+  rejected: number;
+  /** % de gardées parmi les jugées (null : aucune jugée). */
+  validation_rate: number | null;
+  regenerated: number;
+  edited: number;
+  low_data: boolean;
+  means: Partial<Record<MeasureKey, number | null>>;
+}
+
+export interface Stats {
+  total: StatsRow;
+  low_data: boolean;
+  low_data_below: number;
+  breakdowns: { key: string; label: string; rows: (StatsRow & { value: string })[] }[];
+}
+
+export interface StatsFilter {
+  project_id?: number | null;
+  chapter_id?: number | null;
+  date_from?: string | null;
+  date_to?: string | null;
+  tier?: string | null;
+  kind?: string | null;
+}
+
+export function statsQuery(filter: StatsFilter, extra: Record<string, string> = {}): string {
+  const q = new URLSearchParams(extra);
+  for (const [k, v] of Object.entries(filter)) {
+    if (v !== null && v !== undefined && v !== "") q.set(k, String(v));
+  }
+  const s = q.toString();
+  return s ? `?${s}` : "";
+}
+
 export const api = {
   health: async () => {
     const health = await request<Health>("/health");
@@ -2350,6 +2490,19 @@ export const api = {
   applyBenchThresholds: (id: number, confirm: boolean) =>
     request<BenchApplyResult>(`/qc/bench/runs/${id}/apply`, json("POST", { confirm })),
   benchExportUrl: (id: number, format: "json" | "csv") => engineUrl(`/qc/bench/runs/${id}/export?format=${format}`),
+
+  journalSettings: () => request<JournalSettings>("/journal/settings"),
+  imageJournal: (imageId: number) => request<{ log: GenerationLog | null }>(`/panel-images/${imageId}/journal`),
+  judgeImage: (imageId: number, body: VerdictInput) =>
+    request<{ log: GenerationLog | null }>(`/panel-images/${imageId}/verdict`, json("POST", body)),
+  startAB: (panelId: number, body: ABInput) =>
+    request<{ group: string; seed: number; jobs: Job[] }>(`/panels/${panelId}/ab`, json("POST", body)),
+  listAB: (panelId: number) => request<ABGroup[]>(`/panels/${panelId}/ab`),
+  chooseAB: (group: string, body: { winner: "A" | "B"; reason?: string | null; note?: string; select?: boolean }) =>
+    request<ABGroup>(`/ab/${encodeURIComponent(group)}/choice`, json("POST", body)),
+  stats: (filter: StatsFilter = {}) => request<Stats>(`/stats${statsQuery(filter)}`),
+  statsExportUrl: (format: "csv" | "json", filter: StatsFilter = {}) =>
+    engineUrl(`/stats/export${statsQuery(filter, { format })}`),
 
   listAgents: () => request<AgentSummary[]>("/agents"),
   getAgent: (id: string, projectId?: number | null) => request<AgentDetail>(`/agents/${id}${agentScope(projectId)}`),
