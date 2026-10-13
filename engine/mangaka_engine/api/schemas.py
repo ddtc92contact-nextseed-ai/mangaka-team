@@ -839,6 +839,14 @@ class PanelDetailOut(BaseModel):
     decor: LibraryRef | None = None
     objets: list[LibraryRef] = Field(default_factory=list)
     shot_type: str | None
+    # Cadrage suivi par la génération (prompt, fiches de savoir-faire, vue de référence) : plan et angle, et
+    # leur source — « direction » (direction artistique appliquée), « dialogue » (dialogue avec l'IA),
+    # « scenario » (repli sur le plan du scénario, sans direction appliquée : `framing_note` dit pourquoi),
+    # « none » (aucun plan).
+    framing_plan: str | None = None
+    framing_angle: str | None = None
+    framing_source: Literal["direction", "dialogue", "scenario", "none"] = "none"
+    framing_note: str | None = None
     state: str
     bbox: dict[str, int] | None
     final_prompt: str | None

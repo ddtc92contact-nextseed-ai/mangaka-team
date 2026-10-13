@@ -69,6 +69,7 @@ from .generation import (
     composition_params,
     enqueue_panel,
     panel_characters,
+    panel_plan,
     refresh_states,
 )
 from .generation import QC_STEP as STEP
@@ -708,7 +709,7 @@ class QCExecutor:
             version=img.version,
             data=path.read_bytes(),
             description=panel.description,
-            shot_type=panel.shot_type,
+            shot_type=panel_plan(panel) or None,  # plan suivi par la génération (direction appliquée)
             character_names=list(panel.character_names or []),
             references=references,
             without_references=without,

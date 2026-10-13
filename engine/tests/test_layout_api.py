@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 from collections.abc import Callable, Iterator
 from typing import Any
 
@@ -261,6 +262,11 @@ def test_changing_the_shot_of_an_inset_panel_recomputes_the_page(
     monkeypatch.setattr("mangaka_engine.pipeline.pages.secrets.randbelow", lambda _n: next(seeds))
     _, pages = _scripted(c, layout_style="dynamique")
     chapter_id = pages[0]["chapter_id"]
+    # Le scénario ne cadre plus : des plans posés à la main (sinon par la direction artistique appliquée).
+    shots = itertools.cycle(["gros plan", "plan rapproché", "plan large"])
+    pages = c.put(
+        f"/chapters/{chapter_id}/pages", json=_breakdown(pages, lambda pa: {**pa, "shot_type": next(shots)})
+    ).json()
     found = None
     for _ in range(300):  # graines successives : la première page avec une incrustation tirée
         for page in [p for p in pages if len(p["panels"]) >= 3]:

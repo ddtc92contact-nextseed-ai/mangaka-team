@@ -744,8 +744,10 @@ class PageDirection(TimestampMixin, Base):
     `values` : choix courants (proposition de l'agent, corrigée par l'auteur) — rythme, style, gabarit,
     page choc, justification, et par case (repérée par `panel_id`) intensité, plan, angle, cadre,
     ambiance, onomatopées. `locks` : champs modifiés par l'auteur, gardés quand l'agent repropose.
-    `applied` : copie de `values` au dernier « Appliquer à la mise en page » (lue par la mise en page et
-    le prompt image) ; None tant que rien n'est appliqué.
+    `applied` : copie de `values` à la dernière application (lue par la mise en page et le prompt image),
+    plus les plans du scénario d'avant la première (`script_shots`) ; None tant que rien n'est appliqué.
+    `status` : proposed | applied | rejected (voir `pipeline/art_direction.STATUSES` ; « accepted » :
+    ancienne validation).
     """
 
     __tablename__ = "page_directions"
@@ -756,7 +758,7 @@ class PageDirection(TimestampMixin, Base):
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     values: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     locks: Mapped[list[str]] = mapped_column(JSON, default=list)
-    status: Mapped[str] = mapped_column(String(20), default="proposed")  # proposed | accepted
+    status: Mapped[str] = mapped_column(String(20), default="proposed")  # proposed | applied | rejected
     applied: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
     applied_at: Mapped[datetime | None] = mapped_column(default=None)
     variant: Mapped[int] = mapped_column(Integer, default=0)  # « Proposer autre chose » : nombre de relances

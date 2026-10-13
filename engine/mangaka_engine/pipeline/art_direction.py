@@ -26,10 +26,14 @@ relance l'agent avec l'erreur ; après les relances, la proposition est gardée 
 page (`warnings`), visible dans l'écran Direction artistique.
 
 Les choix sont stockés par page (`PageDirection`). Un champ modifié par l'auteur est verrouillé : une
-nouvelle proposition le garde tant qu'il n'est pas déverrouillé. « Appliquer » recopie les choix dans
+nouvelle proposition le garde tant qu'il n'est pas déverrouillé. La direction s'applique quand l'auteur
+valide la page, sur « Appliquer », et d'office au lancement d'une génération (`apply_before_generation`)
+— sauf une page que l'auteur a rejetée. Appliquer recopie les choix dans
 ce que lit la grammaire de mise en page (rythme et style de la page, intensité des cases, gabarit
-suggéré et page choc) et dans le prompt image (plan, angle, ambiance), puis ne recalcule que les
-pages dont la mise en page change. Le cadre devient une option de cadre de la case (`Panel.frame` :
+suggéré et page choc), inscrit le plan dans la case (`Panel.shot_type`) et donne au prompt image, aux
+fiches de savoir-faire et au choix de la vue de référence le plan, l'angle, l'action et l'ambiance de la
+direction ; le plan du scénario ne sert plus que de repli sans direction appliquée. Seules les
+pages dont la mise en page change sont recalculées. Le cadre devient une option de cadre de la case (`Panel.frame` :
 sans bord, débordement sur les cases voisines — seulement sur une page choc ou une case choc —,
 incrustation) et les onomatopées des bulles `sfx` du lettrage — sans toucher
 à une option ou une onomatopée réglée par l'auteur. Un décor ou des objets proposés remplacent ceux
@@ -113,6 +117,16 @@ SfxIntensityName = Literal["léger", "moyen", "fort"]
 PAGE_FIELDS = ("rythme", "layout_style", "template", "page_choc")
 PANEL_FIELDS = ("intensity", "plan", "angle", "cadre", "ambiance", "action", "sfx")
 MAX_SFX = 4
+
+# État d'une direction de page (`PageDirection.status`) : proposée par l'agent, appliquée aux cases (à la
+# validation de l'auteur, sur « Appliquer » ou d'office au lancement d'une génération), rejetée par
+# l'auteur (jamais appliquée d'office : les cases gardent le plan du scénario). « accepted » : ancienne
+# validation sans application, traitée comme une page validée.
+STATUSES = ("proposed", "applied", "rejected")
+KEPT_STATUSES = ("applied", "accepted")  # pages qu'une proposition de tout le chapitre ne remplace pas
+# Plans du scénario d'avant la première application (id de case → plan), gardés dans `PageDirection.applied`
+# pour les rendre si l'auteur rejette ensuite la direction.
+SCRIPT_SHOTS = "script_shots"
 
 
 def _norm(value: Any) -> Any:
@@ -863,6 +877,20 @@ def is_out_of_date(direction: PageDirection, page: Page) -> bool:
     return ids != [p.id for p in page.panels]
 
 
+def is_pending(direction: PageDirection) -> bool:
+    """Choix pas encore appliqués aux cases (jamais appliqués, ou modifiés depuis la dernière application)."""
+    if direction.applied is None:
+        return True
+    return {k: v for k, v in direction.applied.items() if k != SCRIPT_SHOTS} != direction.values
+
+
+def to_apply_at_generation(page: Page) -> bool:
+    """La direction de la page s'applique d'office au lancement d'une génération : proposée (ou modifiée
+    depuis son application), ni rejetée par l'auteur, ni dépassée par un scénario modifié."""
+    d = page.direction
+    return d is not None and bool(d.values) and d.status != "rejected" and not is_out_of_date(d, page) and is_pending(d)
+
+
 def merge_locked(new: dict[str, Any], old: dict[str, Any] | None, locks: Sequence[str]) -> dict[str, Any]:
     """Nouvelle proposition où chaque champ verrouillé garde la valeur de l'auteur."""
     if not old or not locks:
@@ -892,8 +920,9 @@ def save_direction(
 ) -> list[int]:
     """Enregistre la proposition ; renvoie les numéros des pages modifiées.
 
-    Une page acceptée par l'auteur n'est pas remplacée par une proposition de tout le chapitre (seul
-    « Proposer autre chose » sur cette page la relance). Les champs verrouillés sont gardés. Les règles
+    Une page validée ou appliquée n'est pas remplacée par une proposition de tout le chapitre (seul
+    « Proposer autre chose » sur cette page la relance) ; une page rejetée reçoit la nouvelle proposition
+    et redevient « proposée ». Les champs verrouillés sont gardés. Les règles
     de variété encore enfreintes (après verrous) sont notées sur chaque page (`warnings`).
     """
     by_number = {dp.page: dp for dp in output.pages}
@@ -907,15 +936,16 @@ def save_direction(
         if d is None:
             d = PageDirection(chapter_id=chapter.id, project_id=chapter.project_id, values={}, locks=[])
             page.direction = d
-        elif d.status == "accepted" and not single_page:
+        elif d.status in KEPT_STATUSES and not single_page:
             continue
         # Cases supprimées depuis : leurs verrous disparaissent.
         ids = {str(p.id) for p in page.panels}
         d.locks = [k for k in d.locks or [] if "." not in k or k.split(".", 1)[0] in ids]
         d.values = merge_locked(to_values(dp, page), d.values, d.locks)
+        if single_page or d.status == "rejected":
+            d.status = "proposed"  # nouvelle proposition : appliquée à la prochaine génération, sauf rejet
         if single_page:
             d.variant = (d.variant or 0) + 1
-            d.status = "proposed"
         changed.append(page.number)
         saved.append(page)
     for page in saved:
@@ -1049,14 +1079,25 @@ class ApplyResult:
 
 
 def apply_direction(
-    presets: PresetRegistry, pages: Sequence[Page], library: SeriesLibrary | None = None
+    presets: PresetRegistry,
+    pages: Sequence[Page],
+    library: SeriesLibrary | None = None,
+    *,
+    skip_rejected: bool = False,
 ) -> ApplyResult:
-    """Recopie la direction artistique dans les champs lus par la mise en page, puis recalcule
-    uniquement les pages dont la mise en page change."""
+    """Recopie la direction artistique dans les cases et les champs lus par la mise en page, puis recalcule
+    uniquement les pages dont la mise en page change. Le plan de chaque case devient son plan inscrit
+    (`Panel.shot_type`) ; l'angle, l'action et l'ambiance sont lus dans la direction appliquée
+    (`applied_panel_direction`). Un plan retouché par l'auteur est un choix verrouillé de la direction
+    (écran Direction artistique, ou `keep_author_plan` depuis l'écran Scénario) : il est réappliqué tel quel.
+    La page passe « appliquée ». `skip_rejected` : les pages rejetées par l'auteur sont laissées de côté."""
     result = ApplyResult()
     for page in sorted(pages, key=lambda p: p.number):
         d = page.direction
         if d is None or not d.values:
+            continue
+        if skip_rejected and d.status == "rejected":
+            result.skipped.append({"number": page.number, "reason": "direction rejetée par l'auteur"})
             continue
         if is_out_of_date(d, page):
             result.skipped.append(
@@ -1065,6 +1106,7 @@ def apply_direction(
             continue
         v = d.values
         previous = d.applied or {}
+        script_shots = dict(previous.get(SCRIPT_SHOTS) or {})
         page.rythme = RYTHME_TO_LAYOUT.get(v.get("rythme") or "", page.rythme)
         style = v.get("layout_style")
         if style and style in presets.layout_styles:
@@ -1080,6 +1122,10 @@ def apply_direction(
                 panel.intensity = intensities[panel.id]
             choice = by_panel.get(panel.id)
             if choice is not None:
+                plan = choice.get("plan")
+                if isinstance(plan, str) and plan.strip():
+                    script_shots.setdefault(str(panel.id), panel.shot_type)
+                    panel.shot_type = plan.strip()
                 _apply_cadre(
                     panel,
                     choice.get("cadre"),
@@ -1089,8 +1135,9 @@ def apply_direction(
                 _apply_sfx(panel, choice.get("sfx") or [])
                 if library is not None:
                     _apply_library(panel, choice, before.get(panel.id) or {}, library)
-        d.applied = copy.deepcopy(v)
+        d.applied = {**copy.deepcopy(v), SCRIPT_SHOTS: script_shots}
         d.applied_at = utcnow()
+        d.status = "applied"
         result.applied.append(page.number)
         if page.layout is None or is_stale(page):
             try:
@@ -1100,6 +1147,63 @@ def apply_direction(
                 continue
             result.relaid.append(page.number)
     return result
+
+
+def apply_before_generation(session: Session, presets: PresetRegistry, page: Page) -> bool:
+    """Lancer une génération vaut accord : la direction proposée (ou modifiée depuis son application) de la
+    page est appliquée d'office, sauf si l'auteur l'a rejetée. True si elle vient d'être appliquée."""
+    if not to_apply_at_generation(page):
+        return False
+    library = SeriesLibrary.load(session, page.chapter.project_id)
+    return bool(apply_direction(presets, [page], library).applied)
+
+
+def reject_direction(page: Page) -> PageDirection:
+    """L'auteur ne veut pas de la direction de cette page : elle n'est plus appliquée (ni d'office à la
+    génération) et les cases reprennent le plan du scénario, sauf un plan retouché depuis. Les options de
+    mise en page déjà posées (intensités, cadres, onomatopées) restent jusqu'à la prochaine application."""
+    d = page.direction
+    if d is None or not d.values:
+        raise ArtDirectionError(f"la page {page.number} n'a pas encore de direction artistique : rien à rejeter")
+    applied = d.applied or {}
+    shots = applied.get(SCRIPT_SHOTS) or {}
+    plans = {pa.get("panel_id"): pa.get("plan") for pa in applied.get("panels") or []}
+    for panel in page.panels:
+        key = str(panel.id)
+        if key in shots and panel.shot_type == plans.get(panel.id):
+            panel.shot_type = shots[key]
+    d.applied = None
+    d.applied_at = None
+    d.status = "rejected"
+    return d
+
+
+def keep_author_plan(page: Page, panel_id: int, plan: str) -> None:
+    """Plan d'une case retouché à la main dans l'écran Scénario : devient un choix verrouillé de la direction
+    artistique de la page (gardé par les nouvelles propositions et les applications suivantes) et, si elle
+    est appliquée, le plan appliqué — la génération le suit tout de suite."""
+    d = page.direction
+    if d is None or not d.values:
+        return
+    values = copy.deepcopy(d.values)
+    target = next((pa for pa in values.get("panels") or [] if pa.get("panel_id") == panel_id), None)
+    if target is None:
+        return
+    target["plan"] = plan
+    locks = list(d.locks or [])
+    if f"{panel_id}.plan" not in locks:
+        locks.append(f"{panel_id}.plan")
+    d.locks = locks
+    d.values = values
+    if d.applied:
+        applied = copy.deepcopy(d.applied)
+        for pa in applied.get("panels") or []:
+            if pa.get("panel_id") == panel_id:
+                pa["plan"] = plan
+        shots = applied.get(SCRIPT_SHOTS)
+        if isinstance(shots, dict) and str(panel_id) in shots:
+            shots[str(panel_id)] = plan  # un rejet ultérieur garde le plan de l'auteur
+        d.applied = applied
 
 
 # Cadre de direction artistique → option de cadre de la case (pipeline/layout.py).
@@ -1225,7 +1329,8 @@ def direction_job(
             return f"Nouvelle proposition pour la page {changed[0] if changed else '?'}{tries}"
         kept = len(ctx.pages) - len(changed)
         extra = (
-            f" ({kept} page{'s' if kept > 1 else ''} acceptée{'s' if kept > 1 else ''} gardée{'s' if kept > 1 else ''})"
+            f" ({kept} page{'s' if kept > 1 else ''} appliquée{'s' if kept > 1 else ''} gardée{'s' if kept > 1 else ''} :"
+            " « Proposer autre chose » pour la changer)"
             if kept
             else ""
         )

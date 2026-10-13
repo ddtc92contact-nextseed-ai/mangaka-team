@@ -181,8 +181,9 @@ def test_panel_query_includes_the_art_direction(env: Env) -> None:
         }
         query = panel_query(session, panel, panel_cast(session, panel).characters)
         session.commit()
-    for value in ("gros plan", "plan américain", "contre-plongée", "nuit orageuse", "dégaine son sabre", "Aiko"):
+    for value in ("plan américain", "contre-plongée", "nuit orageuse", "dégaine son sabre", "Aiko"):
         assert value in query
+    assert query.startswith("plan américain ")  # le plan suivi (dialogue) remplace celui du scénario
     assert "plan américain" in _ok(c.get(f"/panels/{pid}/knowledge"))["query"]
 
 
