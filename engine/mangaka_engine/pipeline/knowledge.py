@@ -24,7 +24,7 @@ import json
 import math
 import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import PurePath
 from typing import Any
@@ -193,6 +193,49 @@ def chunk_text(content: str, *, max_tokens: int = 350, min_tokens: int = 40) -> 
     return chunks
 
 
+# Fragment de prompt d'une fiche de pack (« **Prompt (EN).** `…` », « **Prompt (EN), version vivante.** »).
+_PROMPT_EN = re.compile(r"^\W*Prompt \(EN\)")
+
+
+def chunk_fiche(title: str, content: str, *, max_tokens: int = 800, min_tokens: int = 40) -> list[Chunk]:
+    """Une fiche de pack = un passage. Seule une fiche de plus de `max_tokens` est coupée (aux paragraphes) :
+    son fragment « Prompt (EN) » reste alors avec ce qui le suit dans le dernier passage, précédé du titre
+    de la fiche, pour ne jamais être séparé de la fiche qu'il illustre."""
+    body = content.strip()
+    if not body:
+        return []
+    tokens = estimate_tokens(body)
+    if tokens <= max_tokens:
+        return [Chunk(heading="", text=body, tokens=tokens)]
+    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", body) if p.strip()]
+    start = next((i for i, p in enumerate(paragraphs) if _PROMPT_EN.match(p)), None)
+    if start is None:
+        return chunk_text(body, max_tokens=max_tokens, min_tokens=min_tokens)
+    head, tail = paragraphs[:start], paragraphs[start:]
+    # Le dernier passage reprend aussi les paragraphes juste avant le fragment, tant qu'il tient.
+    while head and estimate_tokens("\n\n".join([title, head[-1], *tail])) <= max_tokens:
+        tail.insert(0, head.pop())
+    pieces = chunk_text("\n\n".join(head), max_tokens=max_tokens, min_tokens=min_tokens) if head else []
+    last = "\n\n".join([title, *tail])
+    return [*(Chunk(heading="", text=p.text, tokens=p.tokens) for p in pieces), Chunk("", last, estimate_tokens(last))]
+
+
+def chunk_document(doc: KnowledgeDocument, settings: KnowledgeSettings) -> list[Chunk]:
+    """Passages d'un document : une fiche de pack par passage (`chunk_fiche`), les autres documents découpés
+    aux titres puis aux paragraphes (`chunk_text`)."""
+    chunking = settings.chunking
+    if doc.pack_key:
+        return chunk_fiche(doc.title, doc.content, max_tokens=chunking.fiche_max_tokens, min_tokens=chunking.min_tokens)
+    return chunk_text(doc.content, max_tokens=chunking.max_tokens, min_tokens=chunking.min_tokens)
+
+
+def needs_reindex(doc: KnowledgeDocument, settings: KnowledgeSettings) -> bool:
+    """Passages en base différents du découpage actuel (réglage ou règle de découpage changés)."""
+    return [c.text for c in sorted(doc.chunks, key=lambda c: c.index)] != [
+        c.text for c in chunk_document(doc, settings)
+    ]
+
+
 # --- indexation ------------------------------------------------------------------
 def _to_blob(vector: Sequence[float]) -> bytes:
     return np.asarray(vector, dtype="<f4").tobytes()
@@ -211,7 +254,7 @@ def index_document(
         doc.chunks.remove(chunk)
         session.delete(chunk)
     session.flush()
-    pieces = chunk_text(doc.content, max_tokens=settings.chunking.max_tokens, min_tokens=settings.chunking.min_tokens)
+    pieces = chunk_document(doc, settings)
     doc.token_count = sum(c.tokens for c in pieces)
     doc.index_error = None
     vectors: list[list[float]] | None = None
@@ -257,15 +300,23 @@ class Passage:
     score: float | None = None  # hybride, 0–1 (None : pas de requête)
     vector_score: float | None = None
     keyword_score: float | None = None
-    mode: str = "retrieved"  # retrieved | whole (petite collection injectée entière)
+    # retrieved | whole (petite collection injectée entière) | framing (fiche du plan ou de l'angle de la case)
+    mode: str = "retrieved"
     pack: str | None = None  # pack de savoir-faire livré de la collection (presets/knowledge_packs/)
     pages: list[int] = field(default_factory=list)  # recherche par page : pages pour lesquelles il a été retenu
+    dropped: str | None = None  # écarté comme redondant (raison, en français) ; None : servi
+    # Fiche d'un pack (meta) : type (« shot_scale », « camera_angle »…) et terme de l'appli dont elle est la
+    # fiche de référence (« plan moyen », « en plongée »…). Internes : pas dans `as_dict`.
+    fiche_type: str | None = None
+    framing: str | None = None
 
     def source(self) -> str:
         return " › ".join(p for p in (self.document_title, self.heading) if p)
 
     def as_dict(self, *, excerpt: int | None = None) -> dict[str, Any]:
         out = asdict(self)
+        out.pop("fiche_type")
+        out.pop("framing")
         if excerpt is not None and len(self.text) > excerpt:
             out["text"] = self.text[:excerpt].rstrip() + "…"
         for key in ("score", "vector_score", "keyword_score"):
@@ -342,7 +393,13 @@ def rank(
     if not ids:
         return Ranking([])
     rows = session.execute(
-        select(KnowledgeChunk, KnowledgeDocument.title, KnowledgeCollection.name, KnowledgeCollection.pack)
+        select(
+            KnowledgeChunk,
+            KnowledgeDocument.title,
+            KnowledgeCollection.name,
+            KnowledgeCollection.pack,
+            KnowledgeDocument.meta,
+        )
         .join(KnowledgeDocument, KnowledgeChunk.document_id == KnowledgeDocument.id)
         .join(KnowledgeCollection, KnowledgeChunk.collection_id == KnowledgeCollection.id)
         .where(KnowledgeChunk.collection_id.in_(ids))
@@ -353,8 +410,10 @@ def rank(
     kw = _keyword_scores(session, query, {c.id for c in chunks}) if query.strip() else {}
     wv, wk = settings.retrieval.vector_weight, settings.retrieval.keyword_weight
     passages = []
-    for chunk, title, name, pack in rows:
+    for chunk, title, name, pack, meta in rows:
         v, k = vec.get(chunk.id), kw.get(chunk.id, 0.0)
+        meta = meta if pack and isinstance(meta, dict) else {}
+        fiche_type = meta.get("type") if isinstance(meta.get("type"), str) else None
         score = (wv * (v or 0.0) + wk * k) / (wv + wk) if query.strip() else None
         passages.append(
             Passage(
@@ -370,6 +429,8 @@ def rank(
                 vector_score=v,
                 keyword_score=k if query.strip() else None,
                 pack=pack,
+                fiche_type=fiche_type,
+                framing=meta.get(FRAMING_KEYS.get(fiche_type or ""), None) if fiche_type in FRAMING_KEYS else None,
             )
         )
     if query.strip():
@@ -415,6 +476,42 @@ def select_passages(
     return Selection(chosen, used, ranking.passages, whole, ranking.warning)
 
 
+# Type de fiche de pack (meta « type ») → clé du meta qui porte le terme de l'appli dont elle est la référence
+# (cf. knowledge_packs.PackVocabulary.reference_terms).
+FRAMING_KEYS = {"shot_scale": "plan_appli", "camera_angle": "angle_appli"}
+FRAMING_LABELS = {"shot_scale": ("plan", "de plan"), "camera_angle": ("angle", "d'angle")}
+DUPLICATE = "doublon : cette fiche est déjà dans le savoir-faire reçu"
+
+
+def frame_passages(ranked: Sequence[Passage], *, plan: str | None, angle: str | None) -> list[Passage]:
+    """Au plus UNE fiche de plan (`SHOT_*`) et UNE fiche d'angle (`ANG_*`) d'un pack par case : celle dont le
+    terme de référence (pont de vocabulaire) est le plan / l'angle de la case, mise en tête (mode
+    « framing »), même si son score est bas. Case sans plan (ou angle) connu : la meilleure fiche de la
+    famille seulement. Les autres fiches de la famille sont marquées `dropped` (jamais servies, signalées
+    dans « Sources utilisées » si elles l'auraient été) ; les autres familles gardent leur classement."""
+    wanted = {"shot_scale": plan, "camera_angle": angle}
+    pinned: list[Passage] = []
+    out: list[Passage] = []
+    kept: set[str] = set()
+    for p in ranked:
+        family = p.fiche_type if p.pack and p.fiche_type in wanted else None
+        if family is None:
+            out.append(p)
+            continue
+        term = wanted[family]
+        if family not in kept and (p.framing == term if term else True):
+            kept.add(family)
+            if term:
+                pinned.append(replace(p, mode="framing"))
+            else:
+                out.append(p)
+            continue
+        label, of = FRAMING_LABELS[family]
+        one = f"une seule fiche {of} par case"
+        out.append(replace(p, dropped=f"autre {label} que « {term} » ({one})" if term else one))
+    return [*pinned, *out]
+
+
 def choose_passages(
     ranked: Sequence[Passage],
     whole: Sequence[int],
@@ -422,11 +519,19 @@ def choose_passages(
     *,
     top_k: int,
     budget_tokens: int,
+    dropped: list[Passage] | None = None,
 ) -> tuple[list[Passage], int]:
     """Passages retenus d'un classement déjà fait (une seule recherche pour plusieurs budgets) :
-    les petites collections `whole` entières d'abord, puis les `top_k` meilleurs, dans le budget."""
+    les petites collections `whole` entières d'abord, puis les `top_k` meilleurs, dans le budget.
+
+    Une fiche (document) n'est servie qu'une fois : jamais reprise par la recherche quand sa collection est
+    injectée entière, ni deux fois par la recherche. Les passages écartés comme redondants (doublons,
+    fiches de plan d'un autre cadrage — `frame_passages`) ne prennent ni budget ni place dans le top-k : ceux
+    qui auraient été servis sans cela vont dans `dropped` (à recouper avec une sélection sans tri : la boucle
+    ne s'arrête qu'au top-k)."""
     chosen: list[Passage] = []
     used = 0
+    served: set[int] = set()
     by_doc_order = sorted(
         (p for p in ranked if p.collection_id in whole),
         key=lambda p: (whole.index(p.collection_id), p.chunk_id),
@@ -436,16 +541,27 @@ def choose_passages(
         if used + p.tokens <= budget_tokens:
             chosen.append(p)
             used += p.tokens
+            served.add(p.document_id)
     retrieved = 0
     for p in ranked:
         if p.collection_id in whole:
             continue
-        if retrieved >= top_k or (p.score or 0.0) < settings.retrieval.min_score:
+        if retrieved >= top_k:
             break
+        if p.mode != "framing" and (p.score or 0.0) < settings.retrieval.min_score:
+            if p.dropped is None:
+                break
+            continue
+        redundant = p.dropped or (DUPLICATE if p.document_id in served else None)
+        if redundant:
+            if dropped is not None and p.chunk_id not in {d.chunk_id for d in dropped}:
+                dropped.append(replace(p, dropped=redundant))
+            continue
         if used + p.tokens > budget_tokens:
             continue
         chosen.append(p)
         used += p.tokens
+        served.add(p.document_id)
         retrieved += 1
     return chosen, used
 
@@ -718,6 +834,8 @@ class PanelKnowledge:
     writer_budget: int = 0
     writer_top_k: int = 0
     writer_bible: str = ""
+    # Passages que le rédacteur aurait reçus sans le tri des redondances (doublons, autre cadrage), avec la raison.
+    writer_dropped: list[Passage] = field(default_factory=list)
     fragment_passages: list[Passage] = field(default_factory=list)
     fragment_tokens: int = 0
     fragment_budget: int = 0
@@ -842,9 +960,22 @@ class KnowledgeBase:
             page_queries=page_queries,
         )
 
-    def for_panel(self, session: Session, project_id: int, query: str, character_ids: Sequence[int]) -> PanelKnowledge:
+    def for_panel(
+        self,
+        session: Session,
+        project_id: int,
+        query: str,
+        character_ids: Sequence[int],
+        *,
+        plan: str | None = None,
+        angle: str | None = None,
+    ) -> PanelKnowledge:
         """Savoir-faire et notes de la bible d'une case (agent « image_prompt ») : une seule recherche, puis
-        les passages du rédacteur et la note courte des fragments, chacun dans son budget."""
+        les passages du rédacteur et la note courte des fragments, chacun dans son budget.
+
+        `plan` / `angle` : termes de l'appli (`art_direction.PLANS` / `ANGLES`) de la case, None si inconnus.
+        Une seule fiche de plan et une seule fiche d'angle d'un pack : celles de ce plan et de cet angle
+        (`frame_passages`) ; le budget libéré va aux passages suivants."""
         agent = self.settings.agent(IMAGE_AGENT)
         out = PanelKnowledge(
             query=query,
@@ -862,20 +993,33 @@ class KnowledgeBase:
                 session, query, [c.id for c in collections], self.embedder, self.settings, top_k=0, budget_tokens=0
             )
             out.warning = ranking.warning
+            ranked = frame_passages(ranking.ranked, plan=plan, angle=angle)
             if out.writer_budget > 0:
+                dropped: list[Passage] = []
                 out.writer_passages, out.writer_tokens = choose_passages(
+                    ranked,
+                    ranking.whole_collections,
+                    self.settings,
+                    top_k=out.writer_top_k,
+                    budget_tokens=out.writer_budget,
+                    dropped=dropped,
+                )
+                # Écartés signalés : ceux qu'aurait servis la même sélection sans tri des fiches de plan / d'angle.
+                unsorted, _ = choose_passages(
                     ranking.ranked,
                     ranking.whole_collections,
                     self.settings,
                     top_k=out.writer_top_k,
                     budget_tokens=out.writer_budget,
                 )
+                would = {p.chunk_id for p in unsorted}
+                out.writer_dropped = [p for p in dropped if p.chunk_id in would or p.dropped == DUPLICATE]
             if out.fragment_budget > 0:
                 # Jamais de fiche d'un pack (théorie de mise en scène en français) dans le prompt du modèle
                 # d'image : seul le rédacteur les lit.
                 packs = {p.collection_id for p in ranking.ranked if p.pack}
                 out.fragment_passages, out.fragment_tokens = choose_passages(
-                    [p for p in ranking.ranked if not p.pack],
+                    [p for p in ranked if not p.pack],
                     [cid for cid in ranking.whole_collections if cid not in packs],
                     self.settings,
                     top_k=out.fragment_top_k,

@@ -59,3 +59,11 @@ vocabulary:
     worms_eye: en contre-plongée
     pov: vue subjective
     dutch: cadre penché
+  # Fiche de référence d'un terme qui reçoit plusieurs codes : une case « plan moyen » reçoit SHOT_MS_001
+  # (medium) et aucune autre fiche de plan ; une case « gros plan », SHOT_CU_001 et pas SHOT_XCU_001.
+  primary:
+    plan large: long
+    plan moyen: medium
+    gros plan: close_up
+    en plongée: high
+    en contre-plongée: low

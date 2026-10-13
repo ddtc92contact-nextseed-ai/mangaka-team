@@ -90,7 +90,7 @@ from ..store.models import (
     SeriesAsset,
     SeriesAssetImage,
 )
-from .art_direction import DIALOG_FIELDS, applied_panel_direction
+from .art_direction import ANGLES, DIALOG_FIELDS, PLANS, applied_panel_direction
 from .camera import CameraError, angle_prompt, camera_plan, direction_target, merge_loras, ordered_views
 from .inpaint import png_bytes, recompose, soften_mask
 from .jobs import JobReporter
@@ -247,11 +247,25 @@ def panel_knowledge(
     if knowledge is None:
         return PanelKnowledge()
     query = panel_query(session, panel, characters)
+    plan, angle = panel_framing(panel)
     try:
-        return knowledge.for_panel(session, panel.page.chapter.project_id, query, [c.id for c in characters])
+        return knowledge.for_panel(
+            session, panel.page.chapter.project_id, query, [c.id for c in characters], plan=plan, angle=angle
+        )
     except Exception:  # noqa: BLE001 — le prompt se construit sans notes plutôt que d'échouer
         log.warning("savoir-faire indisponible pour le prompt de la case %s", panel.id, exc_info=True)
         return PanelKnowledge(query=query)
+
+
+def panel_framing(panel: Panel) -> tuple[str | None, str | None]:
+    """(plan, angle) de la case en termes de l'appli (`PLANS` / `ANGLES`), None si inconnu : choisit la seule
+    fiche de plan et la seule fiche d'angle d'un pack qu'elle reçoit. Un plan « plongée » / « contre-plongée »
+    est un angle."""
+    plan = panel_plan(panel).casefold()
+    angle = str(applied_panel_direction(panel).get("angle") or "").strip().casefold()
+    if plan in ("plongée", "contre-plongée"):
+        angle, plan = angle or f"en {plan}", ""
+    return (plan if plan in PLANS else None), (angle if angle in ANGLES else None)
 
 
 def split_trigger_words(raw: str | None) -> tuple[str, ...]:
@@ -719,6 +733,7 @@ def writer_sources(found: PanelKnowledge) -> dict[str, Any]:
         "query": found.query,
         "collections": list(found.collections),
         "passages": [p.as_dict() for p in found.writer_passages],
+        "dropped": [p.as_dict(excerpt=0) for p in found.writer_dropped],
         "tokens": found.writer_tokens,
         "budget_tokens": found.writer_budget,
         "bible": found.writer_bible,

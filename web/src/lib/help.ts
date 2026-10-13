@@ -305,7 +305,7 @@ export const HELP = {
   "equipe.budget":
     "Jetons de savoir-faire joints à chaque appel (≈ 4 caractères par jeton) : plus, ce sont des fiches entières et plus de méthode appliquée, mais un appel plus long ; moins, seulement l'essentiel. Pour le Dessinateur, c'est ce que lit le rédacteur de prompt (≈ 1 200 conseillé), la note courte des fragments restant fixée dans presets/knowledge.yaml ; vide : la valeur livrée.",
   "atelier.prompt_sources":
-    "Les fiches de savoir-faire que le rédacteur de prompt a vraiment reçues pour écrire le prompt actuel de cette case, et la date de la rédaction. Les fiches du pack livré apparaissent avec leur collection « Mise en scène · … ».",
+    "Les fiches de savoir-faire que le rédacteur de prompt a reçues pour écrire le prompt actuel, chacune citée une fois, et la date de la rédaction. Une seule fiche de plan et d'angle, celles du cadrage de la case ; les fiches écartées comme redondantes sont signalées.",
   "atelier.knowledge":
     "Les fiches de savoir-faire retrouvées pour cette case (plan, angle, description, personnages…) : passages entiers envoyés au rédacteur de prompt (IA), et note courte en une ligne pour le prompt par fragments.",
   "equipe.trial":

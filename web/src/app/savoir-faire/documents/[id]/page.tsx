@@ -123,6 +123,8 @@ const META_LABELS: Record<string, string> = {
   genres: "Genres",
   avoid_when: "À éviter quand",
   pairs_with: "Va avec",
+  plan_appli: "Fiche de référence du plan",
+  angle_appli: "Fiche de référence de l'angle",
 };
 
 function metaValue(value: unknown): string {

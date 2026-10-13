@@ -4,7 +4,7 @@
 // rédacteur de prompt (IA) et note courte du prompt par fragments, avec leurs jetons.
 import { useState } from "react";
 import { InfoTip } from "@/components/info-tip";
-import { PassageList, formatTokens } from "@/components/knowledge";
+import { PassageList, SourceTitles, formatTokens } from "@/components/knowledge";
 import { Alert, Loading } from "@/components/ui";
 import { api, errorMessage, type PanelKnowledge, type PanelKnowledgePart } from "@/lib/api";
 
@@ -41,6 +41,7 @@ function Part({
       ) : (
         <PassageList passages={part.passages} showScores={false} excerpt={240} testId={`${testId}-passages`} />
       )}
+      {!!part.dropped?.length && <SourceTitles passages={[]} dropped={part.dropped} testId={`${testId}-titles`} />}
       {part.bible && <p className="text-xs text-zinc-400">Notes de la bible : {part.bible}</p>}
     </section>
   );
