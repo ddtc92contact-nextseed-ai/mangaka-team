@@ -19,6 +19,7 @@ import {
   type Annotation,
   type GenerateInput,
   type Job,
+  type PanelDetail,
   type PanelImage,
   type PrintInfo,
   type QueueItem,
@@ -304,7 +305,7 @@ export function PanelInspector({
           <div className="space-y-2 text-sm">
             <p className="whitespace-pre-line text-zinc-200">{d.description || <span className="text-zinc-500">Pas de description.</span>}</p>
             <div className="flex flex-wrap gap-1.5 text-xs">
-              {d.shot_type && <span className="rounded bg-zinc-800 px-2 py-0.5 text-zinc-300">Plan : {d.shot_type}</span>}
+              <FramingBadge d={d} />
               {d.characters.length ? (
                 d.characters.map((c) =>
                   d.unmatched_characters.includes(c) ? (
@@ -1000,5 +1001,28 @@ function SketchBlock({
         />
       </Field>
     </div>
+  );
+}
+
+/** Cadrage suivi par la génération : celui de la direction artistique (ou d'un dialogue avec l'IA) ; le plan du
+ * scénario n'est qu'un repli, signalé avec sa raison. */
+function FramingBadge({ d }: { d: PanelDetail }) {
+  const source = d.framing_source ?? (d.shot_type ? "scenario" : "none");
+  const plan = d.framing_plan ?? d.shot_type;
+  const text = [plan, d.framing_angle].filter(Boolean).join(" · ");
+  if (source === "direction" || source === "dialogue")
+    return (
+      <span
+        className="rounded bg-emerald-500/15 px-2 py-0.5 text-emerald-200"
+        title={source === "direction" ? "Direction artistique appliquée" : "Choisi dans le dialogue avec l'IA"}
+        data-testid="panel-framing"
+      >
+        Plan : {text || "—"} <span className="text-emerald-300/70">({source === "direction" ? "direction" : "dialogue"})</span>
+      </span>
+    );
+  return (
+    <span className="rounded bg-amber-500/15 px-2 py-0.5 text-amber-200" title={d.framing_note ?? undefined} data-testid="panel-framing">
+      ⚠ {plan ? `Plan du scénario : ${plan}` : "Aucun plan"} — {d.framing_note ?? "pas de direction artistique appliquée"}
+    </span>
   );
 }

@@ -820,6 +820,12 @@ export interface PanelDetail {
   decor: LibraryRef | null;
   objets: LibraryRef[];
   shot_type: string | null;
+  /** Cadrage suivi par la génération (prompt, savoir-faire, vue de référence) et sa source ; « scenario » : repli
+   * sur le plan du scénario faute de direction artistique appliquée (`framing_note` dit pourquoi). */
+  framing_plan?: string | null;
+  framing_angle?: string | null;
+  framing_source?: "direction" | "dialogue" | "scenario" | "none";
+  framing_note?: string | null;
   state: PanelState;
   bbox: Rect | null;
   final_prompt: string | null;
@@ -1795,7 +1801,9 @@ export interface PageDirection {
   has_direction: boolean;
   /** Champs modifiés par l'auteur, gardés quand l'agent repropose : « rythme », « 12.plan »… */
   locks: string[];
-  status: "proposed" | "accepted";
+  /** Proposée par l'agent, appliquée aux cases (validation, « Appliquer » ou d'office à la génération), rejetée
+   * par l'auteur (jamais appliquée d'office). « accepted » : ancienne validation. */
+  status: "proposed" | "applied" | "rejected" | "accepted";
   variant: number;
   out_of_date: boolean;
   applied: boolean;
@@ -1827,7 +1835,10 @@ export interface DirectionEdit {
   panels?: ({ panel_id: number } & Partial<Omit<DaPanel, "panel_id" | "index">>)[];
   lock?: string[];
   unlock?: string[];
+  /** true : valider la page, c'est l'appliquer aux cases tout de suite. */
   accept?: boolean;
+  /** true : rejeter la direction de la page (plus appliquée, même à la génération) ; false : annuler le rejet. */
+  reject?: boolean;
 }
 
 export interface DirectionApplyResult {
