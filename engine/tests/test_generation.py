@@ -28,7 +28,7 @@ from mangaka_engine.providers.comfyui import (
 from mangaka_engine.providers.factory import Providers
 from mangaka_engine.providers.llm import MockLLMProvider
 from mangaka_engine.store.models import Job, JobStatus, Panel, PanelState
-from tests.conftest import COMFY_FIXTURES, PRESETS_DIR, png_bytes
+from tests.conftest import COMFY_FIXTURES, PRESETS_DIR, force_stages, png_bytes
 
 # Packs de la série de test : seinen, N&B à trames, dark.
 SEINEN = {"style_genre": "seinen", "style_rendering": "nb-trames", "style_tone": "dark"}
@@ -395,6 +395,7 @@ def test_chapter_and_page_generation_skip_panels_already_done(make_client: Calla
     _ok(c.post(f"/panels/{p1['id']}/generate"), 202)
     _wait(c)
 
+    force_stages(c, ch)
     out = _ok(c.post(f"/chapters/{ch}/generate"), 202)
     assert out["panel_ids"] == [p2["id"], p3["id"]] and out["skipped"] == 1 and len(out["jobs"]) == 2
     _wait(c)
@@ -891,6 +892,7 @@ def test_first_finished_version_is_selected_and_visible_before_next(make_client:
     data = setup_chapter(c)
     p1, p2, p3 = data["panels"]
     chapter_id = data["chapter"]["id"]
+    force_stages(c, chapter_id)
     _ok(c.post(f"/chapters/{chapter_id}/generate"), 202)
 
     assert comfy.started.acquire(timeout=5)  # case 1 en cours

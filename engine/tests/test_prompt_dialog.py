@@ -28,7 +28,7 @@ from mangaka_engine.providers.comfyui import MockComfyUIClient
 from mangaka_engine.providers.factory import Providers
 from mangaka_engine.providers.llm import ChatMessage, MockLLMProvider
 from mangaka_engine.providers.llm.mock import mock_dialog
-from tests.conftest import PRESETS_DIR, STYLE, png_bytes
+from tests.conftest import PRESETS_DIR, STYLE, force_stages, png_bytes
 
 CLOSE_UP = "gros plan sur le visage de Lucius, en contre-plongée"
 
@@ -241,6 +241,7 @@ def test_dialog_edit_survives_chapter_rebuilds_until_rebuild_prompt(env: Env) ->
     _ok(c.post(f"/panel-dialog/{turn['id']}/apply"))
 
     # génération du chapitre, série repassée aux fragments puis à l'IA : le prompt du dialogue reste
+    force_stages(c, data["chapter"]["id"])
     _ok(c.post(f"/chapters/{data['chapter']['id']}/generate", json={}), 202)
     _wait(c)
     _ok(c.patch(f"/projects/{data['series']['id']}", json={"ai_prompt": False}))

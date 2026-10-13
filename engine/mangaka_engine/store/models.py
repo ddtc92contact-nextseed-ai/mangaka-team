@@ -13,6 +13,7 @@ Direction artistique : `PageDirection` (une par page : proposition de l'agent, c
 l'auteur, version appliquée à la mise en page et aux prompts).
 Traçabilité : `GenerationLog` (une ligne par génération ComfyUI, jamais réécrite) → `GenerationEvent`
 (verdicts de l'auteur : gardée, rejetée, régénérée, retouchée).
+Garde d'étapes : `ChapterStageDecision` (validation d'une étape vitale du chapitre, passer-outre, levée).
 Les fichiers binaires (images) vivent dans `data/`, la base ne stocke que leurs chemins relatifs.
 """
 
@@ -852,3 +853,25 @@ class GenerationEvent(Base):
     action: Mapped[str] = mapped_column(String(30))  # select | delete | judge | crop | repair | …
     reason: Mapped[str | None] = mapped_column(String(60), default=None)  # id de journal.yaml
     note: Mapped[str] = mapped_column(Text, default="")
+
+
+class ChapterStageDecision(Base):
+    """Décision sur une étape vitale d'un chapitre (voir pipeline/stage_gate.py) : `validated` (l'étape était
+    complète quand une action l'a franchie), `forced` (« Passer outre » de l'auteur) ou `revoked` (passer-outre
+    levé). Jamais réécrite : l'état d'une étape est sa dernière décision. Ids de simples entiers (comme le
+    journal) : la trace survit à la suppression du chapitre."""
+
+    __tablename__ = "chapter_stage_decisions"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, index=True)
+    project_id: Mapped[int | None] = mapped_column(Integer, default=None, index=True)
+    chapter_id: Mapped[int] = mapped_column(Integer, index=True)
+    chapter_number: Mapped[int | None] = mapped_column(Integer, default=None)
+    stage: Mapped[str] = mapped_column(String(30))  # voir pipeline/stage_gate.py : STAGES
+    decision: Mapped[str] = mapped_column(String(20))  # validated | forced | revoked
+    author: Mapped[str] = mapped_column(String(120), default="")
+    note: Mapped[str] = mapped_column(Text, default="")
+    # Éléments en faute au moment de la décision (un passer-outre garde ce qu'il a laissé passer).
+    faults: Mapped[int] = mapped_column(Integer, default=0)
+    total: Mapped[int] = mapped_column(Integer, default=0)

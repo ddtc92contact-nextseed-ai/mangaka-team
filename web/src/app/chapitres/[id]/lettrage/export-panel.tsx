@@ -45,7 +45,18 @@ function Check({
 }
 
 /** Options d'export (fond perdu, repères), rendu de la page courante et export du chapitre en ZIP. */
-export function ExportPanel({ chapterId, pageId, bleedMm }: { chapterId: number; pageId: number; bleedMm: number }) {
+export function ExportPanel({
+  chapterId,
+  pageId,
+  bleedMm,
+  blocked = null,
+}: {
+  chapterId: number;
+  pageId: number;
+  bleedMm: number;
+  /** Étapes vitales en attente (garde d'étapes) : l'export sera refusé ; le bouton dit pourquoi. */
+  blocked?: string | null;
+}) {
   const [options, setOptions] = useState<ExportOptions>({ bleed: false, crop_marks: false });
   const [render, setRender] = useState<PageRender | null>(null);
   const [job, setJob] = useState<Job | null>(null);
@@ -140,12 +151,23 @@ export function ExportPanel({ chapterId, pageId, bleedMm }: { chapterId: number;
           <InfoTip help="lettrage.render" label="Rendre cette page" />
         </span>
         <span className="flex items-center gap-1.5">
-          <Button onClick={exportChapter} disabled={busy || Boolean(running)} data-testid="export-chapter">
+          <Button
+            onClick={exportChapter}
+            disabled={busy || Boolean(running)}
+            data-testid="export-chapter"
+            title={blocked ?? undefined}
+            aria-describedby={blocked ? "export-blocked" : undefined}
+          >
             Exporter le chapitre
           </Button>
           <InfoTip help="lettrage.export" label="Exporter le chapitre" />
         </span>
       </div>
+      {blocked && (
+        <p id="export-blocked" className="text-xs text-amber-300" data-testid="export-blocked">
+          {blocked} : l&apos;export sera refusé tant que ces étapes ne sont pas réglées (ou forcées).
+        </p>
+      )}
       <div className="space-y-1">
         <span className="flex items-center gap-1.5">
           <Button variant="secondary" onClick={finishChapter} disabled={busy} data-testid="finish-chapter">

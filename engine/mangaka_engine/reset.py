@@ -52,6 +52,8 @@ SERIES_TABLES = (
     # Journal des générations et verdicts : décrivent des cases des séries effacées (sauvegardés avant).
     "generation_events",
     "generation_logs",
+    # Décisions de la garde d'étapes (validée, forcée) : chapitres des séries effacées.
+    "chapter_stage_decisions",
     "panel_image_annotations",
     "qc_bench_runs",
     "llm_runs",

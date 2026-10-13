@@ -15,6 +15,8 @@ export default function ChapterLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const chapter = useEngineData(() => api.getChapter(id), [id]);
   const projectId = chapter.data?.project_id;
+  // Étapes vitales : relues à chaque changement d'onglet (une action d'un autre écran a pu les régler).
+  const stages = useEngineData(() => api.chapterStages(id), [id, pathname]);
   const series = useEngineData(
     () => (projectId ? api.getProject(projectId) : Promise.resolve(null)),
     [projectId],
@@ -39,7 +41,16 @@ export default function ChapterLayout({ children }: { children: ReactNode }) {
 
   return (
     <ChapterContext.Provider
-      value={{ chapter: c, series: series.data, setChapter: chapter.setData, reload: chapter.reload }}
+      value={{
+        chapter: c,
+        series: series.data,
+        setChapter: chapter.setData,
+        reload: chapter.reload,
+        stages: stages.data,
+        stagesError: stages.error,
+        setStages: stages.setData,
+        reloadStages: stages.reload,
+      }}
     >
       <PageHeader
         title={`Chapitre ${c.number}${c.title ? ` — ${c.title}` : ""}`}

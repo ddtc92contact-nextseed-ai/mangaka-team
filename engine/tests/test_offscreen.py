@@ -416,7 +416,7 @@ def test_v29_database_keeps_characters_as_present(make_settings: Callable[..., S
         assert detail["viewpoint"] is None
         assert detail["character_ids"] == [d["cards"][n]["id"] for n in HEROS]
     con = sqlite3.connect(settings.database_path)
-    assert con.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 30
+    assert con.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION >= 30
     con.close()
     fresh = settings.database_path.parent / "fresh.db"
     create_db_engine(fresh).dispose()

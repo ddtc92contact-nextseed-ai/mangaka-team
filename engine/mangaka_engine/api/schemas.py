@@ -1890,3 +1890,58 @@ class StatsOut(BaseModel):
     low_data: bool
     low_data_below: int
     breakdowns: list[StatsBreakdownOut]
+    # « Passer outre » une étape vitale (garde d'étapes), les plus récents d'abord.
+    stage_overrides: list[StageOverrideRowOut] = []
+
+
+# --- Garde d'étapes (pipeline/stage_gate.py) -------------------------------------------------
+StageName = Literal["script", "direction", "layout", "references", "prompts", "approved", "lettering"]
+
+
+class StageDecisionOut(BaseModel):
+    decision: Literal["validated", "forced", "revoked"]
+    author: str
+    note: str
+    at: datetime
+
+
+class StageOut(BaseModel):
+    key: StageName
+    label: str
+    complete: bool  # réglée par le contenu du chapitre
+    forced: bool  # « Passer outre » en cours
+    passed: bool  # complète ou forcée : ne bloque rien
+    total: int
+    faults: int
+    summary: str  # « 5 pages en attente sur 5 »
+    examples: list[str]
+    fix: str
+    screen: str  # onglet du chapitre qui règle l'étape (`personnages` : fiches de la série)
+    blocks: list[str]  # actions bloquées en ce moment (« générer », « lettrer »…)
+    decision: StageDecisionOut | None = None
+
+
+class ChapterStagesOut(BaseModel):
+    chapter_id: int
+    project_id: int
+    stages: list[StageOut]
+
+
+class StageOverrideIn(_In):
+    author: Annotated[str, StringConstraints(strip_whitespace=True, max_length=120)] = ""
+    note: Annotated[str, StringConstraints(strip_whitespace=True, max_length=2000)] = ""
+
+
+class StageOverrideRowOut(BaseModel):
+    id: int
+    at: datetime
+    project_id: int | None
+    chapter_id: int
+    chapter_number: int | None
+    chapter_title: str | None  # None : chapitre supprimé depuis
+    stage: str
+    stage_label: str
+    author: str
+    note: str
+    faults: int
+    total: int

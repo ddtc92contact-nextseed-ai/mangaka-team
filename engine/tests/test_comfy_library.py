@@ -21,7 +21,7 @@ from mangaka_engine.providers.comfyui import MockComfyUIClient
 from mangaka_engine.store.comfy_folders import ComfyFolders
 from mangaka_engine.store.files import FileStore
 from mangaka_engine.store.models import AssetKind, Project, ReferenceVariant, SeriesAsset, SeriesAssetImage
-from tests.conftest import png_bytes
+from tests.conftest import force_stages, png_bytes
 from tests.test_storage import _files, _idle, _ok, _series, c, comfy, comfy_dir, make_client  # noqa: F401 — fixtures
 
 
@@ -270,6 +270,7 @@ def test_panels_sketches_and_plates(c: TestClient, comfy_dir: Path) -> None:
     assert (trash / f"case-02-v{v1['version']}.png").read_bytes() == c.get(v1["url"]).content
 
     # Rendu de la page → planches/page-01.png + .svg.
+    force_stages(c, ch["id"])
     _ok(c.post(f"/pages/{page['id']}/render"))
     assert _lib_files(comfy_dir) == {
         "chapitre-01/page-01/case-02.png",
@@ -285,6 +286,7 @@ def test_panels_sketches_and_plates(c: TestClient, comfy_dir: Path) -> None:
 def test_chapter_export_writes_the_plates(c: TestClient, comfy_dir: Path) -> None:
     s = _series(c, "Lucius et Stan")
     ch, [page] = _chapter(c, s, panels=1)
+    force_stages(c, ch["id"])
     job = _ok(c.post(f"/chapters/{ch['id']}/export", json={}), 202)
     _wait_jobs(c, [job])
     assert _ok(c.get(f"/jobs/{job['id']}"))["status"] == "succeeded"

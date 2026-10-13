@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from ..pipeline.art_direction import applied_panel_direction
+from ..pipeline.art_direction import applied_panel_direction, is_out_of_date, is_pending
 from ..pipeline.comfy_trial import STEP as TRIAL_STEP
 from ..pipeline.composition import SOURCE_LABELS, control_settings, drop_lock_on_delete, lock_preset_id, type_problem
 from ..pipeline.composition import STEP as CONTROL_MAP_STEP
@@ -121,6 +121,7 @@ from .schemas import (
     RewritePromptsOut,
     WorkflowPresetOut,
 )
+from .stages import gate
 from .viewpoint import viewpoint_out
 
 router = APIRouter(tags=["génération"])
@@ -364,6 +365,26 @@ def _require_lock_available(ctx: AppContext, panel: Panel) -> None:
             "composition_lock",
             f"case {panel.index + 1} de la page {panel.page.number} : composition verrouillée, mais {problem[:1].lower()}"
             f"{problem[1:]} Déverrouille la case pour la générer sans.",
+        )
+
+
+def _require_panel_ready(panel: Panel, prompt_override: str | None = None) -> None:
+    """Garde d'une case isolée (les essais restent libres) : jamais de prompt vide envoyé à ComfyUI, ni une
+    direction artistique proposée que la génération ne pourrait pas appliquer (cases changées depuis)."""
+    page = panel.page
+    where = f"case {panel.index + 1} de la page {page.number}"
+    if not any((t or "").strip() for t in (prompt_override, panel.final_prompt, panel.description)):
+        raise FieldError(
+            "final_prompt",
+            f"{where} : prompt vide et case sans description. Décris la case ou écris son prompt final "
+            "avant de la générer.",
+        )
+    d = page.direction
+    if d is not None and d.values and d.status != "rejected" and is_pending(d) and is_out_of_date(d, page):
+        raise FieldError(
+            "stage.direction",
+            f"{where} : la direction artistique de la page {page.number} est en attente mais ne correspond plus "
+            "à ses cases (scénario modifié). Relance l'agent sur la page ou rejette sa direction avant de générer.",
         )
 
 
@@ -683,6 +704,7 @@ def generate_panel(
     _require_comfyui(ctx)
     panel = get_panel_or_404(session, panel_id)
     _require_lock_available(ctx, panel)
+    _require_panel_ready(panel, body.prompt_override)
     jobs = _enqueue(
         session, ctx, panel, count=body.count, seed=body.seed, preset=body.preset, prompt_override=body.prompt_override
     )
@@ -692,8 +714,11 @@ def generate_panel(
     return [job_out(j) for j in jobs]
 
 
-def _generate_pages(session: Session, ctx: AppContext, pages: list[Page], body: BatchGenerateIn) -> BatchGenerateOut:
+def _generate_pages(
+    session: Session, ctx: AppContext, chapter: Chapter, pages: list[Page], body: BatchGenerateIn, *, page: Page | None
+) -> BatchGenerateOut:
     _require_comfyui(ctx)
+    gate(session, chapter, "generation", page=page)
     total = sum(len(p.panels) for p in pages)
     # Cases verrouillées alors que le ControlNet manque dans ComfyUI : laissées de côté (comptées dans
     # `skipped`), les autres se génèrent normalement.
@@ -718,7 +743,7 @@ def generate_page(
 ) -> BatchGenerateOut:
     """Génère les cases de la page sans version choisie (toutes avec `force`) ; ignore celles déjà en file."""
     page = get_page_or_404(session, page_id)
-    return _generate_pages(session, ctx, [page], body or BatchGenerateIn())
+    return _generate_pages(session, ctx, page.chapter, [page], body or BatchGenerateIn(), page=page)
 
 
 @router.post("/chapters/{chapter_id}/generate", response_model=BatchGenerateOut, status_code=202)
@@ -729,13 +754,13 @@ def generate_chapter(
     ctx: AppContext = Depends(get_ctx),
 ) -> BatchGenerateOut:
     """Génère les cases du chapitre sans version choisie (toutes avec `force`), page par page."""
-    get_chapter_or_404(session, chapter_id)
+    chapter = get_chapter_or_404(session, chapter_id)
     pages = list(
         session.scalars(
             select(Page).where(Page.chapter_id == chapter_id).options(selectinload(Page.panels)).order_by(Page.number)
         )
     )
-    return _generate_pages(session, ctx, pages, body or BatchGenerateIn())
+    return _generate_pages(session, ctx, chapter, pages, body or BatchGenerateIn(), page=None)
 
 
 @router.get("/chapters/{chapter_id}/prompts/rewrite", response_model=RewritePromptsOut)

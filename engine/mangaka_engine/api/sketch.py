@@ -39,6 +39,7 @@ from .schemas import (
     SketchIn,
     SketchValidateIn,
 )
+from .stages import gate
 
 router = APIRouter(tags=["croquis"])
 
@@ -171,6 +172,8 @@ def _batch(
     _require_enabled(pages)
     if action == "clean":
         _require_clean_mode(ctx, pages)
+        if pages:  # les versions propres sont des générations : même garde (les croquis restent libres)
+            gate(session, pages[0].chapter, "generation", page=pages[0] if len(pages) == 1 else None)
     total = sum(len(p.panels) for p in pages)
     panels = select_panels(session, pages)
     jobs: list[Job] = []

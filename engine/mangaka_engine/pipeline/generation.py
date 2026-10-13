@@ -1525,6 +1525,9 @@ class GenerationExecutor:
                     or job.params.get("angle_scene")
                     or ""
                 ).strip() or update_panel_prompt(presets, session, panel, self.knowledge)
+                if not prompt.strip():
+                    # Garde d'étapes : jamais une case au prompt vide envoyée à ComfyUI (image inutilisable).
+                    raise GenerationError("prompt vide : décris la case ou écris son prompt final")
                 size = panel_target(presets, page, panel)
             if size is None:
                 raise GenerationError(f"la page {page.number} n'est pas mise en page")

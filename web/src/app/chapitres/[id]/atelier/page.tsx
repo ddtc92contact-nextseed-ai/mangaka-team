@@ -19,6 +19,8 @@ import { StepAlert } from "../step-alert";
 import { buildPanelViews, PageCanvas, type PageCanvasHandle } from "./page-canvas";
 import { PanelInspector } from "./panel-inspector";
 import { QCToolbar } from "./qc-toolbar";
+import { blockedReason } from "@/lib/stages";
+import { StageBanner } from "../stages";
 
 export default function WorkshopRoute() {
   return (
@@ -29,7 +31,7 @@ export default function WorkshopRoute() {
 }
 
 function Workshop() {
-  const { chapter, reload: reloadChapter } = useChapter();
+  const { chapter, reload: reloadChapter, stages, reloadStages } = useChapter();
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -172,6 +174,7 @@ function Workshop() {
 
   return (
     <div className="space-y-4">
+      <StageBanner action="generation" />
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex items-center gap-1" role="group" aria-label="Choix de la page">
           <Button variant="secondary" className="!px-2.5" onClick={() => prev && navigate(prev.id, null)} disabled={!prev} aria-label="Page précédente">
@@ -240,11 +243,13 @@ function Workshop() {
           <GenerateChapterButton
             chapterId={chapter.id}
             variant="primary"
+            blocked={stages ? blockedReason(stages.stages, "generation") : null}
             onQueued={(m) => {
               setError(null);
               setNotice(m);
               pages.reload();
               reloadChapter();
+              reloadStages();
             }}
           />
         </div>

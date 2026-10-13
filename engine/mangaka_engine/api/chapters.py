@@ -73,6 +73,7 @@ from .schemas import (
     PanelOut,
     SfxOut,
 )
+from .stages import gate
 from .storage import remove_chapter_folders, remove_page_folders
 from .viewpoint import viewpoint_out
 
@@ -358,6 +359,9 @@ def update_chapter(chapter_id: int, body: ChapterUpdate, session: Session = Depe
             raise FieldError(key, "ne peut pas être vide")
     if "status" in changes:
         changes["status"] = ChapterStatus(changes["status"])
+        wanted = changes["status"]
+        if wanted in (ChapterStatus.ready, ChapterStatus.published) and wanted != chapter.status:
+            gate(session, chapter, wanted.value)
     for key, value in changes.items():
         setattr(chapter, key, value)
     if "status" in changes or "summary" in changes:
@@ -672,7 +676,7 @@ def layout_chapter(
 ) -> list[PageOut]:
     """« Recalculer » tout le chapitre (gouttières et biais modifiés à la main sont réinitialisés ;
     chaque page garde sa graine, donc sa mise en page)."""
-    get_chapter_or_404(session, chapter_id)
+    gate(session, get_chapter_or_404(session, chapter_id), "layout")
     pages = _load_pages(session, chapter_id)
     for page in pages:
         if page.panels:

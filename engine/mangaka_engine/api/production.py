@@ -12,13 +12,14 @@ from ..pipeline.generation import panels_to_generate
 from ..pipeline.pages import is_stale
 from ..pipeline.sketch import enqueue_clean, enqueue_sketch, panels_to_clean, panels_to_sketch
 from ..store.models import Job, Page, PageKind, Panel
-from .chapters import _layout
+from .chapters import _layout, get_chapter_or_404
 from .deps import AppContext, get_ctx, get_session
 from .errors import FieldError
 from .generation import _enqueue, _presets, _require_comfyui, lock_problem
 from .jobs import job_out
 from .schemas import ChapterProductionOut, ChapterProductionPlanOut, ProductionModeName
 from .sketch import _chapter_pages, _require_clean_mode, _run
+from .stages import gate
 
 router = APIRouter(tags=["génération"])
 
@@ -77,10 +78,14 @@ def produce_chapter(
     - sinon : une version de chaque case sans version choisie.
     Les cases déjà en file sont laissées telles quelles ; l'avancement se suit dans Production."""
     _require_comfyui(ctx)
+    chapter = get_chapter_or_404(session, chapter_id)
+    # Garde d'étapes : tout sauf la mise en page, que « Générer le chapitre » pose elle-même juste après.
+    gate(session, chapter, "generation", only=("script", "direction", "references", "prompts"))
     plan = _plan(session, chapter_id)
     for page in plan.to_layout:  # dans l'ordre : chaque page tient compte du gabarit de la précédente
         _layout(ctx, page)
     session.flush()
+    gate(session, chapter, "generation", only=("layout",))
     panels, to_clean = _selection(session, ctx, plan)
     if to_clean:
         try:

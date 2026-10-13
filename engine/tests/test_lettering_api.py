@@ -12,7 +12,7 @@ import httpx
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from tests.conftest import STYLE
+from tests.conftest import STYLE, force_stages
 
 
 def _ok(resp: httpx.Response, status: int = 200) -> Any:
@@ -156,6 +156,7 @@ def test_render_page_png_300dpi_and_svg(client: TestClient) -> None:
     data = _setup(client)
     page = data["page"]
     assert client.get(f"/pages/{page['id']}/render").status_code == 404
+    force_stages(client, data["chapter"]["id"])
     info = _ok(client.post(f"/pages/{page['id']}/render", json={"bleed": True}))
     assert (info["width"], info["height"]) == (2551, 3579) and info["bleed"] and not info["crop_marks"]
     png = client.get(info["png_url"])
@@ -187,6 +188,7 @@ def test_render_refuses_page_without_layout(client: TestClient) -> None:
 def test_export_chapter_zip_with_numbered_pages(client: TestClient) -> None:
     data = _setup(client)
     chapter_id = data["chapter"]["id"]
+    force_stages(client, chapter_id)
     job = _ok(client.post(f"/chapters/{chapter_id}/export", json={"bleed": True, "crop_marks": True}), 202)
     assert job["step"] == "export" and job["params"] == {"bleed": True, "crop_marks": True}
     client.app.state.ctx.jobs.wait(job["id"], 60)  # type: ignore[attr-defined]
@@ -233,6 +235,7 @@ def test_resized_bubble_text_fills_its_frame_in_screen_and_render(client: TestCl
     grown = next(x for x in res["bubbles"] if x["id"] == bubble["id"])
     assert grown["manual"] and size < grown["font"]["size_pt"] <= grown["font"]["max_size_pt"]
     # Le rendu (SVG et PNG) utilise la même taille que l'écran.
+    force_stages(client, data["chapter"]["id"])
     info = _ok(client.post(f"/pages/{page['id']}/render"))
     root = ET.fromstring(client.get(info["svg_url"]).content)
     sizes = [float(t.get("font-size") or 0) for t in root.iter("{http://www.w3.org/2000/svg}text")]

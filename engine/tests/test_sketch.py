@@ -15,7 +15,7 @@ from mangaka_engine.pipeline.generation import sketch_size
 from mangaka_engine.presets import LoraSpec, PresetError, PresetRegistry, build_workflow
 from mangaka_engine.providers.comfyui import MockComfyUIClient
 from mangaka_engine.store.models import ImageKind, PanelImage
-from tests.conftest import PRESETS_DIR, STYLE
+from tests.conftest import PRESETS_DIR, STYLE, force_stages
 from tests.test_generation import _ok, _wait, make_client, setup_chapter  # noqa: F401 — fixture
 
 REG = PresetRegistry.load(PRESETS_DIR)
@@ -192,6 +192,7 @@ def test_sketch_page_then_triage_then_clean(make_client: Callable[..., TestClien
     assert again["panel_ids"] == [p2["id"]]
     _wait(c)
 
+    force_stages(c, chapter_id)
     res = _ok(c.post(f"/pages/{page1['id']}/clean"), 202)
     assert res["panel_ids"] == [p1["id"]]
     [job] = res["jobs"]
@@ -245,6 +246,7 @@ def test_sketches_never_reach_assembly_or_export(make_client: Callable[..., Test
     [shown] = lettering["panels"]
     assert shown["image_url"] == sketch["url"] and shown["image_kind"] == "croquis"
     assert [w["code"] for w in lettering["warnings"] if w.get("panel_id") == p3["id"]] == ["sketch_only"]
+    force_stages(c, data["chapter"]["id"])
     rendered = _ok(c.post(f"/pages/{page['id']}/render", json={}))
     assert any(w["code"] == "sketch_only" and "croquis seulement" in w["message"] for w in rendered["warnings"])
     assert _missing_fill_at(c, page["id"], shown["box"])
@@ -421,6 +423,7 @@ def test_chapter_sketch_and_clean_keep_regenerate_quality(make_client: Callable[
     est = _ok(c.get(f"/chapters/{chapter_id}/sketch-estimate"))
     assert (est["to_sketch"], est["validated"], est["to_clean"]) == (0, 3, 3)
     assert est["clean"]["total_s"] == pytest.approx(448 + 112 + 112)
+    force_stages(c, chapter_id)
     assert len(_ok(c.post(f"/chapters/{chapter_id}/clean"), 202)["panel_ids"]) == 3
     _wait(c)
     p3 = data["panels"][2]

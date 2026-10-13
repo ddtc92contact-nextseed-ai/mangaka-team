@@ -42,10 +42,13 @@ export function GenerateChapterButton({
   chapterId,
   onQueued,
   variant = "secondary",
+  blocked = null,
 }: {
   chapterId: number;
   onQueued?: (message: string) => void;
   variant?: "primary" | "secondary";
+  /** Étapes vitales en attente (garde d'étapes) : le moteur refusera ; le bouton dit pourquoi. */
+  blocked?: string | null;
 }) {
   const { queue, refresh } = useQueue();
   const [open, setOpen] = useState(false);
@@ -60,6 +63,7 @@ export function GenerateChapterButton({
     setOpen(true);
     setPlan(null);
     setError(null);
+    if (blocked) return;
     setLoading(true);
     try {
       const [next, jobs] = await Promise.all([
@@ -97,16 +101,27 @@ export function GenerateChapterButton({
 
   const waiting = queue ? (queue.running ? 1 : 0) + queue.pending.length : 0;
   const jobs = plan ? plan.panels + plan.to_clean : 0;
-  const canConfirm = plan !== null && jobs > 0 && !busy;
+  const canConfirm = plan !== null && jobs > 0 && !busy && !blocked;
 
   return (
     <>
       <span className="inline-flex items-center gap-1.5">
-        <Button variant={variant} onClick={prepare} data-testid="generate-chapter">
+        <Button
+          variant={variant}
+          onClick={prepare}
+          data-testid="generate-chapter"
+          aria-describedby={blocked ? "generate-chapter-blocked" : undefined}
+          title={blocked ?? undefined}
+        >
           Générer le chapitre
         </Button>
         <InfoTip help="chapitre_infos.generate_all" label="Générer le chapitre" />
       </span>
+      {blocked && (
+        <span id="generate-chapter-blocked" className="basis-full text-xs text-amber-300" data-testid="generate-chapter-blocked">
+          {blocked}
+        </span>
+      )}
       <Modal
         open={open}
         onClose={() => setOpen(false)}
@@ -123,6 +138,12 @@ export function GenerateChapterButton({
         }
       >
         <div className="space-y-3 text-sm text-zinc-300">
+          {blocked && (
+            <Alert>
+              {blocked}. Règle ces étapes (ou passe outre l&apos;une d&apos;elles depuis la liste des étapes du chapitre)
+              avant de générer.
+            </Alert>
+          )}
           {loading && <p className="text-zinc-500">Calcul des cases à générer…</p>}
           {error && <Alert>{error}</Alert>}
           {plan && plan.total === 0 && <p>Aucune case dans les pages de l&apos;histoire : découpe d&apos;abord le chapitre.</p>}

@@ -13,15 +13,16 @@ import io
 import json
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..presets import PresetRegistry
-from ..store.models import GenerationLog
+from ..store.models import Chapter, GenerationLog
 from .journal import KINDS, MEASURES, PANEL_KINDS, event_counts, latest_events, tonality_gaps
+from .stage_gate import overrides_query, stage_label
 
 # Colonnes de l'export, dans l'ordre (CSV et JSON).
 EXPORT_COLUMNS = (
@@ -244,4 +245,36 @@ def compute_stats(session: Session, presets: PresetRegistry, f: StatsFilter) -> 
         "low_data": total["low_data"],
         "low_data_below": threshold,
         "breakdowns": breakdowns,
+        "stage_overrides": stage_overrides(session, f),
     }
+
+
+def stage_overrides(session: Session, f: StatsFilter) -> list[dict[str, Any]]:
+    """« Passer outre » des étapes vitales (garde d'étapes) dans le filtre (série, chapitre, dates)."""
+    rows = overrides_query(
+        session,
+        project_id=f.project_id,
+        chapter_id=f.chapter_id,
+        start=datetime.combine(f.date_from, time.min) if f.date_from is not None else None,
+        end=datetime.combine(f.date_to + timedelta(days=1), time.min) if f.date_to is not None else None,
+    )
+    titles = {
+        c.id: c.title for c in session.scalars(select(Chapter).where(Chapter.id.in_({r.chapter_id for r in rows})))
+    }
+    return [
+        {
+            "id": r.id,
+            "at": r.created_at.replace(tzinfo=r.created_at.tzinfo or UTC),
+            "project_id": r.project_id,
+            "chapter_id": r.chapter_id,
+            "chapter_number": r.chapter_number,
+            "chapter_title": titles.get(r.chapter_id),
+            "stage": r.stage,
+            "stage_label": stage_label(r.stage),
+            "author": r.author,
+            "note": r.note,
+            "faults": r.faults,
+            "total": r.total,
+        }
+        for r in rows
+    ]

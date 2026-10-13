@@ -1,10 +1,12 @@
 "use client";
 
+import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import { useJournalSettings } from "@/components/journal";
 import { Alert, Card, EmptyState, Input, Loading, PageHeader, Select } from "@/components/ui";
-import { api, type MeasureKey, type StatsFilter, type StatsRow } from "@/lib/api";
+import { formatDateTime } from "@/lib/agents";
+import { api, type MeasureKey, type StageOverrideRow, type StatsFilter, type StatsRow } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
 import { formatPct, rateLabel } from "@/lib/journal";
 
@@ -185,6 +187,7 @@ function Statistics() {
                 <StatsTable rows={b.rows} measures={measures} label={b.label} />
               </Card>
             ))}
+          <StageOverrides rows={data.stage_overrides ?? []} />
           {settings?.tonality_reference && (
             <p className="text-xs text-zinc-500">
               Cible de tonalité ({settings.tonality_reference}) :{" "}
@@ -198,6 +201,58 @@ function Statistics() {
         </>
       )}
     </div>
+  );
+}
+
+/** « Passer outre » une étape vitale d'un chapitre (garde d'étapes) : qui, quand, quoi, combien laissé passer. */
+function StageOverrides({ rows }: { rows: StageOverrideRow[] }) {
+  return (
+    <Card className="space-y-2" data-testid="stage-overrides">
+      <h2 className="text-sm font-medium text-zinc-300">Étapes forcées</h2>
+      {rows.length === 0 ? (
+        <p className="text-sm text-zinc-500">
+          Aucune étape forcée pour ces filtres : chaque chapitre a franchi ses étapes vitales réglées.
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[40rem] text-sm">
+            <thead>
+              <tr className="border-b border-zinc-800 text-left text-xs text-zinc-500">
+                <th className="py-1.5 pr-3 font-normal">Date</th>
+                <th className="py-1.5 pr-3 font-normal">Chapitre</th>
+                <th className="py-1.5 pr-3 font-normal">Étape</th>
+                <th className="py-1.5 pr-3 text-right font-normal">Laissé passer</th>
+                <th className="py-1.5 pr-3 font-normal">Auteur</th>
+                <th className="py-1.5 pr-3 font-normal">Raison</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.id} className="border-b border-zinc-900">
+                  <td className="py-1.5 pr-3 tabular-nums text-zinc-400">{formatDateTime(r.at)}</td>
+                  <td className="py-1.5 pr-3 text-zinc-200">
+                    {r.chapter_title === null ? (
+                      <span className="text-zinc-500">chapitre {r.chapter_number ?? "?"} (supprimé)</span>
+                    ) : (
+                      <Link href={`/chapitres/${r.chapter_id}`} className="hover:text-rose-300">
+                        Chapitre {r.chapter_number}
+                        {r.chapter_title ? ` — ${r.chapter_title}` : ""}
+                      </Link>
+                    )}
+                  </td>
+                  <td className="py-1.5 pr-3 text-zinc-200">{r.stage_label}</td>
+                  <td className="py-1.5 pr-3 text-right tabular-nums text-zinc-300">
+                    {r.faults}/{r.total}
+                  </td>
+                  <td className="py-1.5 pr-3 text-zinc-300">{r.author || "—"}</td>
+                  <td className="py-1.5 pr-3 text-zinc-400">{r.note || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
   );
 }
 

@@ -19,7 +19,7 @@ from mangaka_engine.pipeline.layout import target_size
 from mangaka_engine.pipeline.render import load_chapter_pages, page_inputs
 from mangaka_engine.presets import PresetRegistry, build_upscale_workflow
 from mangaka_engine.store.models import PanelImage
-from tests.conftest import PRESETS_DIR, STYLE
+from tests.conftest import PRESETS_DIR, STYLE, force_stages
 
 REG = PresetRegistry.load(PRESETS_DIR)
 A4 = REG.page_format("a4-300dpi")
@@ -193,6 +193,7 @@ def _setup(c: TestClient, upscaler: str | None = None) -> dict[str, Any]:
         )
     )
     page = pages[0]
+    force_stages(c, ch["id"])
     res = _ok(c.post(f"/pages/{page['id']}/generate"), 202)
     assert len(res["jobs"]) == 2
     _wait(c)

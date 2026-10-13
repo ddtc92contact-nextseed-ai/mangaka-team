@@ -54,6 +54,8 @@
 - 30 : personnages cités hors cadre (`panels.offscreen_names`) et point de vue d'un spectateur
   (`panels.viewpoint` : plan de réaction ou vue subjective). Les cases existantes gardent tous leurs
   personnages comme « présents à l'image » (`character_names`), sans hors cadre ni point de vue.
+- 31 : garde d'étapes : décisions sur les étapes vitales d'un chapitre (`chapter_stage_decisions` : validée,
+  forcée, levée). Table nouvelle et vide : aucune étape n'est validée d'avance, l'état se lit dans le chapitre.
 
 Une base neuve est créée directement à la dernière version. Chaque migration tourne dans une
 transaction unique, clés étrangères désactivées (recette « 12 étapes » de SQLite pour reconstruire
@@ -76,6 +78,7 @@ from .models import (
     AgentProfileVersion,
     Base,
     Chapter,
+    ChapterStageDecision,
     Character,
     CharacterImage,
     GenerationEvent,
@@ -100,7 +103,7 @@ from .slugs import RESERVED_ENTRIES, RESERVED_SERIES, slugify, unique_slug
 
 log = logging.getLogger("mangaka_engine")
 
-SCHEMA_VERSION = 30
+SCHEMA_VERSION = 31
 
 
 class MigrationError(RuntimeError):
@@ -477,6 +480,13 @@ def _v29_to_v30(cur: sqlite3.Cursor) -> None:
         cur.execute("ALTER TABLE panels ADD COLUMN viewpoint JSON")
 
 
+def _v30_to_v31(cur: sqlite3.Cursor) -> None:
+    tables = {row[0] for row in cur.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if ChapterStageDecision.__tablename__ not in tables:
+        for stmt in _ddl(ChapterStageDecision.__table__):
+            cur.execute(stmt)
+
+
 MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     # version de départ → (version d'arrivée, fonction)
     0: (2, _v0_to_v2),
@@ -509,6 +519,7 @@ MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     27: (28, _v27_to_v28),
     28: (29, _v28_to_v29),
     29: (30, _v29_to_v30),
+    30: (31, _v30_to_v31),
 }
 
 

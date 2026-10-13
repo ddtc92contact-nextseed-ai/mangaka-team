@@ -36,7 +36,7 @@ from mangaka_engine.providers.qc import Box, Detections, MockDetectorProvider, M
 from mangaka_engine.providers.qc.dghs import DETECTOR_MODELS, _call_onnx, check_detector_options
 from mangaka_engine.providers.vision import MockVisionProvider, VisionResponseError
 from mangaka_engine.store.models import Job, JobStatus, QCVerdict
-from tests.conftest import PRESETS_DIR, png_bytes
+from tests.conftest import PRESETS_DIR, force_stages, png_bytes
 from tests.test_generation import GatedComfy, _job, _ok, _wait, setup_chapter
 
 QC = PresetRegistry.load(PRESETS_DIR).require_qc()
@@ -470,6 +470,7 @@ def test_chapter_qc_job_and_summary(make_client: Callable[..., TestClient], pres
     )
     data = setup_chapter(c)
     chapter_id = data["chapter"]["id"]
+    force_stages(c, chapter_id)
     _ok(c.post(f"/chapters/{chapter_id}/generate"), 202)
     _wait(c)
     assert _ok(c.get(f"/chapters/{chapter_id}/qc")) == {
