@@ -412,6 +412,23 @@ class PanelOut(BaseModel):
     last_job_error: str | None = None
 
 
+class DialogueStatsOut(BaseModel):
+    panels: int
+    replies: int  # répliques hors onomatopées
+    sfx: int
+    per_panel: float
+    mean_words: float
+    inner_voice: int  # pensées, voix off, narrations
+    sfx_only: int  # cases dont la seule bulle est une onomatopée
+
+
+class DialogueReportOut(BaseModel):
+    """Densité des dialogues d'un chapitre et règles (`dialogue_rules`) encore enfreintes."""
+
+    stats: DialogueStatsOut
+    warnings: list[str]
+
+
 class PageOut(BaseModel):
     id: int
     chapter_id: int

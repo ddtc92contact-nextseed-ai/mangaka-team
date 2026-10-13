@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, object_session, selectinload
 
 from ..pipeline.crop import PanelCrop, bounded
+from ..pipeline.dialogues import chapter_report
 from ..pipeline.finishing import panel_print_info
 from ..pipeline.journal import record_event
 from ..pipeline.knowledge import record_chapter_summary
@@ -59,6 +60,7 @@ from .schemas import (
     CharacterLinkIn,
     CharacterLinkOut,
     CutSlant,
+    DialogueReportOut,
     GutterMove,
     JobOut,
     PageLayoutIn,
@@ -461,6 +463,19 @@ def list_pages(
 ) -> list[PageOut]:
     get_chapter_or_404(session, chapter_id)
     return pages_out(session, ctx, _load_pages(session, chapter_id))
+
+
+@router.get("/chapters/{chapter_id}/dialogues", response_model=DialogueReportOut)
+def chapter_dialogues(
+    chapter_id: int, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
+) -> DialogueReportOut:
+    """Densité des dialogues (bulles enregistrées, onomatopées à part) et règles du scénariste enfreintes :
+    ce qui reste après les relances, ou après une retouche de l'auteur."""
+    chapter = get_chapter_or_404(session, chapter_id)
+    presets = ctx.agents.presets_for(chapter.project_id)
+    rules = presets.prompt("script").dialogue_rules
+    report = chapter_report(presets, _load_pages(session, chapter_id), rules)
+    return DialogueReportOut.model_validate(report.as_dict())
 
 
 def _page_out(
