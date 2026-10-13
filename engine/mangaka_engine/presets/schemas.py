@@ -1110,6 +1110,8 @@ class TextStyle(_Strict):
     italic: bool = Field(default=False, description="Fichier italique de la famille (obligatoire s'il est demandé)")
     size_pt: float = Field(gt=0, le=72)
     min_size_pt: float = Field(gt=0, le=72, description="Taille minimale lisible : en dessous, avertissement")
+    # Plafond quand le texte remplit une bulle agrandie à la main (absent, ou sous size_pt : size_pt).
+    max_size_pt: float | None = Field(default=None, gt=0, le=72)
     step_pt: float = Field(default=0.5, gt=0, le=10)
     line_height: float = Field(default=1.1, gt=0.5, le=3)
     uppercase: bool = False
@@ -1120,6 +1122,11 @@ class TextStyle(_Strict):
         if self.min_size_pt > self.size_pt:
             raise ValueError("min_size_pt doit être ≤ size_pt")
         return self
+
+    @property
+    def ceiling_pt(self) -> float:
+        """Plus grande taille permise (bulle agrandie à la main) : jamais sous la taille normale."""
+        return max(self.size_pt, self.max_size_pt or 0.0)
 
 
 # Plus grande onomatopée possible : borne de `SfxSettings.max_size_pt` et de la taille saisie à la main.

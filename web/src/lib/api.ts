@@ -1503,7 +1503,17 @@ export interface LetteredBubble {
   manual: boolean;
   manual_tail: boolean;
   overflow: boolean;
-  font: { family: string; size_pt: number; size_px: number; color: string };
+  // min / max : bornes du style ; un cadre ajusté à la main est rempli entre les deux, sauf taille saisie
+  // à la main (`manual_size`).
+  font: {
+    family: string;
+    size_pt: number;
+    size_px: number;
+    color: string;
+    min_size_pt: number;
+    max_size_pt: number;
+    manual_size: boolean;
+  };
   lines: { text: string; x: number; y: number }[];
   // miter_limit : joints en onglet (pointes vives des queues et des cris), jamais biseautés.
   shape: { path: string; fill: string; stroke: string; stroke_px: number; miter_limit: number };
@@ -1597,6 +1607,8 @@ export interface BubbleUpdate {
   speaker?: string;
   position?: BubbleBox | null;
   tail?: { x: number; y: number } | null;
+  /** Taille du texte saisie à la main (pt) ; null = automatique. */
+  size_pt?: number | null;
   sfx?: SfxUpdate | null;
 }
 

@@ -1406,10 +1406,12 @@ Le texte n'est **jamais** dessiné par le modèle d'image : il est posé au lett
 
 - `fonts.yaml` : `fonts` (id → fichier + nom) et `styles` par type de bulle (`speech`, `thought`,
   `shout`, `narration`, `"off"` — entre guillemets, sinon YAML lit un booléen) : police, graisse
-  (polices variables), taille en **points** (`size_pt`), taille minimale lisible (`min_size_pt`),
-  pas de réduction, interligne, capitales. `hyphenation` règle la césure française (pyphen).
-  Faute de place à la taille minimale, la bulle garde tout son texte et la case affiche un
-  avertissement.
+  (polices variables), taille en **points** (`size_pt`), taille minimale lisible (`min_size_pt`), plafond
+  (`max_size_pt`), pas de réduction, interligne, capitales. `hyphenation` règle la césure française
+  (pyphen). Faute de place à la taille minimale, la bulle garde tout son texte et la case affiche un
+  avertissement. Une bulle dont le cadre est ajusté à la main (écran Lettrage) prend la plus grande
+  taille qui remplit ce cadre, entre `min_size_pt` et `max_size_pt` (absent : `size_pt`) ; une taille
+  saisie dans le panneau de la bulle l'emporte jusqu'au retour en « auto ».
 - `lettering.yaml` : marges intérieures par type, forme de la parole (ellipse / rectangle arrondi),
   nuage, pointes du cri, queue (longueur, base, direction par défaut sans visage détecté), écarts
   bulle ↔ bulle / bord de case / visage, couleurs, bordure des cases, repères de coupe.

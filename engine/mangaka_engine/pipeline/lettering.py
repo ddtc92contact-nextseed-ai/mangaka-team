@@ -9,7 +9,9 @@ Règles :
 
 - **texte** : typographie française (espaces insécables avant « ! ? : ; » et dans les guillemets),
   retour à la ligne glouton avec césure (pyphen) seulement quand la ligne resterait trop vide,
-  taille réduite par pas jusqu'au minimum lisible du preset, bloc centré ;
+  taille réduite par pas jusqu'au minimum lisible du preset, bloc centré ; une bulle au cadre ajusté
+  à la main prend la plus grande taille qui remplit ce cadre, du plafond `max_size_pt` au minimum (même
+  retour à la ligne, même césure), sauf taille saisie à la main ;
 - **placement** : dans la zone réservée, sinon dans toute la case — pour une case en biais, chaque
   bulle reste entièrement dans le polygone de la case (pas seulement sa boîte) ; la 1re bulle lue est en haut
   côté début de lecture (gauche en ltr, droite en rtl), chaque suivante plus bas ou, à la même
@@ -570,6 +572,8 @@ class BubbleSpec:
     order: int = 0
     manual_box: Box | None = None
     manual_tail: Point | None = None
+    # Taille du texte saisie à la main (écran Lettrage) : l'emporte sur l'ajustement automatique.
+    size_pt: float | None = None
 
 
 @dataclass
@@ -646,6 +650,7 @@ class BubbleLayout:
     manual: bool
     manual_tail: bool
     overflow: bool = False
+    manual_size: bool = False
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -664,6 +669,9 @@ class BubbleLayout:
                 "size_pt": self.size_pt,
                 "size_px": round(self.size_px, 2),
                 "color": self.style.color,
+                "min_size_pt": self.style.min_size_pt,
+                "max_size_pt": self.style.ceiling_pt,
+                "manual_size": self.manual_size,
             },
             "lines": [{"text": ln.text, "x": round(ln.x, 1), "y": round(ln.y, 1)} for ln in self.lines],
             "shape": {
@@ -797,14 +805,23 @@ class Letterer:
         return pt_to_px(v, self.dpi)
 
     # texte ------------------------------------------------------------------------------
-    def sizes(self, kind: str) -> list[float]:
+    def sizes(self, kind: str, *, fill: bool = False) -> list[float]:
+        """Tailles essayées, de la plus grande à `min_size_pt`. `fill` (cadre ajusté à la main) : depuis
+        le plafond `max_size_pt`, pour que le texte remplisse une bulle agrandie."""
         st = self.fonts.style(kind)
-        out, size = [], st.size_pt
+        out, size = [], st.ceiling_pt if fill else st.size_pt
         while size > st.min_size_pt + 1e-9:
             out.append(round(size, 2))
             size -= st.step_pt
         out.append(st.min_size_pt)
         return out
+
+    def bubble_sizes(self, b: BubbleSpec) -> list[float]:
+        """Tailles essayées pour une bulle : celle saisie à la main seule, sinon de quoi remplir un cadre
+        ajusté à la main, sinon les tailles du placement automatique."""
+        if b.size_pt is not None:
+            return [b.size_pt]
+        return self.sizes(b.kind, fill=b.manual_box is not None)
 
     def block(self, kind: str, text: str, size_pt: float, max_text_width: float) -> TextBlock:
         st = self.fonts.style(kind)
@@ -1071,17 +1088,14 @@ class Letterer:
         for b in manual:
             assert b.manual_box is not None
             text = self._text(b)
-            fit = next(
-                (
-                    f
-                    for size in self.sizes(b.kind)
-                    if (f := self.fit(b.kind, text, size, b.manual_box.w, b.manual_box.h))
-                ),
-                None,
-            )
+            # Cadre ajusté à la main : le texte le remplit (plus grande taille qui tient, plafonnée). Un pixel
+            # de marge : le cadre enregistré est arrondi au pixel, il ne doit pas faire perdre un pas de taille.
+            sizes = self.bubble_sizes(b)
+            w, h = b.manual_box.w + 1, b.manual_box.h + 1
+            fit = next((f for size in sizes if (f := self.fit(b.kind, text, size, w, h))), None)
             overflow = fit is None
             if fit is None:
-                fit = self.fit_any(b.kind, text, self.sizes(b.kind)[-1], b.manual_box.w)
+                fit = self.fit_any(b.kind, text, sizes[-1], b.manual_box.w)
             out[b.id] = self._layout(b, panel, b.manual_box, fit, direction, overflow=overflow)
             if overflow:
                 warnings.append(self._overflow(label, b, panel))
@@ -1095,13 +1109,13 @@ class Letterer:
                 return self.tail_boxes(auto[i], box, panel, direction)
 
             regions = [r for r in ((panel.zone.intersection(inner) if panel.zone else None), inner) if r is not None]
-            steps = max(len(self.sizes(b.kind)) for b in auto)
+            steps = max(len(self.bubble_sizes(b)) for b in auto)
             placed: tuple[list[_Fit], list[Box]] | None = None
             for k in range(steps):
                 for region in regions:
                     fitted: list[_Fit] = []
                     for b, text in zip(auto, texts, strict=True):
-                        sizes = self.sizes(b.kind)
+                        sizes = self.bubble_sizes(b)
                         f = self.fit(b.kind, text, sizes[min(k, len(sizes) - 1)], region.w, region.h)
                         if f is None:
                             break
@@ -1120,7 +1134,7 @@ class Letterer:
                 # Plus de place hors des visages : on les ignore (avertissement), puis on empile.
                 fitted = []
                 for b, text in zip(auto, texts, strict=True):
-                    size = self.sizes(b.kind)[-1]
+                    size = self.bubble_sizes(b)[-1]
                     f = self.fit(b.kind, text, size, inner.w, inner.h)
                     if f is None:
                         overflow_ids.add(b.id)
@@ -1198,6 +1212,7 @@ class Letterer:
             manual=b.manual_box is not None,
             manual_tail=b.manual_tail is not None,
             overflow=overflow,
+            manual_size=b.size_pt is not None,
         )
 
     def letter_page(self, panels: Sequence[PanelSpec], direction: Direction, page: Box | None = None) -> PageLettering:

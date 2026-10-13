@@ -2,6 +2,7 @@
 
 import { useId, useImperativeHandle, useRef, useState, type KeyboardEvent, type PointerEvent, type Ref } from "react";
 import { engineUrl, type BubbleBox, type LetteredBubble, type LetteredSfx, type PageLettering, type SfxUpdate } from "@/lib/api";
+import { previewSizePt } from "@/lib/bubble-size";
 import { BUBBLE_KINDS } from "@/lib/script";
 import { insetPolygon, outsetPolygon, svgPoints, type Point } from "@/lib/layout";
 import { screenToPage, type View } from "@/lib/panel-zoom";
@@ -381,6 +382,15 @@ export function LetteringCanvas({
         const selected = b.id === selectedId;
         const move = active?.mode === "move" ? `translate(${active.dx} ${active.dy})` : undefined;
         const kind = BUBBLE_KINDS[b.kind];
+        // Redimensionnement en cours : le texte suit déjà le cadre (aperçu ; le moteur recalcule au lâcher).
+        const resized = active?.mode === "resize" ? applyDelta(b, "resize", active.dx, active.dy).position : undefined;
+        const grow = resized ? previewSizePt(b.font, b.box, resized) / b.font.size_pt : 1;
+        const around = (scale: string) =>
+          resized
+            ? `translate(${resized.x + resized.w / 2} ${resized.y + resized.h / 2}) scale(${scale}) translate(${-(b.box.x + b.box.w / 2)} ${-(b.box.y + b.box.h / 2)})`
+            : undefined;
+        const textMove = around(String(grow));
+        const shapeMove = resized ? around(`${resized.w / b.box.w} ${resized.h / b.box.h}`) : undefined;
         return (
           <g
             key={b.id}
@@ -396,27 +406,31 @@ export function LetteringCanvas({
             data-testid="lettering-bubble"
             data-kind={b.kind}
             data-overflow={b.overflow ? "true" : undefined}
+            data-size-pt={b.font.size_pt}
             className="cursor-move outline-none [&:focus-visible>.focus-ring]:opacity-100"
             onPointerDown={(e) => onPointerDown(e, b, "move")}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
             onKeyDown={(e) => onKeyDown(e, b)}
           >
-            <path
-              d={b.shape.path}
-              fill="none"
-              stroke={b.shape.stroke}
-              strokeWidth={2 * b.shape.stroke_px}
-              strokeLinejoin="miter"
-              strokeMiterlimit={b.shape.miter_limit}
-            />
-            <path d={b.shape.path} fill={b.shape.fill} />
+            <g transform={shapeMove}>
+              <path
+                d={b.shape.path}
+                fill="none"
+                stroke={b.shape.stroke}
+                strokeWidth={2 * b.shape.stroke_px}
+                strokeLinejoin="miter"
+                strokeMiterlimit={b.shape.miter_limit}
+              />
+              <path d={b.shape.path} fill={b.shape.fill} />
+            </g>
             <text
               fontFamily={`"${b.font.family}", sans-serif`}
               fontSize={b.font.size_px}
               fill={b.font.color}
               textAnchor="middle"
               xmlSpace="preserve"
+              transform={textMove}
             >
               {b.lines.map((l, j) => (
                 <tspan key={j} x={l.x} y={l.y}>

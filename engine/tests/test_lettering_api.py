@@ -219,3 +219,39 @@ def test_export_refuses_chapter_without_layout(client: TestClient) -> None:
     res = client.post(f"/chapters/{ch['id']}/export")
     assert res.status_code == 422
     assert client.get("/exports/99999/file").status_code == 404
+
+
+def test_resized_bubble_text_fills_its_frame_in_screen_and_render(client: TestClient) -> None:
+    data = _setup(client)
+    page = data["page"]
+    let = _ok(client.get(f"/pages/{page['id']}/lettering"))
+    bubble = let["bubbles"][0]
+    box, size = bubble["box"], bubble["font"]["size_pt"]
+    assert not bubble["font"]["manual_size"] and bubble["font"]["max_size_pt"] > size
+    big = {"x": box["x"], "y": box["y"], "w": round(box["w"] * 1.5), "h": round(box["h"] * 1.5)}
+    res = _ok(client.patch(f"/bubbles/{bubble['id']}", json={"position": big}))
+    grown = next(x for x in res["bubbles"] if x["id"] == bubble["id"])
+    assert grown["manual"] and size < grown["font"]["size_pt"] <= grown["font"]["max_size_pt"]
+    # Le rendu (SVG et PNG) utilise la même taille que l'écran.
+    info = _ok(client.post(f"/pages/{page['id']}/render"))
+    root = ET.fromstring(client.get(info["svg_url"]).content)
+    sizes = [float(t.get("font-size") or 0) for t in root.iter("{http://www.w3.org/2000/svg}text")]
+    assert any(abs(s - grown["font"]["size_px"]) < 0.06 for s in sizes)
+    # Taille saisie à la main : l'emporte, survit au déplacement et au retour au placement automatique.
+    typed = _ok(client.patch(f"/bubbles/{bubble['id']}", json={"size_pt": 7}))
+    b = next(x for x in typed["bubbles"] if x["id"] == bubble["id"])
+    assert b["font"]["size_pt"] == 7 and b["font"]["manual_size"] and b["box"] == big
+    moved = _ok(client.patch(f"/bubbles/{bubble['id']}", json={"position": {**big, "x": big["x"] + 20}}))
+    b = next(x for x in moved["bubbles"] if x["id"] == bubble["id"])
+    assert b["font"]["size_pt"] == 7 and b["box"]["x"] == big["x"] + 20
+    auto = _ok(client.patch(f"/bubbles/{bubble['id']}", json={"position": None, "tail": None}))
+    b = next(x for x in auto["bubbles"] if x["id"] == bubble["id"])
+    assert not b["manual"] and b["font"]["size_pt"] == 7
+    # « auto » : la taille redevient calculée.
+    back = _ok(client.patch(f"/bubbles/{bubble['id']}", json={"size_pt": None}))
+    b = next(x for x in back["bubbles"] if x["id"] == bubble["id"])
+    assert not b["manual"] and not b["font"]["manual_size"] and b["font"]["size_pt"] == size
+    # Bornes, et pas pour une onomatopée (elle a son propre réglage).
+    assert client.patch(f"/bubbles/{bubble['id']}", json={"size_pt": 200}).status_code == 422
+    sfx = _ok(client.post(f"/panels/{bubble['panel_id']}/sfx", json={"text": "BAM"}), 201)["sfx"][0]
+    assert client.patch(f"/bubbles/{sfx['id']}", json={"size_pt": 20}).status_code == 422
