@@ -26,6 +26,7 @@ export const ACTION_LABEL: Record<string, string> = {
   keep: "gardée comme référence",
   refine: "affinée",
   choose_style: "essai de style retenu",
+  stage_override: "étape du chapitre forcée",
 };
 
 export const AB_MODE_LABEL: Record<string, string> = {

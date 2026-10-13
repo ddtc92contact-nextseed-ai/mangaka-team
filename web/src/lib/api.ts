@@ -2275,6 +2275,64 @@ export interface Stats {
   low_data: boolean;
   low_data_below: number;
   breakdowns: { key: string; label: string; rows: (StatsRow & { value: string })[] }[];
+  /** « Passer outre » une étape vitale (garde d'étapes), les plus récents d'abord. */
+  stage_overrides: StageOverrideRow[];
+}
+
+/** Étapes vitales d'un chapitre (garde d'étapes du moteur : pipeline/stage_gate.py). */
+export type StageKey = "script" | "direction" | "layout" | "references" | "prompts" | "approved" | "lettering";
+
+export interface StageDecision {
+  decision: "validated" | "forced" | "revoked";
+  author: string;
+  note: string;
+  at: string;
+}
+
+export interface ChapterStage {
+  key: StageKey;
+  label: string;
+  /** Réglée par le contenu du chapitre. */
+  complete: boolean;
+  /** « Passer outre » en cours. */
+  forced: boolean;
+  /** Complète ou forcée : ne bloque rien. */
+  passed: boolean;
+  total: number;
+  faults: number;
+  /** « 5 pages en attente sur 5 ». */
+  summary: string;
+  /** Éléments en faute (« page 3 », « Kaï »), 20 au plus. */
+  examples: string[];
+  /** Ce qu'il faut faire (« Applique-la »). */
+  fix: string;
+  /** Onglet du chapitre qui règle l'étape ; `personnages` : fiches de la série. */
+  screen: string;
+  /** Actions bloquées en ce moment (« générer », « lettrer »…). */
+  blocks: string[];
+  decision: StageDecision | null;
+}
+
+export interface ChapterStages {
+  chapter_id: number;
+  project_id: number;
+  stages: ChapterStage[];
+}
+
+export interface StageOverrideRow {
+  id: number;
+  at: string;
+  project_id: number | null;
+  chapter_id: number;
+  chapter_number: number | null;
+  /** null : chapitre supprimé depuis. */
+  chapter_title: string | null;
+  stage: string;
+  stage_label: string;
+  author: string;
+  note: string;
+  faults: number;
+  total: number;
 }
 
 export interface StatsFilter {
@@ -2373,6 +2431,11 @@ export const api = {
     request<Chapter>(`/projects/${projectId}/chapters`, json("POST", body)),
   updateChapter: (id: number, body: Partial<ChapterInput>) => request<Chapter>(`/chapters/${id}`, json("PATCH", body)),
   deleteChapter: (id: number) => request<void>(`/chapters/${id}`, { method: "DELETE" }),
+  chapterStages: (id: number) => request<ChapterStages>(`/chapters/${id}/stages`),
+  overrideStage: (id: number, stage: StageKey, body: { author?: string; note?: string } = {}) =>
+    request<ChapterStages>(`/chapters/${id}/stages/${stage}/override`, json("POST", body)),
+  revokeStageOverride: (id: number, stage: StageKey) =>
+    request<ChapterStages>(`/chapters/${id}/stages/${stage}/override`, { method: "DELETE" }),
   reorderChapters: (projectId: number, chapterIds: number[]) =>
     request<Chapter[]>(`/projects/${projectId}/chapters/reorder`, json("POST", { chapter_ids: chapterIds })),
 

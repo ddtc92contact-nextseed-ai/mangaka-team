@@ -11,9 +11,11 @@ import { useToast } from "@/components/toast";
 import { Alert, Button, ButtonLink, Card } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { useChapter } from "./chapter-context";
+import { blockedReason } from "@/lib/stages";
+import { StageChecklist } from "./stages";
 
 export default function ChapterInfoPage() {
-  const { chapter, setChapter, reload } = useChapter();
+  const { chapter, setChapter, reload, stages, reloadStages } = useChapter();
   const [queued, setQueued] = useState<string | null>(null);
   const router = useRouter();
   const [saved, setSaved] = useState(false);
@@ -94,6 +96,7 @@ export default function ChapterInfoPage() {
         />
       </Card>
       <div className="space-y-6">
+        <StageChecklist />
         <Card>
           <h2 className="mb-2 flex items-center gap-1.5 font-semibold text-zinc-100">
             Résumé pour la continuité
@@ -151,9 +154,11 @@ export default function ChapterInfoPage() {
               </ButtonLink>
               <GenerateChapterButton
                 chapterId={chapter.id}
+                blocked={stages ? blockedReason(stages.stages, "generation") : null}
                 onQueued={(m) => {
                   setQueued(m);
                   reload();
+                  reloadStages();
                 }}
               />
             </div>

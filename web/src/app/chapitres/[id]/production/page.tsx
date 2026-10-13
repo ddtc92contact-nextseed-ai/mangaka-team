@@ -17,6 +17,8 @@ import { cssClipPath, panelPolygon } from "@/lib/layout";
 import { buildPanelViews, PageCanvas, runningLabel, type PanelView } from "../atelier/page-canvas";
 import { useChapter } from "../chapter-context";
 import { StepAlert } from "../step-alert";
+import { blockedReason } from "@/lib/stages";
+import { StageBanner } from "../stages";
 
 export default function ProductionRoute() {
   return (
@@ -91,7 +93,7 @@ function useNow(active: boolean): number {
 }
 
 function Production() {
-  const { chapter, reload: reloadChapter } = useChapter();
+  const { chapter, reload: reloadChapter, reloadStages } = useChapter();
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -126,6 +128,7 @@ function Production() {
 
   return (
     <div className="space-y-6">
+      <StageBanner action="generation" />
       <AgentsCard jobs={agents.jobs} error={agents.error} pages={list} chapterId={chapter.id} />
 
       <CurrentJob
@@ -139,6 +142,7 @@ function Production() {
           setNotice(m);
           pages.reload();
           reloadChapter();
+          reloadStages();
         }}
       />
       {notice && <Alert tone="info">{notice}</Alert>}
@@ -340,7 +344,8 @@ function CurrentJob({
 }) {
   const { cancel } = useQueue();
   const toast = useToast();
-  const sketchEnabled = useChapter().series.sketch_enabled;
+  const { series, stages } = useChapter();
+  const sketchEnabled = series.sketch_enabled;
   const here = running && running.chapter_id === chapterId ? running : null;
   const now = useNow(here !== null);
   const [busy, setBusy] = useState(false);
@@ -408,7 +413,14 @@ function CurrentJob({
               Croquis et tri
             </ButtonLink>
           )}
-          {!here && mine.length === 0 && <GenerateChapterButton chapterId={chapterId} onQueued={onQueued} variant="primary" />}
+          {!here && mine.length === 0 && (
+            <GenerateChapterButton
+              chapterId={chapterId}
+              onQueued={onQueued}
+              variant="primary"
+              blocked={stages ? blockedReason(stages.stages, "generation") : null}
+            />
+          )}
         </div>
       </div>
 

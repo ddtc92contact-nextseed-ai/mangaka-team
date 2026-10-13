@@ -17,6 +17,8 @@ import { ExportPanel } from "./export-panel";
 import { LetteringCanvas, type CanvasEdit, type LetteringCanvasHandle } from "./lettering-canvas";
 import { LetteringWarnings, PanelZoom } from "./panel-zoom";
 import { AddSfx, SfxEditor } from "./sfx-editor";
+import { blockedReason } from "@/lib/stages";
+import { StageBanner } from "../stages";
 
 export default function LetteringRoute() {
   return (
@@ -27,7 +29,7 @@ export default function LetteringRoute() {
 }
 
 function Lettering() {
-  const { chapter } = useChapter();
+  const { chapter, stages } = useChapter();
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -216,6 +218,7 @@ function Lettering() {
 
   return (
     <div className="space-y-4">
+      <StageBanner action={["lettering", "export"]} />
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex items-center gap-1" role="group" aria-label="Choix de la page">
           <Button variant="secondary" className="!px-2.5" onClick={() => prev && navigate(prev.id)} disabled={!prev} aria-label="Page précédente">
@@ -340,7 +343,12 @@ function Lettering() {
               onSelect={select}
             />
           )}
-          <ExportPanel chapterId={chapter.id} pageId={page.id} bleedMm={data?.bleed_mm ?? 3} />
+          <ExportPanel
+            chapterId={chapter.id}
+            pageId={page.id}
+            bleedMm={data?.bleed_mm ?? 3}
+            blocked={stages ? blockedReason(stages.stages, "export") : null}
+          />
         </div>
       </div>
     </div>
