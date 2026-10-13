@@ -21,7 +21,8 @@ sur le prompt par fragments, avec un avertissement sur la case).
 Le texte n'est jamais dessiné : les répliques entre guillemets sont retirées des données envoyées ET
 du paragraphe rendu. Le style tient sur toutes les cases, avec ou sans image de référence : le paragraphe
 s'ouvre sur la phrase de style de la série (`style.series_style_lead`, ajoutée en tête si le LLM l'a
-oubliée) et finit sur les mots-clés de style, dans leur langue mesurée (ajoutés tels quels s'ils manquent).
+oubliée), suivie des mots-clés de la finition de la série (`style.series_finition`, « croquis », « scan »…),
+et finit sur les mots-clés de style, dans leur langue mesurée (ajoutés tels quels s'ils manquent).
 
 Fonctions pures (aucune base) : le rassemblement des données d'une case vit dans `generation.py`.
 """
@@ -167,6 +168,8 @@ class PromptBrief:
     style: str = ""
     # Phrase de style qui ouvre le paragraphe (« Black and white manga panel, inked line art… »).
     style_lead: str = ""
+    # Mots-clés de la finition de la série (`$finition`), juste après la phrase de style ; "" = « propre ».
+    finition: str = ""
     bible: str = ""
     savoir_faire: str = ""
     # Termes photographiques refusés dans le paragraphe (`forbidden_photo_terms` d'image_prompt.yaml).
@@ -202,6 +205,7 @@ class PromptBrief:
         references: Sequence[ReferenceSlot] = (),
         style: str = "",
         style_lead: str = "",
+        finition: str = "",
         bible: str = "",
         savoir_faire: str = "",
         prompt: PromptPreset | None = None,
@@ -243,6 +247,7 @@ class PromptBrief:
             references=list(references),
             style=_SPACES.sub(" ", style or "").strip().rstrip(" .;,"),
             style_lead=_SPACES.sub(" ", style_lead or "").strip(),
+            finition=_SPACES.sub(" ", finition or "").strip().rstrip(" .;,"),
             bible=_text(bible),
             # Passages entiers avec leur source (titres entre « ») : ni guillemets retirés ni lignes fusionnées.
             savoir_faire=(savoir_faire or "").strip(),
@@ -294,6 +299,8 @@ class PromptBrief:
             "references": self.reference_lines(),
             "style_lead": self.style_lead,
             "style": self.style,
+            # Absente pour « propre » : l'empreinte (`key`) des cases sans finition ne change pas.
+            **({"finition": self.finition} if self.finition else {}),
         }
 
     def key(self) -> str:
@@ -357,6 +364,7 @@ def template_values(brief: PromptBrief) -> dict[str, str]:
         "image_tags": ", ".join(r["tag"] for r in brief.reference_lines()) or "(none)",
         "style": _or(brief.style, "(none)"),
         "style_lead": _or(brief.style_lead, "(none)"),
+        "finition": _or(brief.finition, "(none)"),
         "bible": _or(brief.bible, "(nothing specific)"),
         "savoir_faire": _or(brief.savoir_faire, "(none)"),
         "palette_rule": brief.palette_rule,
@@ -431,7 +439,7 @@ def _without(text: str, *fragments: str) -> str:
 
 def photo_problems(paragraph: str, brief: PromptBrief) -> list[str]:
     """Termes photographiques du paragraphe (mots entiers, sans casse), hors style de la série."""
-    text = _without(paragraph, brief.style, brief.style_lead)
+    text = _without(paragraph, brief.style, brief.style_lead, brief.finition)
     found = [
         t
         for t in dict.fromkeys(t.strip() for t in brief.photo_terms if t.strip())
@@ -486,9 +494,24 @@ def with_style(text: str, style: str) -> str:
     return f"{body} {style}."
 
 
+def with_finition(text: str, lead: str, finition: str) -> str:
+    """La phrase de style puis les mots-clés de la finition en tête du paragraphe (`$finition`, comme le
+    prompt par fragments) : retirés d'ailleurs s'ils y sont, ajoutés sinon. Sans finition : `with_lead`."""
+    finition = finition.strip().rstrip(" .;,")
+    if not finition:
+        return with_lead(text, lead)
+    lead = lead.strip()
+    head = " ".join(p for p in (lead if not lead or lead[-1] in ".!?…" else f"{lead}.", f"{finition}.") if p)
+    if name_key(text).startswith(name_key(head)):
+        return text
+    body = _SPACES.sub(" ", _without(text, lead, finition)).strip()
+    body = re.sub(r"([.!?…])(?:\s*[.,;])+", r"\1", re.sub(r"^[\s.,;]+", "", body))
+    return f"{head} {body}".strip()
+
+
 def finish_paragraph(paragraph: str, brief: PromptBrief) -> str:
-    """Paragraphe validé → prompt stocké : phrase de style en tête, mots-clés de style à la fin."""
-    return with_lead(with_style(paragraph, brief.style), brief.style_lead)
+    """Paragraphe validé → prompt stocké : phrase de style puis finition en tête, mots-clés de style à la fin."""
+    return with_finition(with_style(paragraph, brief.style), brief.style_lead, brief.finition)
 
 
 def load_json_object(text: str, root_hint: str) -> dict[str, Any]:

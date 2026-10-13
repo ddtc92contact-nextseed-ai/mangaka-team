@@ -26,3 +26,71 @@ options:
       simple: { name: Simple, lang: en, prompt_keywords: [uncluttered background, few details] }
       moyen: { name: Moyen, lang: en, prompt_keywords: [moderately detailed background] }
       riche: { name: Riche, lang: en, prompt_keywords: [richly detailed background, many intricate details] }
+  # Finition : la partie « canaliser le style sans LoRA » (13/10/2026) — les mots de la finition partent dans
+  # CHAQUE case de la série. `piece: finition` : ils vont dans la pièce réservée `$finition` d'image_prompt.yaml,
+  # juste après la phrase de style, et JAMAIS dans `$style` (plafonné à `style_max_chars`, il les tronquerait en
+  # silence et chasserait les mots du genre et du ton). `negative_keywords` : ajoutés au prompt négatif de la
+  # case, lu seulement à vrai CFG (cfg > 1, palier Qualité) ; en Turbo, Rapide et croquis (cfg 1), seuls les
+  # mots-clés du prompt positif portent la finition.
+  # Recettes mesurées le 13/10/2026 (ecoloman ch.1 case 11, graine 880101, palier Qualité, cfg 2,0) — densité de
+  # trait (écart moyen entre pixels voisins du visage) : référence 23,1 · croquis 26,6 (la vision le classe
+  # « ARTISANAL ») · pinceau nerveux 24,6 · scan 32,4 (+40 %). Une seule case (gros plan) : à confirmer sur un
+  # décor et une case d'action. Fiches « Rendu · Finitions » du pack manga_rendering_knowledge.
+  # Pas monochrome_only : un croquis peut servir une série en couleur (papier et scan mesurés en N&B).
+  finition:
+    name: Finition
+    description: >-
+      Aspect du dessin : propre (rendu actuel) ou fait main — croquis visible, pinceau nerveux, scan
+      d'impression des années 90. Ajouté à chaque case de la série, juste après la phrase de style.
+    piece: finition
+    choices:
+      propre:
+        name: Propre (rendu actuel)
+        lang: en
+        prompt_keywords: []
+      croquis:
+        name: Croquis visible
+        lang: en
+        prompt_keywords:
+          - rough hand-drawn ink sketch
+          - visible pencil underdrawing
+          - unclosed lines
+          - quick loose strokes
+          - the artist's hand is visible
+          - deliberately unfinished
+        negative_keywords:
+          - clean digital line art
+          - smooth vector lines
+          - glossy airbrush
+          - over-rendered
+          - polished 3d render
+          - perfect gradients
+          - slick illustration
+      pinceau-nerveux:
+        name: Pinceau nerveux
+        lang: en
+        prompt_keywords:
+          - confident rough brush inking
+          - dry brush strokes
+          - ink splatter
+          - rough hatching
+          - visible stroke ends
+          - uneven ink density
+      scan:
+        name: Scan années 90
+        lang: en
+        prompt_keywords:
+          - printed on cheap paper
+          - coarse halftone dots
+          - paper grain
+          - off-white paper
+          - faint ghosting
+          - slight ink misregistration
+        negative_keywords:
+          - clean digital line art
+          - smooth vector lines
+          - glossy airbrush
+          - over-rendered
+          - polished 3d render
+          - perfect gradients
+          - slick illustration

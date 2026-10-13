@@ -868,8 +868,11 @@ class StyleTone(StylePack):
 
 class StyleOptionChoice(_Strict):
     name: str = Field(min_length=1)
-    prompt_keywords: list[str] = Field(min_length=1)
+    # Vide seulement pour un réglage à pièce réservée (`StyleOption.piece`) : « propre » n'ajoute rien.
+    prompt_keywords: list[str] = Field(default_factory=list)
     people_keywords: list[str] = Field(default_factory=list)  # voir StylePack
+    # Termes ajoutés au prompt négatif de la case (lus à vrai CFG seulement, palier Qualité).
+    negative_keywords: list[str] = Field(default_factory=list)
     lang: StyleLang = Field(description="Langue des mots-clés, choisie au calibrage (informatif)")
 
     @model_validator(mode="before")
@@ -882,6 +885,18 @@ class StyleOptionChoice(_Strict):
     def _keywords(cls, value: list[str]) -> list[str]:
         return _check_keywords(value)
 
+    @field_validator("negative_keywords")
+    @classmethod
+    def _negative(cls, value: list[str]) -> list[str]:
+        out = [" ".join(k.split()) for k in value]
+        if any(not k or "," in k for k in out):
+            raise ValueError("terme négatif vide ou contenant une virgule")
+        return list(dict.fromkeys(out))
+
+
+# Pièces réservées d'image_prompt.yaml qu'un réglage fin peut remplir à la place de `$style`.
+StyleOptionPiece = Literal["finition"]
+
 
 class StyleOption(_Strict):
     """Réglage fin borné : une liste de choix, chacun avec ses mots-clés. Non choisi = rien d'ajouté."""
@@ -889,6 +904,9 @@ class StyleOption(_Strict):
     name: str = Field(min_length=1)
     description: str = ""
     monochrome_only: bool = Field(default=False, description="Réservé aux rendus N&B (trames)")
+    # Pièce réservée du prompt de case (`$finition` d'image_prompt.yaml) : les mots-clés du choix y vont, et
+    # n'entrent JAMAIS dans `$style` (plafonné à `style_max_chars`, il les tronquerait en silence).
+    piece: StyleOptionPiece | None = None
     choices: dict[str, StyleOptionChoice] = Field(min_length=1)
 
     @field_validator("choices")
@@ -898,6 +916,17 @@ class StyleOption(_Strict):
         if bad:
             raise ValueError(f"identifiant de choix invalide : « {bad[0]} » (minuscules, chiffres, tirets)")
         return value
+
+    @model_validator(mode="after")
+    def _keywords(self) -> StyleOption:
+        if self.piece is None:
+            empty = [k for k, c in self.choices.items() if not c.prompt_keywords]
+            if empty:
+                raise ValueError(f"choix « {empty[0]} » sans mot-clé (permis seulement avec `piece`)")
+            negative = [k for k, c in self.choices.items() if c.negative_keywords]
+            if negative:
+                raise ValueError(f"choix « {negative[0]} » : negative_keywords permis seulement avec `piece`")
+        return self
 
 
 class StyleOptions(_Strict):
@@ -1392,6 +1421,7 @@ IMAGE_PROMPT_VARIABLES = {
     "staging",
     "character_count",
     "style_lead",
+    "finition",
 }
 # Phrase de style en tête des prompts de case (`style_lead` d'image_prompt.yaml).
 STYLE_LEAD_VARIABLES = {"rendering", "genre"}
@@ -2042,6 +2072,9 @@ class KnowledgeAgent(_Strict):
     writer_budget_tokens: int | None = Field(default=None, ge=0, le=32000)
     writer_top_k: int | None = Field(default=None, ge=1, le=50)
     writer_bible_max_tokens: int | None = Field(default=None, ge=0, le=32000)
+    # Collections toujours cherchées (meilleures fiches dans le budget), jamais injectées entières même si elles
+    # sont petites (`small_collection_tokens`) : une petite collection entière mangerait le budget du rédacteur.
+    searched_collections: list[str] = Field(default_factory=list)
 
     @property
     def main_budget_tokens(self) -> int:

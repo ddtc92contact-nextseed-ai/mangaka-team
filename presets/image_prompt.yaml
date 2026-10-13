@@ -24,8 +24,15 @@
 # $character_count (nombre de personnages en toutes lettres : « One character », « Two characters »).
 # $style_lead : phrase de style de la série (`style_lead` ci-dessous), toujours en tête : sans image de
 # référence (figurants, lieux, workflow texte), c'est elle qui tient le style manga (12/10/2026).
+# $finition : mots-clés de la finition choisie par la série (`style_options.yaml › finition` : croquis,
+# pinceau nerveux, scan ; « propre » n'ajoute rien), juste après la phrase de style. Pièce réservée, JAMAIS
+# dans $style : `style_max_chars` la tronquerait en silence et chasserait les mots du genre et du ton
+# (mesuré le 13/10/2026 : en tête, elle tient mieux qu'en fin de prompt). Ses termes négatifs
+# (`negative_keywords` du choix) sont ajoutés au prompt négatif de la case — lus à vrai CFG seulement
+# (cfg > 1, palier Qualité), ignorés en Turbo, Rapide et croquis (cfg 1).
 parts:
   - "$style_lead."
+  - "$finition."
   - "$plan."
   - "Camera angle: $angle."
   - "$description."

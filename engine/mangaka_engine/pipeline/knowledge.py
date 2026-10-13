@@ -994,11 +994,18 @@ class KnowledgeBase:
             )
             out.warning = ranking.warning
             ranked = frame_passages(ranking.ranked, plan=plan, angle=angle)
+            # `searched_collections` : cherchées comme les grandes, jamais injectées entières.
+            searched = {n.casefold() for n in agent.searched_collections}
+            whole = [
+                cid
+                for c in collections
+                if (cid := c.id) in ranking.whole_collections and c.name.casefold() not in searched
+            ]
             if out.writer_budget > 0:
                 dropped: list[Passage] = []
                 out.writer_passages, out.writer_tokens = choose_passages(
                     ranked,
-                    ranking.whole_collections,
+                    whole,
                     self.settings,
                     top_k=out.writer_top_k,
                     budget_tokens=out.writer_budget,
@@ -1007,7 +1014,7 @@ class KnowledgeBase:
                 # Écartés signalés : ceux qu'aurait servis la même sélection sans tri des fiches de plan / d'angle.
                 unsorted, _ = choose_passages(
                     ranking.ranked,
-                    ranking.whole_collections,
+                    whole,
                     self.settings,
                     top_k=out.writer_top_k,
                     budget_tokens=out.writer_budget,
@@ -1020,7 +1027,7 @@ class KnowledgeBase:
                 packs = {p.collection_id for p in ranking.ranked if p.pack}
                 out.fragment_passages, out.fragment_tokens = choose_passages(
                     [p for p in ranked if not p.pack],
-                    [cid for cid in ranking.whole_collections if cid not in packs],
+                    [cid for cid in whole if cid not in packs],
                     self.settings,
                     top_k=out.fragment_top_k,
                     budget_tokens=out.fragment_budget,

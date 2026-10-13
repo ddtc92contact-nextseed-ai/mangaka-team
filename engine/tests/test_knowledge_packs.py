@@ -49,6 +49,13 @@ PACK_COLLECTIONS = [
     "Mise en scène · Checklist",
     "Mise en scène · Pont ComfyUI",
 ]
+RENDERING_COLLECTIONS = [
+    "Rendu · Encrage",
+    "Rendu · Trames",
+    "Rendu · Papier et impression",
+    "Rendu · Finitions",
+    "Rendu · Valeurs et masses",
+]
 
 
 @pytest.fixture
@@ -204,14 +211,15 @@ def pack_client(make_settings: Callable[..., Settings]) -> Iterator[TestClient]:
 
 def test_startup_imports_the_shipped_pack_in_13_collections(pack_client: TestClient) -> None:
     c = pack_client
-    cols = {col["name"]: col for col in _ok(c.get("/knowledge/collections"))}
+    every = {col["name"]: col for col in _ok(c.get("/knowledge/collections"))}
+    assert set(every) == set(PACK_COLLECTIONS) | set(RENDERING_COLLECTIONS)
+    cols = {name: col for name, col in every.items() if col["pack"] == "manga_visual_knowledge"}
     assert set(cols) == set(PACK_COLLECTIONS)
-    assert all(col["pack"] == "manga_visual_knowledge" for col in cols.values())
     raw = (PRESETS_DIR / "knowledge_packs" / "manga_visual_knowledge.md").read_text()
     fiches = sum(1 for line in raw.splitlines() if line.startswith("### "))
     assert sum(col["document_count"] for col in cols.values()) == fiches + 4  # + 0.B, 0.C, annexes A et B
     status = _ok(c.get("/knowledge/status"))
-    [report] = status["packs"]
+    report = next(r for r in status["packs"] if r["pack"] == "manga_visual_knowledge")
     assert report["created"] == fiches + 4 and report["warnings"] == [] and report["error"] is None
 
     docs = [
@@ -228,7 +236,7 @@ def test_startup_imports_the_shipped_pack_in_13_collections(pack_client: TestCli
     assert cu["meta"]["pairs_with"] and "gros plan" in cu["keywords"]
 
     # « Mettre à jour les packs » sur un fichier inchangé : rien ne bouge
-    [update] = _ok(c.post("/knowledge/packs/update"))
+    update = next(r for r in _ok(c.post("/knowledge/packs/update")) if r["pack"] == "manga_visual_knowledge")
     assert (update["created"], update["updated"], update["deleted"]) == (0, 0, 0)
     assert update["unchanged"] == fiches + 4
 
@@ -240,6 +248,60 @@ def test_startup_imports_the_shipped_pack_in_13_collections(pack_client: TestCli
     assert r.status_code == 409 and "Mettre à jour les packs" in r.json()["detail"]
     assert c.patch(f"/knowledge/documents/{cu['id']}", json={"content": "x"}).status_code == 409
     assert c.delete(f"/knowledge/documents/{cu['id']}").status_code == 409
+
+
+def test_rendering_pack_imports_its_5_collections_idempotently(pack_client: TestClient) -> None:
+    c = pack_client
+    cols = {
+        col["name"]: col for col in _ok(c.get("/knowledge/collections")) if col["pack"] == "manga_rendering_knowledge"
+    }
+    # jamais de « Rendu · Pont presets » : les réglages vivent dans les presets, une copie dériverait
+    assert set(cols) == set(RENDERING_COLLECTIONS)
+    raw = (PRESETS_DIR / "knowledge_packs" / "manga_rendering_knowledge.md").read_text()
+    fiches = sum(1 for line in raw.splitlines() if line.startswith("### "))
+    assert fiches == 17 and sum(col["document_count"] for col in cols.values()) == fiches
+    report = next(r for r in _ok(c.get("/knowledge/status"))["packs"] if r["pack"] == "manga_rendering_knowledge")
+    assert report["created"] == fiches and report["warnings"] == [] and report["error"] is None
+    # « Mettre à jour les packs » deux fois : rien de créé, aucun doublon
+    for _ in range(2):
+        update = next(r for r in _ok(c.post("/knowledge/packs/update")) if r["pack"] == "manga_rendering_knowledge")
+        assert (update["created"], update["updated"], update["deleted"]) == (0, 0, 0)
+        assert update["unchanged"] == fiches
+    names = [col["name"] for col in _ok(c.get("/knowledge/collections"))]
+    assert len(names) == len(set(names)) == len(PACK_COLLECTIONS) + len(RENDERING_COLLECTIONS)
+    # aucune fiche ne recopie les mots-clés d'une finition (style_options.yaml › finition)
+    finition = PresetRegistry.load(PRESETS_DIR).style_options.options["finition"]
+    copied = {k for ch in finition.choices.values() for k in [*ch.prompt_keywords, *ch.negative_keywords]}
+    finitions = cols["Rendu · Finitions"]
+    for doc in _ok(c.get(f"/knowledge/collections/{finitions['id']}/documents")):
+        content = _ok(c.get(f"/knowledge/documents/{doc['id']}"))["content"]
+        assert "`finition ›" in content or "« propre » n'ajoute rien" in content, doc["title"]
+        assert not [k for k in copied if k in content], doc["title"]
+
+
+def test_rendering_wiring_is_narrow() -> None:
+    """Directeur artistique : Valeurs et masses + Encrage ; rédacteur de prompt : Valeurs et masses SEULEMENT ;
+    scénariste : rien du pack rendu."""
+    agents = PresetRegistry.load(PRESETS_DIR).knowledge.agents
+    rendu = set(RENDERING_COLLECTIONS)
+    assert {c for c in agents["art_direction"].collections if c in rendu} == {
+        "Rendu · Valeurs et masses",
+        "Rendu · Encrage",
+    }
+    assert [c for c in agents["image_prompt"].collections if c in rendu] == ["Rendu · Valeurs et masses"]
+    # petite collection, mais cherchée : injectée entière, elle mangerait le budget du rédacteur
+    assert agents["image_prompt"].searched_collections == ["Rendu · Valeurs et masses"]
+    assert not [c for c in agents["script"].collections if c.startswith("Rendu")]
+    assert not [c for a in agents.values() for c in a.collections if "Pont presets" in c]
+
+
+def test_close_up_fiche_never_asks_for_a_flat_black_face() -> None:
+    raw = (PRESETS_DIR / "knowledge_packs" / "manga_visual_knowledge.md").read_text()
+    fiche = raw.split("### SHOT_CU_001")[1].split("\n### ")[0]
+    assert "deep shadow" not in fiche and "dans le noir" not in fiche
+    assert "half of the face in hatched shadow, never a flat black fill" in fiche
+    # même consigne ailleurs : une ombre sur le visage dit son moyen (hachure, trame), jamais l'aplat plein
+    assert "(bande noire)" not in raw and "half of face in deep shadow" not in raw
 
 
 def test_default_wiring_shows_pack_collections_for_the_three_agents(pack_client: TestClient) -> None:
@@ -309,7 +371,9 @@ def test_panel_writer_reads_pack_fiches_but_fragments_never_do(make_settings: Ca
         pid = pages[0]["panels"][0]["id"]
         seen = _ok(c.get(f"/panels/{pid}/knowledge"))  # « Savoir-faire de la case » dans l'atelier
         writer = seen["writer"]["passages"]
-        assert writer and all(p["pack"] == "manga_visual_knowledge" for p in writer)
+        assert writer and {p["pack"] for p in writer} <= {"manga_visual_knowledge", "manga_rendering_knowledge"}
+        rendu = {p["collection_name"] for p in writer if p["pack"] == "manga_rendering_knowledge"}
+        assert rendu <= {"Rendu · Valeurs et masses"}
         # gros plan du scénario + contre-plongée de la description : une seule fiche de plan, la bonne
         shots = [p["document_title"] for p in writer if p["document_title"].startswith("SHOT_")]
         assert shots == ["SHOT_CU_001 — Gros plan (visage)"]
@@ -401,9 +465,10 @@ def test_shipped_pack_gives_one_passage_per_fiche_and_reindexes_old_chunks(db: D
         update_packs(session, PRESETS_DIR, MockEmbeddingProvider(), old)
         session.commit()
         assert any(len(d.chunks) > 1 for d in _docs(session).values())
-        [report] = update_packs(session, PRESETS_DIR, MockEmbeddingProvider(), settings)
+        reports = update_packs(session, PRESETS_DIR, MockEmbeddingProvider(), settings)
         session.commit()
-        assert report.updated > 0 and report.created == 0
+        report = next(r for r in reports if r.pack == "manga_visual_knowledge")
+        assert report.updated > 0 and all(r.created == 0 for r in reports)
         docs = list(_docs(session).values())
         chunks = session.scalar(select(text("count(*)")).select_from(KnowledgeChunk))
         assert chunks == sum(len(d.chunks) for d in docs)
@@ -417,8 +482,8 @@ def test_shipped_pack_gives_one_passage_per_fiche_and_reindexes_old_chunks(db: D
         annexe = next(d for d in docs if d.title.startswith("Annexe B"))
         assert len(annexe.chunks) == 1
         # import suivant : rien à refaire
-        [again] = update_packs(session, PRESETS_DIR, MockEmbeddingProvider(), settings)
-        assert again.updated == 0
+        again = update_packs(session, PRESETS_DIR, MockEmbeddingProvider(), settings)
+        assert [r.updated for r in again] == [0, 0]
 
 
 def test_oversized_fiche_keeps_its_prompt_fragment_with_the_title() -> None:

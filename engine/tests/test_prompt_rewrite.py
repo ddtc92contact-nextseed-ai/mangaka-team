@@ -247,8 +247,9 @@ def test_mock_panel_shows_the_pack_sheets_the_writer_received(pack_env: Env) -> 
     sources = panel["prompt_sources"]
     assert sources is not None and sources["written_at"]
     names = {p["collection_name"] for p in sources["passages"]}
-    assert names and all(n.startswith("Mise en scène · ") for n in names)
-    assert all(p["pack"] == "manga_visual_knowledge" for p in sources["passages"])
+    # du pack rendu, le rédacteur ne lit que « Rendu · Valeurs et masses » (branchement étroit)
+    assert names and all(n.startswith("Mise en scène · ") or n == "Rendu · Valeurs et masses" for n in names)
+    assert {p["pack"] for p in sources["passages"]} <= {"manga_visual_knowledge", "manga_rendering_knowledge"}
     # ce sont bien les passages envoyés au rédacteur pour ce prompt
     user = _writer_calls(pack_env.llm)[-1][-1].content
     assert all(f"« {p['document_title']} »" in user for p in sources["passages"])

@@ -126,7 +126,14 @@ from .prompt_dialog import (
 from .prompt_dialog import PROMPT_ID as DIALOG_PROMPT_ID
 from .prompt_writer import PROMPT_ID as WRITER_PROMPT_ID
 from .prompt_writer import PromptBrief, PromptWriterError, WriteRun, write_prompt
-from .style import series_monochrome, series_rendering, series_style, series_style_lead
+from .style import (
+    series_finition,
+    series_finition_negative,
+    series_monochrome,
+    series_rendering,
+    series_style,
+    series_style_lead,
+)
 
 log = logging.getLogger("mangaka_engine")
 
@@ -304,6 +311,7 @@ def build_panel_prompt(
         objects=[_prompt_entry(o) for o in objects],
         style=series_style(presets, series, drop=mood_dropped_terms(da.get("ambiance"), presets.image_prompt)),
         style_lead=series_style_lead(presets, series),
+        finition=series_finition(presets, series),
         savoir_faire=savoir_faire,
         bible=bible,
         settings=presets.image_prompt,
@@ -804,6 +812,7 @@ def panel_brief(
         references=references,
         style=series_style(presets, project, drop=mood_dropped_terms(da.get("ambiance"), presets.image_prompt)),
         style_lead=series_style_lead(presets, project),
+        finition=series_finition(presets, project),
         bible=bible,
         savoir_faire=savoir_faire,
         prompt=presets.prompts.get(WRITER_PROMPT_ID),
@@ -1551,6 +1560,9 @@ class GenerationExecutor:
             if rendering is not None:
                 # La tonalité a ses termes dans le négatif (lu seulement à vrai CFG, palier Qualité).
                 negative = merge_negative(negative, rendering.tonality_negative)
+            # Finition de la série (croquis, scan…) : son négatif anti-lisse, lu lui aussi à vrai CFG seulement
+            # (cfg > 1) ; en Turbo, Rapide et croquis, seuls ses mots-clés du prompt positif (`$finition`) portent.
+            negative = merge_negative(negative, ", ".join(series_finition_negative(presets, chapter.project)))
             params: dict[str, Any] = {
                 "positive_prompt": prompt,
                 "negative_prompt": negative,

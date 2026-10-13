@@ -20,7 +20,7 @@ Après modification d'un preset, redémarre le moteur (`npm run dev`).
 | `style_genres/*.yaml` | Packs de style : **genre et public** (shōnen, seinen, shōjo, jeunesse, magical girl, tranche de vie, franco-belge) — mots-clés, mise en page, sens de lecture, polices, consignes LLM, tons autorisés, scène test de la planche de style |
 | `style_renderings/*.yaml` | Packs de style : **rendu** (N&B à trames par défaut, N&B encre, couleur, couleur douce) |
 | `style_tones/*.yaml` | Packs de style : **ton** (lumineux, neutre par défaut, dark, humour) |
-| `style_options.yaml` | Réglages fins bornés du style : trait, trames (N&B seulement), détail des décors |
+| `style_options.yaml` | Réglages fins bornés du style : trait, trames (N&B seulement), détail des décors, finition (propre, croquis, pinceau nerveux, scan) |
 | `style_loras.yaml` | Catalogue des LoRA de style : mots déclencheurs et poids conseillé |
 | `camera_loras.yaml` | LoRA Multiple-Angles (« Nouvel angle », « Changer l'angle ») et Cohérence anime, vocabulaire de caméra |
 | `prompts/*.yaml` | Prompts des étapes LLM (`script` : découpage d'un chapitre ; `direction-artistique` ; `redacteur-image` : prompt image de chaque case rédigé en un paragraphe ; `redacteur-image-dialogue` : dialogue sur une case dans l'atelier) |
@@ -436,6 +436,14 @@ llm_guidelines: Ton épique ; scènes larges, enjeux qui dépassent les personna
 `options` : un réglage (`trait`, `trames`, `detail`…) = `name`, `description`, `choices` (id →
 `name` + `lang` + `prompt_keywords`) et `monochrome_only: true` pour un réglage réservé aux rendus N&B (masqué
 dans la fiche pour un rendu couleur, 422 à l'API). Un réglage non choisi n'ajoute rien.
+
+**Finition** (`finition`, 13/10/2026) : `piece: finition` envoie les mots-clés du choix dans la pièce
+réservée `$finition` d'`image_prompt.yaml`, juste après la phrase de style, dans **chaque** case de la série
+(fragments et rédacteur de prompt, donc croquis, Turbo, Qualité et passage au propre) — et **jamais** dans
+`$style`, dont le plafond `style_max_chars` la tronquerait en silence. `negative_keywords` d'un choix :
+ajoutés au prompt négatif de la case, lu seulement à vrai CFG (cfg > 1, palier Qualité ; ignoré en Turbo,
+Rapide et croquis). `propre` (ou « Par défaut ») n'ajoute rien : le prompt est identique, octet pour octet,
+à celui d'une série sans finition. Les mots-clés vides et `negative_keywords` ne sont permis qu'avec `piece`.
 
 `loras` : `file` (nom exact listé par ComfyUI, sous-dossier compris), `name`, `trigger_words` (ajoutés
 en tête de `$style`) et `weight` (pré-rempli quand on choisit ce LoRA). Le LoRA de style se choisit
@@ -1268,7 +1276,7 @@ variable est vide est omis.
 `forbidden_text_terms` est toujours ajouté au prompt négatif du workflow (le texte est posé au
 lettrage, jamais dessiné par le modèle), `negative_photo_terms` aussi (contre le photoréalisme :
 « photorealistic, photograph, 3d render… »), `$style_lead` (phrase de style de la série, `style_lead`)
-ouvre le prompt, et `strip_quotes` retire les répliques entre guillemets
+ouvre le prompt, suivi de `$finition` (mots-clés de la finition de la série, `style_options.yaml › finition`), et `strip_quotes` retire les répliques entre guillemets
 de la description. Le prompt est stocké sur la case ; une édition manuelle est conservée jusqu'à
 « reconstruire le prompt ».
 
@@ -1581,7 +1589,9 @@ une série, documents `.md` / `.txt` / `.pdf` (texte extrait par pypdf) ou texte
 - **Recherche hybride** (`retrieval`) : score = `vector_weight` × cosinus + `keyword_weight` ×
   BM25 normalisé (le meilleur passage par mots-clés vaut 1), `top_k` passages au plus, dans le
   `budget_tokens` de l'agent. Une collection de moins de `small_collection_tokens` jetons est
-  injectée **entière**, sans recherche.
+  injectée **entière**, sans recherche — sauf si l'agent la cite dans `searched_collections` : elle est
+  alors cherchée comme une grande (le rédacteur de prompt y met « Rendu · Valeurs et masses », ≈ 680 jetons,
+  qui avec Pont ComfyUI mangerait sinon tout son budget de 1 200 jetons).
 - **Agents** (`agents`) : `script` (étape 1, variable `$savoir_faire` de `prompts/script.yaml`),
   `art_direction` (`prompts/direction-artistique.yaml`) et `image_prompt` (étape 3, voir ci-dessous).
   Collections par nom (casse ignorée) ; `series_collections: true` ajoute celles de la série du
@@ -1628,9 +1638,12 @@ une série, documents `.md` / `.txt` / `.pdf` (texte extrait par pypdf) ou texte
 ### Packs de savoir-faire (`knowledge_packs/`)
 
 Un pack est un gros fichier Markdown de fiches livré avec l'appli, et un manifeste YAML qui le range en
-collections. Le pack livré, `manga_visual_knowledge` (cadrages, angles, corps et gestes, action,
-composition, découpage, émotions, anti-répétition, exemples analysés), donne 13 collections
-« Mise en scène · … » et environ 70 documents.
+collections. Deux packs livrés : `manga_visual_knowledge` (cadrages, angles, corps et gestes, action,
+composition, découpage, émotions, anti-répétition, exemples analysés), qui donne 13 collections
+« Mise en scène · … » et environ 70 documents, et `manga_rendering_knowledge` (13/10/2026 : encrage, trames,
+papier et impression, finitions, valeurs et masses), qui donne 5 collections « Rendu · … » et 17 fiches.
+Un pack ne recopie jamais un preset (pas de collection « Pont presets ») : les mots-clés d'une finition
+vivent dans `style_options.yaml`, une copie dériverait.
 
 **Format du fichier** (`manga_visual_knowledge.md`) : une section par `## titre` ; dans une section, une
 fiche par `### ID — titre`, qui commence par une ligne `` `path: …` `` et un bloc ```` ```meta ```` en JSON
@@ -1695,6 +1708,9 @@ le format d'un storyboarder (champs que l'appli n'a pas) : lues par aucun agent,
 Savoir-faire. « Sources utilisées » de l'écran Direction artistique liste les fiches de chaque page.
 Rédacteur de prompt + Cadrages, Angles,
 Corps et gestes, Action, Composition, Émotions, Pont ComfyUI (≈ 420 jetons, entière).
+Pack rendu, branchement étroit (le budget du rédacteur est déjà plein) : DA + Rendu · Valeurs et masses et
+Rendu · Encrage ; rédacteur + Rendu · Valeurs et masses **seulement** ; scénariste : rien. Trames, Papier et
+impression, Finitions : cherchables dans Savoir-faire, lues par aucun agent.
 
 ### Embeddings : mode réel
 
