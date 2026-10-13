@@ -114,8 +114,12 @@ def build_prompt(
     savoir_faire: str = "",
     bible: str = "",
     settings: ImagePromptSettings | None = None,
+    framing: str = "",
 ) -> str:
     """Assemble le prompt positif d'une case à partir des morceaux du preset.
+
+    `framing` : consigne de cadrage (`$framing`, `framing.framing_sentence`) d'une case dont des personnages
+    cités restent hors cadre ; "" pour une case ordinaire (le morceau est omis).
 
     `plan`, `angle`, `ambiance`, `action` : direction artistique appliquée à la case ; `$plan` vaut le
     type de plan du scénario quand la direction artistique n'en donne pas (plans et angles en anglais,
@@ -143,6 +147,7 @@ def build_prompt(
         "ambiance": _clean(ambiance),
         "action": _clean(action),
         "description": _clean(desc),
+        "framing": _clean(framing),
         "setting": _clean(setting),
         "staging": _clean(staging),
         "character_count": character_count(len(described)),

@@ -17,6 +17,16 @@ from ..pipeline.composition import STEP as CONTROL_MAP_STEP
 from ..pipeline.estimate import Estimate, estimate_panels, remaining_panels
 from ..pipeline.finishing import STEP as FINISH_STEP
 from ..pipeline.finishing import FinishingError, drop_finishes, panel_print_info, resolve_upscaler
+from ..pipeline.framing import (
+    REACTION,
+    SUBJECTIVE,
+    aliases_from,
+    apply_viewpoint,
+    find_spectators,
+    same_name,
+    set_cast,
+    viewpoint_of,
+)
 from ..pipeline.generation import (
     ACTIVE,
     QC_STEP,
@@ -112,6 +122,7 @@ from .schemas import (
     WorkflowPresetOut,
 )
 from .stages import gate
+from .viewpoint import viewpoint_out
 
 router = APIRouter(tags=["génération"])
 
@@ -195,6 +206,12 @@ def panel_detail(session: Session, ctx: AppContext, panel: Panel) -> PanelDetail
     presets = _presets(ctx, panel)
     cast = panel_cast(session, panel, presets)
     resolved = resolve_preset_id(presets, panel, cast.entries)
+    matcher = CharacterMatcher.for_project(session, page.chapter.project_id)
+    spect = find_spectators(
+        panel.description or "",
+        [*(panel.character_names or []), *(panel.offscreen_names or [])],
+        aliases_from(matcher),
+    )
     try:
         upscaler: str | None = resolve_upscaler(presets, page.chapter.project).preset.name
     except FinishingError:
@@ -213,9 +230,11 @@ def panel_detail(session: Session, ctx: AppContext, panel: Panel) -> PanelDetail
         staging=panel.staging or "",
         characters=list(panel.character_names or []),
         character_ids=list(panel.character_ids or []),
-        unmatched_characters=CharacterMatcher.for_project(session, page.chapter.project_id).unmatched(
-            panel.character_names or []
-        ),
+        unmatched_characters=matcher.unmatched(panel.character_names or []),
+        offscreen_characters=list(panel.offscreen_names or []),
+        viewpoint=viewpoint_out(panel),
+        spectator_hints=spect.viewers,
+        perception=spect.verb,
         decor=_ref(cast.decor) if cast.decor is not None else None,
         objets=[_ref(o) for o in cast.objects],
         shot_type=panel.shot_type,
@@ -454,6 +473,39 @@ def get_panel(
     return panel_detail(session, ctx, get_panel_or_404(session, panel_id))
 
 
+def _update_cast(session: Session, ctx: AppContext, panel: Panel, body: PanelUpdate) -> None:
+    """Présents, hors cadre et point de vue corrigés par l'auteur (inspecteur de case) : les ids des fiches
+    suivent les présents, un point de vue de l'auteur n'est jamais écrasé par la direction artistique, et le
+    prompt automatique est reconstruit (un prompt rédigé par l'IA le sera de nouveau)."""
+    matcher = CharacterMatcher.for_project(session, panel.page.chapter.project_id)
+    changes = body.model_fields_set
+    if "characters" in changes or "offscreen_characters" in changes:
+        present = body.characters if body.characters is not None else list(panel.character_names or [])
+        offscreen = (
+            body.offscreen_characters if body.offscreen_characters is not None else list(panel.offscreen_names or [])
+        )
+        # Un nom passé d'une liste à l'autre la quitte (sinon « présent » l'emporterait).
+        if body.offscreen_characters is not None and body.characters is None:
+            present = [n for n in present if not any(same_name(n, o) for o in offscreen)]
+        set_cast(panel, present, offscreen, matcher)
+    if "viewpoint" in changes:
+        vp = body.viewpoint
+        if vp is None:
+            panel.viewpoint = None
+        else:
+            apply_viewpoint(panel, vp.mode, vp.spectators, source="auteur", matcher=matcher)
+    elif "characters" in changes or "offscreen_characters" in changes:
+        # Spectateurs déplacés à la main : le point de vue suit (vue subjective ⇔ spectateurs hors cadre).
+        current = viewpoint_of(panel)
+        if current is not None:
+            viewers = list(current.get("spectators") or [])
+            off = panel.offscreen_names or []
+            hidden = bool(viewers) and all(any(same_name(v, o) for o in off) for v in viewers)
+            mode = SUBJECTIVE if hidden else REACTION
+            panel.viewpoint = {"mode": mode, "spectators": viewers, "source": "auteur"}
+    update_panel_prompt(_presets(ctx, panel), session, panel, ctx.knowledge, reset=True)
+
+
 @router.patch("/panels/{panel_id}", response_model=PanelDetailOut)
 def update_panel(
     panel_id: int, body: PanelUpdate, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
@@ -474,6 +526,8 @@ def update_panel(
         if key in changes:
             setattr(panel, key, changes[key] or "")
             update_panel_prompt(_presets(ctx, panel), session, panel, ctx.knowledge, reset=True)
+    if {"characters", "offscreen_characters", "viewpoint"} & changes.keys():
+        _update_cast(session, ctx, panel, body)
     if "generation_preset" in changes:
         preset = changes["generation_preset"]
         known = _presets(ctx, panel).workflows

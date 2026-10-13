@@ -37,6 +37,11 @@ class DirectionPanelOut(BaseModel):
     # Bibliothèque proposée par l'agent (null : garder le décor / les objets du scénario).
     decor: int | None = None
     objets: list[int] | None = None
+    # Spectateur : « plan de réaction » | « vue subjective » (null : case sans spectateur), ses spectateurs, et
+    # `point_de_vue_defaut` : choix par défaut, l'agent n'ayant rien choisi.
+    point_de_vue: str | None = None
+    spectateurs: list[str] = Field(default_factory=list)
+    point_de_vue_defaut: bool = False
 
 
 class PageDirectionOut(BaseModel):
@@ -76,6 +81,7 @@ class DirectionOptions(BaseModel):
     cadres: list[str]
     page_chocs: list[str]
     sfx_intensities: list[str]
+    points_de_vue: list[str] = Field(default_factory=list)
     styles: list[Option]
     templates: list[dict[str, Any]]
 
@@ -147,6 +153,9 @@ def direction_out(page: Page) -> PageDirectionOut:
                     sfx=list(pa.get("sfx") or []),
                     decor=pa.get("decor"),
                     objets=pa.get("objets"),
+                    point_de_vue=pa.get("point_de_vue"),
+                    spectateurs=list(pa.get("spectateurs") or []),
+                    point_de_vue_defaut=bool(pa.get("point_de_vue_defaut")),
                 )
                 for pa in v.get("panels") or []
             ],
@@ -200,6 +209,7 @@ def get_direction(
             cadres=list(da.CADRES),
             page_chocs=list(da.PAGE_CHOCS),
             sfx_intensities=list(da.SFX_INTENSITIES),
+            points_de_vue=list(da.POINTS_DE_VUE),
             styles=[Option(value=s.id, label=s.name) for s in presets.layout_styles.values()],
             templates=[
                 {"id": t.id, "name": t.name, "panel_count": t.panel_count} for t in presets.layout_templates.values()

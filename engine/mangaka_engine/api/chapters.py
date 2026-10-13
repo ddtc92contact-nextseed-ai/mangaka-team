@@ -13,6 +13,7 @@ from ..pipeline.art_direction import keep_author_plan
 from ..pipeline.crop import PanelCrop, bounded
 from ..pipeline.dialogues import chapter_report
 from ..pipeline.finishing import panel_print_info
+from ..pipeline.framing import set_cast
 from ..pipeline.journal import record_event
 from ..pipeline.knowledge import record_chapter_summary
 from ..pipeline.layout import LayoutError, clamp_to_live
@@ -74,6 +75,7 @@ from .schemas import (
 )
 from .stages import gate
 from .storage import remove_chapter_folders, remove_page_folders
+from .viewpoint import viewpoint_out
 
 router = APIRouter(tags=["chapitres"])
 
@@ -196,6 +198,8 @@ def page_out(
                 staging=p.staging or "",
                 characters=list(p.character_names or []),
                 unmatched_characters=matcher.unmatched(p.character_names or []),
+                offscreen_characters=list(p.offscreen_names or []),
+                viewpoint=viewpoint_out(p),
                 decor=p.decor_id,
                 objets=list(p.object_ids or []),
                 shot_type=p.shot_type,
@@ -394,12 +398,13 @@ def link_character_name(
         pa
         for page in _load_pages(session, chapter_id)
         for pa in page.panels
-        if any(name_key(n) == key for n in pa.character_names or [])
+        if any(name_key(n) == key for n in [*(pa.character_names or []), *(pa.offscreen_names or [])])
     ]
     alias_added = False
     if body.character_id is None:
         for pa in panels:
             pa.character_names = [n for n in pa.character_names or [] if name_key(n) != key]
+            pa.offscreen_names = [n for n in pa.offscreen_names or [] if name_key(n) != key]
     else:
         character = session.get(Character, body.character_id)
         if character is None or character.project_id != chapter.project_id:
@@ -575,8 +580,9 @@ def replace_pages(
                 panel.setting = cin.setting
             if cin.staging is not None:
                 panel.staging = cin.staging
-            panel.character_names = list(dict.fromkeys(c for c in cin.characters if c))
-            panel.character_ids = matcher.ids(panel.character_names)
+            # Hors cadre absent : gardés, sauf ceux devenus présents.
+            offscreen = cin.offscreen_characters if cin.offscreen_characters is not None else panel.offscreen_names
+            set_cast(panel, cin.characters, offscreen or [], matcher)
             shot = normalize_shot_type(cin.shot_type) or None
             if panel.id is not None and shot and shot != panel.shot_type:
                 # Plan retouché à la main : choix verrouillé de la direction artistique de la page, jamais

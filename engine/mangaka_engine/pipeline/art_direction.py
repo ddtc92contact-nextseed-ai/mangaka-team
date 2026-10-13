@@ -25,6 +25,13 @@ au moins une case hors hauteur d'œil et un plan serré par page, pas deux plans
 relance l'agent avec l'erreur ; après les relances, la proposition est gardée avec un avertissement par
 page (`warnings`), visible dans l'écran Direction artistique.
 
+Spectateur (`pipeline/framing.py`) : quand le texte d'une case met un personnage en spectateur (« voit »,
+« regarde », « aperçoit », « découvre », « assiste »…), l'agent choisit explicitement `point_de_vue` :
+« plan de réaction » (le spectateur est dessiné) ou « vue subjective » (on voit ce qu'il voit, le spectateur
+reste hors cadre). Un choix manquant relance l'agent ; après les relances, le choix par défaut
+(`framing.default_viewpoint`) est noté comme tel. « Appliquer » range les spectateurs (présents ou hors
+cadre) et note le choix sur la case (`Panel.viewpoint`), sans jamais écraser un choix de l'auteur.
+
 Les choix sont stockés par page (`PageDirection`). Un champ modifié par l'auteur est verrouillé : une
 nouvelle proposition le garde tant qu'il n'est pas déverrouillé. La direction s'applique quand l'auteur
 valide la page, sur « Appliquer », et d'office au lancement d'une génération (`apply_before_generation`)
@@ -54,16 +61,28 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, field_validator
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 
 from ..presets import PresetRegistry, PromptPreset, VarietyRules
 from ..providers.llm import ChatMessage, LLMError, LLMProvider
 from ..store.db import Database
 from ..store.models import Bubble, BubbleKind, Chapter, Character, LLMRun, Page, PageDirection, PageKind, Panel, utcnow
 from ..validation import format_errors
+from .framing import (
+    VIEWPOINT_LABELS,
+    Aliases,
+    aliases_from,
+    apply_viewpoint,
+    default_viewpoint,
+    find_spectators,
+    same_name,
+    viewpoint_key,
+    viewpoint_of,
+)
 from .knowledge import AgentKnowledge, KnowledgeBase
 from .layout import LayoutError
 from .library import SeriesLibrary
+from .names import CharacterMatcher
 from .pages import applied_values, is_stale, layout_page
 from .script import DIRECTION_LABELS, _render
 from .style import NO_GUIDELINES, style_brief
@@ -113,9 +132,11 @@ AngleName = Literal[
 CadreName = Literal["normal", "sans bord", "débordement", "incrustation"]
 PageChocName = Literal["pleine page", "splash"]
 SfxIntensityName = Literal["léger", "moyen", "fort"]
+POINTS_DE_VUE = ("plan de réaction", "vue subjective")
+PointDeVueName = Literal["plan de réaction", "vue subjective"]
 
 PAGE_FIELDS = ("rythme", "layout_style", "template", "page_choc")
-PANEL_FIELDS = ("intensity", "plan", "angle", "cadre", "ambiance", "action", "sfx")
+PANEL_FIELDS = ("intensity", "plan", "angle", "cadre", "ambiance", "action", "sfx", "point_de_vue", "spectateurs")
 MAX_SFX = 4
 
 # État d'une direction de page (`PageDirection.status`) : proposée par l'agent, appliquée aux cases (à la
@@ -162,6 +183,16 @@ class DirectionSfx(_LLMModel):
     _i = field_validator("intensity", mode="before")(_norm)
 
 
+def _point_de_vue(value: Any) -> Any:
+    """« Vue Subjective », « réaction », « pov » → libellé attendu ; vide ou « aucun » = null."""
+    v = _norm(value)
+    key = viewpoint_key(v)
+    return VIEWPOINT_LABELS[key] if key else v
+
+
+Name = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
+
+
 class DirectionPanel(_LLMModel):
     panel: int = Field(ge=1, le=20, description="Numéro de la case dans la page (1 = première)")
     intensity: IntensityName
@@ -175,8 +206,19 @@ class DirectionPanel(_LLMModel):
     # Bibliothèque (facultatif) : null ou absent = garder le décor / les objets du scénario.
     decor: int | None = None
     objets: list[int] | None = Field(default=None, max_length=8)
+    # Spectateur (voir le module) : null = la case n'a pas de spectateur ; `spectateurs` : null = ceux repérés.
+    point_de_vue: PointDeVueName | None = None
+    spectateurs: list[Name] | None = Field(default=None, max_length=12)
+    # Choix fait par défaut, l'agent n'ayant rien choisi (jamais lu dans une réponse du LLM).
+    point_de_vue_defaut: bool = Field(default=False, exclude=True)
 
     _n = field_validator("intensity", "plan", "angle", "cadre", mode="before")(_norm)
+    _pdv = field_validator("point_de_vue", mode="before")(_point_de_vue)
+
+    @field_validator("point_de_vue_defaut", mode="before")
+    @classmethod
+    def _never_from_llm(cls, v: Any) -> bool:
+        return False
 
     @field_validator("objets")
     @classmethod
@@ -273,6 +315,8 @@ class DirectionContext:
                             "panel": i + 1,
                             "description": pa["description"],
                             "characters": pa["characters"],
+                            **({"offscreen": pa["offscreen"]} if pa.get("offscreen") else {}),
+                            **({"spectators": pa["spectators"]} if pa.get("spectators") else {}),
                             "decor": pa.get("decor"),
                             "objets": pa.get("objets") or [],
                             "shot_type": pa["shot_type"],
@@ -293,6 +337,7 @@ class DirectionContext:
             "cadres": list(CADRES),
             "page_chocs": list(PAGE_CHOCS),
             "sfx_intensities": list(SFX_INTENSITIES),
+            "points_de_vue": list(POINTS_DE_VUE),
             "variety_rules": self.rules.model_dump() if self.rules is not None else None,
         }
 
@@ -319,12 +364,23 @@ def story_pages(chapter: Chapter) -> list[Page]:
     return [p for p in chapter.pages if p.kind == PageKind.story and p.panels]
 
 
-def _panel_brief(panel: Panel) -> dict[str, Any]:
+def _panel_brief(panel: Panel, aliases: Aliases | None = None) -> dict[str, Any]:
+    present = list(panel.character_names or [])
+    offscreen = list(panel.offscreen_names or [])
+    # Spectateurs repérés dans le texte, parmi les personnages présents et hors cadre (et ceux du choix
+    # déjà appliqué : un spectateur rangé hors cadre reste un spectateur).
+    vp = viewpoint_of(panel)
+    spect = find_spectators(panel.description or "", [*present, *offscreen], aliases)
+    viewers = spect.viewers or (list(vp.get("spectators") or []) if vp else [])
     return {
         "panel_id": panel.id,
         "description": panel.description,
         "staging": panel.staging or "",
-        "characters": list(panel.character_names or []),
+        "characters": present,
+        "offscreen": offscreen,
+        "spectators": viewers,
+        "seen": spect.seen,
+        "perception": spect.verb,
         "decor": panel.decor_id,
         "objets": list(panel.object_ids or []),
         "shot_type": panel.shot_type,
@@ -395,6 +451,7 @@ def build_context(
     targets = list(pages) if pages is not None else story_pages(chapter)
     single = pages is not None and len(targets) == 1
     templates = list(presets.layout_templates.values())
+    aliases = aliases_from(CharacterMatcher(characters))
     briefs = []
     variant = 0
     for page in targets:
@@ -406,7 +463,7 @@ def build_context(
                 page_id=page.id,
                 number=page.number,
                 rythme=page.rythme,
-                panels=[_panel_brief(p) for p in page.panels],
+                panels=[_panel_brief(p, aliases) for p in page.panels],
                 templates=[t.id for t in templates if t.panel_count == len(page.panels)],
                 current=public_values(d.values, page) if single and d is not None and d.values else None,
                 locks=list(d.locks or []) if d is not None else [],
@@ -455,7 +512,19 @@ def _pages_text(ctx: DirectionContext) -> str:
             lines[0] += f", rythme du scénario : {p.rythme}"
         lines.append(f"  gabarits possibles : {', '.join(p.templates) or '(aucun : grille automatique)'}")
         for i, pa in enumerate(p.panels, start=1):
-            who = f" — personnages : {', '.join(pa['characters'])}" if pa["characters"] else ""
+            who = (
+                f" — personnages à l'image : {', '.join(pa['characters'])}"
+                if pa["characters"]
+                else " — aucun personnage à l'image"
+            )
+            if pa.get("offscreen"):
+                who += f" — hors cadre : {', '.join(pa['offscreen'])}"
+            if pa.get("spectators"):
+                verb = f" (« {pa['perception']} »)" if pa.get("perception") else ""
+                who += (
+                    f" — SPECTATEUR{'S' if len(pa['spectators']) > 1 else ''}{verb} : {', '.join(pa['spectators'])}"
+                    " → choisis point_de_vue"
+                )
             if pa.get("decor") in names:
                 who += f" — décor : {names[pa['decor']]} (id {pa['decor']})"
             things = [f"{names[i]} (id {i})" for i in pa.get("objets") or [] if i in names]
@@ -537,6 +606,7 @@ def render_messages(prompt: PromptPreset, ctx: DirectionContext) -> list[ChatMes
         "cadres": ", ".join(CADRES),
         "page_chocs": ", ".join(PAGE_CHOCS),
         "sfx_intensities": ", ".join(SFX_INTENSITIES),
+        "points_de_vue": ", ".join(POINTS_DE_VUE),
         "variety_rules": variety_text(ctx.rules),
         "context_json": json.dumps(ctx.as_json(), ensure_ascii=False, indent=2),
         "savoir_faire": (ctx.knowledge.savoir_faire() if ctx.knowledge else "")
@@ -604,6 +674,73 @@ def check_against(out: DirectionOutput, ctx: DirectionContext) -> list[str]:
     if missing:
         problems.append(f"pages manquantes : {', '.join(map(str, missing))}")
     return problems
+
+
+# --- spectateurs : plan de réaction ou vue subjective -------------------------------------
+def _briefs_by_page(ctx: DirectionContext) -> dict[int, PageBrief]:
+    return {p.number: p for p in ctx.pages}
+
+
+def viewpoint_problems(out: DirectionOutput, ctx: DirectionContext) -> list[str]:
+    """Cases dont le texte met un personnage en spectateur sans choix explicite (messages pour la relance),
+    et spectateurs inconnus de la case."""
+    problems: list[str] = []
+    briefs = _briefs_by_page(ctx)
+    for dp in out.pages:
+        brief = briefs.get(dp.page)
+        if brief is None:
+            continue
+        for pa in dp.panels:
+            if not 1 <= pa.panel <= len(brief.panels):
+                continue
+            info = brief.panels[pa.panel - 1]
+            viewers = info.get("spectators") or []
+            if viewers and pa.point_de_vue is None:
+                verb = f"« {info['perception']} »" if info.get("perception") else "le texte"
+                problems.append(
+                    f"page {dp.page} › case {pa.panel} › point_de_vue : {verb} met {', '.join(viewers)} en "
+                    f"spectateur : choisis « plan de réaction » (le spectateur est dessiné) ou « vue subjective » "
+                    "(on voit ce qu'il voit, le spectateur reste hors cadre)"
+                )
+            unknown = _unknown_spectators(info, pa)
+            if pa.point_de_vue is not None and unknown:
+                names = [*info.get("characters", []), *info.get("offscreen", [])]
+                problems.append(
+                    f"page {dp.page} › case {pa.panel} › spectateurs : {', '.join(unknown)} ne sont pas dans la case "
+                    f"(personnages : {', '.join(names) or 'aucun'})"
+                )
+    return problems
+
+
+def _unknown_spectators(info: dict[str, Any], pa: DirectionPanel) -> list[str]:
+    names = [*info.get("characters", []), *info.get("offscreen", [])]
+    return [s for s in pa.spectateurs or [] if not any(same_name(s, n) for n in names)]
+
+
+def default_viewpoints(out: DirectionOutput, ctx: DirectionContext) -> None:
+    """Complète les choix de spectateur : spectateurs absents ou inconnus de la case → ceux repérés dans le
+    texte ; case à spectateur sans `point_de_vue` → le choix par défaut, noté `point_de_vue_defaut`."""
+    briefs = _briefs_by_page(ctx)
+    for dp in out.pages:
+        brief = briefs.get(dp.page)
+        if brief is None:
+            continue
+        for pa in dp.panels:
+            if not 1 <= pa.panel <= len(brief.panels):
+                continue
+            info = brief.panels[pa.panel - 1]
+            viewers = info.get("spectators") or []
+            if pa.point_de_vue is not None:
+                if pa.spectateurs is None or _unknown_spectators(info, pa):
+                    pa.spectateurs = list(viewers)
+                continue
+            if not viewers:
+                continue
+            spect = find_spectators(info.get("description") or "", [*info["characters"], *info.get("offscreen", [])])
+            spect.viewers = viewers
+            pa.point_de_vue = VIEWPOINT_LABELS[default_viewpoint(spect, info["characters"])]
+            pa.spectateurs = list(viewers)
+            pa.point_de_vue_defaut = True
 
 
 # --- mise en scène variée (variety_rules) -------------------------------------------------
@@ -810,10 +947,16 @@ def run_direction(llm: LLMProvider, prompt: PromptPreset, ctx: DirectionContext,
             continue
         try:
             output = parse_direction(result.text, ctx)
+            viewpoints = viewpoint_problems(output, ctx)
             variety = output_variety(output, ctx.rules)
-            if variety:
+            if viewpoints or variety:
                 fallback = DirectionRun(output=output, attempts=attempt, messages=messages, variety=variety)
-                raise DirectionValidationError("mise en scène trop répétitive : " + " ; ".join(variety[:8]))
+                parts = []
+                if viewpoints:
+                    parts.append("spectateur sans point de vue : " + " ; ".join(viewpoints[:8]))
+                if variety:
+                    parts.append("mise en scène trop répétitive : " + " ; ".join(variety[:8]))
+                raise DirectionValidationError(" ; ".join(parts))
         except DirectionValidationError as exc:
             last_error = str(exc)
             if attempt < total:
@@ -821,8 +964,11 @@ def run_direction(llm: LLMProvider, prompt: PromptPreset, ctx: DirectionContext,
                 retry = _render(prompt.retry, {"error": last_error}, "retry")
                 messages = [*messages, ChatMessage("assistant", result.text[:20000]), ChatMessage("user", retry)]
             continue
+        default_viewpoints(output, ctx)
         return DirectionRun(output=output, attempts=attempt, messages=messages)
     if fallback is not None:
+        # Spectateurs encore sans choix (ou inconnus de la case) : le choix par défaut, noté comme tel.
+        default_viewpoints(fallback.output, ctx)
         return fallback
     raise ArtDirectionError(
         f"Le LLM a renvoyé une direction artistique invalide {total} fois de suite. Dernière erreur : {last_error}"
@@ -848,6 +994,15 @@ def to_values(dp: DirectionPage, page: Page) -> dict[str, Any]:
                 "sfx": [s.model_dump() for s in pa.sfx],
                 **({"decor": pa.decor} if pa.decor is not None else {}),
                 **({"objets": pa.objets} if pa.objets is not None else {}),
+                **(
+                    {
+                        "point_de_vue": pa.point_de_vue,
+                        "spectateurs": list(pa.spectateurs or []),
+                        **({"point_de_vue_defaut": True} if pa.point_de_vue_defaut else {}),
+                    }
+                    if pa.point_de_vue is not None
+                    else {}
+                ),
             }
         )
     return {
@@ -982,8 +1137,11 @@ class PanelEdit(BaseModel):
     ambiance: Annotated[str, StringConstraints(strip_whitespace=True, max_length=300)] | None = None
     action: Annotated[str, StringConstraints(strip_whitespace=True, max_length=200)] | None = None
     sfx: list[DirectionSfx] | None = Field(default=None, max_length=MAX_SFX)
+    point_de_vue: PointDeVueName | None = None
+    spectateurs: list[Name] | None = Field(default=None, max_length=12)
 
     _n = field_validator("intensity", "plan", "angle", "cadre", mode="before")(_norm)
+    _pdv = field_validator("point_de_vue", mode="before")(_point_de_vue)
 
 
 def edit_direction(
@@ -1028,12 +1186,14 @@ def edit_direction(
             raise ArtDirectionError(f"case {edit.panel_id} : n'appartient pas à la page {page.number}")
         for name in edit.model_fields_set - {"panel_id"}:
             value = getattr(edit, name)
-            if value is None and name not in ("ambiance", "action", "sfx"):
+            if value is None and name not in ("ambiance", "action", "sfx", "point_de_vue", "spectateurs"):
                 raise ArtDirectionError(f"{name} : ne peut pas être vide")
             if name == "sfx":
                 value = [s.model_dump() for s in value or []]
             elif name in ("ambiance", "action"):
                 value = value or ""
+            elif name == "spectateurs":
+                value = list(value or [])
             target[name] = value
             add_lock(f"{edit.panel_id}.{name}")
     valid = set(PAGE_FIELDS) | {f"{pid}.{n}" for pid in by_id for n in PANEL_FIELDS}
@@ -1117,6 +1277,7 @@ def apply_direction(
         page_choc = bool(v.get("page_choc"))
         by_panel = {pa.get("panel_id"): pa for pa in v.get("panels") or []}
         before = {pa.get("panel_id"): pa for pa in previous.get("panels") or []}
+        matcher = _matcher(page)
         for panel in page.panels:
             if intensities.get(panel.id) in INTENSITIES:
                 panel.intensity = intensities[panel.id]
@@ -1135,6 +1296,7 @@ def apply_direction(
                 _apply_sfx(panel, choice.get("sfx") or [])
                 if library is not None:
                     _apply_library(panel, choice, before.get(panel.id) or {}, library)
+                _apply_viewpoint(panel, choice, before.get(panel.id) or {}, matcher)
         d.applied = {**copy.deepcopy(v), SCRIPT_SHOTS: script_shots}
         d.applied_at = utcnow()
         d.status = "applied"
@@ -1231,6 +1393,29 @@ def _apply_cadre(panel: Panel, cadre: str | None, before: str | None, *, break_o
     for key, value in CADRE_TO_FRAME.get(cadre or "normal", {}).items():
         current.setdefault(key, value)
     panel.frame = current or None
+
+
+def _matcher(page: Page) -> CharacterMatcher | None:
+    session = object_session(page)
+    return CharacterMatcher.for_project(session, page.chapter.project_id) if session is not None else None
+
+
+def _apply_viewpoint(
+    panel: Panel, choice: dict[str, Any], before: dict[str, Any], matcher: CharacterMatcher | None
+) -> None:
+    """Point de vue de la DA : range les spectateurs (hors cadre en vue subjective, présents en plan de
+    réaction) et le note sur la case. Jamais par-dessus un choix de l'auteur ; un choix inchangé depuis
+    l'application précédente n'est pas réappliqué (l'auteur a pu corriger les personnages depuis)."""
+    mode = viewpoint_key(choice.get("point_de_vue"))
+    current = viewpoint_of(panel)
+    if mode is None or (current is not None and current.get("source") == "auteur"):
+        return
+    spectators = list(choice.get("spectateurs") or [])
+    same = (before.get("point_de_vue"), before.get("spectateurs") or []) == (choice.get("point_de_vue"), spectators)
+    if same and current is not None:
+        return
+    source = "défaut" if choice.get("point_de_vue_defaut") else "direction"
+    apply_viewpoint(panel, mode, spectators, source=source, matcher=matcher)
 
 
 def _apply_library(panel: Panel, choice: dict[str, Any], before: dict[str, Any], library: SeriesLibrary) -> None:

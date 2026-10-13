@@ -512,7 +512,7 @@ def test_v28_database_gets_the_journal_without_loss(make_settings: Callable[...,
         assert c.get("/stats/export", params={"format": "json"}).json() == []
         assert c.get(f"/projects/{s['id']}/characters").json()[0]["name"] == "Aiko"
     con = sqlite3.connect(settings.database_path)
-    assert con.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+    assert con.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION >= 29
     con.close()
     fresh = settings.database_path.parent / "fresh.db"
     create_db_engine(fresh).dispose()

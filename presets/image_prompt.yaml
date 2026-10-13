@@ -22,6 +22,9 @@
 # Scénario : $setting (lieu de la case : lieu, moment, éléments du décor — présent même sans décor de la
 # bibliothèque), $staging (mise en scène : qui fait quoi, où dans le cadre, interactions),
 # $character_count (nombre de personnages en toutes lettres : « One character », « Two characters »).
+# $framing : consigne de cadrage (`framing` ci-dessous) d'une case dont des personnages cités restent hors
+# cadre — vue subjective, case sans personnage, « seuls X dans le cadre » ; vide (morceau omis) pour une case
+# ordinaire.
 # $style_lead : phrase de style de la série (`style_lead` ci-dessous), toujours en tête : sans image de
 # référence (figurants, lieux, workflow texte), c'est elle qui tient le style manga (12/10/2026).
 # $finition : mots-clés de la finition choisie par la série (`style_options.yaml › finition` : croquis,
@@ -34,6 +37,7 @@ parts:
   - "$style_lead."
   - "$finition."
   - "$plan."
+  - "$framing."
   - "Camera angle: $angle."
   - "$description."
   - "Action and pose: $action."
@@ -351,3 +355,12 @@ camera_terms:
 tight_shots:
   shots: [plan moyen, plan rapproché, gros plan, très gros plan, insert]
   negative: [full body, full-length, feet visible, standing pose facing viewer]
+
+# Qui est dans l'image (pipeline/framing.py) : un personnage cité mais hors cadre n'est ni nommé comme sujet
+# dessiné ni pourvu d'image de référence. Ces phrases ($framing des morceaux ci-dessus, et consigne du
+# rédacteur de prompt) disent au modèle ce que montre la case : la vue subjective d'un spectateur, une case
+# sans personnage, ou seulement les présents ($names). Une case ordinaire n'en reçoit aucune.
+framing:
+  subjective: "Subjective point-of-view panel: we see exactly what the onlookers see, through their eyes; the onlookers themselves stay out of the frame, no figure in the foreground"
+  empty: "No character in the frame: the panel shows only the place and what happens in it"
+  only: "Only $names in the frame, nobody else"
