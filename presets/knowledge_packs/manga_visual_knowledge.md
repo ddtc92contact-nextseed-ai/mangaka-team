@@ -446,12 +446,12 @@ McCloud a observé que les transitions `aspect_to_aspect` (et dans une moindre m
 **Rendre le gros plan expressif.**
 - Recadrer **hors du centre** : couper le haut du crâne (intensité), ou laisser de l'espace devant le regard (attente).
 - Inclinaison légère de la tête et de la caméra.
-- Lumière dure latérale : moitié du visage dans le noir (doute, menace).
+- Lumière dure latérale : moitié du visage dans l'ombre (doute, menace), **hachurée ou tramée, jamais en aplat noir plein** : en aplat, le modèle la rend comme un bloc noir qui mange la moitié de la figure, et le lecteur y voit un visage déformé (→ REN_VAL_002).
 - Ajouter un **élément de contexte** dans le cadre (main au premier plan, reflet, objet) pour qu'il ne soit pas qu'un portrait.
 
 **À éviter.** Enchaîner des gros plans de visage pour toute une scène émotionnelle : alterner avec mains, objets, espace (→ EMO_003). Le contrôleur signale plus de 3 gros plans visage consécutifs.
 
-**Prompt (EN).** `close-up of face, cropped at forehead, off-center, harsh side lighting, half of face in deep shadow, intense eyes, manga ink`
+**Prompt (EN).** `close-up of face, cropped at forehead, off-center, harsh side lighting, half of the face in hatched shadow, never a flat black fill, intense eyes, manga ink`
 
 ---
 
@@ -788,7 +788,7 @@ L'épaule et la nuque d'un personnage au premier plan, l'autre de face en arriè
 **Codes manga utiles.**
 - Pupilles qui rétrécissent jusqu'au point + absence de reflet : choc, peur.
 - Yeux masqués par l'ombre ou le reflet des lunettes : menace, secret, colère froide.
-- Ombre sur le haut du visage (bande noire) : intention sombre, détermination glaciale.
+- Ombre sur le haut du visage (bande d'ombre hachurée ou tramée, jamais un aplat noir plein) : intention sombre, détermination glaciale.
 - Lignes verticales qui tombent du haut de la case (*tare-sen*) : abattement, malaise, gêne.
 - Hachures obliques sur les joues : gêne, rougeur.
 - Goutte de sueur : embarras, nervosité.
@@ -1377,7 +1377,7 @@ Les *kōka-sen* (effets de traits) sont tracés sur le fond ou au premier plan p
 | Découpage | Petites cases rapprochées, `moment_to_moment`, menace hors champ, révélation à la tourne |
 | Effets | *yure-sen* (tremblement), *odoro-sen*, sueur, grands aplats noirs |
 
-**Prompt (EN).** `character pressed against the wall, trembling hands, tiny pupils, looming shadow cast over them, high angle, heavy black shadows, unsettling dutch angle`
+**Prompt (EN).** `character pressed against the wall, trembling hands, tiny pupils, looming shadow cast over them in dense screentone, the face still readable, high angle, heavy black shadows in the background, unsettling dutch angle`
 
 ---
 
