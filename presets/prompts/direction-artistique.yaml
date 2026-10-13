@@ -15,6 +15,7 @@
 #   $request             (ce qui est demandé : tout le chapitre, ou une autre proposition pour une page)
 #   $rythmes $intensities $plans $angles $cadres $page_chocs $sfx_intensities $points_de_vue (valeurs autorisées)
 #   $variety_rules       (règles de mise en scène variée ci-dessous, en clair)
+#   $page_rules          (règles par planche ci-dessous, en clair)
 #   $context_json        (le même contexte, en JSON)
 #   $bible               (bible de la série) · $savoir_faire (passages du savoir-faire de l'agent « art_direction »)
 # Gabarit de relance après une réponse invalide : $error (erreurs de validation).
@@ -49,6 +50,29 @@ variety_rules:
   tight_plans: [gros plan, très gros plan, plan rapproché, insert]
   max_wide_in_a_row: 1            # par page : jamais 2 plans larges d'affilée
   wide_plans: [plan large, plan d'ensemble]
+
+# Règles par planche (audit du chapitre « vulcano » du 13/10 : 65 % de cases « X à gauche / Y à droite »,
+# 0 gros plan, 8 cases « choc » d'affilée, ce qui compte relégué au fond derrière un héros). Vérifiées
+# après la réponse du LLM (pipeline/art_direction.py `check_page_rules`) : une règle enfreinte déclenche
+# UNE relance ciblée qui ne corrige que les cases fautives, puis un avertissement visible, jamais un
+# blocage. Sans ce bloc, aucune règle par planche.
+page_rules:
+  min_close_per_page: 1           # au moins 1 gros plan (ou très gros plan, ou insert) par page…
+  close_min_panels: 3             # …dès 3 cases sur la page
+  close_plans: [gros plan, très gros plan, insert]
+  min_calm_per_page: 1            # au moins 1 case calme par page…
+  calm_min_panels: 3              # …dès 3 cases sur la page
+  calm_intensities: [calme]       # intensité d'une case calme…
+  calm_rythmes: [respiration]     # …ou case non « choc » d'une page à ce rythme
+  no_repeated_composition: true   # jamais deux cases d'affilée au même plan + même angle + même gauche/droite
+  left_right_markers: [à gauche, à droite]   # recette « X à gauche / Y à droite » (action ou mise en scène)
+  max_choc_in_a_row: 3            # pages dirigées ensemble : au plus 3 cases « choc » d'affilée (0 = pas de limite)
+  choc_intensities: [choc]
+  no_background_subject: true     # ce qui compte n'est pas relégué au fond derrière un personnage…
+  background_markers: [au fond, en arrière-plan, à l'arrière-plan, au loin, dans le lointain]
+  foreground_markers: [premier plan, devant lui, devant elle]   # …qui occupe le premier plan
+  empty_panel_without_names: true # case sans personnage permise : son action ne nomme personne
+  targeted_retry: 1               # relance ciblée sur les cases fautives (0 : avertissement direct)
 
 system: |
   Tu es directeur artistique de manga et de bande dessinée. À partir d'un scénario déjà découpé en
@@ -103,6 +127,9 @@ user: |
 
   Règles de mise en scène (vérifiées : une réponse qui les enfreint est refusée) :
   $variety_rules
+
+  Règles par planche (vérifiées : les cases fautives te seront renvoyées pour correction) :
+  $page_rules
 
   Scénario des pages :
   $pages
