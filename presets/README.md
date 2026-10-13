@@ -263,6 +263,31 @@ bloc `variety_rules`, aucune règle. Le LLM factice les respecte (angles en alte
 audacieuse) règle l'audace, modifiable dans « L'équipe » (globalement ou par série), comme le modèle, la
 température et les consignes.
 
+**Règles par planche (`page_rules`).** Audit du chapitre « vulcano » (13/10) : 65 % de cases « X à gauche / Y à
+droite », 0 gros plan, une planche entièrement « choc » et 8 chocs d'affilée, ce qui compte relégué au fond derrière
+un héros. Ces règles se jouent à l'échelle de la planche et sont vérifiées **après** la réponse du LLM
+(`check_page_rules`), avec les seuils du preset :
+
+```yaml
+page_rules:
+  min_close_per_page: 1           # au moins un gros plan / très gros plan / insert par page…
+  close_min_panels: 3             # …dès 3 cases
+  min_calm_per_page: 1            # au moins une case « calme » par page (ou non choc d'une page « respiration »)…
+  calm_min_panels: 3              # …dès 3 cases
+  no_repeated_composition: true   # jamais deux cases d'affilée au même plan + même angle + même recette gauche/droite
+  max_choc_in_a_row: 3            # pages dirigées ensemble : au plus 3 cases « choc » d'affilée
+  no_background_subject: true     # pas de « au fond / au loin » derrière un personnage au premier plan ou un spectateur dessiné
+  empty_panel_without_names: true # case sans personnage permise : son action ne nomme personne
+  targeted_retry: 1               # une relance ciblée, puis avertissement
+```
+
+Une règle enfreinte déclenche **une seule relance ciblée** : le LLM reçoit les règles enfreintes et la liste des
+seules cases à renvoyer (« page 3 : cases 1, 2, 3, 4 ») ; seules ces cases sont remplacées, et la correction
+n'est gardée que si elle enfreint moins de règles. Ce qui reste devient un avertissement de la page (écran
+Direction artistique), jamais un blocage — même si le LLM ne répond pas à la relance. Une suite de chocs à
+cheval sur plusieurs pages est notée « chapitre : … » sur chacune. Les seuils principaux sont réglables dans
+« L'équipe » (groupe « Mise en scène »). Le LLM factice respecte ces règles.
+
 L'auteur corrige n'importe quel champ : il est alors **verrouillé** (🔒) et gardé quand l'agent repropose,
 jusqu'à ce qu'il le déverrouille ; une page « acceptée » n'est pas remplacée par une relance de tout le
 chapitre. **« Appliquer à la mise en page »** recopie les choix : rythme de la page (calme et respiration →

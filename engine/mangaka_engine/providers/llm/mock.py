@@ -337,7 +337,44 @@ def mock_art_direction(ctx: dict[str, Any]) -> dict[str, Any]:
         )
     _limit_frontal(out)
     _tighten(out, ctx.get("variety_rules") or {})
+    if ctx.get("page_rules"):
+        _page_rules(out, ctx["page_rules"], ctx.get("variety_rules") or {})
     return {"pages": out}
+
+
+def _page_rules(pages: list[dict[str, Any]], rules: dict[str, Any], variety: dict[str, Any]) -> None:
+    """Règles par planche (page_rules) : un gros plan et une case calme par page dès 3 cases, pas plus de 3 cases
+    « choc » d'affilée. Le gros plan remplace un plan à hauteur d'œil (la case hors hauteur d'œil reste), sans
+    répéter le plan d'une voisine ; la case calme est la moins importante qui n'est pas le temps fort."""
+    close = list(rules.get("close_plans") or ["gros plan", "très gros plan", "insert"])
+    off_level = set(variety.get("off_eye_level") or ["plongée", "contre-plongée"])
+    calm = (rules.get("calm_intensities") or ["calme"])[0]
+    for p in pages:
+        panels = p["panels"]
+        n = len(panels)
+        close_rule = rules.get("min_close_per_page", 1) and n >= int(rules.get("close_min_panels") or 3)
+        if close_rule and not any(pa["plan"] in close for pa in panels):
+            order = sorted(range(n), key=lambda i: (panels[i]["intensity"] != "choc", i == 0, -i))
+            for i in order:
+                if panels[i]["plan"] in off_level:
+                    continue
+                near = {q["plan"] for q in panels[max(0, i - 1) : i + 2] if q is not panels[i]}
+                plan = next((c for c in close if c not in near), None)
+                if plan is not None:
+                    panels[i]["plan"] = plan
+                    break
+        calm_rule = rules.get("min_calm_per_page", 1) and n >= int(rules.get("calm_min_panels") or 3)
+        if calm_rule and not any(pa["intensity"] == calm for pa in panels):
+            i = next((j for j in reversed(range(n)) if panels[j]["intensity"] != "choc"), n - 1)
+            panels[i].update(intensity=calm, cadre="normal", sfx=[])
+    limit = int(rules.get("max_choc_in_a_row") or 0)
+    run = 0
+    for p in pages:
+        for pa in p["panels"]:
+            run = run + 1 if pa["intensity"] == "choc" else 0
+            if limit and run > limit:
+                pa.update(intensity="normal", cadre="normal", sfx=[])
+                run = 0
 
 
 _DA_TIGHT = ["gros plan", "plan rapproché", "insert"]

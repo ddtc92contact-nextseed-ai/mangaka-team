@@ -1375,6 +1375,62 @@ class VarietyRules(_Strict):
     wide_plans: list[str] = Field(default_factory=lambda: ["plan large", "plan d'ensemble"])
 
 
+class PageRules(_Strict):
+    """Règles par planche de la direction artistique (`page_rules` de prompts/direction-artistique.yaml,
+    vérifiées par pipeline/art_direction.py `check_page_rules` après la réponse du LLM).
+
+    Une règle enfreinte déclenche une seule relance ciblée sur les cases fautives (`targeted_retry`) ;
+    ensuite la proposition est gardée avec un avertissement visible, jamais bloquée. Valeurs comparées
+    sans casse.
+    """
+
+    # Au moins `min_close_per_page` gros plan (ou très gros plan, ou insert) par page d'au moins
+    # `close_min_panels` cases (0 = pas d'exigence).
+    min_close_per_page: int = Field(default=1, ge=0, le=20)
+    close_min_panels: int = Field(default=3, ge=1, le=20)
+    close_plans: list[str] = Field(default_factory=lambda: ["gros plan", "très gros plan", "insert"])
+    # Au moins `min_calm_per_page` case calme par page d'au moins `calm_min_panels` cases : intensité de
+    # `calm_intensities`, ou case non « choc » d'une page au rythme de `calm_rythmes` (0 = pas d'exigence).
+    min_calm_per_page: int = Field(default=1, ge=0, le=20)
+    calm_min_panels: int = Field(default=3, ge=1, le=20)
+    calm_intensities: list[str] = Field(default_factory=lambda: ["calme"])
+    calm_rythmes: list[str] = Field(default_factory=lambda: ["respiration"])
+    # Jamais deux cases d'affilée de même composition : même plan, même angle et même recette gauche/droite
+    # (l'action ou la mise en scène place un personnage à gauche et un autre à droite).
+    no_repeated_composition: bool = True
+    left_right_markers: list[str] = Field(default_factory=lambda: ["à gauche", "à droite"])
+    # Pas plus de `max_choc_in_a_row` cases « choc » d'affilée sur les pages dirigées ensemble (0 = pas de limite).
+    max_choc_in_a_row: int = Field(default=3, ge=0, le=50)
+    choc_intensities: list[str] = Field(default_factory=lambda: ["choc"])
+    # L'élément important n'est pas relégué au fond derrière un personnage : une action qui met quelque chose
+    # au fond (`background_markers`) pendant qu'un personnage occupe le premier plan (`foreground_markers`),
+    # ou derrière un spectateur dessiné (plan de réaction), est refusée.
+    no_background_subject: bool = True
+    background_markers: list[str] = Field(
+        default_factory=lambda: ["au fond", "en arrière-plan", "à l'arrière-plan", "au loin", "dans le lointain"]
+    )
+    foreground_markers: list[str] = Field(default_factory=lambda: ["premier plan", "devant lui", "devant elle"])
+    # Case sans personnage à l'image (décor, objet, ce qui est vu) : permise ; son action ne nomme alors aucun
+    # personnage (sinon il serait dessiné).
+    empty_panel_without_names: bool = True
+    # Relance ciblée (0 ou 1) : une seule, sur les cases fautives, avant l'avertissement.
+    targeted_retry: int = Field(default=1, ge=0, le=1)
+    # Message de la relance ciblée ($error : règles enfreintes ; $cases : les seules cases à renvoyer).
+    retry: str = (
+        "Ta direction artistique enfreint des règles par planche :\n$error\n"
+        "Corrige UNIQUEMENT ces cases ($cases) et renvoie seulement elles, chacune complète, au format "
+        '{"pages": [{"page": N, "panels": [{"panel": M, "intensity": …, "plan": …, "angle": …, "cadre": …, '
+        '"ambiance": …, "action": …, "sfx": […], "point_de_vue": …, "spectateurs": …}]}]}, sans texte autour.'
+    )
+
+    @field_validator("retry")
+    @classmethod
+    def _check_retry(cls, value: str) -> str:
+        if not string.Template(value).is_valid():
+            raise ValueError("gabarit invalide : un « $ » isolé doit s'écrire « $$ »")
+        return value
+
+
 class DialogueRoom(_Strict):
     """Répliques au plus dans une case d'une page d'au plus `max_panels` cases (place des bulles)."""
 
@@ -1450,6 +1506,8 @@ class PromptPreset(_Strict):
     max_words: int | None = Field(default=None, ge=10, le=1000)
     # Règles de variété de la direction artistique (prompts/direction-artistique.yaml).
     variety_rules: VarietyRules | None = None
+    # Règles par planche de la direction artistique (prompts/direction-artistique.yaml) : relance ciblée.
+    page_rules: PageRules | None = None
     # Densité et variété des dialogues du scénariste (prompts/script.yaml).
     dialogue_rules: DialogueRules | None = None
 

@@ -117,6 +117,46 @@ settings:
     max: 20
     source: prompts/direction-artistique.yaml#variety_rules.max_wide_in_a_row
     help: Dans une page, au plus ce nombre de plans larges (ou d'ensemble) d'affilée.
+  # Règles par planche (page_rules, vérifiées après la réponse : une relance ciblée sur les cases fautives,
+  # puis un avertissement, jamais un blocage).
+  - key: min_close_per_page
+    label: Gros plans par page
+    group: Mise en scène
+    type: integer
+    min: 0
+    max: 20
+    source: prompts/direction-artistique.yaml#page_rules.min_close_per_page
+    help: >-
+      Au moins ce nombre de gros plans, très gros plans ou inserts par page de 3 cases ou plus (0 = pas
+      d'exigence).
+  - key: min_calm_per_page
+    label: Cases calmes par page
+    group: Mise en scène
+    type: integer
+    min: 0
+    max: 20
+    source: prompts/direction-artistique.yaml#page_rules.min_calm_per_page
+    help: >-
+      Au moins ce nombre de cases d'intensité « calme » par page de 3 cases ou plus, même en plein combat
+      (0 = pas d'exigence).
+  - key: max_choc_in_a_row
+    label: Cases « choc » d'affilée
+    group: Mise en scène
+    type: integer
+    min: 0
+    max: 50
+    source: prompts/direction-artistique.yaml#page_rules.max_choc_in_a_row
+    help: Sur le chapitre, au plus ce nombre de cases « choc » d'affilée (0 = pas de limite).
+  - key: targeted_retry
+    label: Relance ciblée des règles par planche
+    group: Mise en scène
+    type: integer
+    min: 0
+    max: 1
+    source: prompts/direction-artistique.yaml#page_rules.targeted_retry
+    help: >-
+      1 = une relance qui ne corrige que les cases fautives (gros plan, case calme, composition répétée,
+      chocs d'affilée, sujet relégué au fond) ; 0 = avertissement direct.
   - key: max_retries
     label: Nouveaux essais après une réponse invalide
     group: Modèle
@@ -156,6 +196,7 @@ settings:
       - page_chocs
       - sfx_intensities
       - variety_rules
+      - page_rules
       - context_json
       - bible
       - savoir_faire
