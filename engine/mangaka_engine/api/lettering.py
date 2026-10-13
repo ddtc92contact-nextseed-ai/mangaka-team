@@ -30,6 +30,7 @@ from .deps import AppContext, get_ctx, get_session
 from .errors import FieldError
 from .jobs import job_out
 from .schemas import BubbleUpdate, ExportIn, JobOut, RenderIn, SfxCreate
+from .stages import gate
 from .storage import sync_library
 
 SFX_MAX_CHARS = 60
@@ -272,6 +273,7 @@ def render_page(
     """Assemble la page et l'exporte en PNG (300 DPI) + SVG ; option fond perdu / repères de coupe."""
     body = body or RenderIn()
     page = get_page_or_404(session, page_id)
+    gate(session, page.chapter, "lettering", page=page)
     try:
         info = render_page_to_files(_presets(ctx, page), ctx.files, page, bleed=body.bleed, crop_marks=body.crop_marks)
     except (LetteringError, PresetError) as exc:
@@ -336,6 +338,7 @@ def export_chapter(
     _fonts(ctx, presets)
     if not any(p.layout and p.panels for p in chapter.pages):
         raise FieldError("export", "aucune page mise en page dans ce chapitre : rien à exporter")
+    gate(session, chapter, "export")
     running = session.scalar(
         select(Job.id).where(
             Job.chapter_id == chapter_id, Job.step == STEP, Job.status.in_([JobStatus.pending, JobStatus.running])

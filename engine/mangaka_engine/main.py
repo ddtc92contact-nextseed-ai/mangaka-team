@@ -36,6 +36,7 @@ from .api import (
     reference_sheets,
     reset,
     sketch,
+    stages,
     storage,
     style_board,
     system,
@@ -268,6 +269,7 @@ def create_app(settings: Settings | None = None, providers: Providers | None = N
     app.include_router(style_board.router)
     app.include_router(comfyui.router)
     app.include_router(chapters.router)
+    app.include_router(stages.router)
     app.include_router(art_direction.router)
     app.include_router(jobs.router)
     app.include_router(generation.router)

@@ -24,7 +24,7 @@ from mangaka_engine.presets import (
 )
 from mangaka_engine.providers.comfyui import MockComfyUIClient
 from mangaka_engine.store.models import PanelImage
-from tests.conftest import PRESETS_DIR, png_bytes
+from tests.conftest import PRESETS_DIR, force_stages, png_bytes
 from tests.test_generation import _ok, _wait, make_client, setup_chapter  # noqa: F401 — fixture
 
 REG = PresetRegistry.load(PRESETS_DIR)
@@ -445,6 +445,7 @@ def test_clean_mode_img2img_or_controlnet(make_client: Callable[..., TestClient]
     assert params["control"]["source"] == "croquis" and params["control"]["image_id"] == sketch2["id"]
     assert params["control"]["type"] == "scribble"
     # Case avec références : variante ControlNet avec références.
+    force_stages(c, data["chapter"]["id"])
     res = _ok(c.post(f"/pages/{data['pages'][0]['id']}/clean"), 202)
     assert [j["params"]["preset"] for j in res["jobs"]] == ["qwen-image-edit-ref-qualite-controlnet"]
     _wait(c)
@@ -484,6 +485,7 @@ def test_missing_controlnet_never_breaks_a_panel(make_client: Callable[..., Test
     res = c.post(f"/panels/{p2['id']}/generate")
     assert res.status_code == 422 and "Déverrouille la case" in res.json()["errors"][0]["message"]
     # La page se génère quand même : la case verrouillée est laissée de côté, les autres partent.
+    force_stages(c, data["chapter"]["id"])
     out = _ok(c.post(f"/pages/{data['pages'][0]['id']}/generate", json={"force": True}), 202)
     assert out["panel_ids"] == [p1["id"]] and out["skipped"] == 1
     # Passage au propre par ControlNet refusé ; en img2img, il marche.

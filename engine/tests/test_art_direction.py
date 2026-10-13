@@ -29,7 +29,7 @@ from mangaka_engine.presets import PresetRegistry
 from mangaka_engine.providers.llm import LLMAuthError, MockLLMProvider
 from mangaka_engine.providers.llm.mock import mock_art_direction
 from mangaka_engine.store.models import Page, PageDirection, Panel
-from tests.conftest import LEAD, PRESETS_DIR, STYLE
+from tests.conftest import LEAD, PRESETS_DIR, STYLE, force_stages
 
 PRESETS = PresetRegistry.load(PRESETS_DIR)
 PROMPT = PRESETS.prompt("direction-artistique")
@@ -834,6 +834,10 @@ def test_generation_applies_every_proposal_except_a_rejected_one(c: TestClient) 
     chapter_id = _scripted_chapter(c, sid, pages=3)
     pages = _direct(c, chapter_id)["pages"]
     _panel_edit(c, pages[2]["page_id"], reject=True)
+    # Garde d'étapes : deux pages encore proposées → refus ; passer outre l'étape garde l'application d'office.
+    r = c.post(f"/chapters/{chapter_id}/generate", json={})
+    assert r.status_code == 422 and r.json()["errors"][0]["field"] == "stage.direction", r.text
+    force_stages(c, chapter_id, "direction")
     r = c.post(f"/chapters/{chapter_id}/generate", json={})
     assert r.status_code == 202, r.text
     assert _statuses(c, chapter_id) == ["applied", "applied", "rejected"]  # plus aucune « proposed »

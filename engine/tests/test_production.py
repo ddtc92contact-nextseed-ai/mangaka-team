@@ -17,7 +17,7 @@ from mangaka_engine.pipeline.layout import PanelSpec
 from mangaka_engine.pipeline.layout_style import styled_layout
 from mangaka_engine.presets import PresetRegistry
 from mangaka_engine.store.models import Page, PanelImage
-from tests.conftest import PRESETS_DIR, STYLE
+from tests.conftest import PRESETS_DIR, STYLE, force_stages
 from tests.test_generation import _ok, _providers, _wait, make_client  # noqa: F401 — fixture
 
 PRESETS = PresetRegistry.load(PRESETS_DIR)
@@ -77,6 +77,7 @@ def test_one_click_lays_out_then_sketches_every_panel_of_every_page(
     assert plan == {"mode": "sketch", "panels": 14, "to_clean": 0, "pages": 4, "unlaid_pages": [2, 4], "total": 14}
     assert all(p["layout"] is None for p in _pages(c, ch["id"])[1::2])  # le plan ne modifie rien
 
+    force_stages(c, ch["id"])
     out = _ok(c.post(f"/chapters/{ch['id']}/produce"), 202)
     assert out["mode"] == "sketch" and out["laid_out_pages"] == [2, 4]
     assert out["panel_ids"] == every and out["cleaned_panel_ids"] == [] and out["skipped"] == 0
@@ -105,6 +106,7 @@ def test_one_click_without_sketch_tier_generates_final_versions(
     pages = _pages(c, ch["id"])
     _forget_layout(c, [p["id"] for p in pages])
 
+    force_stages(c, ch["id"])
     out = _ok(c.post(f"/chapters/{ch['id']}/produce"), 202)
     assert out["mode"] == "final" and out["laid_out_pages"] == [1, 2, 3]
     assert out["panel_ids"] == [pa["id"] for p in pages[:3] for pa in p["panels"]]
@@ -174,6 +176,7 @@ def test_rendered_default_page_has_non_rectangular_panels(client: TestClient) ->
     slanted = [p for p in pages if any(g["angle_deg"] for g in p["layout"]["gutters"])]
     assert slanted and all(p["layout"]["style"]["id"] == "dynamique" for p in pages)
     page = slanted[0]
+    force_stages(client, ch["id"])
     _ok(client.post(f"/pages/{page['id']}/render"))
     res = client.get(f"/pages/{page['id']}/render.png")
     assert res.status_code == 200 and res.headers["content-type"] == "image/png"

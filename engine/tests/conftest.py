@@ -58,3 +58,13 @@ def png_bytes(size: tuple[int, int] = (64, 48), fmt: str = "PNG") -> bytes:
     buf = io.BytesIO()
     Image.new("RGB", size, (200, 30, 30)).save(buf, format=fmt)
     return buf.getvalue()
+
+
+def force_stages(client: TestClient, chapter_id: int, *stages: str) -> None:
+    """« Passer outre » les étapes de la garde d'étapes (toutes celles en attente sans `stages`) : pour les
+    tests d'autres fonctions que la garde, qui lancent génération, lettrage ou export sans tout régler."""
+    current = client.get(f"/chapters/{chapter_id}/stages").json()["stages"]
+    for stage in current:
+        if (not stages or stage["key"] in stages) and not stage["passed"]:
+            r = client.post(f"/chapters/{chapter_id}/stages/{stage['key']}/override", json={"author": "tests"})
+            assert r.status_code == 200, r.text
