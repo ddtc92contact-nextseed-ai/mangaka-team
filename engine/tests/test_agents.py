@@ -274,7 +274,7 @@ def test_without_profile_step_1_uses_the_preset(c: TestClient) -> None:
     llm.requests.clear()
     _script(c, _series(c))
     assert llm.requests[-1]["temperature"] == 0.7
-    assert llm.requests[-1]["messages"][0].content.startswith("Tu es scénariste et storyboarder")
+    assert llm.requests[-1]["messages"][0].content.startswith("Tu es scénariste de manga")
 
 
 def test_dessinateur_settings_reach_the_panel_prompt(c: TestClient) -> None:

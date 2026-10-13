@@ -125,7 +125,8 @@ def test_breakdown_chapter_2_uses_chapter_1_summary(app_client: TestClient) -> N
     pages = app_client.get(f"/chapters/{c2['id']}/pages").json()
     assert [p["number"] for p in pages] == [1, 2, 3, 4]
     first = pages[0]["panels"][0]
-    assert first["description"] and first["shot_type"] and first["dialogues"]
+    # Le scénariste ne cadre plus : le plan viendra de la direction artistique.
+    assert first["description"] and first["shot_type"] is None and first["dialogues"]
     assert first["dialogues"][0]["kind"] == "narration"
     # mise en page automatique après le découpage
     assert all(p["layout"] and not p["layout_stale"] for p in pages)
