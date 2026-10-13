@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { GenerateChapterButton, missingPanels } from "@/components/generate-chapter";
@@ -11,6 +12,7 @@ import { queueItems, useQueue } from "@/components/queue";
 import { useToast } from "@/components/toast";
 import { Alert, Button, ButtonLink, Card, EmptyState, Loading, Select } from "@/components/ui";
 import { api, fullErrorMessage, type PageData } from "@/lib/api";
+import { capitalize } from "@/lib/direction";
 import { useEngineData } from "@/lib/hooks";
 import { needsReview } from "@/lib/qc";
 import { PAGE_KINDS } from "@/lib/script";
@@ -39,6 +41,8 @@ function Workshop() {
   const finishJobs = useEngineData(() => api.chapterJobs(chapter.id, "finishing"), [chapter.id, finished]);
   const presets = useEngineData(() => api.workflowPresets());
   const qcStatus = useEngineData(() => api.qcStatus());
+  // Règles de mise en scène encore enfreintes (direction artistique) : avertissement, jamais bloquant.
+  const direction = useEngineData(() => api.getDirection(chapter.id), [chapter.id, finished]);
   const [onlyReview, setOnlyReview] = useState(false);
   const [showBoxes, setShowBoxes] = useState(false);
   const [showLettering, setShowLettering] = useState(false);
@@ -291,6 +295,10 @@ function Workshop() {
             </EmptyState>
           ) : (
             <Card className="p-3 sm:p-5">
+              <DirectionWarnings
+                chapterId={chapter.id}
+                warnings={direction.data?.pages.find((d) => d.page_id === page.id)?.warnings ?? []}
+              />
               {page.layout_stale && (
                 <div className="mb-3">
                   <Alert tone="info">Mise en page obsolète : recalcule-la dans « Mise en page » pour des tailles justes.</Alert>
@@ -349,6 +357,28 @@ function Workshop() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Règles de mise en scène de la page encore enfreintes (après la relance de l'agent ou une retouche). */
+function DirectionWarnings({ chapterId, warnings }: { chapterId: number; warnings: string[] }) {
+  if (warnings.length === 0) return null;
+  return (
+    <div className="mb-3">
+      <Alert tone="info">
+        <span data-testid="workshop-direction-warnings">
+          Direction artistique de cette page : règles de mise en scène encore enfreintes (rien n&apos;est bloqué).
+          <ul className="mt-1 list-disc pl-5">
+            {warnings.map((w) => (
+              <li key={w}>{capitalize(w)}</li>
+            ))}
+          </ul>
+          <Link href={`/chapitres/${chapterId}/direction`} className="underline">
+            Retoucher dans « Direction artistique »
+          </Link>
+        </span>
+      </Alert>
     </div>
   );
 }
