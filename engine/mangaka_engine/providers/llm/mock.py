@@ -7,7 +7,8 @@ se passe dans un décor de la bibliothèque, à tour de rôle, et une case sur d
 Pour la direction artistique (`"task": "art_direction"`), il renvoie des choix variés mais
 déterministes : même chapitre, même audace, même relance → mêmes choix (`mock_art_direction`), qui
 respectent les règles de variété du preset (angles en alternance, jamais 3 plans identiques d'affilée,
-une action par case).
+une action par case) ; une case à spectateur reçoit une « vue subjective » s'il y a autre chose à voir,
+sinon un « plan de réaction ».
 
 Pour la rédaction du prompt image d'une case (`"task": "image_prompt"`), il rend un paragraphe qui
 définit d'abord le rôle de chaque image de référence (`<image1>`…), nomme chaque personnage, le place
@@ -280,7 +281,12 @@ def mock_art_direction(ctx: dict[str, Any]) -> dict[str, Any]:
                 cadre = "sans bord" if bold == 1 else "débordement"
             if len(out_panels) >= 2 and out_panels[-1]["plan"] == out_panels[-2]["plan"] == plan:
                 plan = next(p for p in _DA_PLANS[(seed + i) % len(_DA_PLANS) :] + _DA_PLANS if p != plan)
-            who = next(iter(pa.get("characters") or []), None)
+            # Spectateur repéré : vue subjective s'il y a quelque chose d'autre à voir, sinon plan de réaction.
+            viewers = [str(v) for v in pa.get("spectators") or []]
+            others = [c for c in pa.get("characters") or [] if c not in viewers]
+            point_de_vue = ("vue subjective" if others else "plan de réaction") if viewers else None
+            cast = others if point_de_vue == "vue subjective" else list(pa.get("characters") or [])
+            who = next(iter(cast), None)
             action = _DA_ACTIONS[(seed + i) % len(_DA_ACTIONS)]
             out_panels.append(
                 {
@@ -294,6 +300,7 @@ def mock_art_direction(ctx: dict[str, Any]) -> dict[str, Any]:
                     "sfx": [{"text": _DA_SFX[(seed + i) % len(_DA_SFX)], "intensity": "fort"}]
                     if intensity == "choc"
                     else [],
+                    **({"point_de_vue": point_de_vue, "spectateurs": viewers} if point_de_vue else {}),
                 }
             )
         page_choc = None
@@ -543,6 +550,8 @@ def _mock_english(ctx: dict[str, Any]) -> list[str]:
         spot = _SPOTS[i % len(_SPOTS)]
         look = _LOOKS[(seed + i) % len(_LOOKS)]
         sentences.append(f"{name}, {spot}, {pose}, {look}.")
+    if ctx.get("framing"):
+        sentences.append(str(ctx["framing"]).rstrip(".") + ".")
     if panel.get("camera"):
         sentences.append(
             f"Framing: {panel['camera']}, with strong foreshortening, converging perspective lines and speed lines behind the motion."

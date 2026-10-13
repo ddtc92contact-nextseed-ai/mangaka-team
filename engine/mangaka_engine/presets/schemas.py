@@ -1473,6 +1473,7 @@ class PromptPreset(_Strict):
 # --- Prompt image (étape 3) ---------------------------------------------------
 IMAGE_PROMPT_VARIABLES = {
     "shot",
+    "framing",
     "action",
     "plan",
     "angle",
@@ -1632,6 +1633,21 @@ class TightShotSettings(_Strict):
     negative: list[str] = Field(default_factory=list)
 
 
+class FramingSettings(_Strict):
+    """`framing` d'image_prompt.yaml : consigne de cadrage d'une case dont des personnages cités restent hors
+    cadre (pipeline/framing.py), en tête du prompt ($framing) et chez le rédacteur de prompt."""
+
+    # Vue subjective : on voit ce que voit le spectateur, lui reste hors cadre.
+    subjective: str = (
+        "Subjective point-of-view panel: we see exactly what the onlookers see, through their eyes; the onlookers "
+        "themselves stay out of the frame, no figure in the foreground"
+    )
+    # Aucun personnage à l'image (décor, objet, foule anonyme).
+    empty: str = "No character in the frame: the panel shows only the place and what happens in it"
+    # Seuls les présents sont à l'image ($names : leurs noms).
+    only: str = "Only $names in the frame, nobody else"
+
+
 class ImagePromptSettings(_Strict):
     """Construction du prompt final d'une case (voir pipeline/prompt.py)."""
 
@@ -1723,6 +1739,8 @@ class ImagePromptSettings(_Strict):
     # combattre le plein pied (lus seulement à vrai CFG : à cfg 1, la phrase de cadrage du prompt positif,
     # `camera_terms`, est le seul levier).
     tight_shots: TightShotSettings = Field(default_factory=TightShotSettings)
+    # Personnages cités hors cadre, vue subjective, case sans personnage : consigne de cadrage ($framing).
+    framing: FramingSettings = Field(default_factory=FramingSettings)
 
     @field_validator("parts")
     @classmethod

@@ -383,8 +383,15 @@ class Panel(TimestampMixin, Base):
     index: Mapped[int] = mapped_column(Integer)
     description: Mapped[str] = mapped_column(Text, default="")
     character_ids: Mapped[list[int]] = mapped_column(JSON, default=list)
-    # Noms tels qu'écrits par le scénario (personnages secondaires compris).
+    # Personnages PRÉSENTS À L'IMAGE, noms tels qu'écrits par le scénario (personnages secondaires compris) :
+    # dessinés, avec leur image de référence (`character_ids` : leurs fiches).
     character_names: Mapped[list[str]] = mapped_column(JSON, default=list)
+    # Personnages cités par la case mais HORS CADRE (« ils voient les trafiquants » : les spectateurs d'une
+    # vue subjective) : jamais dessinés ni pourvus d'image de référence (pipeline/framing.py).
+    offscreen_names: Mapped[list[str]] = mapped_column(JSON, default=list, server_default="[]")
+    # Point de vue d'un spectateur : {"mode": "reaction"|"subjective", "spectators": [noms],
+    # "source": "direction"|"défaut"|"auteur"} ; None = case sans spectateur (ou choix pas encore fait).
+    viewpoint: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
     # Bibliothèque de la série : décor de la case et objets visibles (ids de `series_assets`, sans clé
     # étrangère : un objet ou un décor supprimé est retiré des cases par l'API, ignoré sinon).
     decor_id: Mapped[int | None] = mapped_column(Integer, default=None)
