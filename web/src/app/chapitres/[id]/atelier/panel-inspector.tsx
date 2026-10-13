@@ -34,6 +34,7 @@ import { LIBRARY_KINDS } from "@/lib/library";
 import { describeUsedReference, droppedReferencesNote } from "@/lib/used-references";
 import { useChapter } from "../chapter-context";
 import { ABBlock } from "./ab-block";
+import { CastBlock } from "./cast-block";
 import { ChangeAngleBlock } from "./change-angle";
 import { CompositionBlock, LockBadge } from "./composition-block";
 import { CropBlock } from "./crop-editor";
@@ -305,25 +306,6 @@ export function PanelInspector({
             <p className="whitespace-pre-line text-zinc-200">{d.description || <span className="text-zinc-500">Pas de description.</span>}</p>
             <div className="flex flex-wrap gap-1.5 text-xs">
               {d.shot_type && <span className="rounded bg-zinc-800 px-2 py-0.5 text-zinc-300">Plan : {d.shot_type}</span>}
-              {d.characters.length ? (
-                d.characters.map((c) =>
-                  d.unmatched_characters.includes(c) ? (
-                    <span
-                      key={c}
-                      className="rounded bg-amber-500/20 px-2 py-0.5 text-amber-200"
-                      title="Aucune fiche personnage : ni référence, ni description, ni LoRA"
-                    >
-                      ⚠ {c}
-                    </span>
-                  ) : (
-                    <span key={c} className="rounded bg-violet-500/15 px-2 py-0.5 text-violet-200">
-                      {c}
-                    </span>
-                  ),
-                )
-              ) : (
-                <span className="text-zinc-500">Aucun personnage</span>
-              )}
               {d.decor && (
                 <span className={`rounded px-2 py-0.5 ${LIBRARY_KINDS.decor.badge}`} title="Décor récurrent">
                   Décor : {d.decor.name}
@@ -335,6 +317,13 @@ export function PanelInspector({
                 </span>
               ))}
             </div>
+            <CastBlock
+              detail={d}
+              onSaved={(next) => {
+                detail.setData(next);
+                onChanged();
+              }}
+            />
             {(d.setting || d.staging) && (
               <dl className="space-y-1 text-xs" data-testid="panel-scene">
                 {d.setting && (

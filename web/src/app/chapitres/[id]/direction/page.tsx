@@ -663,6 +663,15 @@ function PanelRow({
         {field("plan", "Plan", options.plans)}
         {field("angle", "Angle", options.angles)}
         {field("cadre", "Cadre", options.cadres)}
+        {pa.point_de_vue && (
+          <div className="space-y-1 sm:col-span-2" data-testid="direction-viewpoint">
+            {field("point_de_vue", "Point de vue (spectateur)", options.points_de_vue ?? [])}
+            <p className="text-xs text-zinc-500">
+              {pa.point_de_vue === "vue subjective" ? "Hors cadre" : "À l'image"} : {(pa.spectateurs ?? []).join(", ") || "—"}
+              {pa.point_de_vue_defaut && " · choix par défaut (l'agent n'a pas tranché)"}
+            </p>
+          </div>
+        )}
       </div>
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <LockedField

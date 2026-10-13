@@ -197,6 +197,14 @@ export interface PanelCrop {
   zoom: number;
 }
 
+/** Point de vue d'un spectateur : plan de réaction (dessiné) ou vue subjective (hors cadre). */
+export interface Viewpoint {
+  mode: "reaction" | "subjective";
+  spectators: string[];
+  /** direction (direction artistique) | défaut (l'agent n'a rien choisi) | auteur (jamais écrasé). */
+  source: string;
+}
+
 export interface PanelData {
   id: number;
   index: number;
@@ -205,9 +213,13 @@ export interface PanelData {
   setting?: string;
   /** Mise en scène (qui fait quoi, où dans le cadre) — « Mise en scène : … » du prompt image. */
   staging?: string;
+  /** Personnages présents à l'image (dessinés, avec leur image de référence). */
   characters: string[];
   /** Noms de `characters` qui ne désignent aucune fiche personnage (à rattacher ou écarter). */
   unmatched_characters?: string[];
+  /** Cités par la case mais hors cadre : jamais dessinés ni pourvus d'image de référence. Absent à l'envoi = gardés. */
+  offscreen_characters?: string[];
+  viewpoint?: Viewpoint | null;
   /** Décor de la bibliothèque de la série (id), null : aucun. */
   decor?: number | null;
   /** Objets de la bibliothèque de la série (ids). */
@@ -813,10 +825,18 @@ export interface PanelDetail {
   description: string;
   setting: string;
   staging: string;
+  /** Personnages présents à l'image. */
   characters: string[];
   character_ids: number[];
   /** Noms sans fiche personnage : ni références, ni description, ni LoRA à la génération. */
   unmatched_characters: string[];
+  /** Cités par la case mais hors cadre : ni dessinés, ni image de référence. */
+  offscreen_characters?: string[];
+  viewpoint?: Viewpoint | null;
+  /** Personnages que le texte met en spectateur (« voient », « regarde »…) : la case attend un point de vue. */
+  spectator_hints?: string[];
+  /** Verbe de perception repéré dans le texte (« voient »). */
+  perception?: string;
   decor: LibraryRef | null;
   objets: LibraryRef[];
   shot_type: string | null;
@@ -1765,6 +1785,11 @@ export interface DaPanel {
   /** Bibliothèque proposée par l'agent (null ou absent : garder le décor / les objets du scénario). */
   decor?: number | null;
   objets?: number[] | null;
+  /** Case à spectateur : « plan de réaction » ou « vue subjective » (null : pas de spectateur). */
+  point_de_vue?: string | null;
+  spectateurs?: string[];
+  /** Choix par défaut : l'agent n'a pas tranché. */
+  point_de_vue_defaut?: boolean;
 }
 
 /** Choix de direction artistique d'une page (`has_direction` faux : pas encore proposée). */
@@ -1805,6 +1830,7 @@ export interface ChapterDirection {
     cadres: string[];
     page_chocs: DaPageChoc[];
     sfx_intensities: string[];
+    points_de_vue?: string[];
     styles: { value: string; label: string }[];
     templates: LayoutTemplate[];
   };
@@ -2389,6 +2415,9 @@ export const api = {
       setting?: string;
       staging?: string;
       sketch_denoise?: number | null;
+      characters?: string[];
+      offscreen_characters?: string[];
+      viewpoint?: { mode: Viewpoint["mode"]; spectators: string[] } | null;
     },
   ) =>
     request<PanelDetail>(`/panels/${id}`, json("PATCH", body)),
