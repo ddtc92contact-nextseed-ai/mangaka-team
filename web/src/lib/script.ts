@@ -127,7 +127,7 @@ export const newPanel = (): DraftPanel => ({
   charactersText: "",
   decor: null,
   objets: [],
-  shot_type: "plan moyen",
+  shot_type: null, // le plan vient de la direction artistique
   importance: 2,
   dialogues: [],
 });

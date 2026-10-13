@@ -98,7 +98,7 @@ export const HELP = {
   "scenario.rythme":
     "Indice pour la mise en page : une page lente (ambiance) garde des cases régulières, une page rapide (action) contraste davantage les tailles et incline les cases.",
   "scenario.shot_type":
-    "Le cadrage de la case (plan large, rapproché, gros plan…). Il oriente la composition de l'image générée.",
+    "Le plan de la case (plan large, rapproché, gros plan…), inscrit par la direction artistique : le scénariste ne le choisit plus. Le changer ici est une retouche, gardée par la direction (🔒). Sans direction appliquée, il sert de repli à la génération.",
   "scenario.importance":
     "Le poids de la case dans la page : 1 pour une transition, 3 pour un moment fort, qui reçoit plus de place à la mise en page.",
   "scenario.intensity":
@@ -182,9 +182,9 @@ export const HELP = {
   "croquis.denoise":
     "La part du croquis redessinée au passage au propre : bas, le résultat colle au croquis ; haut, le modèle corrige davantage. Vide : la valeur de la série.",
   "direction.lancer":
-    "Le directeur artistique (LLM) propose un rythme par page et, pour chaque case, intensité, plan, angle, cadre, ambiance, action et onomatopées. Il doit varier plans et angles (règles du preset) : ce qui reste répétitif après ses relances est signalé en avertissement. Rien ne bouge dans la mise en page tant que tu n'appliques pas.",
+    "Le directeur artistique (LLM) propose un rythme par page et, pour chaque case, intensité, plan, angle, cadre, ambiance, action et onomatopées. C'est lui qui compose les cases, pas le scénario. Sa proposition s'applique quand tu valides la page, et d'office au lancement de la génération, sauf si tu la rejettes.",
   "direction.appliquer":
-    "Recalcule la mise en page des pages avec les choix retenus (rythme, page choc, style, gabarit, intensité des cases). À faire une fois la proposition relue et retouchée.",
+    "Fait arriver la direction dans les cases : plan et angle de chaque case (prompt, savoir-faire, vue de référence), action, ambiance, puis la mise en page (rythme, page choc, gabarit, intensités). Les pages rejetées sont laissées de côté et tes retouches gardées. La génération le fait d'office pour les pages proposées.",
   "direction.lock":
     "Un choix verrouillé 🔒 est le tien : l'agent le garde quand il repropose. Modifier un champ le verrouille ; clique sur le cadenas pour le rendre à l'agent.",
   "direction.rythme":

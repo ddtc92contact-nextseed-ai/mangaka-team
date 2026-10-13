@@ -7,6 +7,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from mangaka_engine.pipeline.script import (
+    DIRECTION_LABELS,
+    SHOT_TYPES,
     ScriptContext,
     ScriptError,
     ScriptValidationError,
@@ -126,6 +128,31 @@ def test_mock_script_is_valid() -> None:
 
 
 # --- prompt et contexte ---------------------------------------------------------------
+def test_the_scenarist_no_longer_frames_the_panels() -> None:
+    """Étape 1 : l'histoire, l'intention, ce que fait chaque personnage — ni plan, ni place dans le cadre."""
+    system, user = render_messages(PROMPT, _ctx())
+    text = (system.content + "\n" + user.content).replace(DIRECTION_LABELS["rtl"], "")
+    assert "shot_type" not in text and '"shot_types"' not in text
+    for shot in SHOT_TYPES:
+        assert shot not in text.lower(), shot
+    for placement in ("gauche", "droite", "premier plan", "arrière-plan"):
+        assert placement not in text, placement
+    raw = (PRESETS_DIR / "prompts" / "script.yaml").read_text(encoding="utf-8")
+    assert "Kaï au premier plan" not in raw and "à gauche" not in raw and "à droite" not in raw
+    # Le simulateur suit la même consigne : ni plan, ni gauche / droite dans la mise en scène.
+    out = mock_script(_ctx().as_json())
+    panels = [pa for page in out["pages"] for pa in page["panels"]]
+    assert all("shot_type" not in pa for pa in panels)
+    assert not any(w in pa["staging"] for pa in panels for w in ("gauche", "droite", "premier plan"))
+
+
+def test_chapters_written_with_a_shot_type_still_parse() -> None:
+    out = parse_script(json.dumps(VALID))
+    assert out.pages[0].panels[0].shot_type == "plan large"
+    without = {**VALID, "pages": [{"panels": [{"description": "Aiko court.", "shot_type": ""}]}]}
+    assert parse_script(json.dumps(without)).pages[0].panels[0].shot_type is None
+
+
 def test_prompt_comes_from_presets_and_includes_previous_summaries() -> None:
     ctx = _ctx([{"number": 1, "title": "L'arrivée", "summary": "Aiko perd son sabre dans le Kamo."}])
     system, user = render_messages(PROMPT, ctx)
@@ -134,7 +161,7 @@ def test_prompt_comes_from_presets_and_includes_previous_summaries() -> None:
     assert "Chapitre 1 — L'arrivée" in user.content
     assert "Chapitre 2 — « La pluie »" in user.content
     assert "rônin aux cheveux courts" in user.content
-    assert "contre-plongée" in user.content
+    assert "contre-plongée" not in user.content  # plus de liste de plans : la direction artistique cadre
     assert '"task": "script"' in user.content
 
 

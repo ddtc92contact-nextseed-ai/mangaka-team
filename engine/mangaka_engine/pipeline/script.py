@@ -2,7 +2,10 @@
 
 1. contexte : série, personnages, bibliothèque (décors et objets, avec leurs ids), résumés des chapitres précédents (continuité), synopsis, bible de
    la série et passages du savoir-faire (`pipeline/knowledge.py`, enregistrés dans `llm_runs`) ;
-2. prompt rendu depuis `presets/prompts/script.yaml` (aucun texte de prompt dans ce module) ;
+2. prompt rendu depuis `presets/prompts/script.yaml` (aucun texte de prompt dans ce module) ; le scénario
+   garde l'histoire, l'intention et ce que fait chaque personnage, mais ne compose pas : ni plan, ni place
+   dans le cadre (« qui à gauche, qui à droite ») — c'est le travail de la direction artistique
+   (`pipeline/art_direction.py`), appliqué aux cases avant la génération ;
 3. réponse JSON validée par Pydantic, puis les ids de décor / d'objets contre la bibliothèque de la
    série ; invalide → nouvel essai avec l'erreur renvoyée au LLM
    (`max_retries` du preset, 2 au maximum) → sinon `ScriptError` lisible ;
@@ -107,7 +110,7 @@ def normalize_shot_type(value: Any) -> Any:
     if not isinstance(value, str):
         return value
     v = " ".join(value.strip().lower().replace("’", "'").split())
-    return v.replace("contre plongée", "contre-plongée")
+    return v.replace("contre plongée", "contre-plongée") or None
 
 
 class _LLMModel(BaseModel):
@@ -145,7 +148,9 @@ class ScriptPanel(_LLMModel):
     setting: SceneText = ""
     staging: SceneText = ""
     characters: list[Short] = Field(default_factory=list, max_length=20)
-    shot_type: ShotType
+    # Plus demandé au scénariste (la direction artistique cadre) ; accepté s'il est donné, comme dans les
+    # chapitres déjà écrits : repli de la génération tant qu'aucune direction n'est appliquée.
+    shot_type: ShotType | None = None
     dialogues: list[ScriptDialogue] = Field(default_factory=list, max_length=12)
     importance: int = Field(default=2, ge=1, le=3)
     intensity: IntensityName | None = None
@@ -268,7 +273,6 @@ class ScriptContext:
             **self.library.as_json(),
             "previous_chapters": self.previous_chapters,
             "chapter": self.chapter,
-            "shot_types": list(SHOT_TYPES),
             "bubble_kinds": list(BUBBLE_KINDS),
             "intensities": list(INTENSITIES),
             "rythmes": list(RYTHMES),
@@ -369,7 +373,7 @@ def render_messages(prompt: PromptPreset, ctx: ScriptContext) -> list[ChatMessag
         "chapter_title": ctx.chapter["title"] or "sans titre",
         "synopsis": ctx.chapter["synopsis"],
         "target_pages": str(ctx.chapter["target_pages"]),
-        "shot_types": ", ".join(SHOT_TYPES),
+        "shot_types": ", ".join(SHOT_TYPES),  # plus dans le gabarit livré ; gardé pour les prompts personnalisés
         "bubble_kinds": ", ".join(BUBBLE_KINDS),
         "intensities": ", ".join(INTENSITIES),
         "rythmes": ", ".join(RYTHMES),

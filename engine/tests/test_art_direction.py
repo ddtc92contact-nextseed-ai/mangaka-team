@@ -24,9 +24,11 @@ from mangaka_engine.pipeline.art_direction import (
     render_messages,
     run_direction,
 )
+from mangaka_engine.pipeline.generation import build_panel_prompt, panel_framing, panel_plan
 from mangaka_engine.presets import PresetRegistry
 from mangaka_engine.providers.llm import LLMAuthError, MockLLMProvider
 from mangaka_engine.providers.llm.mock import mock_art_direction
+from mangaka_engine.store.models import Page, PageDirection, Panel
 from tests.conftest import LEAD, PRESETS_DIR, STYLE
 
 PRESETS = PresetRegistry.load(PRESETS_DIR)
@@ -253,11 +255,11 @@ def test_run_edit_rerun_keeps_locked_fields(c: TestClient) -> None:
     assert p2["plan"] == "gros plan" and p2["intensity"] == "choc"
     assert again["panels"] != first["panels"] or again["rationale"] != first["rationale"]
 
-    # Tout le chapitre : idem ; une page acceptée n'est pas remplacée.
+    # Tout le chapitre : idem ; une page validée (donc appliquée) n'est pas remplacée.
     _panel_edit(c, pages[1]["page_id"], accept=True)
     whole = _direct(c, chapter_id)["pages"]
     assert whole[0]["rythme"] == "climax"
-    assert whole[1]["status"] == "accepted" and whole[1]["panels"] == pages[1]["panels"]
+    assert whole[1]["status"] == "applied" and whole[1]["panels"] == pages[1]["panels"]
 
     # Déverrouiller : la proposition suivante peut le changer.
     unlocked = _panel_edit(c, first["page_id"], unlock=["rythme"])
@@ -713,3 +715,178 @@ def test_art_direction_knowledge_is_retrieved_per_page(make_settings: Callable[.
         first = next(p for p in pages if p["number"] == 1)["panels"][0]["description"]
         assert first and first in sources["query"].split("\nPage 2 : ")[0]
         assert not {"Mise en scène · Vocabulaire", "Mise en scène · Checklist"} & set(sources["collections"])
+
+
+# --- la direction arrive dans les cases (plan, angle, statut) ------------------------------------
+def _session(c: TestClient):  # type: ignore[no-untyped-def]
+    return c.app.state.ctx.db.session_scope()  # type: ignore[attr-defined]
+
+
+def _statuses(c: TestClient, chapter_id: int) -> list[str]:
+    with _session(c) as session:
+        return [
+            d.status
+            for d in session.query(PageDirection)
+            .join(Page, Page.id == PageDirection.page_id)
+            .filter(PageDirection.chapter_id == chapter_id)
+            .order_by(Page.number)
+        ]
+
+
+def _store_proposal(c: TestClient, page_id: int, choices: list[dict[str, Any]]) -> None:
+    """Une proposition déjà en base, restée « proposed » (comme les 18 du projet avant le correctif)."""
+    with _session(c) as session:
+        page = session.get(Page, page_id)
+        assert page is not None
+        panels = [
+            {"panel_id": p.id, "intensity": "normal", "cadre": "normal", "ambiance": "", "action": "", "sfx": [], **ch}
+            for p, ch in zip(page.panels, choices, strict=True)
+        ]
+        page.direction = PageDirection(
+            chapter_id=page.chapter_id,
+            project_id=page.chapter.project_id,
+            values={"rythme": "montée", "rationale": "Un plan serré par page.", "panels": panels},
+            locks=[],
+            status="proposed",
+        )
+        session.commit()
+
+
+def _pages_body(pages: list[dict], change: Callable[[dict], dict] = lambda pa: pa) -> dict:
+    keys = ("id", "description", "characters", "shot_type", "importance", "dialogues")
+    return {
+        "pages": [
+            {"id": p["id"], "kind": "story", "panels": [change({k: pa[k] for k in keys}) for pa in p["panels"]]}
+            for p in pages
+        ]
+    }
+
+
+def test_accepting_a_page_applies_the_plan_and_angle_of_each_panel(c: TestClient) -> None:
+    sid = _series(c)
+    chapter_id = _scripted_chapter(c, sid, pages=2)
+    pages = _direct(c, chapter_id)["pages"]
+    assert [p["status"] for p in pages] == ["proposed", "proposed"]
+    first = pages[0]
+    out = _panel_edit(c, first["page_id"], accept=True)
+    assert out["status"] == "applied" and out["applied"] and not out["pending"]
+    assert _statuses(c, chapter_id) == ["applied", "proposed"]
+    scenario = {pa["id"]: pa for pa in c.get(f"/chapters/{chapter_id}/pages").json()[0]["panels"]}
+    with _session(c) as session:
+        for pa in first["panels"]:
+            assert scenario[pa["panel_id"]]["shot_type"] == pa["plan"]  # plan inscrit = plan proposé
+            panel = session.get(Panel, pa["panel_id"])
+            applied = da.applied_panel_direction(panel)
+            assert (applied["plan"], applied["angle"]) == (pa["plan"], pa["angle"])
+            assert (applied["action"], applied["ambiance"]) == (pa["action"], pa["ambiance"])
+            assert panel_plan(panel) == pa["plan"]
+    detail = c.get(f"/panels/{first['panels'][0]['panel_id']}").json()
+    assert detail["framing_source"] == "direction" and detail["framing_note"] is None
+    assert (detail["framing_plan"], detail["framing_angle"]) == (
+        first["panels"][0]["plan"],
+        first["panels"][0]["angle"],
+    )
+    # Rejeter : plus appliquée, les cases reprennent le plan du scénario (aucun : le scénariste ne cadre plus).
+    rejected = _panel_edit(c, first["page_id"], reject=True)
+    assert rejected["status"] == "rejected" and not rejected["applied"]
+    detail = c.get(f"/panels/{first['panels'][0]['panel_id']}").json()
+    assert detail["framing_source"] == "none" and "rejetée" in detail["framing_note"]
+    assert _panel_edit(c, first["page_id"], reject=False)["status"] == "proposed"
+
+
+def test_case_133_close_up_proposed_by_the_direction_reaches_the_prompt(c: TestClient) -> None:
+    """Ch.3, page 4 : la direction propose un gros plan sur le visage paniqué du trafiquant ; le scénario disait
+    « plan moyen ». Lancer la génération applique la proposition : le prompt porte le gros plan."""
+    chapter_id, page = _three_panel_page(c, "sage", ai_prompt=False)  # prompt par fragments
+    face = "lumière rougeoyante du cratère montant sur le visage, sueur et yeux écarquillés"
+    _store_proposal(
+        c,
+        page["id"],
+        [
+            {"plan": "contre-plongée", "angle": "de trois quarts", "action": "Aiko grimpe la pente, haletante"},
+            {"plan": "plongée", "angle": "en plongée", "action": "le trafiquant recule vers le cratère"},
+            {"plan": "gros plan", "angle": "de face", "ambiance": face, "action": "le trafiquant écarquille les yeux"},
+        ],
+    )
+    case_133 = page["panels"][2]["id"]
+    detail = c.get(f"/panels/{case_133}").json()
+    assert detail["shot_type"] == "plan moyen" and detail["framing_source"] == "scenario"  # repli signalé
+    assert "appliquée d'office" in detail["framing_note"]
+
+    r = c.post(f"/panels/{case_133}/generate", json={})
+    assert r.status_code == 202, r.text
+    assert _statuses(c, chapter_id) == ["applied"]
+    detail = c.get(f"/panels/{case_133}").json()
+    assert detail["shot_type"] == "gros plan" and detail["framing_source"] == "direction"
+    prompt = detail["final_prompt"]
+    assert "close-up, the face fills the frame" in prompt.lower() and "medium shot" not in prompt.lower()
+    assert f"Mood and lighting: {face}." in prompt
+    with _session(c) as session:
+        panel = session.get(Panel, case_133)
+        assert panel_framing(panel) == ("gros plan", "de face")
+        built = build_panel_prompt(PRESETS, panel, [])
+        assert "close-up, the face fills the frame" in built.lower() and "medium shot" not in built.lower()
+    assert c.app.state.ctx.generation.wait_idle(10)  # type: ignore[attr-defined]
+
+
+def test_generation_applies_every_proposal_except_a_rejected_one(c: TestClient) -> None:
+    sid = _series(c)
+    chapter_id = _scripted_chapter(c, sid, pages=3)
+    pages = _direct(c, chapter_id)["pages"]
+    _panel_edit(c, pages[2]["page_id"], reject=True)
+    r = c.post(f"/chapters/{chapter_id}/generate", json={})
+    assert r.status_code == 202, r.text
+    assert _statuses(c, chapter_id) == ["applied", "applied", "rejected"]  # plus aucune « proposed »
+    first = pages[0]["panels"][0]
+    detail = c.get(f"/panels/{first['panel_id']}").json()
+    assert detail["framing_source"] == "direction" and detail["framing_plan"] == first["plan"]
+    assert c.app.state.ctx.generation.wait_idle(10)  # type: ignore[attr-defined]
+    # Nouvelle proposition de tout le chapitre : les pages appliquées restent, la page rejetée est reproposée.
+    again = _direct(c, chapter_id)["pages"]
+    assert [p["status"] for p in again] == ["applied", "applied", "proposed"]
+    assert again[0]["panels"] == pages[0]["panels"]
+
+
+def test_manual_plan_is_never_overwritten_by_a_new_proposal_or_application(c: TestClient) -> None:
+    chapter_id, page = _three_panel_page(c, "sage")
+    d = _direct(c, chapter_id)["pages"][0]
+    _panel_edit(c, page["id"], accept=True)
+    ids = [pa["panel_id"] for pa in d["panels"]]
+    # Retouche dans l'écran Scénario (« très gros plan » : jamais proposé par la direction).
+    pages = c.get(f"/chapters/{chapter_id}/pages").json()
+    body = _pages_body(pages, lambda pa: {**pa, "shot_type": "très gros plan"} if pa["id"] == ids[0] else pa)
+    assert c.put(f"/chapters/{chapter_id}/pages", json=body).status_code == 200
+    now = c.get(f"/chapters/{chapter_id}/direction").json()["pages"][0]
+    assert f"{ids[0]}.plan" in now["locks"] and now["panels"][0]["plan"] == "très gros plan" and not now["pending"]
+    assert c.get(f"/panels/{ids[0]}").json()["framing_plan"] == "très gros plan"  # suivi tout de suite
+    # Retouche dans l'écran Direction artistique.
+    _panel_edit(c, page["id"], panels=[{"panel_id": ids[1], "plan": "insert"}])
+    # Nouvelle proposition puis ré-application : les deux retouches restent.
+    again = _direct(c, chapter_id, page["id"])["pages"][0]
+    assert [again["panels"][0]["plan"], again["panels"][1]["plan"]] == ["très gros plan", "insert"]
+    out = c.post(f"/chapters/{chapter_id}/direction/apply", json={}).json()
+    assert out["applied"] == [1]
+    shots = [pa["shot_type"] for pa in out["pages"][0]["panels"]]
+    assert shots[:2] == ["très gros plan", "insert"] and shots[2] == again["panels"][2]["plan"]
+    with _session(c) as session:
+        assert panel_plan(session.get(Panel, ids[0])) == "très gros plan"
+
+
+def test_apply_on_an_existing_chapter_lands_the_stored_proposals(c: TestClient) -> None:
+    """Rattrapage : des propositions restées « proposed » arrivent dans les cases sur « Appliquer la direction »,
+    sans écraser une retouche de l'auteur ; une page rejetée est laissée de côté."""
+    sid = _series(c)
+    chapter_id = _scripted_chapter(c, sid, pages=3)
+    pages = _direct(c, chapter_id)["pages"]
+    touched = pages[0]["panels"][0]["panel_id"]
+    _panel_edit(c, pages[0]["page_id"], panels=[{"panel_id": touched, "plan": "insert"}])
+    _panel_edit(c, pages[2]["page_id"], reject=True)
+    out = c.post(f"/chapters/{chapter_id}/direction/apply", json={}).json()
+    assert out["applied"] == [1, 2] and out["skipped"] == [{"number": 3, "reason": "direction rejetée par l'auteur"}]
+    assert _statuses(c, chapter_id) == ["applied", "applied", "rejected"]
+    proposed = {pa["panel_id"]: pa["plan"] for p in pages[:2] for pa in p["panels"]} | {touched: "insert"}
+    inscribed = {pa["id"]: pa["shot_type"] for p in out["pages"][:2] for pa in p["panels"]}
+    assert inscribed == proposed
+    # La page rejetée, demandée par son id : appliquée (choix explicite de l'auteur).
+    out = c.post(f"/chapters/{chapter_id}/direction/apply", json={"page_ids": [pages[2]["page_id"]]}).json()
+    assert out["applied"] == [3] and _statuses(c, chapter_id) == ["applied"] * 3
