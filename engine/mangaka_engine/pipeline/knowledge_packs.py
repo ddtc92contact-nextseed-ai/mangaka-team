@@ -12,6 +12,9 @@ ligne `path:` et un bloc ```` ```meta ```` en JSON) et un manifeste YAML qui ran
 - **pont de vocabulaire** : les codes `shot_scale` / `camera_angle` du meta sont traduits dans les termes de
   l'appli (`art_direction.PLANS` / `ANGLES`) et ajoutés, avec le titre, aux **mots-clés** du document : indexés
   en FTS, jamais injectés. Une case en « gros plan » « en contre-plongée » retrouve ainsi les bonnes fiches ;
+  la fiche de référence d'un terme (`vocabulary.primary`) le garde dans son meta (`plan_appli` / `angle_appli`) :
+  c'est la seule fiche de plan (ou d'angle) que reçoit une case dans ce plan (`knowledge.frame_passages`) ;
+- **une fiche = un passage** à l'indexation (`knowledge.chunk_fiche`) ; un découpage changé réindexe la fiche ;
 - **idempotent** : un fichier inchangé ne change rien ; une fiche modifiée est seule réécrite et réindexée.
   Les collections et documents d'un pack (`pack` / `pack_key`) sont réécrits par une mise à jour ; ceux de
   l'utilisateur ne sont jamais touchés.
@@ -37,7 +40,7 @@ from ..presets import KnowledgeSettings
 from ..providers.embedding import EmbeddingError, EmbeddingProvider
 from ..store.models import KnowledgeCollection, KnowledgeDocument
 from .art_direction import ANGLES, PLANS
-from .knowledge import fused_term, index_document
+from .knowledge import fused_term, index_document, needs_reindex
 
 log = logging.getLogger("mangaka_engine")
 
@@ -58,6 +61,9 @@ class PackVocabulary(BaseModel):
 
     shot_scale: dict[str, str] = Field(default_factory=dict)
     camera_angle: dict[str, str] = Field(default_factory=dict)
+    # Terme de l'appli → code de la fiche de référence, quand plusieurs codes donnent le même terme (« plan
+    # moyen » : medium, pas full ni medium_full). Sans entrée, toute fiche du terme peut servir.
+    primary: dict[str, str] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _check(self) -> PackVocabulary:
@@ -65,7 +71,25 @@ class PackVocabulary(BaseModel):
         unknown = sorted({t for t in [*self.shot_scale.values(), *self.camera_angle.values()] if t not in known})
         if unknown:
             raise ValueError(f"termes inconnus de l'appli (plans / angles de la direction artistique) : {unknown}")
+        bridged = {**self.shot_scale, **self.camera_angle}
+        wrong = sorted(f"{t} → {c}" for t, c in self.primary.items() if bridged.get(c) != t)
+        if wrong:
+            raise ValueError(f"fiches de référence qui ne traduisent pas leur terme (primary) : {wrong}")
         return self
+
+    def reference_terms(self, meta: dict[str, Any]) -> dict[str, str]:
+        """Termes de l'appli dont la fiche est la référence : {"plan_appli": …, "angle_appli": …}. Une case
+        dans ce plan (ou cet angle) reçoit cette fiche et aucune autre fiche de plan (ou d'angle)."""
+        out = {}
+        for key, field_name, table in (
+            ("plan_appli", "shot_scale", self.shot_scale),
+            ("angle_appli", "camera_angle", self.camera_angle),
+        ):
+            code = meta.get(field_name)
+            term = table.get(code) if isinstance(code, str) else None
+            if term and self.primary.get(term, code) == code:
+                out[key] = term
+        return out
 
 
 class PackManifest(BaseModel):
@@ -278,6 +302,7 @@ def parse_pack(content: str, manifest: PackManifest) -> ParsedPack:
             key = str(meta.get("id") or (m_id.group(1) if m_id else title))[:120]
             if path:
                 meta.setdefault("path", path)
+            meta.update(manifest.vocabulary.reference_terms(meta))
             entries.append(
                 PackEntry(
                     key=key,
@@ -430,8 +455,11 @@ def import_pack(
                 doc.collection = col
             _fill(doc, entry, manifest.file)
             session.flush()
-            if reindex or moved:
+            if reindex or moved or needs_reindex(doc, settings):
                 index_document(session, doc, shared, settings)  # type: ignore[arg-type]
+            report.updated += 1
+        elif needs_reindex(doc, settings):  # règle ou réglage de découpage changés : passages refaits
+            index_document(session, doc, shared, settings)  # type: ignore[arg-type]
             report.updated += 1
         else:
             report.unchanged += 1

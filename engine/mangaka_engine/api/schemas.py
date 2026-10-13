@@ -1473,9 +1473,11 @@ class PassageOut(BaseModel):
     score: float | None
     vector_score: float | None
     keyword_score: float | None
-    mode: Literal["retrieved", "whole"]
+    # framing : fiche du plan ou de l'angle de la case (une seule par famille), servie en premier
+    mode: Literal["retrieved", "whole", "framing"]
     pack: str | None = None
     pages: list[int] = Field(default_factory=list)  # recherche par page (direction artistique)
+    dropped: str | None = None  # écarté comme redondant : raison (en français)
     selected: bool = False
 
 
@@ -1490,6 +1492,8 @@ class PanelKnowledgePart(BaseModel):
     text_tokens: int
     bible: str  # notes de la bible sur les personnages de la case ($bible)
     bible_tokens: int
+    # Passages qui auraient été servis sans le tri des redondances (doublon, autre plan / angle que la case).
+    dropped: list[PassageOut] = Field(default_factory=list)
 
 
 class PromptSourcesOut(BaseModel):
@@ -1499,6 +1503,7 @@ class PromptSourcesOut(BaseModel):
     query: str = ""
     collections: list[str] = Field(default_factory=list)
     passages: list[PassageOut] = Field(default_factory=list)
+    dropped: list[PassageOut] = Field(default_factory=list)  # écartés comme redondants (raison dans `dropped`)
     tokens: int = 0
     budget_tokens: int = 0
     bible: str = ""

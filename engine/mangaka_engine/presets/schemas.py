@@ -1966,6 +1966,9 @@ class AgentPreset(_Strict):
 class KnowledgeChunking(_Strict):
     max_tokens: int = Field(default=350, ge=50, le=4000, description="Taille maximale d'un passage")
     min_tokens: int = Field(default=40, ge=0, le=2000, description="Un passage plus petit est fusionné au suivant")
+    fiche_max_tokens: int = Field(
+        default=800, ge=50, le=4000, description="Fiche d'un pack : un passage, coupée seulement au-delà"
+    )
 
 
 class KnowledgeRetrieval(_Strict):
@@ -1990,6 +1993,9 @@ class KnowledgeAgent(_Strict):
     writer_budget_tokens: int | None = Field(default=None, ge=0, le=32000)
     writer_top_k: int | None = Field(default=None, ge=1, le=50)
     writer_bible_max_tokens: int | None = Field(default=None, ge=0, le=32000)
+    # Collections toujours cherchées (meilleures fiches dans le budget), jamais injectées entières même si elles
+    # sont petites (`small_collection_tokens`) : une petite collection entière mangerait le budget du rédacteur.
+    searched_collections: list[str] = Field(default_factory=list)
 
     @property
     def main_budget_tokens(self) -> int:

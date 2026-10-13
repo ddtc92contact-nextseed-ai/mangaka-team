@@ -7,6 +7,9 @@
 chunking:
   max_tokens: 350        # taille maximale d'un passage (découpe aux titres, puis aux paragraphes)
   min_tokens: 40         # un passage plus court est fusionné au suivant de la même section
+  # Fiche d'un pack (presets/knowledge_packs/) : une fiche = un passage. Seule une fiche plus longue est coupée,
+  # et son fragment « Prompt (EN) » reste dans le dernier passage, avec le titre de la fiche.
+  fiche_max_tokens: 800
 
 retrieval:
   top_k: 6               # passages au plus, par défaut (surchargé par agent)
@@ -89,6 +92,10 @@ agents:
       - Mise en scène · Composition
       - Mise en scène · Émotions
       - Mise en scène · Pont ComfyUI
+      - Rendu · Valeurs et masses
+    # ≈ 680 jetons : sous small_collection_tokens, elle serait injectée entière et, avec Pont ComfyUI (≈ 420),
+    # mangerait le budget du rédacteur (plus de fiche de cadrage). Cherchée : ses fiches utiles à la case seulement.
+    searched_collections:
       - Rendu · Valeurs et masses
     series_collections: true
     budget_tokens: 160            # fragments : note courte du prompt d'une case

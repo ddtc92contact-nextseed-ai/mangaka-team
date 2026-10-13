@@ -18,7 +18,13 @@ from sqlalchemy.orm import Session
 
 from mangaka_engine.config import Settings
 from mangaka_engine.main import create_app
-from mangaka_engine.pipeline.knowledge import KnowledgeBase, index_document, rank
+from mangaka_engine.pipeline.knowledge import (
+    KnowledgeBase,
+    choose_passages,
+    index_document,
+    rank,
+    select_passages,
+)
 from mangaka_engine.pipeline.knowledge_packs import load_pack, update_packs
 from mangaka_engine.presets import KnowledgeAgent, KnowledgeSettings, PresetRegistry
 from mangaka_engine.providers.embedding import MockEmbeddingProvider
@@ -283,6 +289,8 @@ def test_rendering_wiring_is_narrow() -> None:
         "Rendu · Encrage",
     }
     assert [c for c in agents["image_prompt"].collections if c in rendu] == ["Rendu · Valeurs et masses"]
+    # petite collection, mais cherchée : injectée entière, elle mangerait le budget du rédacteur
+    assert agents["image_prompt"].searched_collections == ["Rendu · Valeurs et masses"]
     assert not [c for c in agents["script"].collections if c.startswith("Rendu")]
     assert not [c for a in agents.values() for c in a.collections if "Pont presets" in c]
 
@@ -366,6 +374,10 @@ def test_panel_writer_reads_pack_fiches_but_fragments_never_do(make_settings: Ca
         assert writer and {p["pack"] for p in writer} <= {"manga_visual_knowledge", "manga_rendering_knowledge"}
         rendu = {p["collection_name"] for p in writer if p["pack"] == "manga_rendering_knowledge"}
         assert rendu <= {"Rendu · Valeurs et masses"}
+        # gros plan du scénario + contre-plongée de la description : une seule fiche de plan, la bonne
+        shots = [p["document_title"] for p in writer if p["document_title"].startswith("SHOT_")]
+        assert shots == ["SHOT_CU_001 — Gros plan (visage)"]
+        assert all(p["dropped"] for p in seen["writer"]["dropped"])
         assert "Mise en scène · Pont ComfyUI" in {p["collection_name"] for p in writer}
         assert seen["writer"]["tokens"] <= seen["writer"]["budget_tokens"]
         assert seen["fragments"]["passages"] == []  # jamais de théorie française dans le prompt d'image
@@ -441,3 +453,106 @@ def test_profile_still_overrides_the_default_collections(db: Database) -> None:
         kb = KnowledgeBase(settings, None, profile_lookup=lambda *_: ["Mise en scène · Action"])
         got = kb.for_agent(session, "script", None, "esquive")
         assert got.collections == ["Mise en scène · Action"]
+
+
+# --- une fiche = un passage, un seul cadrage par case ------------------------------------------
+def test_shipped_pack_gives_one_passage_per_fiche_and_reindexes_old_chunks(db: Database) -> None:
+    settings = PresetRegistry.load(PRESETS_DIR).knowledge
+    cap = settings.chunking.fiche_max_tokens
+    # Base indexée avec l'ancien découpage (350 jetons) : l'import suivant refait les passages, sans doublon.
+    old = settings.model_copy(update={"chunking": settings.chunking.model_copy(update={"fiche_max_tokens": 350})})
+    with db.session_scope() as session:
+        update_packs(session, PRESETS_DIR, MockEmbeddingProvider(), old)
+        session.commit()
+        assert any(len(d.chunks) > 1 for d in _docs(session).values())
+        reports = update_packs(session, PRESETS_DIR, MockEmbeddingProvider(), settings)
+        session.commit()
+        report = next(r for r in reports if r.pack == "manga_visual_knowledge")
+        assert report.updated > 0 and all(r.created == 0 for r in reports)
+        docs = list(_docs(session).values())
+        chunks = session.scalar(select(text("count(*)")).select_from(KnowledgeChunk))
+        assert chunks == sum(len(d.chunks) for d in docs)
+        for doc in docs:
+            parts = sorted(doc.chunks, key=lambda c: c.index)
+            if doc.token_count <= cap:
+                assert len(parts) == 1, doc.title
+            for chunk in parts:
+                if "Prompt (EN)" in chunk.text:  # avec le titre de sa fiche : seul passage, ou le titre en tête
+                    assert len(parts) == 1 or chunk.text.startswith(doc.title), doc.title
+        annexe = next(d for d in docs if d.title.startswith("Annexe B"))
+        assert len(annexe.chunks) == 1
+        # import suivant : rien à refaire
+        again = update_packs(session, PRESETS_DIR, MockEmbeddingProvider(), settings)
+        assert [r.updated for r in again] == [0, 0]
+
+
+def test_oversized_fiche_keeps_its_prompt_fragment_with_the_title() -> None:
+    from mangaka_engine.pipeline.knowledge import chunk_fiche
+
+    body = "\n\n".join(f"**Point {i}.** " + "Une phrase de mise en scène assez longue. " * 12 for i in range(12))
+    body += "\n\n**Prompt (EN).** `close-up of face, harsh side light`"
+    parts = chunk_fiche("SHOT_X_001 — Long", body, max_tokens=300)
+    assert len(parts) > 1 and all(p.tokens <= 300 for p in parts)
+    assert parts[-1].text.startswith("SHOT_X_001 — Long\n\n") and "Prompt (EN)" in parts[-1].text
+    assert not any("Prompt (EN)" in p.text for p in parts[:-1])
+    assert chunk_fiche("Court", "**Prompt (EN).** `x`", max_tokens=300)[0].text == "**Prompt (EN).** `x`"
+
+
+def _framing_keys(found: Any, keys: dict[int, str]) -> list[str]:
+    return [keys[p.document_id] for p in found.writer_passages if keys[p.document_id].startswith(("SHOT_", "ANG_"))]
+
+
+def test_panel_gets_one_framing_fiche_once_and_reuses_the_freed_budget(db: Database) -> None:
+    settings = PresetRegistry.load(PRESETS_DIR).knowledge
+    with db.session_scope() as session:
+        update_packs(session, PRESETS_DIR, MockEmbeddingProvider(), settings)
+        session.commit()
+        keys = dict(session.execute(select(KnowledgeDocument.id, KnowledgeDocument.pack_key)).all())
+        kb = KnowledgeBase(settings, MockEmbeddingProvider())
+        budget = settings.agent("image_prompt").writer_budget_tokens
+
+        medium = kb.for_panel(session, 0, "plan moyen Aiko accroupie, genoux pliés", [], plan="plan moyen")
+        assert _framing_keys(medium, keys) == ["SHOT_MS_001"]
+        assert medium.writer_passages[1].mode == "framing"  # après Pont ComfyUI (entière), avant les autres
+        close = kb.for_panel(
+            session, 0, "gros plan visage en contre-plongée colère", [], plan="gros plan", angle="en contre-plongée"
+        )
+        assert _framing_keys(close, keys) == ["SHOT_CU_001", "ANG_LOW_001"]
+        # angle de la case sans fiche (de face) : aucune fiche d'angle ; plan inconnu : la meilleure seulement
+        front = kb.for_panel(session, 0, "plan moyen en plongée de face", [], angle="de face")
+        assert len([k for k in _framing_keys(front, keys) if k.startswith("SHOT_")]) <= 1
+        assert not [k for k in _framing_keys(front, keys) if k.startswith("ANG_")]
+
+        for found in (medium, close, front):
+            titles = [p.document_title for p in found.writer_passages]
+            assert sum(t.startswith("Annexe B — Pont vers ComfyUI") for t in titles) == 1
+            assert found.writer()[0].count("Annexe B — Pont vers ComfyUI") == 1
+            assert len({p.document_id for p in found.writer_passages}) == len(found.writer_passages)
+            assert found.writer_tokens == sum(p.tokens for p in found.writer_passages) <= budget
+
+        # budget libéré : sans le tri, SHOT_MFS_001 aurait été servie ; une fiche d'une autre famille la remplace
+        dropped = {keys[p.document_id]: p.dropped for p in medium.writer_dropped}
+        assert "SHOT_MFS_001" in dropped and "autre plan que « plan moyen »" in str(dropped["SHOT_MFS_001"])
+        served = {keys[p.document_id] for p in medium.writer_passages}
+        assert not served & set(dropped)
+        ids = [c.id for c in session.scalars(select(KnowledgeCollection))]
+        unsorted = select_passages(
+            session, "plan moyen Aiko accroupie, genoux pliés", ids, kb.embedder, settings, top_k=0, budget_tokens=0
+        )
+        whole = [c for c in unsorted.whole_collections if c in {p.collection_id for p in medium.writer_passages}]
+        before, _ = choose_passages(
+            unsorted.ranked, whole, settings, top_k=medium.writer_top_k, budget_tokens=medium.writer_budget
+        )
+        newcomers = served - {keys[p.document_id] for p in before}
+        assert newcomers and not any(k.startswith(("SHOT_", "ANG_")) for k in newcomers)
+
+
+def test_low_angle_shot_of_the_script_picks_the_low_angle_fiche(pack_client: TestClient) -> None:
+    c = pack_client
+    s = _ok(c.post("/projects", json={**STYLE, "title": "Les Lames", "ai_prompt": False}), 201)
+    ch = _ok(c.post(f"/projects/{s['id']}/chapters", json={"title": "Pluie"}), 201)
+    panel = {"description": "Le rival domine la ruelle", "shot_type": "contre-plongée"}
+    pages = _ok(c.put(f"/chapters/{ch['id']}/pages", json={"pages": [{"panels": [panel]}]}))
+    seen = _ok(c.get(f"/panels/{pages[0]['panels'][0]['id']}/knowledge"))
+    angles = [p for p in seen["writer"]["passages"] if p["document_title"].startswith("ANG_")]
+    assert [(p["document_title"], p["mode"]) for p in angles] == [("ANG_LOW_001 — Contre-plongée", "framing")]

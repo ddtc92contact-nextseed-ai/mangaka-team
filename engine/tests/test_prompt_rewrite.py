@@ -112,6 +112,7 @@ def test_knowledge_change_makes_written_prompts_pending_but_never_manual_ones(en
     sources = rewritten["prompt_sources"]
     assert sources["written_at"] and "Design de personnages" in sources["collections"]
     assert [p["document_title"] for p in sources["passages"]] == ["Silhouettes"]
+    assert sources["dropped"] == []
     assert _ok(c.get(f"/panels/{manual}"))["final_prompt"] == "Aiko, close-up, rain."
 
 
