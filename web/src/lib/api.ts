@@ -2036,6 +2036,25 @@ export type BibleInput = Partial<Pick<Bible, "world" | "tone" | "rules" | "motif
   character_notes?: Record<number, string>;
 };
 
+/** Densité des dialogues d'un chapitre (bulles enregistrées, onomatopées à part). */
+export interface DialogueStats {
+  panels: number;
+  replies: number;
+  sfx: number;
+  per_panel: number;
+  mean_words: number;
+  /** Pensées, voix off et narrations. */
+  inner_voice: number;
+  /** Cases dont la seule bulle est une onomatopée. */
+  sfx_only: number;
+}
+
+/** Règles de dialogue du scénariste encore enfreintes (après les relances ou une retouche). */
+export interface DialogueReport {
+  stats: DialogueStats;
+  warnings: string[];
+}
+
 export interface ScriptSources {
   run_id: number;
   job_id: number | null;
@@ -2554,6 +2573,7 @@ export const api = {
   searchKnowledge: (body: SearchInput) => request<SearchResult>("/knowledge/search", json("POST", body)),
   getBible: (projectId: number) => request<Bible>(`/projects/${projectId}/bible`),
   saveBible: (projectId: number, body: BibleInput) => request<Bible>(`/projects/${projectId}/bible`, json("PUT", body)),
+  chapterDialogues: (chapterId: number) => request<DialogueReport>(`/chapters/${chapterId}/dialogues`),
   chapterSources: (chapterId: number, agent = "script") =>
     request<ScriptSources | null>(`/chapters/${chapterId}/sources?agent=${encodeURIComponent(agent)}`),
 };
