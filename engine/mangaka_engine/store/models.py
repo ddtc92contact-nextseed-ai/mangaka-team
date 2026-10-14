@@ -202,6 +202,10 @@ class Project(TimestampMixin, Base):
     logos: Mapped[list[SeriesLogo]] = relationship(
         back_populates="project", cascade="all, delete-orphan", order_by="SeriesLogo.version"
     )
+    # Charte des couvertures (pipeline/cover_charter.py) ; None = réglages par défaut de cover_charter.yaml.
+    cover_charter: Mapped[CoverCharter | None] = relationship(
+        back_populates="project", cascade="all, delete-orphan", uselist=False
+    )
 
 
 class Character(TimestampMixin, Base):
@@ -1010,3 +1014,20 @@ class SeriesLogo(Base):
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
     project: Mapped[Project] = relationship(back_populates="logos")
+
+
+class CoverCharter(TimestampMixin, Base):
+    """Charte des couvertures d'une série (pipeline/cover_charter.py) : choix bornés de presets/cover_charter.yaml
+    {"palette_mode", "mood", "shot", "back_shot", "logo_place", "subject"} et personnages admis en couverture
+    (`character_ids`, dans l'ordre). Une ligne par série, créée au premier enregistrement (table ajoutée sans
+    migration de données : `create_all`)."""
+
+    __tablename__ = "cover_charters"
+    __table_args__ = NEVER_REUSED
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), unique=True)
+    settings: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    character_ids: Mapped[list[int]] = mapped_column(JSON, default=list)
+
+    project: Mapped[Project] = relationship(back_populates="cover_charter")

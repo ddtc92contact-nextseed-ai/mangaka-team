@@ -1,6 +1,7 @@
 from .loader import LoadedUpscaler, LoadedWorkflow, PresetError, PresetIssue, PresetRegistry
 from .schemas import (
     BackLayout,
+    CoverCharterSettings,
     CoverCompositionSettings,
     CoverFormat,
     CoverSettings,
@@ -35,6 +36,7 @@ __all__ = [
     "BuiltWorkflow",
     "ControlInput",
     "BackLayout",
+    "CoverCharterSettings",
     "CoverCompositionSettings",
     "CoverFormat",
     "CoverSettings",

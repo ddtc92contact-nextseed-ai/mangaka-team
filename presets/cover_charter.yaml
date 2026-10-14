@@ -1,0 +1,121 @@
+# Charte des couvertures d'une série (fiche série › « Charte des couvertures ») : une charte À PART de l'ADN des
+# chapitres. Une couverture est toujours en COULEUR (même pour une série en noir et blanc, voir cover.yaml), n'a
+# ni timing ni découpage ; elle tient la cohérence des personnages, son cadrage et son accroche.
+# Voir engine/mangaka_engine/pipeline/cover_charter.py et presets/README.md (« Charte des couvertures »).
+#
+# La charte appartient à la série (comme la palette et le logo) : elle vaut pour tous ses tomes. Chaque réglage
+# est un choix borné parmi les clés ci-dessous ; une série sans charte enregistrée suit `defaults`.
+# Les phrases `prompt` sont ajoutées au prompt de la 1re de couverture et de la petite illustration de 4e
+# (jamais deux fois), et données au LLM qui rédige le prompt de la 1re. Un écart (personnage qui ne ressemble
+# pas à sa fiche) donne un avertissement visible, jamais un blocage.
+#
+# Variables des phrases : $colors (couleurs de la palette retenue de la série, « deep navy blue (#1e293b) as the
+# dominant colour, … »), $characters (personnages présents, « Kaito and Rin »), $lead (le premier d'entre eux).
+
+defaults:
+  palette_mode: suggeree
+  mood: lumineuse
+  shot: plan-americain
+  back_shot: plan-ensemble
+  logo_place: format
+  subject: heros
+
+# Couleur : la palette de la série (fiche série › Identité visuelle) imposée, seulement suggérée, ou ignorée.
+palette_modes:
+  imposee:
+    label: Imposée
+    description: Les couleurs de la palette sont les seules dominantes de l'image.
+    prompt: "Colour palette, strictly limited to the series palette: $colors."
+  suggeree:
+    label: Suggérée
+    description: La palette oriente les couleurs, l'illustration reste libre.
+    prompt: "Colour palette inspired by the series palette: $colors."
+  libre:
+    label: Libre
+    description: La palette de la série n'est pas envoyée.
+    prompt: ""
+
+# Rôles de la palette envoyés au modèle d'image (les couleurs de texte servent au lettrage, pas à l'illustration)
+# et leur nom anglais dans la phrase.
+palette_roles:
+  dominante: dominant colour
+  secondaire: secondary colour
+  accent: accent colour
+  fond: background colour
+  ombre: shadow colour
+
+# Ambiance : toujours en couleur (aucune phrase ne parle de noir et blanc).
+moods:
+  lumineuse:
+    label: Lumineuse
+    prompt: "Bright, luminous lighting, airy and vivid full colours."
+  sombre:
+    label: Sombre
+    prompt: "Dark, moody lighting with deep shadows and rich saturated colours glowing out of the darkness."
+  contrastee:
+    label: Contrastée
+    prompt: "High-contrast lighting, bold complementary colours, strong rim light around the characters."
+  chaude:
+    label: Chaude
+    prompt: "Warm golden lighting, sunset hues of orange, red and gold."
+  froide:
+    label: Froide
+    prompt: "Cool lighting, blue and teal hues, crisp and clear atmosphere."
+  pastel:
+    label: Pastel
+    prompt: "Soft diffuse lighting, gentle pastel colours, dreamy atmosphere."
+
+# Cadrage : plan préféré de la 1re (`shot`) et de la petite illustration de 4e (`back_shot`).
+shots:
+  portrait:
+    label: Portrait
+    description: Visage et épaules, regard vers le lecteur.
+    prompt: "Framing: close-up portrait, head and shoulders of the main subject, looking toward the viewer."
+  plan-americain:
+    label: Plan américain
+    description: Le sujet coupé à mi-cuisse, attitude lisible.
+    prompt: "Framing: medium-long shot (American shot), the main subject cut at mid-thigh, pose clearly readable."
+  plan-ensemble:
+    label: Plan d'ensemble
+    description: Les personnages dans un décor marquant.
+    prompt: "Framing: wide shot, the characters full-body within a striking, readable setting."
+
+# Place réservée au logo et au titre (zone gardée dégagée dans l'illustration ; position du logo par défaut à la
+# composition). `format` : zone `clear` du format de couverture ; `top` / `bottom` : bandeau de `height` (fraction
+# de la hauteur rognée) en haut ou en bas, dans la marge de sécurité (en bas : au-dessus de la zone de l'auteur).
+logo_places:
+  format:
+    label: Zone du format
+    description: La zone du logo prévue par le format (en haut).
+    band: format
+  haut:
+    label: Bandeau en haut
+    band: top
+    height: 0.3
+  bas:
+    label: Bandeau en bas
+    band: bottom
+    height: 0.24
+
+# Sujet principal (l'accroche) : qui ou quoi domine l'image.
+subjects:
+  heros:
+    label: Le héros seul
+    prompt: "Main subject: $lead, alone in the foreground and dominating the image."
+  duo:
+    label: Un duo
+    prompt: "Main subject: $characters as a duo, both faces clearly visible in the foreground."
+  groupe:
+    label: Le groupe
+    prompt: "Main subject: $characters together as a group, every face clearly visible."
+  decor:
+    label: Un lieu ou un symbole
+    prompt: "Main subject: an evocative place or symbol of the series; the characters stay secondary."
+
+# Phrase d'identité ajoutée pour chaque image de référence envoyée (même si le prompt a été écrit à la main).
+# Variables : $tag (« <image1> »), $name.
+identity_prompt: "$tag is the identity reference for $name: keep the face, hair and outfit."
+
+# Contrôle d'identité après chaque génération (couche « cohérence des personnages » de qc.yaml : même seuil) :
+# un personnage qui ne ressemble pas à sa fiche donne un avertissement visible sur la version, jamais un blocage.
+identity_check: true

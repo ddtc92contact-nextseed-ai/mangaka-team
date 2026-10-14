@@ -108,6 +108,28 @@ la palette retenue de la série ; sans palette, `fallback_palette`).
   + SVG, et le texte de la 4e. À plat : 4e + dos + 1re en ltr, 1re + dos + 4e en rtl (manga). Options fond perdu
   et repères de coupe (plus les repères de pli du dos), comme l'export d'un chapitre.
 
+## Charte des couvertures (`cover_charter.yaml`)
+
+Fiche série › « Charte des couvertures » : une charte **à part** de l'ADN des chapitres, enregistrée par série
+(table `cover_charters`) et valable pour tous ses tomes. Une couverture est toujours en couleur (même pour une
+série N&B), sans timing ni découpage. Chaque réglage est un choix borné du preset ; sans charte enregistrée,
+`defaults` s'applique ; un choix disparu du preset revient au défaut (signalé).
+
+- **Couleur** : `palette_modes` (palette retenue de la série imposée, suggérée ou libre ; seuls les rôles de
+  `palette_roles` sont envoyés, en mots + hexadécimal) et `moods` (ambiance, jamais de noir et blanc).
+- **Cohérence des personnages** : personnages admis en couverture (au plus `cover.yaml › max_characters`). Sur un
+  tome, les personnages choisis sont restreints à la charte ; aucun choisi → ceux de la charte. Leur image
+  principale part en référence à **chaque** génération de la 1re et de la petite illustration de 4e, avec la
+  phrase `identity_prompt` si le prompt ne cite pas déjà l'image.
+- **Cadrage et accroche** : `shots` (plan de la 1re `shot`, plan de la 4e `back_shot`), `logo_places` (zone du
+  format, bandeau haut ou bas : zone gardée dégagée dans le prompt et position du logo par défaut à la
+  composition), `subjects` (sujet principal de la 1re ; variables `$lead`, `$characters`).
+- Les phrases sont ajoutées à la fin du prompt envoyé (jamais deux fois) et données au LLM qui rédige le prompt
+  de la 1re (`$charter` dans `prompts/redacteur-couverture.yaml`).
+- **Vérification** (`identity_check`) : après chaque génération, la couche « cohérence des personnages » du QC
+  (CCIP, seuil `qc.yaml › identity.min_similarity`) compare chaque personnage à sa fiche. Un écart donne un
+  avertissement sur la version et dans la composition (1re retenue, illustration de 4e), jamais un blocage.
+
 ## Gabarits de planche (`layouts/*.yaml`)
 
 Un gabarit est un arbre de découpes « guillotine » : `panel` (une case), `{ rows: [poids…] }`
