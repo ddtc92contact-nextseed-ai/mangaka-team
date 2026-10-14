@@ -7,8 +7,9 @@ import { Alert, ButtonLink, EmptyState, Loading } from "@/components/ui";
 import { api, type LibraryKind } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
 import { LIBRARY_KINDS, LIBRARY_ORDER, entryHref, newEntryHref } from "@/lib/library";
+import { LibraryIcon } from "./library-icon";
 
-/** Onglets Personnages / Objets / Décors (flèches gauche / droite pour changer d'onglet). */
+/** Onglets Personnages / Objets / Décors / Véhicules / Créatures (flèches gauche / droite pour changer d'onglet). */
 export function LibraryTabs({
   value,
   onChange,
@@ -45,10 +46,11 @@ export function LibraryTabs({
             tabIndex={active ? 0 : -1}
             onClick={() => onChange(k)}
             onKeyDown={(e) => onKey(e, i)}
-            className={`-mb-px whitespace-nowrap border-b-2 px-3 py-2 text-sm transition-colors focus-visible:outline-2 focus-visible:outline-rose-400 ${
+            className={`-mb-px flex items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2 text-sm transition-colors focus-visible:outline-2 focus-visible:outline-rose-400 ${
               active ? "border-rose-400 text-zinc-50" : "border-transparent text-zinc-400 hover:text-zinc-200"
             }`}
           >
+            <LibraryIcon kind={k} />
             {LIBRARY_KINDS[k].tab}
           </button>
         );
@@ -97,7 +99,10 @@ export function LibraryList({ kind, projectId, compact = false }: { kind: Librar
           >
             <Avatar url={e.reference_images[0]?.url} name={e.name} size="h-14 w-14" />
             <div className="min-w-0">
-              <p className="font-semibold text-zinc-100">{e.name}</p>
+              <p className="flex items-center gap-1.5 font-semibold text-zinc-100">
+                <LibraryIcon kind={kind} className="h-4 w-4 text-zinc-500" />
+                <span className="truncate">{e.name}</span>
+              </p>
               <p className="line-clamp-2 text-sm text-zinc-400">{e.visual_description || "Pas de description visuelle"}</p>
               <p className="mt-2 text-xs text-zinc-500">
                 {e.reference_images.length} image{e.reference_images.length > 1 ? "s" : ""} de référence

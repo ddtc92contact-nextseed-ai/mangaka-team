@@ -110,7 +110,7 @@ export const HELP = {
   "scenario.bubbles":
     "Chaque réplique devient une bulle au lettrage. Le type change sa forme : parole, pensée, cri, hors champ (personnage hors de la case) ou récitatif (narration dans un cartouche).",
   "scenario.objets":
-    "Les objets récurrents de la bibliothèque visibles dans la case : leur description et leurs références sont jointes à la génération pour qu'ils restent identiques.",
+    "Les objets, véhicules et créatures récurrents de la bibliothèque visibles dans la case : leur description et leurs références sont jointes à la génération pour qu'ils restent identiques (pour un véhicule, la vue qui correspond au cadrage passe en premier). Une créature n'est pas un personnage : elle ne parle pas et se coche ici.",
   "scenario.setting":
     "Précision de cadrage du lieu : moment (heure, météo), coin du lieu et éléments visibles du décor. Il devient « Lieu : … » dans le prompt image, même sans décor récurrent : sans lui, le modèle dessine souvent un fond blanc.",
   "scenario.location":

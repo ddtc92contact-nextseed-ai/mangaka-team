@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { api, fullErrorMessage, type Queue, type QueueItem } from "@/lib/api";
+import { api, fullErrorMessage, type LibraryKind, type Queue, type QueueItem } from "@/lib/api";
 import { formatDuration, productionHref, workshopHref } from "@/lib/generation";
-import { entryHref } from "@/lib/library";
+import { LIBRARY_KINDS, entryHref } from "@/lib/library";
 import { Badge, useEngineStatus } from "./engine-status";
 import { ProgressBar } from "./ui";
 
@@ -140,7 +140,7 @@ function referenceHref(item: QueueItem): string | null {
   if (item.job.step === "cover" && typeof params.volume_id === "number") return `/tomes/${params.volume_id}`;
   if (item.job.step === "style_board" && item.project_id !== null) return `/projets/${item.project_id}#planche-de-style`;
   if (item.job.step !== "reference" || typeof params.entry_id !== "number") return null;
-  return kind === "character" || kind === "object" || kind === "decor" ? entryHref(kind, params.entry_id) : null;
+  return typeof kind === "string" && kind in LIBRARY_KINDS ? entryHref(kind as LibraryKind, params.entry_id) : null;
 }
 
 function QueueRow({ item, compact, onNavigate }: { item: QueueItem; compact: boolean; onNavigate?: () => void }) {

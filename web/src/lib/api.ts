@@ -1273,7 +1273,7 @@ export interface Character {
   id: number;
   project_id: number;
   name: string;
-  /** Dossier de la fiche dans ComfyUI : mangaka/<série>/personnages|objets|decors/<slug>/. */
+  /** Dossier de la fiche dans ComfyUI : mangaka/<série>/personnages|objets|decors|vehicules|creatures/<slug>/. */
   slug?: string;
   visual_description: string;
   prompt_keywords: string[];
@@ -1373,14 +1373,18 @@ export interface CastBatch {
 }
 
 /** Sortes de fiches de la bibliothèque d'une série. */
-export type LibraryKind = "character" | "object" | "decor";
+export type LibraryKind = "character" | "object" | "decor" | "vehicle" | "creature";
 
-/** Objet ou décor récurrent : mêmes champs qu'un personnage. */
+/** Sortes rattachées aux cases par la liste « objets » (un véhicule ou une créature est montré comme un objet) ;
+ * l'une peut devenir l'autre sans perdre ses images (« Catégorie » de la fiche). */
+export type PanelObjectKind = "object" | "vehicle" | "creature";
+
+/** Objet, décor, véhicule ou créature récurrent : mêmes champs qu'un personnage. */
 export interface SeriesAsset extends Character {
-  kind: "object" | "decor";
+  kind: Exclude<LibraryKind, "character">;
 }
 
-/** Fiche de la bibliothèque (personnage, objet ou décor). */
+/** Fiche de la bibliothèque (personnage, objet, décor, véhicule ou créature). */
 export type LibraryEntry = Character | SeriesAsset;
 export type LibraryEntryInput = Pick<
   Character,
@@ -1604,6 +1608,8 @@ const LIBRARY_SEGMENT: Record<LibraryKind, string> = {
   character: "characters",
   object: "objects",
   decor: "decors",
+  vehicle: "vehicles",
+  creature: "creatures",
 };
 
 export interface Health {
@@ -2655,9 +2661,11 @@ export interface Bible {
   rules: string;
   motifs: string;
   characters: { id: number; name: string; visual_description: string; note: string }[];
-  /** Décors et objets de la bibliothèque, repris dans la bible injectée aux agents. */
+  /** Décors, objets, véhicules et créatures de la bibliothèque, repris dans la bible injectée aux agents. */
   decors?: { id: number; name: string; visual_description: string }[];
   objets?: { id: number; name: string; visual_description: string }[];
+  vehicules?: { id: number; name: string; visual_description: string }[];
+  creatures?: { id: number; name: string; visual_description: string }[];
   chapter_summaries: ChapterSummaryEntry[];
   rendered: BibleSummary | null;
   updated_at: string | null;
@@ -3088,6 +3096,16 @@ export const api = {
     request<LibraryEntry>(`/${LIBRARY_SEGMENT[kind]}/${id}`, json("PATCH", body)),
   deleteLibraryEntry: (kind: LibraryKind, id: number) =>
     request<void>(`/${LIBRARY_SEGMENT[kind]}/${id}`, { method: "DELETE" }),
+  /** Objet → véhicule ou créature (et retour) : mêmes images, variantes et cases. */
+  changeLibraryKind: (kind: PanelObjectKind, id: number, target: PanelObjectKind) =>
+    request<SeriesAsset>(`/${LIBRARY_SEGMENT[kind]}/${id}/kind`, json("POST", { kind: target })),
+  /** Objets, véhicules et créatures de la série (ce qu'une case peut montrer dans « objets »), dans cet ordre. */
+  listPanelObjects: (projectId: number) =>
+    Promise.all(
+      (["object", "vehicle", "creature"] as const).map((k) =>
+        request<SeriesAsset[]>(`/projects/${projectId}/${LIBRARY_SEGMENT[k]}`),
+      ),
+    ).then((lists) => lists.flat()),
   uploadLibraryImages: (kind: LibraryKind, id: number, files: File[]) => {
     const form = new FormData();
     for (const f of files) form.append("files", f);

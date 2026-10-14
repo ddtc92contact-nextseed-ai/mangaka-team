@@ -26,7 +26,7 @@ function parseKeywords(raw: string): string[] {
 }
 
 /**
- * Création (projectId) ou édition (initial) d'une fiche de la bibliothèque : personnage, objet ou décor.
+ * Création (projectId) ou édition (initial) d'une fiche de la bibliothèque : personnage, objet, décor, véhicule ou créature.
  * En création, les images déposées sont envoyées juste après l'enregistrement.
  */
 export function LibraryEntryForm({
