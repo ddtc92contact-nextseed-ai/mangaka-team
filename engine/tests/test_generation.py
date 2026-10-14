@@ -27,6 +27,8 @@ from mangaka_engine.providers.comfyui import (
 )
 from mangaka_engine.providers.factory import Providers
 from mangaka_engine.providers.llm import MockLLMProvider
+from mangaka_engine.store import comfy_folders
+from mangaka_engine.store.comfy_folders import ComfyFolders
 from mangaka_engine.store.models import Job, JobStatus, Panel, PanelState
 from tests.conftest import COMFY_FIXTURES, PRESETS_DIR, force_stages, png_bytes
 
@@ -72,7 +74,8 @@ def _providers(comfy: ComfyUIClient | None) -> Providers:
         llm=MockLLMProvider(),
         vision=None,
         comfyui=comfy,
-        names={"llm": "mock", "vision": "mock", "comfyui": getattr(comfy, "name", "http")},
+        # Sans client : « mock », jamais le vrai ~/ComfyUI (ComfyFolders le prendrait par défaut).
+        names={"llm": "mock", "vision": "mock", "comfyui": getattr(comfy, "name", "mock")},
         errors={} if comfy is not None else {"comfyui": "client ComfyUI inconnu"},
     )
 
@@ -433,6 +436,17 @@ def test_no_comfyui_client_gives_503(
         data = setup_chapter(c)
         r = c.post(f"/panels/{data['panels'][0]['id']}/generate")
         assert r.status_code == 503 and r.json()["detail"].startswith("ComfyUI indisponible")
+
+
+def test_test_clients_never_use_the_real_comfyui_folder(make_settings: Callable[..., Settings]) -> None:
+    """Sans client ComfyUI, les tests restent en mock : pas de dossier ComfyUI (avant, `~/ComfyUI` réel)."""
+    with TestClient(create_app(make_settings(), providers=_providers(None))) as c:
+        folders = c.app.state.ctx.folders  # type: ignore[attr-defined]
+        assert folders.mock and not folders.enabled
+    # Même un client « http » sans COMFYUI_DIR ne retombe pas sur le vrai ~/ComfyUI (garde-fou de conftest).
+    folders = ComfyFolders.from_settings(None, provider="http")
+    assert not folders.enabled
+    assert Path(comfy_folders.DEFAULT_DIR).expanduser() != Path.home() / "ComfyUI"
 
 
 # --- file unique ------------------------------------------------------------------------

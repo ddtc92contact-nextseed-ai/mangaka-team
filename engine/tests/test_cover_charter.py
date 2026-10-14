@@ -345,7 +345,9 @@ def test_a_character_unlike_its_reference_gives_a_visible_warning(
 def test_without_identity_provider_the_cover_is_still_generated(
     make_settings: Callable[..., Settings], comfy: MockComfyUIClient
 ) -> None:
-    providers = Providers(llm=MockLLMProvider(), vision=None, comfyui=comfy, names={}, errors={"identity": "absent"})
+    providers = Providers(
+        llm=MockLLMProvider(), vision=None, comfyui=comfy, names={"comfyui": "mock"}, errors={"identity": "absent"}
+    )
     with TestClient(create_app(make_settings(), providers=providers)) as client:
         s, v, kaito, *_ = _setup(client)
         _ok(client.put(f"/projects/{s['id']}/cover-charter", json={"character_ids": [kaito["id"]]}))

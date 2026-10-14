@@ -173,7 +173,8 @@ def _providers(comfy: ComfyUIClient | None) -> Providers:
         llm=MockLLMProvider(),
         vision=None,
         comfyui=comfy,
-        names={"llm": "mock", "vision": "mock", "comfyui": getattr(comfy, "name", "http")},
+        # Sans client : « mock », jamais le vrai ~/ComfyUI (ComfyFolders le prendrait par défaut).
+        names={"llm": "mock", "vision": "mock", "comfyui": getattr(comfy, "name", "mock")},
         errors={} if comfy is not None else {"comfyui": "client ComfyUI inconnu"},
     )
 
