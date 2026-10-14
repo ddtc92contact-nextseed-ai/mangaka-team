@@ -12,6 +12,7 @@ import { LayoutStyleNotices } from "@/components/layout-style-notice";
 import { ProjectForm } from "@/components/project-form";
 import { SeriesBible } from "@/components/series-bible";
 import { SeriesFiles } from "@/components/series-files";
+import { SeriesIdentityCard } from "@/components/series-identity";
 import { StyleBoardBanner, StyleBoardCard, useStyleBoard } from "@/components/style-board";
 import { DIRECTIONS, DirectionBadge } from "@/components/reading-direction";
 import { SeriesStatusBadge } from "@/components/status";
@@ -101,6 +102,9 @@ export default function ProjectPage() {
       </div>
       <div className="mb-6">
         <StyleBoardCard projectId={id} board={styleBoard} />
+      </div>
+      <div className="mb-6">
+        <SeriesIdentityCard projectId={id} />
       </div>
       <div className="mb-6">
         <AgentOverrides projectId={id} />
