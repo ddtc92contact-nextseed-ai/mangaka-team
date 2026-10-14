@@ -184,6 +184,9 @@ class Project(TimestampMixin, Base):
     palette: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
     palette_proposals: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list, server_default="[]")
     logo_proposals: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list, server_default="[]")
+    # ADN de la série (presets/pre_direction.yaml) : seules les valeurs ajustées par l'auteur, par chemin
+    # ({"shots.wide.min": 0.2}) ; tout le reste est hérité du genre (pipeline/pre_direction.py `series_dna`).
+    pre_direction: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, server_default="{}")
 
     characters: Mapped[list[Character]] = relationship(
         back_populates="project", cascade="all, delete-orphan", order_by="Character.name"

@@ -12,6 +12,8 @@
 #    les prompts personnalisés)
 #   $intensities $rythmes  (indices de mise en page, cf. presets/README.md « Direction artistique »)
 #   $dialogue_rules (règles de dialogue ci-dessous, en clair : densité, brièveté, place, variété)
+#   $pre_direction  (charte chiffrée de la série, son ADN : cases par planche, dialogue par planche, courbe de
+#                    rythme — presets/pre_direction.yaml, réglable sur la fiche série)
 #   $context_json  (le même contexte, en JSON)
 #   $bible         (bible de la série : univers, ton, personnages, règles, gags, résumés validés)
 #   $savoir_faire  (passages du savoir-faire de l'agent « script », avec leur source ; voir knowledge.yaml)
@@ -29,7 +31,13 @@ max_previous_chapters: 8  # résumés des chapitres précédents envoyés pour l
 # combat réduites à leur onomatopée, plus aucune pensée, voix off ni narration.)
 dialogue_rules:
   target_per_panel: 2       # répliques visées dans chaque case où un personnage présent peut parler…
-  min_per_panel: 1.3        # …et au moins 1,3 par case sur le chapitre (bornées par la place des cases)
+  # …et, compté par planche, 4 à 8 répliques (minimum borné par la place des cases) et au moins une case sans
+  # réplique dès 2 cases. Valeurs par défaut : l'ADN de la série les remplace (famille « dialogue » de
+  # pre_direction.yaml, réglée par genre et par série).
+  min_per_page: 4
+  max_per_page: 8
+  min_silent_panels_per_page: 1
+  silent_min_panels: 2
   max_words: 12             # mots au plus par réplique (la brièveté fait le rythme : on ajoute des bulles,
   max_mean_words: 7         # on ne les allonge pas) ; au plus 7 mots en moyenne
   action_needs_voice: true  # case d'action (choc ou onomatopée) : au moins un mot d'un personnage
@@ -86,7 +94,7 @@ user: |
   $style_guidelines
 
   Contraintes :
-  - environ $target_pages pages ; 3 à 7 cases par page (1 seule pour une pleine page) ;
+  - environ $target_pages pages ; le nombre de cases par page suit la charte de la série ci-dessous ;
   - « kind » d'un dialogue vaut exactement l'une de ces valeurs : $bubble_kinds
     (narration = récitatif, off = voix hors champ) ;
   - « importance » vaut 1 (case de transition), 2 (case normale) ou 3 (case forte, grande) ;
@@ -124,6 +132,9 @@ user: |
   - répliques courtes, en français, comme dans un vrai manga ; « dialogues » ne contient jamais
     d'onomatopée (elles vont dans « sfx ») ;
   - « summary » : résumé du chapitre en 3 à 6 phrases, pour assurer la continuité des chapitres suivants.
+
+  Charte de la série (son ADN, chiffré et vérifié : une réponse qui s'en écarte te sera renvoyée) :
+  $pre_direction
 
   Dialogues (vérifiés : une réponse qui enfreint ces règles est refusée) :
   $dialogue_rules

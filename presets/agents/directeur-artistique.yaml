@@ -197,6 +197,7 @@ settings:
       - sfx_intensities
       - variety_rules
       - page_rules
+      - pre_direction
       - context_json
       - bible
       - savoir_faire

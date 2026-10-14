@@ -29,6 +29,7 @@ from .api import (
     journal,
     knowledge,
     lettering,
+    pre_direction,
     production,
     projects,
     prompt_dialog,
@@ -284,6 +285,7 @@ def create_app(settings: Settings | None = None, providers: Providers | None = N
     app.include_router(reference_sheets.router)
     app.include_router(style_board.router)
     app.include_router(identity.router)
+    app.include_router(pre_direction.router)
     app.include_router(comfyui.router)
     app.include_router(chapters.router)
     app.include_router(volumes.router)

@@ -62,6 +62,8 @@
 - 33 : identité visuelle de la série : palette retenue et dernières propositions (`projects.palette`,
   `palette_proposals`, `logo_proposals`) et versions du logo du titre (`series_logos`). Les séries existantes
   n'ont ni palette ni logo.
+- 34 : ADN de la série (`projects.pre_direction` : valeurs de la charte ajustées par l'auteur). Les séries
+  existantes n'ajustent rien : elles reçoivent les défauts de leur genre (presets/pre_direction.yaml).
 
 Une base neuve est créée directement à la dernière version. Chaque migration tourne dans une
 transaction unique, clés étrangères désactivées (recette « 12 étapes » de SQLite pour reconstruire
@@ -113,7 +115,7 @@ from .slugs import RESERVED_ENTRIES, RESERVED_SERIES, slugify, unique_slug
 
 log = logging.getLogger("mangaka_engine")
 
-SCHEMA_VERSION = 33
+SCHEMA_VERSION = 34
 
 
 class MigrationError(RuntimeError):
@@ -518,6 +520,12 @@ def _v32_to_v33(cur: sqlite3.Cursor) -> None:
             cur.execute(stmt)
 
 
+def _v33_to_v34(cur: sqlite3.Cursor) -> None:
+    existing = {row[1] for row in cur.execute("PRAGMA table_info(projects)")}
+    if "pre_direction" not in existing:
+        cur.execute("ALTER TABLE projects ADD COLUMN pre_direction JSON NOT NULL DEFAULT '{}'")
+
+
 MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     # version de départ → (version d'arrivée, fonction)
     0: (2, _v0_to_v2),
@@ -553,6 +561,7 @@ MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     30: (31, _v30_to_v31),
     31: (32, _v31_to_v32),
     32: (33, _v32_to_v33),
+    33: (34, _v33_to_v34),
 }
 
 

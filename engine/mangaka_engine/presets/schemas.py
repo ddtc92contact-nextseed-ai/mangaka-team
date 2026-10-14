@@ -1536,8 +1536,14 @@ class PageRules(_Strict):
         '{"pages": [{"page": N, "panels": [{"panel": M, "intensity": …, "plan": …, "angle": …, "cadre": …, '
         '"ambiance": …, "action": …, "sfx": […], "point_de_vue": …, "spectateurs": …}]}]}, sans texte autour.'
     )
+    # Ajouté à la relance ciblée quand une règle de la charte de la série porte sur la page entière (courbe de
+    # rythme, formes de planche) : $pages, les pages dont renvoyer aussi les champs de page.
+    page_retry: str = (
+        "Pour les pages $pages, renvoie aussi les champs de la page à corriger dans leur objet : "
+        '{"page": N, "rythme": …, "template": …, "page_choc": …, "panels": [...]} ("panels" peut rester vide).'
+    )
 
-    @field_validator("retry")
+    @field_validator("retry", "page_retry")
     @classmethod
     def _check_retry(cls, value: str) -> str:
         if not string.Template(value).is_valid():
@@ -1562,8 +1568,13 @@ class DialogueRules(_Strict):
 
     # Répliques visées dans chaque case où un personnage présent peut parler (sans dépasser la place)…
     target_per_panel: int = Field(default=2, ge=0, le=6)
-    # …et répliques par case au moins sur le chapitre (bornées par la place disponible ; 0 = pas d'exigence).
-    min_per_panel: float = Field(default=1.3, ge=0, le=6)
+    # …et répliques par planche, au moins et au plus (le minimum est borné par la place des cases ; 0 = pas
+    # d'exigence) ; au moins `min_silent_panels_per_page` case(s) sans réplique par planche d'au moins
+    # `silent_min_panels` cases. Remplacés par l'ADN de la série (famille « dialogue », pre_direction.yaml).
+    min_per_page: int = Field(default=4, ge=0, le=30)
+    max_per_page: int = Field(default=8, ge=1, le=30)
+    min_silent_panels_per_page: int = Field(default=1, ge=0, le=9)
+    silent_min_panels: int = Field(default=2, ge=1, le=9)
     # Brièveté : mots au plus par réplique, et en moyenne sur le chapitre.
     max_words: int = Field(default=12, ge=1, le=100)
     max_mean_words: float = Field(default=7, ge=1, le=100)
@@ -1591,12 +1602,165 @@ class DialogueRules(_Strict):
             raise ValueError(f"type de réplique inconnu : {', '.join(bad)} (parmi {', '.join(allowed)})")
         return v
 
+    @model_validator(mode="after")
+    def _per_page(self) -> DialogueRules:
+        if self.min_per_page > self.max_per_page:
+            raise ValueError("min_per_page doit être ≤ max_per_page")
+        return self
+
     def room_for(self, panels_on_page: int, importance: int = 2) -> int | None:
         """Répliques au plus dans une case (None = pas de limite)."""
         rule = next((r for r in sorted(self.room, key=lambda r: r.max_panels) if panels_on_page <= r.max_panels), None)
         if rule is None:
             return None
         return rule.replies + (self.big_panel_bonus if importance >= 3 else 0)
+
+
+# --- ADN de la série (pré-direction, presets/pre_direction.yaml) ------------------------
+# Charte chiffrée d'une série : uniquement des nombres bornés et des booléens, jamais de texte libre. Le genre
+# donne les valeurs (héritées), la série peut en ajuster (`projects.pre_direction`). Vérifiée par
+# pipeline/pre_direction.py (scénariste) et pipeline/art_direction.py (direction artistique) : relance, puis
+# avertissement visible, jamais un blocage.
+class ShareRange(_Strict):
+    """Part d'un ensemble (0 à 1), au moins `min` et au plus `max`."""
+
+    min: float = Field(default=0, ge=0, le=1)
+    max: float = Field(default=1, ge=0, le=1)
+
+    @model_validator(mode="after")
+    def _order(self) -> ShareRange:
+        if self.min > self.max + 1e-9:
+            raise ValueError("min doit être ≤ max")
+        return self
+
+
+class DnaPanels(_Strict):
+    """Cases par planche (une pleine page d'une seule case reste permise)."""
+
+    min_per_page: int = Field(ge=1, le=9)
+    max_per_page: int = Field(ge=1, le=9)
+
+    @model_validator(mode="after")
+    def _order(self) -> DnaPanels:
+        if self.min_per_page > self.max_per_page:
+            raise ValueError("min_per_page doit être ≤ max_per_page")
+        return self
+
+
+class DnaShapes(_Strict):
+    """Formes de planche : part de planches à grande case, et variété des formes (nombre de cases et de grandes
+    cases, gabarit, page choc)."""
+
+    big_panel_share: ShareRange
+    max_same_in_a_row: int = Field(ge=1, le=20)
+    max_same_share: float = Field(ge=0, le=1)
+
+
+class DnaShots(_Strict):
+    """Échelle des plans : part des cases du chapitre, par famille de plans (`shot_classes`)."""
+
+    close_up: ShareRange
+    medium_close: ShareRange
+    medium: ShareRange
+    wide: ShareRange  # plancher des plans larges / d'ensemble : sous `min`, la relance dit « élargis »
+    insert: ShareRange
+    tight_max: float = Field(ge=0, le=1)  # plafond des plans serrés (gros plan, rapproché, insert)
+
+
+class DnaPresence(_Strict):
+    """Présence : part des cases en vue subjective et des cases sans personnage à l'image."""
+
+    subjective: ShareRange
+    empty: ShareRange
+
+
+class DnaDialogue(_Strict):
+    """Dialogue compté par planche (onomatopées à part)."""
+
+    min_per_page: int = Field(ge=0, le=30)
+    max_per_page: int = Field(ge=1, le=30)
+    min_silent_panels: int = Field(ge=0, le=9)
+
+    @model_validator(mode="after")
+    def _order(self) -> DnaDialogue:
+        if self.min_per_page > self.max_per_page:
+            raise ValueError("min_per_page doit être ≤ max_per_page")
+        return self
+
+
+class DnaRhythm(_Strict):
+    """Courbe de rythme cible, vérifiée sur les rythmes de page de la direction artistique."""
+
+    first_peak: ShareRange  # position du premier pic dans le chapitre (0 = début, 1 = fin)
+    breath_after_peak: bool  # une respiration obligatoire après un pic
+    max_peaks_in_a_row: int = Field(ge=1, le=10)
+    final_peak_last_pages: int = Field(ge=0, le=10)  # pic final dans les N dernières planches (0 = libre)
+
+
+class PreDirection(_Strict):
+    """ADN d'une série : les six familles de la charte."""
+
+    panels: DnaPanels
+    shapes: DnaShapes
+    shots: DnaShots
+    presence: DnaPresence
+    dialogue: DnaDialogue
+    rhythm: DnaRhythm
+
+
+ShotClass = Literal["close_up", "medium_close", "medium", "wide", "insert"]
+SHOT_CLASSES: tuple[ShotClass, ...] = ("close_up", "medium_close", "medium", "wide", "insert")
+TIGHT_CLASSES: tuple[ShotClass, ...] = ("close_up", "medium_close", "insert")
+
+
+def _merge(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
+    out = dict(base)
+    for key, value in patch.items():
+        out[key] = _merge(out[key], value) if isinstance(value, dict) and isinstance(out.get(key), dict) else value
+    return out
+
+
+class PreDirectionSettings(_Strict):
+    """`presets/pre_direction.yaml` : défaut ultime, défauts des genres et vocabulaire des contrôles."""
+
+    # Plans de la direction artistique comptés dans chaque famille (comparés sans casse).
+    shot_classes: dict[ShotClass, list[str]]
+    # Rythmes de page (direction artistique) qui font un pic, et ceux qui font une respiration.
+    peak_rythmes: list[str] = Field(min_length=1)
+    breath_rythmes: list[str] = Field(min_length=1)
+    # Courbe de rythme et formes de planche vérifiées dès N pages dirigées ensemble.
+    min_pages: int = Field(default=4, ge=2, le=50)
+    # Grande case : importance de case (scénario) qui fait une grande case, et part de surface d'une case de
+    # gabarit (par rapport à une part égale, 1/n) au-delà de laquelle elle est grande.
+    big_importance: int = Field(default=3, ge=2, le=3)
+    big_area_ratio: float = Field(default=1.5, gt=1, le=5)
+    defaults: PreDirection
+    # Valeurs propres à chaque genre (presets/style_genres/), reprises sur `defaults` (seules les clés données).
+    genres: dict[str, dict[str, Any]] = Field(default_factory=dict)
+
+    @field_validator("shot_classes")
+    @classmethod
+    def _classes(cls, value: dict[str, list[str]]) -> dict[str, list[str]]:
+        missing = [c for c in SHOT_CLASSES if not value.get(c)]
+        if missing:
+            raise ValueError(f"shot_classes : famille absente ou vide : {', '.join(missing)}")
+        return value
+
+    @model_validator(mode="after")
+    def _genres(self) -> PreDirectionSettings:
+        for genre in self.genres:
+            self.genre(genre)
+        return self
+
+    def genre(self, genre_id: str | None) -> PreDirection:
+        """ADN d'un genre (le défaut ultime pour un genre absent ou inconnu)."""
+        patch = self.genres.get(genre_id or "")
+        if not patch:
+            return self.defaults
+        try:
+            return PreDirection.model_validate(_merge(self.defaults.model_dump(), patch))
+        except ValueError as exc:
+            raise ValueError(f"genres.{genre_id} : {exc}") from None
 
 
 class PromptPreset(_Strict):

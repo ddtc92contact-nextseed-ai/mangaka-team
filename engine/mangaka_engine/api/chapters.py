@@ -30,6 +30,7 @@ from ..pipeline.pages import (
     regeneration_advised,
     slant_page_cut,
 )
+from ..pipeline.pre_direction import dialogue_rules_for, panel_count_problems, series_charter
 from ..pipeline.render import crop_max_zoom, displayed_image, image_size
 from ..pipeline.script import normalize_shot_type, script_job
 from ..pipeline.sketch import cleaned_from, latest_sketch, validated_sketch
@@ -485,8 +486,13 @@ def chapter_dialogues(
     ce qui reste après les relances, ou après une retouche de l'auteur."""
     chapter = get_chapter_or_404(session, chapter_id)
     presets = ctx.agents.presets_for(chapter.project_id)
-    rules = presets.prompt("script").dialogue_rules
-    report = chapter_report(presets, _load_pages(session, chapter_id), rules)
+    # Dialogue compté par planche et cases par planche : valeurs de l'ADN de la série.
+    charter = series_charter(presets, chapter.project)
+    rules = dialogue_rules_for(presets.prompt("script").dialogue_rules, charter)
+    pages = _load_pages(session, chapter_id)
+    report = chapter_report(presets, pages, rules)
+    story = [p for p in sorted(pages, key=lambda p: p.number) if p.kind == PageKind.story and p.panels]
+    report.warnings = panel_count_problems([len(p.panels) for p in story], charter) + report.warnings
     return DialogueReportOut.model_validate(report.as_dict())
 
 
