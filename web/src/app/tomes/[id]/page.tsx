@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useConfirm } from "@/components/confirm";
 import { CoverComposition } from "@/components/cover-composition";
+import { IdentityBadge } from "@/components/cover-identity";
 import { useToast } from "@/components/toast";
 import { Alert, Button, Card, Field, Input, Loading, PageHeader, ProgressBar, Select, Textarea } from "@/components/ui";
 import {
@@ -83,6 +84,9 @@ function CoverEditor({ data, onData, reload }: { data: CoverStudio; onData: (d: 
   const preview = data.versions.find((x) => x.id === previewId) ?? data.versions.find((x) => x.selected) ?? data.versions[0] ?? null;
   const chosen = new Set(v.cover_character_ids);
   const disabled = Boolean(data.problem);
+  const charter = data.charter;
+  // Charte qui nomme des personnages : seuls ceux-là peuvent apparaître en couverture.
+  const characters = data.characters.filter((c) => c.in_charter || chosen.has(c.id));
 
   async function patch(body: Parameters<typeof api.updateVolume>[1], what: string) {
     setError(null);
@@ -198,6 +202,7 @@ function CoverEditor({ data, onData, reload }: { data: CoverStudio; onData: (d: 
         {data.problem && <Alert>{data.problem}</Alert>}
         {error && <Alert>{error}</Alert>}
         {notice && !error && <Alert tone="info">{notice}</Alert>}
+        {charter && <CharterSummary charter={charter} projectId={v.project_id} />}
         <Card>
           <h2 className="mb-4 font-semibold text-zinc-100">Format et personnages</h2>
           <div className="space-y-4">
@@ -220,9 +225,9 @@ function CoverEditor({ data, onData, reload }: { data: CoverStudio; onData: (d: 
               <legend className="mb-2 text-sm font-medium text-zinc-300">
                 Personnages ({v.cover_character_ids.length}/{data.max_characters})
               </legend>
-              {data.characters.length ? (
+              {characters.length ? (
                 <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3" aria-label="Personnages de la série">
-                  {data.characters.map((c) => {
+                  {characters.map((c) => {
                     const on = chosen.has(c.id);
                     const full = !on && v.cover_character_ids.length >= data.max_characters;
                     return (
@@ -242,6 +247,7 @@ function CoverEditor({ data, onData, reload }: { data: CoverStudio; onData: (d: 
                           <span className="min-w-0 truncate">
                             {c.name}
                             {!c.has_reference && <span className="block text-[10px] text-zinc-500">sans image de référence</span>}
+                            {!c.in_charter && <span className="block text-[10px] text-amber-300">hors charte : écarté</span>}
                           </span>
                         </label>
                       </li>
@@ -341,6 +347,7 @@ function CoverEditor({ data, onData, reload }: { data: CoverStudio; onData: (d: 
                     <p className="truncate" title={`${x.width}×${x.height} px`}>
                       seed {String(x.seed ?? "—")}
                     </p>
+                    <IdentityBadge identity={x.identity} compact />
                     <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
                       {x.selected ? (
                         <span className="rounded bg-emerald-500/15 px-1 py-px text-[10px] text-emerald-300">Retenue</span>
@@ -374,13 +381,45 @@ function CoverEditor({ data, onData, reload }: { data: CoverStudio; onData: (d: 
           </div>
           {fmt ? <CoverPreview format={fmt} version={preview} zones={zones} /> : <p className="text-sm text-zinc-500">Format inconnu.</p>}
           {preview && (
-            <p className="mt-2 text-xs text-zinc-500">
-              {preview.selected ? "Version retenue" : "Version affichée"} · {preview.width}×{preview.height} px · seed {String(preview.seed ?? "—")}
-            </p>
+            <div className="mt-2 space-y-1">
+              <p className="text-xs text-zinc-500">
+                {preview.selected ? "Version retenue" : "Version affichée"} · {preview.width}×{preview.height} px · seed {String(preview.seed ?? "—")}
+              </p>
+              <IdentityBadge identity={preview.identity} />
+            </div>
           )}
         </Card>
       </div>
     </div>
+  );
+}
+
+/** Charte des couvertures de la série appliquée à ce tome (réglée sur la fiche série). */
+function CharterSummary({ charter, projectId }: { charter: NonNullable<CoverStudio["charter"]>; projectId: number }) {
+  return (
+    <Card data-testid="cover-charter-summary">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="font-semibold text-zinc-100">Charte des couvertures</h2>
+        <Link href={`/projets/${projectId}#charte-couvertures`} className="text-xs text-rose-300 hover:text-rose-200">
+          Régler sur la fiche série →
+        </Link>
+      </div>
+      <p className="text-sm text-zinc-300">{charter.saved ? charter.summary : `Réglages par défaut — ${charter.summary}`}</p>
+      <p className="mt-1 text-xs text-zinc-500">
+        {charter.present.length
+          ? `Références d'identité envoyées à chaque génération : ${charter.present.join(", ")}.`
+          : "Aucun personnage : la couverture montre un lieu ou un symbole."}{" "}
+        Couleur, ambiance, cadrage et sujet sont ajoutés au prompt de la 1re et de la 4e.
+      </p>
+      {(charter.outside.length > 0 || charter.warnings.length > 0) && (
+        <ul className="mt-2 space-y-1 text-xs text-amber-300">
+          {charter.outside.length > 0 && <li>⚠ Hors charte, écartés de la génération : {charter.outside.join(", ")}.</li>}
+          {charter.warnings.map((w) => (
+            <li key={w}>⚠ {w}</li>
+          ))}
+        </ul>
+      )}
+    </Card>
   );
 }
 
