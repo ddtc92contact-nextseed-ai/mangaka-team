@@ -1,7 +1,16 @@
 "use client";
 
-import { useId, useImperativeHandle, useRef, useState, type KeyboardEvent, type PointerEvent, type Ref } from "react";
-import { engineUrl, type BubbleBox, type LetteredBubble, type LetteredSfx, type PageLettering, type SfxUpdate } from "@/lib/api";
+import { useEffect, useId, useImperativeHandle, useRef, useState, type KeyboardEvent, type PointerEvent, type Ref } from "react";
+import {
+  api,
+  engineUrl,
+  type BubbleBox,
+  type BubbleFit,
+  type LetteredBubble,
+  type LetteredSfx,
+  type PageLettering,
+  type SfxUpdate,
+} from "@/lib/api";
 import { previewSizePt } from "@/lib/bubble-size";
 import { BUBBLE_KINDS } from "@/lib/script";
 import { insetPolygon, outsetPolygon, svgPoints, type Point } from "@/lib/layout";
@@ -31,6 +40,13 @@ const MIN_W = 60;
 const MIN_H = 40;
 const STEP = 12; // ≈ 1 mm à 300 DPI
 const COMMIT_MS = 450;
+// Pause du glissé de la poignée après laquelle le moteur calcule le texte exact du cadre (aperçu).
+const FIT_MS = 80;
+
+/** Clé d'un cadre en cours de redimensionnement : bulle + cadre au pixel. */
+function fitKey(id: number, box: BubbleBox): string {
+  return [id, box.x, box.y, box.w, box.h].join(":");
+}
 
 export interface LetteringCanvasHandle {
   focusBubble: (id: number) => void;
@@ -102,6 +118,27 @@ export function LetteringCanvas({
   const [sfxDragState, setSfxDrag] = useState<SfxDrag | null>(null);
   const sfxDrag = sfxDragState && sfxDragState.data === data ? sfxDragState : null;
   const sfxList = data.sfx ?? [];
+  // Redimensionnement en cours : dès une courte pause, le moteur donne la taille et les lignes exactes du texte
+  // dans ce cadre (celles du lâcher) ; en attendant, l'aperçu proportionnel (previewSizePt).
+  const [fitted, setFitted] = useState<(BubbleFit & { key: string }) | null>(null);
+  const resizing = drag?.mode === "resize" ? data.bubbles.find((b) => b.id === drag.id) : undefined;
+  const resizeBox = resizing && drag ? applyDelta(resizing, "resize", drag.dx, drag.dy).position : undefined;
+  const resizeKey = resizing && resizeBox && !resizing.font.manual_size ? fitKey(resizing.id, resizeBox) : null;
+  useEffect(() => {
+    if (!resizeKey) return;
+    const [id, x, y, w, h] = resizeKey.split(":").map(Number);
+    let live = true;
+    const t = setTimeout(() => {
+      api
+        .fitBubble(id, { x, y, w, h })
+        .then((fit) => live && setFitted({ ...fit, key: resizeKey }))
+        .catch(() => undefined); // aperçu seulement : le lâcher recalcule de toute façon
+    }, FIT_MS);
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
+  }, [resizeKey]);
   useImperativeHandle(ref, () => ({ focusBubble: (id) => groups.current.get(id)?.focus() }), []);
 
   const { width: W, height: H } = data;
@@ -384,12 +421,14 @@ export function LetteringCanvas({
         const kind = BUBBLE_KINDS[b.kind];
         // Redimensionnement en cours : le texte suit déjà le cadre (aperçu ; le moteur recalcule au lâcher).
         const resized = active?.mode === "resize" ? applyDelta(b, "resize", active.dx, active.dy).position : undefined;
-        const grow = resized ? previewSizePt(b.font, b.box, resized) / b.font.size_pt : 1;
+        const exact = resized && fitted?.key === fitKey(b.id, resized) ? fitted : null;
+        const previewPt = resized ? (exact?.size_pt ?? previewSizePt(b.font, b.box, resized, b.manual)) : undefined;
+        const grow = previewPt !== undefined && !exact ? previewPt / b.font.size_pt : 1;
         const around = (scale: string) =>
           resized
             ? `translate(${resized.x + resized.w / 2} ${resized.y + resized.h / 2}) scale(${scale}) translate(${-(b.box.x + b.box.w / 2)} ${-(b.box.y + b.box.h / 2)})`
             : undefined;
-        const textMove = around(String(grow));
+        const textMove = exact ? undefined : around(String(grow));
         const shapeMove = resized ? around(`${resized.w / b.box.w} ${resized.h / b.box.h}`) : undefined;
         return (
           <g
@@ -407,6 +446,7 @@ export function LetteringCanvas({
             data-kind={b.kind}
             data-overflow={b.overflow ? "true" : undefined}
             data-size-pt={b.font.size_pt}
+            data-preview-pt={previewPt}
             className="cursor-move outline-none [&:focus-visible>.focus-ring]:opacity-100"
             onPointerDown={(e) => onPointerDown(e, b, "move")}
             onPointerMove={onPointerMove}
@@ -426,13 +466,13 @@ export function LetteringCanvas({
             </g>
             <text
               fontFamily={`"${b.font.family}", sans-serif`}
-              fontSize={b.font.size_px}
+              fontSize={exact?.size_px ?? b.font.size_px}
               fill={b.font.color}
               textAnchor="middle"
               xmlSpace="preserve"
               transform={textMove}
             >
-              {b.lines.map((l, j) => (
+              {(exact?.lines ?? b.lines).map((l, j) => (
                 <tspan key={j} x={l.x} y={l.y}>
                   {l.text}
                 </tspan>

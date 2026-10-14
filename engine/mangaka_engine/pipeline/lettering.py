@@ -10,8 +10,9 @@ Règles :
 - **texte** : typographie française (espaces insécables avant « ! ? : ; » et dans les guillemets),
   retour à la ligne glouton avec césure (pyphen) seulement quand la ligne resterait trop vide,
   taille réduite par pas jusqu'au minimum lisible du preset, bloc centré ; une bulle au cadre ajusté
-  à la main prend la plus grande taille qui remplit ce cadre, du plafond `max_size_pt` au minimum (même
-  retour à la ligne, même césure), sauf taille saisie à la main ;
+  à la main prend la plus grande taille qui remplit ce cadre (même retour à la ligne, même césure, marges
+  proportionnelles à la taille du texte : agrandir le cadre ×2 double le texte), entre `min_size_pt` et
+  le plafond `max_size_pt`, sauf taille saisie à la main ;
 - **placement** : dans la zone réservée, sinon dans toute la case — pour une case en biais, chaque
   bulle reste entièrement dans le polygone de la case (pas seulement sa boîte) ; la 1re bulle lue est en haut
   côté début de lecture (gauche en ltr, droite en rtl), chaque suivante plus bas ou, à la même
@@ -651,6 +652,9 @@ class BubbleLayout:
     manual_tail: bool
     overflow: bool = False
     manual_size: bool = False
+    # Marges de la bulle (largeur, hauteur totales autour du texte) à la taille normale du style : l'aperçu
+    # du redimensionnement en déduit la taille que donnera le remplissage (marges proportionnelles).
+    margin: tuple[float, float] = (0.0, 0.0)
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -672,6 +676,8 @@ class BubbleLayout:
                 "min_size_pt": self.style.min_size_pt,
                 "max_size_pt": self.style.ceiling_pt,
                 "manual_size": self.manual_size,
+                "style_size_pt": self.style.size_pt,
+                "margin_px": {"w": round(self.margin[0], 2), "h": round(self.margin[1], 2)},
             },
             "lines": [{"text": ln.text, "x": round(ln.x, 1), "y": round(ln.y, 1)} for ln in self.lines],
             "shape": {
@@ -807,7 +813,7 @@ class Letterer:
     # texte ------------------------------------------------------------------------------
     def sizes(self, kind: str, *, fill: bool = False) -> list[float]:
         """Tailles essayées, de la plus grande à `min_size_pt`. `fill` (cadre ajusté à la main) : depuis
-        le plafond `max_size_pt`, pour que le texte remplisse une bulle agrandie."""
+        le plafond `max_size_pt`, pour que le texte remplisse une bulle agrandie (voir `fill_box`)."""
         st = self.fonts.style(kind)
         out, size = [], st.ceiling_pt if fill else st.size_pt
         while size > st.min_size_pt + 1e-9:
@@ -823,19 +829,23 @@ class Letterer:
             return [b.size_pt]
         return self.sizes(b.kind, fill=b.manual_box is not None)
 
-    def block(self, kind: str, text: str, size_pt: float, max_text_width: float) -> TextBlock:
+    def block(self, kind: str, text: str, size_pt: float, max_text_width: float, *, linear: bool = False) -> TextBlock:
+        """Bloc de texte à cette taille. `linear` (remplissage d'un cadre ajusté à la main) : mesuré à la taille
+        normale du style puis mis à l'échelle — les mesures arrondies au pixel ne grandissent pas tout à fait
+        comme la taille ; ainsi un cadre ×2 donne exactement un texte ×2 (même retour à la ligne)."""
         st = self.fonts.style(kind)
-        font = self.fonts.pil(st, self.pt(size_pt))
+        ratio = size_pt / st.size_pt if linear else 1.0
+        font = self.fonts.pil(st, self.pt(st.size_pt if linear else size_pt))
 
         def measure(s: str) -> float:
-            return font.getlength(self.fonts.drawable(st, s))
+            return font.getlength(self.fonts.drawable(st, s)) * ratio
 
         hy = self.preset.hyphenation
         lines = wrap_text(
             text, measure, max_text_width, language=hy.language, min_word_chars=hy.min_word_chars, min_gap=hy.min_gap
         )
-        cap = -font.getbbox("H", anchor="ls")[1]
-        desc = font.getbbox("gjpq", anchor="ls")[3]
+        cap = -font.getbbox("H", anchor="ls")[1] * ratio
+        desc = font.getbbox("gjpq", anchor="ls")[3] * ratio
         size_px = self.pt(size_pt)
         return TextBlock(
             lines=tuple(lines),
@@ -846,58 +856,121 @@ class Letterer:
             desc=desc,
         )
 
-    def _pad(self, kind: str) -> tuple[float, float]:
+    def _pad(self, kind: str, scale: float = 1.0) -> tuple[float, float]:
         p = self.s.padding_mm[kind]
-        return self.mm(p.x), self.mm(p.y)
+        return self.mm(p.x) * scale, self.mm(p.y) * scale
 
     def _ellipse_kind(self, kind: str) -> bool:
         return kind in ("thought", "shout", "off") or (kind == "speech" and self.s.speech_shape == "ellipse")
 
-    def _extra(self, kind: str) -> float:
+    def _extra(self, kind: str, scale: float = 1.0) -> float:
         if kind == "thought":
-            return self.mm(self.s.cloud.amplitude_mm)
+            return self.mm(self.s.cloud.amplitude_mm) * scale
         if kind == "shout":
-            return self.mm(self.s.shout.spike_mm)
+            return self.mm(self.s.shout.spike_mm) * scale
         return 0.0
 
-    def outer_size(self, kind: str, tw: float, th: float) -> tuple[float, float]:
-        """Taille de la bulle autour d'un bloc de texte tw × th."""
-        px, py = self._pad(kind)
-        extra = self._extra(kind)
+    def margin_scale(self, kind: str, size_pt: float) -> float:
+        """Marges d'un texte qui remplit un cadre ajusté à la main : proportionnelles à sa taille (1 à
+        `size_pt`), pour que le texte occupe la bulle comme dans une bulle placée automatiquement."""
+        return size_pt / self.fonts.style(kind).size_pt
+
+    def outer_size(self, kind: str, tw: float, th: float, scale: float = 1.0) -> tuple[float, float]:
+        """Taille de la bulle autour d'un bloc de texte tw × th (marges × `scale`)."""
+        px, py = self._pad(kind, scale)
+        extra = self._extra(kind, scale)
         if self._ellipse_kind(kind):
             f = self.s.ellipse_factor
             return 2 * (tw / 2 * f + px + extra), 2 * (th / 2 * f + py + extra)
         return tw + 2 * px, th + 2 * py
 
-    def inner_size(self, kind: str, w: float, h: float) -> tuple[float, float]:
+    def inner_size(self, kind: str, w: float, h: float, scale: float = 1.0) -> tuple[float, float]:
         """Inverse de `outer_size` : place disponible pour le texte dans une bulle w × h."""
-        px, py = self._pad(kind)
-        extra = self._extra(kind)
+        px, py = self._pad(kind, scale)
+        extra = self._extra(kind, scale)
         if self._ellipse_kind(kind):
             f = self.s.ellipse_factor
             return max(1.0, 2 * (w / 2 - px - extra) / f), max(1.0, 2 * (h / 2 - py - extra) / f)
         return max(1.0, w - 2 * px), max(1.0, h - 2 * py)
 
-    def fit(self, kind: str, text: str, size_pt: float, max_w: float, max_h: float) -> _Fit | None:
-        """Meilleur retour à la ligne à cette taille pour une bulle tenant dans max_w × max_h."""
-        inner_w, _ = self.inner_size(kind, max_w, max_h)
+    def fit(
+        self, kind: str, text: str, size_pt: float, max_w: float, max_h: float, *, fill: bool = False
+    ) -> _Fit | None:
+        """Meilleur retour à la ligne à cette taille pour une bulle tenant dans max_w × max_h. `fill` (cadre
+        ajusté à la main) : marges proportionnelles à la taille, forme visée = celle du cadre."""
+        scale = self.margin_scale(kind, size_pt) if fill else 1.0
+        aspect = max_w / max_h if fill and max_h > 0 else self.s.preferred_aspect
+        inner_w, _ = self.inner_size(kind, max_w, max_h, scale)
         size_px = self.pt(size_pt)
         lo = min(inner_w, size_px * 5)
         best: tuple[float, _Fit] | None = None
         seen: set[tuple[str, ...]] = set()
         for i in range(12):
             width = lo + (inner_w - lo) * i / 11
-            block = self.block(kind, text, size_pt, width)
+            block = self.block(kind, text, size_pt, width, linear=fill)
             if block.lines in seen:
                 continue
             seen.add(block.lines)
-            outer = self.outer_size(kind, block.width, block.height)
+            outer = self.outer_size(kind, block.width, block.height, scale)
             if outer[0] > max_w + 0.01 or outer[1] > max_h + 0.01:
                 continue
-            score = abs(math.log(outer[0] / outer[1] / self.s.preferred_aspect)) + 1.0 * block.hyphens
+            score = abs(math.log(outer[0] / outer[1] / aspect)) + 1.0 * block.hyphens
             if best is None or score < best[0] - 1e-9:
                 best = (score, _Fit(size_pt, block, outer))
         return best[1] if best else None
+
+    def fill_box(self, kind: str, text: str, box: Box) -> _Fit | None:
+        """Cadre ajusté à la main : la plus grande taille qui le remplit (de `max_size_pt` à `min_size_pt`,
+        marges proportionnelles), None si même la plus petite déborde. Recherche dichotomique (tenir est
+        monotone en taille). Un pixel de marge : le cadre enregistré est arrondi au pixel, il ne doit pas
+        faire perdre un pas de taille."""
+        sizes = self.sizes(kind, fill=True)
+        w, h = box.w + 1, box.h + 1
+        best = self.fit(kind, text, sizes[-1], w, h, fill=True)
+        if best is None:
+            return None
+        lo, hi = (
+            0,
+            len(sizes) - 1,
+        )  # sizes[hi] tient : on cherche le plus petit indice (la plus grande taille) qui tient
+        while lo < hi:
+            mid = (lo + hi) // 2
+            f = self.fit(kind, text, sizes[mid], w, h, fill=True)
+            if f is None:
+                lo = mid + 1
+            else:
+                best, hi = f, mid
+        return best
+
+    def manual_fit(self, b: BubbleSpec) -> tuple[_Fit, bool]:
+        """Texte d'une bulle au cadre ajusté à la main : taille saisie, sinon remplissage du cadre ; faute de
+        place, tout le texte à la plus petite taille (second élément : True, il déborde)."""
+        assert b.manual_box is not None
+        text = self._text(b)
+        if b.size_pt is not None:
+            fit = self.fit(b.kind, text, b.size_pt, b.manual_box.w + 1, b.manual_box.h + 1)
+        else:
+            fit = self.fill_box(b.kind, text, b.manual_box)
+        if fit is None:
+            return self.fit_any(b.kind, text, self.bubble_sizes(b)[-1], b.manual_box.w), True
+        return fit, False
+
+    def fit_preview(self, b: BubbleSpec) -> dict[str, Any]:
+        """Aperçu du redimensionnement (écran Lettrage) : taille et lignes du texte dans le cadre `manual_box`,
+        exactement comme au lettrage de la page — sans rien enregistrer."""
+        assert b.manual_box is not None
+        fit, overflow = self.manual_fit(b)
+        box = Box(_r(b.manual_box.x1), _r(b.manual_box.y1), _r(b.manual_box.x2), _r(b.manual_box.y2))
+        return {
+            "id": b.id,
+            "box": box.as_xywh(),
+            "size_pt": fit.size_pt,
+            "size_px": round(fit.block.size_px, 2),
+            "overflow": overflow,
+            "lines": [
+                {"text": ln.text, "x": round(ln.x, 1), "y": round(ln.y, 1)} for ln in self.lines(b.kind, fit.block, box)
+            ],
+        }
 
     def fit_any(self, kind: str, text: str, size_pt: float, max_w: float) -> _Fit:
         """Repli sans contrainte de hauteur (texte trop long) : tout le texte, rien de coupé."""
@@ -1087,15 +1160,7 @@ class Letterer:
         auto = [b for b in panel.bubbles if b.manual_box is None]
         for b in manual:
             assert b.manual_box is not None
-            text = self._text(b)
-            # Cadre ajusté à la main : le texte le remplit (plus grande taille qui tient, plafonnée). Un pixel
-            # de marge : le cadre enregistré est arrondi au pixel, il ne doit pas faire perdre un pas de taille.
-            sizes = self.bubble_sizes(b)
-            w, h = b.manual_box.w + 1, b.manual_box.h + 1
-            fit = next((f for size in sizes if (f := self.fit(b.kind, text, size, w, h))), None)
-            overflow = fit is None
-            if fit is None:
-                fit = self.fit_any(b.kind, text, sizes[-1], b.manual_box.w)
+            fit, overflow = self.manual_fit(b)
             out[b.id] = self._layout(b, panel, b.manual_box, fit, direction, overflow=overflow)
             if overflow:
                 warnings.append(self._overflow(label, b, panel))
@@ -1213,6 +1278,7 @@ class Letterer:
             manual_tail=b.manual_tail is not None,
             overflow=overflow,
             manual_size=b.size_pt is not None,
+            margin=self.outer_size(b.kind, 0.0, 0.0),
         )
 
     def letter_page(self, panels: Sequence[PanelSpec], direction: Direction, page: Box | None = None) -> PageLettering:

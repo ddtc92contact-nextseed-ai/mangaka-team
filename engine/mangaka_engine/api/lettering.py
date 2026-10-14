@@ -14,6 +14,7 @@ from ..pipeline.fonts import FontBook
 from ..pipeline.lettering import LetteringError
 from ..pipeline.render import (
     STEP,
+    bubble_fit_preview,
     lettering_json,
     page_file_stem,
     page_inputs,
@@ -29,7 +30,7 @@ from .chapters import get_chapter_or_404, get_page_or_404
 from .deps import AppContext, get_ctx, get_session
 from .errors import FieldError
 from .jobs import job_out
-from .schemas import BubbleUpdate, ExportIn, JobOut, RenderIn, SfxCreate
+from .schemas import BubbleBox, BubbleUpdate, ExportIn, JobOut, RenderIn, SfxCreate
 from .stages import gate
 from .storage import sync_library
 
@@ -159,6 +160,25 @@ def update_bubble(
         bubble.tail = {**tail, "manual": True} if tail is not None else None
     session.commit()
     return _lettering(ctx, page)
+
+
+@router.post("/bubbles/{bubble_id}/fit")
+def fit_bubble(
+    bubble_id: int, body: BubbleBox, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
+) -> dict[str, Any]:
+    """Aperçu pendant le redimensionnement d'une bulle : taille et lignes de son texte dans le cadre envoyé,
+    calculées comme au lâcher (le texte ne saute pas). Rien n'est enregistré."""
+    bubble = session.get(Bubble, bubble_id)
+    if bubble is None:
+        raise HTTPException(status_code=404, detail="Bulle introuvable")
+    if bubble.kind == BubbleKind.sfx:
+        raise FieldError("position", "une onomatopée n'a pas de cadre")
+    page = bubble.panel.page
+    presets = _presets(ctx, page)
+    try:
+        return bubble_fit_preview(presets, _fonts(ctx, presets), page, bubble, body.model_dump())
+    except (LetteringError, PresetError) as exc:
+        raise FieldError("lettering", str(exc)) from None
 
 
 def _update_sfx(bubble: Bubble, body: BubbleUpdate, changes: dict[str, Any], *, fonts: list[str]) -> None:

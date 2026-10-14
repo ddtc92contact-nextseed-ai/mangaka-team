@@ -1556,7 +1556,8 @@ export interface LetteredBubble {
   manual_tail: boolean;
   overflow: boolean;
   // min / max : bornes du style ; un cadre ajusté à la main est rempli entre les deux, sauf taille saisie
-  // à la main (`manual_size`).
+  // à la main (`manual_size`). style_size_pt / margin_px : taille normale du style et marges de la bulle à
+  // cette taille (le remplissage les fait grandir avec le texte) — pour l'aperçu du redimensionnement.
   font: {
     family: string;
     size_pt: number;
@@ -1565,10 +1566,22 @@ export interface LetteredBubble {
     min_size_pt: number;
     max_size_pt: number;
     manual_size: boolean;
+    style_size_pt: number;
+    margin_px: { w: number; h: number };
   };
   lines: { text: string; x: number; y: number }[];
   // miter_limit : joints en onglet (pointes vives des queues et des cris), jamais biseautés.
   shape: { path: string; fill: string; stroke: string; stroke_px: number; miter_limit: number };
+}
+
+/** Aperçu du redimensionnement d'une bulle : son texte dans le cadre `box`, calculé comme au lâcher. */
+export interface BubbleFit {
+  id: number;
+  box: BubbleBox;
+  size_pt: number;
+  size_px: number;
+  overflow: boolean;
+  lines: { text: string; x: number; y: number }[];
 }
 
 export interface LetteringWarning {
@@ -2631,6 +2644,7 @@ export const api = {
   getLettering: (pageId: number) => request<PageLettering>(`/pages/${pageId}/lettering`),
   resetLettering: (pageId: number) => request<PageLettering>(`/pages/${pageId}/lettering/reset`, { method: "POST" }),
   updateBubble: (id: number, body: BubbleUpdate) => request<PageLettering>(`/bubbles/${id}`, json("PATCH", body)),
+  fitBubble: (id: number, box: BubbleBox) => request<BubbleFit>(`/bubbles/${id}/fit`, json("POST", box)),
   addSfx: (panelId: number, body: { text: string; intensity?: Intensity; x?: number; y?: number }) =>
     request<PageLettering>(`/panels/${panelId}/sfx`, json("POST", body)),
   deleteSfx: (id: number) => request<PageLettering>(`/bubbles/${id}`, { method: "DELETE" }),
