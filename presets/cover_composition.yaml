@@ -1,0 +1,63 @@
+# Composition de la couverture d'un tome (écran « Couverture ») : 1re de couverture (illustration retenue + logo
+# de la série + numéro de tome + nom d'auteur), 4e de couverture (résumé rédigé par l'IA, accroche, petite
+# illustration, rappel du titre), dos (tranche) et export (1re, 4e, couverture à plat ; PNG + SVG).
+# Voir engine/mangaka_engine/pipeline/cover_composition.py et presets/README.md (« Composition de la couverture »).
+#
+# Aucun texte n'est dessiné par le modèle d'image : tout le texte est posé ici, en vectoriel (SVG, polices
+# embarquées) et en PNG, avec les polices de fonts.yaml et les couleurs de la palette de la série.
+
+summary:
+  prompt: resume-quatrieme      # presets/prompts/ (LLM du Scénariste, écran « L'équipe »)
+  min_chars: 600                # longueur du résumé, en signes (espaces compris)
+  max_chars: 900
+  tagline_max_chars: 90         # phrase d'accroche courte
+  # Fin du tome jamais révélée : reprendre ≥ 7 mots d'affilée de la fin du dernier chapitre invalide la réponse.
+  spoiler_words: 7
+
+# Petite illustration de 4e générée par le flux de couverture (cover.yaml : même workflow, même agrandisseur).
+back_illustration:
+  aspect: [4, 3]                # largeur : hauteur
+  long_side: 1344               # plus grand côté généré (px), multiple de cover.yaml › multiple
+  width_mm: 100                 # largeur imprimée visée : agrandie au DPI du format
+  lead: "Full-colour manga illustration, a single evocative scene from the volume, vivid colours."
+  rules:
+    - "Absolutely no text, no letters, no title, no logo, no signature, no watermark anywhere in the image."
+
+# Dos (tranche) : largeur = (pages / 2) × épaisseur d'une feuille + couverture, au moins `min_width_mm`.
+# Pages : celles des chapitres du tome (à défaut de pages, le nombre de pages visé du chapitre).
+spine:
+  sheet_thickness_mm: 0.12      # une feuille = deux pages (papier manga ~ 80 g)
+  cover_mm: 0.6
+  min_width_mm: 3
+  title_min_width_mm: 6         # plus étroit : numéro seul sur le dos (avertissement)
+  title_fill: 0.62              # hauteur du titre vertical / largeur du dos
+
+front:
+  logo_scale: { min: 0.3, max: 1.0 }   # taille du logo, relative à la plus grande qui tient dans sa zone
+  default_logo_scale: 0.92
+  outline_pt: 1.6               # contour du nom d'auteur et du titre de repli (lisible sur l'illustration)
+  badge_radius: 0.18
+
+default_back_layout: illustration-haut
+
+# Couleurs de repli tant que la série n'a pas de palette retenue (fiche série › Identité visuelle).
+fallback_palette:
+  dominante: "#1e293b"
+  secondaire: "#334155"
+  accent: "#f59e0b"
+  fond: "#f8fafc"
+  texte-clair: "#ffffff"
+  texte-sombre: "#0f172a"
+
+# Styles de texte : police (fonts.yaml), graisse, taille en points. Le résumé est réduit par pas de `step_pt`
+# jusqu'à `min_size_pt` pour tenir dans son cadre ; au-delà, erreur lisible (jamais de texte coupé).
+texts:
+  summary: { font: baloo2, weight: 500, size_pt: 10.5, min_size_pt: 6.5, step_pt: 0.25, line_height: 1.28 }
+  tagline: { font: titan-one, size_pt: 15, min_size_pt: 8, step_pt: 0.5, line_height: 1.1 }
+  back_title: { font: bowlby-one, size_pt: 13, min_size_pt: 6, step_pt: 0.5, line_height: 1.0 }
+  volume_label: { font: fredoka, weight: 600, size_pt: 7, min_size_pt: 4, uppercase: true }
+  volume_number: { font: bowlby-one, size_pt: 24, min_size_pt: 8, step_pt: 1 }
+  author: { font: fredoka, weight: 600, size_pt: 12, min_size_pt: 6, step_pt: 0.5 }
+  spine_title: { font: lilita-one, size_pt: 14, min_size_pt: 4, step_pt: 0.25 }
+  # Titre composé quand la série n'a pas de logo (avertissement visible à l'écran).
+  fallback_title: { font: bowlby-one, size_pt: 44, min_size_pt: 12, step_pt: 1, line_height: 1.0 }

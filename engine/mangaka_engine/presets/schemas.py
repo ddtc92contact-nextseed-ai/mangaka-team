@@ -2553,3 +2553,155 @@ class LogoStyle(_Strict):
             out.append("shadow")
         out.append("subtitle")
         return out
+
+
+# --- composition de la couverture d'un tome (1re, 4e, dos, export) ------------------------------------
+class BackBox(_Strict):
+    """Boîte d'un gabarit de 4e de couverture, en fraction de la zone de sécurité (format rogné moins la marge de
+    sécurité) : la même disposition sert au 13 × 18 et à l'A4."""
+
+    x: float = Field(ge=0, le=1)
+    y: float = Field(ge=0, le=1)
+    width: float = Field(gt=0, le=1)
+    height: float = Field(gt=0, le=1)
+    align: Literal["left", "center", "right"] = "center"
+
+    @model_validator(mode="after")
+    def _inside(self) -> BackBox:
+        eps = 1e-6
+        if self.x + self.width > 1 + eps or self.y + self.height > 1 + eps:
+            raise ValueError("boîte hors de la zone de sécurité (x + width et y + height ≤ 1)")
+        return self
+
+
+class BackLayout(_Strict):
+    """Gabarit de 4e de couverture (`presets/back_layouts/*.yaml`) : fond aux couleurs de la palette, accroche,
+    résumé, petite illustration, rappel du titre et du numéro de tome."""
+
+    id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
+    name: str
+    description: str = ""
+    order: int = 0
+    # Rôles de la palette, par ordre de préférence : fond de la 4e, encart du résumé (absent : aucun), accroche.
+    background: list[str] = Field(min_length=1)
+    summary_panel: list[str] | None = None
+    tagline_color: list[str] = Field(default_factory=lambda: ["accent"])
+    tagline: BackBox
+    illustration: BackBox
+    summary: BackBox
+    title: BackBox
+
+    @model_validator(mode="after")
+    def _no_overlap(self) -> BackLayout:
+        boxes = {
+            "tagline": self.tagline,
+            "illustration": self.illustration,
+            "summary": self.summary,
+            "title": self.title,
+        }
+        names = list(boxes)
+        eps = 1e-6
+        for i, a in enumerate(names):
+            for b in names[i + 1 :]:
+                p, q = boxes[a], boxes[b]
+                if (
+                    p.x < q.x + q.width - eps
+                    and q.x < p.x + p.width - eps
+                    and p.y < q.y + q.height - eps
+                    and q.y < p.y + p.height - eps
+                ):
+                    raise ValueError(f"les boîtes « {a} » et « {b} » se chevauchent")
+        return self
+
+
+class SummarySettings(_Strict):
+    """Résumé de 4e de couverture rédigé par l'IA (texte d'accroche + phrase d'accroche courte)."""
+
+    prompt: str = "resume-quatrieme"
+    # Longueur du résumé en signes (espaces compris) : réponse refusée en dehors (relance, puis erreur lisible).
+    min_chars: int = Field(default=600, ge=50, le=5000)
+    max_chars: int = Field(default=900, ge=50, le=5000)
+    tagline_max_chars: int = Field(default=90, ge=10, le=300)
+    # Fin du tome jamais révélée : un passage d'au moins ce nombre de mots repris de la fin du dernier chapitre
+    # rend la réponse invalide.
+    spoiler_words: int = Field(default=7, ge=3, le=40)
+
+    @model_validator(mode="after")
+    def _check(self) -> SummarySettings:
+        if self.min_chars > self.max_chars:
+            raise ValueError("min_chars doit être ≤ max_chars")
+        return self
+
+
+class BackIllustrationSettings(_Strict):
+    """Petite illustration de 4e générée par le flux de couverture (cover.yaml) : ratio et taille propres."""
+
+    aspect: tuple[int, int] = (4, 3)  # largeur : hauteur
+    long_side: int = Field(default=1344, ge=256, le=4096)  # plus grand côté généré (px)
+    # Largeur imprimée visée (mm) : l'image est agrandie à cette taille au DPI du format (la boîte du gabarit
+    # peut la réduire).
+    width_mm: float = Field(default=90, gt=10, le=400)
+    lead: str = ""
+    rules: list[str] = Field(default_factory=list)
+
+    @field_validator("aspect")
+    @classmethod
+    def _aspect(cls, v: tuple[int, int]) -> tuple[int, int]:
+        if v[0] <= 0 or v[1] <= 0:
+            raise ValueError("aspect : deux entiers positifs (largeur, hauteur)")
+        return v
+
+
+class SpineSettings(_Strict):
+    """Dos (tranche) : largeur = feuilles × épaisseur du papier + couverture, au moins `min_width_mm`."""
+
+    sheet_thickness_mm: float = Field(default=0.12, gt=0, le=2)  # une feuille = deux pages
+    cover_mm: float = Field(default=0.6, ge=0, le=10)  # carton de couverture et colle
+    min_width_mm: float = Field(default=3, gt=0, le=100)
+    # En dessous, pas de titre sur le dos (trop étroit pour être lisible) : numéro seul, avertissement.
+    title_min_width_mm: float = Field(default=6, gt=0, le=100)
+    title_fill: float = Field(default=0.62, gt=0.1, le=1)  # hauteur des lettres du titre / largeur du dos
+
+
+class FrontSettings(_Strict):
+    """1re de couverture : logo dans sa zone réservée, numéro de tome, nom d'auteur."""
+
+    # Taille du logo relative à la plus grande qui tient dans la zone du logo (1 = remplit la zone).
+    logo_scale: FloatRange = Field(default_factory=lambda: FloatRange(min=0.3, max=1.0))
+    default_logo_scale: float = Field(default=0.92, gt=0, le=1)
+    outline_pt: float = Field(default=1.6, ge=0, le=20)  # contour du nom d'auteur et du titre de repli
+    badge_radius: float = Field(default=0.18, ge=0, le=0.5)  # arrondi du badge du numéro (fraction du côté)
+
+
+class CompositionTexts(_Strict):
+    """Styles de texte (police de fonts.yaml, graisse, tailles en points) ; couleurs : celles de la palette."""
+
+    summary: TextStyle
+    tagline: TextStyle
+    back_title: TextStyle
+    volume_label: TextStyle
+    volume_number: TextStyle
+    author: TextStyle
+    spine_title: TextStyle
+    fallback_title: TextStyle
+
+
+class CoverCompositionSettings(_Strict):
+    """`presets/cover_composition.yaml` : composition de la couverture d'un tome (1re, 4e, dos) et export."""
+
+    summary: SummarySettings = Field(default_factory=SummarySettings)
+    back_illustration: BackIllustrationSettings = Field(default_factory=BackIllustrationSettings)
+    spine: SpineSettings = Field(default_factory=SpineSettings)
+    front: FrontSettings = Field(default_factory=FrontSettings)
+    default_back_layout: str | None = None
+    # Couleurs de repli (rôle → #rrggbb) quand la série n'a pas encore de palette retenue.
+    fallback_palette: dict[str, str] = Field(min_length=1)
+    texts: CompositionTexts
+
+    @field_validator("fallback_palette")
+    @classmethod
+    def _colors(cls, v: dict[str, str]) -> dict[str, str]:
+        bad = [k for k, c in v.items() if not re.fullmatch(HEX_COLOR, c)]
+        if bad:
+            raise ValueError(f"couleur invalide (#rrggbb attendu) : {', '.join(bad)}")
+        return {k: c.lower() for k, c in v.items()}

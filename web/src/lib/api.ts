@@ -2259,6 +2259,125 @@ export interface CoverStudio {
   upscaler_name: string | null;
 }
 
+// --- Composition de la couverture (1re, 4e, dos, export) ---------------------
+
+/** Rectangle en fraction de l'image complète (fond perdu compris). */
+export interface RelRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** Placement du logo sur la 1re : centre en fraction du format rogné, taille relative à sa zone. */
+export interface LogoPlacement {
+  cx: number;
+  cy: number;
+  scale: number;
+}
+
+export interface CompositionLogo {
+  present: boolean;
+  placement: LogoPlacement | null;
+  rect: RelRect | null;
+  zone: RelRect | null;
+  safe: RelRect;
+  scale_min: number;
+  scale_max: number;
+  default_scale: number;
+}
+
+export interface BackImageChoice {
+  source: "panel" | "generated";
+  id: number;
+}
+
+export interface PanelChoice {
+  image_id: number;
+  url: string;
+  chapter_number: number;
+  page_number: number;
+  panel_number: number;
+}
+
+export interface BackVersion {
+  id: number;
+  url: string;
+  width: number;
+  height: number;
+  seed: Seed | null;
+  prompt: string;
+  selected: boolean;
+  created_at: string;
+}
+
+export interface CompositionNotice {
+  code: string;
+  message: string;
+  part: "front" | "back" | "spine";
+}
+
+export type CoverPart = "front" | "back" | "spine" | "flat";
+
+/** Composition de la couverture d'un tome (écran « Couverture »). */
+export interface CoverComposition {
+  volume_id: number;
+  project_id: number;
+  number: number;
+  series_title: string;
+  direction: "ltr" | "rtl";
+  format: CoverFormat | null;
+  /** Composition indisponible (presets). */
+  problem: string | null;
+  /** Change dès que la composition change : clé des aperçus. */
+  revision: string;
+  author: string;
+  series_author: string;
+  summary: string;
+  tagline: string;
+  summary_source: "ai" | "manual" | null;
+  summary_notes: string;
+  summary_chars: number;
+  summary_min: number;
+  summary_max: number;
+  tagline_max: number;
+  summary_size_pt: number | null;
+  back_layout: string | null;
+  back_layouts: { id: string; name: string; description: string }[];
+  back_image: BackImageChoice | null;
+  back_image_url: string | null;
+  back_prompt: string;
+  back_aspect: [number, number];
+  back_versions: BackVersion[];
+  back_jobs: Job[];
+  panel_choices: PanelChoice[];
+  logo: CompositionLogo | null;
+  has_front_image: boolean;
+  palette_name: string | null;
+  spine_mm: number | null;
+  pages: number;
+  /** Faces de la couverture à plat, de gauche à droite. */
+  order: ("front" | "spine" | "back")[];
+  warnings: CompositionNotice[];
+  /** Bloquants : l'export est refusé tant qu'il en reste. */
+  problems: CompositionNotice[];
+  export_jobs: Job[];
+  last_export: { job_id: number; filename: string; url: string; finished_at: string | null } | null;
+}
+
+export interface CompositionPatch {
+  summary?: string;
+  tagline?: string;
+  back_layout?: string;
+  author?: string;
+  series_author?: string;
+  logo?: LogoPlacement;
+  reset_logo?: boolean;
+  back_image?: BackImageChoice;
+  clear_back_image?: boolean;
+  back_prompt?: string;
+}
+
 // --- Savoir-faire et bible ---------------------------------------------------
 export interface KnowledgeCollection {
   id: number;
@@ -2806,6 +2925,15 @@ export const api = {
     request<Job>(`/volumes/${volumeId}/cover/generate`, json("POST", body)),
   selectCover: (coverId: number) => request<CoverStudio>(`/volume-covers/${coverId}/select`, { method: "POST" }),
   deleteCover: (coverId: number) => request<void>(`/volume-covers/${coverId}`, { method: "DELETE" }),
+  coverComposition: (volumeId: number) => request<CoverComposition>(`/volumes/${volumeId}/composition`),
+  updateComposition: (volumeId: number, body: CompositionPatch) =>
+    request<CoverComposition>(`/volumes/${volumeId}/composition`, json("PATCH", body)),
+  writeBackSummary: (volumeId: number, body: { rewrite?: boolean } = {}) =>
+    request<CoverComposition>(`/volumes/${volumeId}/back/summary`, json("POST", body)),
+  generateBackIllustration: (volumeId: number, body: { prompt?: string; seed?: Seed | null } = {}) =>
+    request<Job>(`/volumes/${volumeId}/back/generate`, json("POST", body)),
+  exportCover: (volumeId: number, body: ExportOptions) =>
+    request<Job>(`/volumes/${volumeId}/cover/export`, json("POST", body)),
   upcomingChapters: (days = 7) => request<Chapter[]>(`/chapters/upcoming?days=${days}`),
   getChapter: (id: number) => request<Chapter>(`/chapters/${id}`),
   createChapter: (projectId: number, body: Partial<ChapterInput>) =>
@@ -3069,6 +3197,9 @@ export function parseTags(value: string): string[] {
 
 /** Lien de téléchargement du ZIP d'un export de chapitre terminé. */
 export const exportFileUrl = (jobId: number) => engineUrl(`/exports/${jobId}/file`);
+/** Aperçu PNG d'une face de la couverture (rendu de l'export, réduit) ; `revision` : clé de cache. */
+export const compositionPreviewUrl = (volumeId: number, part: CoverPart, revision: string, width = 640) =>
+  engineUrl(`/volumes/${volumeId}/composition/${part}.png?width=${width}&v=${revision}`);
 
 export interface BenchScope {
   project_id?: number | null;

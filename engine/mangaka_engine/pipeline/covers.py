@@ -14,6 +14,10 @@
   avec l'agrandisseur de la finition d'impression jusqu'au DPI du format, la recadre au pixel près (fond perdu
   compris) → nouvelle `VolumeCover`, retenue d'office si le tome n'en a pas encore.
 
+Petite illustration de 4e (`kind = "back"`, #161) : même flux, même agrandisseur, mais ratio et taille de
+`cover_composition.yaml › back_illustration`, prompt du tome (`back_prompt`), règles de la 4e (aucun texte),
+sans personnage de référence ; retenue d'office comme illustration de 4e si le tome n'en a pas.
+
 Aucun nom de modèle, de workflow ni de nœud ici : tout vient des presets.
 """
 
@@ -354,31 +358,78 @@ def write_cover_prompt(llm: LLMProvider, prompt: PromptPreset, brief: CoverBrief
 
 
 # --- mise en file ----------------------------------------------------------------------------
-def active_cover_jobs(session: Session, volume_id: int) -> list[Job]:
+def job_kind(job: Job) -> str:
+    return str((job.params or {}).get("kind") or "front")
+
+
+def active_cover_jobs(session: Session, volume_id: int, kind: str | None = "front") -> list[Job]:
+    """Jobs de couverture en file ou en cours du tome (`kind` : front, back ; None : tous)."""
     rows = session.scalars(select(Job).where(Job.step == STEP, Job.status.in_(ACTIVE)).order_by(Job.id))
-    return [j for j in rows if (j.params or {}).get("volume_id") == volume_id]
+    return [j for j in rows if (j.params or {}).get("volume_id") == volume_id and (kind is None or job_kind(j) == kind)]
+
+
+def aspect_size(aspect: tuple[int, int], long_side: int, multiple: int = 16) -> tuple[int, int]:
+    """Taille générée au ratio `aspect` (largeur, hauteur), plus grand côté `long_side`, multiples de `multiple`."""
+    aw, ah = aspect
+    w, h = (float(long_side), long_side * ah / aw) if aw >= ah else (long_side * aw / ah, float(long_side))
+    return max(multiple, round(w / multiple) * multiple), max(multiple, round(h / multiple) * multiple)
+
+
+def back_size(presets: PresetRegistry, fmt: CoverFormat) -> tuple[int, int]:
+    """Taille finale de la petite illustration de 4e : `width_mm` au DPI du format, au ratio du preset."""
+    back = presets.require_composition().back_illustration
+    aw, ah = back.aspect
+    w = fmt.mm_to_px(back.width_mm)
+    return w, max(1, round(w * ah / aw))
+
+
+def back_style(presets: PresetRegistry, series: Project, cover: CoverSettings) -> CoverStyle:
+    style = cover_style(presets, series, cover)
+    lead = presets.require_composition().back_illustration.lead.strip()
+    return CoverStyle(lead=lead or style.lead, style=style.style, monochrome_series=style.monochrome_series)
 
 
 def enqueue_cover(
-    session: Session, presets: PresetRegistry, volume: Volume, *, seed: int | None = None, prompt: str | None = None
+    session: Session,
+    presets: PresetRegistry,
+    volume: Volume,
+    *,
+    seed: int | None = None,
+    prompt: str | None = None,
+    kind: str = "front",
 ) -> Job:
-    """Met en file la génération de la couverture du tome (sans commit). `prompt` : celui du tome par défaut."""
+    """Met en file la génération de la couverture du tome (sans commit). `prompt` : celui du tome par défaut.
+    `kind = "back"` : petite illustration de 4e (ratio, taille et règles de cover_composition.yaml)."""
     cover = presets.require_cover()
     fmt = presets.cover_format(volume.cover_format)
     loaded = presets.workflow(cover.workflow)
     series = session.get(Project, volume.project_id)
     if series is None:
         raise CoverError("série introuvable")
-    text = (prompt if prompt is not None else volume.cover_prompt or "").strip()
+    back = kind == "back"
+    default = volume.back_prompt if back else volume.cover_prompt
+    text = (prompt if prompt is not None else default or "").strip()
     if not text:
+        if back:
+            raise CoverError("prompt de l'illustration de 4e vide : décris la scène avant de générer")
         raise CoverError("prompt vide : fais-le rédiger par l'IA ou écris-le avant de générer")
-    if active_cover_jobs(session, volume.id):
-        raise CoverError("une génération de couverture est déjà en cours pour ce tome : attends sa fin")
-    style = cover_style(presets, series, cover)
-    final = finish_cover_prompt(text, style, cover_rules(cover, fmt))
-    width, height = generation_size(fmt, cover.long_side, cover.multiple)
-    chars = cover_characters(session, volume)
-    full_w, full_h = fmt.full_px
+    if active_cover_jobs(session, volume.id, kind):
+        what = "de l'illustration de 4e" if back else "de couverture"
+        raise CoverError(f"une génération {what} est déjà en cours pour ce tome : attends sa fin")
+    if back:
+        settings = presets.require_composition().back_illustration
+        style = back_style(presets, series, cover)
+        rules = [_render(rule, {}, "rules").strip() for rule in settings.rules if rule.strip()]
+        final = finish_cover_prompt(text, style, rules)
+        width, height = aspect_size(settings.aspect, settings.long_side, cover.multiple)
+        chars: list[Character] = []
+        full_w, full_h = back_size(presets, fmt)
+    else:
+        style = cover_style(presets, series, cover)
+        final = finish_cover_prompt(text, style, cover_rules(cover, fmt))
+        width, height = generation_size(fmt, cover.long_side, cover.multiple)
+        chars = cover_characters(session, volume)
+        full_w, full_h = fmt.full_px
     job = Job(
         project_id=series.id,
         step=STEP,
@@ -387,6 +438,7 @@ def enqueue_cover(
         params={
             "volume_id": volume.id,
             "volume_number": volume.number,
+            "kind": kind,
             "cover_format": fmt.id,
             "preset": loaded.preset.id,
             "tier": loaded.preset.tier.name if loaded.preset.tier else None,
@@ -405,15 +457,16 @@ def enqueue_cover(
 
 
 # --- ménage ---------------------------------------------------------------------------------
-def prune_covers(session: Session, volume: Volume, keep: int | None) -> list[str]:
-    """Garde les `keep` dernières versions (la retenue toujours), efface les plus anciennes (sans commit) ;
-    renvoie les fichiers à effacer après le commit."""
+def prune_covers(session: Session, volume: Volume, keep: int | None, kind: str = "front") -> list[str]:
+    """Garde les `keep` dernières versions de la sorte `kind` (la retenue toujours), efface les plus anciennes
+    (sans commit) ; renvoie les fichiers à effacer après le commit."""
     if keep is None:
         return []
-    rows = sorted(volume.covers, key=lambda c: c.id, reverse=True)
+    rows = sorted((c for c in volume.covers if c.kind == kind), key=lambda c: c.id, reverse=True)
+    back_id = (volume.back_image or {}).get("id") if (volume.back_image or {}).get("source") == "generated" else None
     paths: list[str] = []
     for c in rows[keep:]:
-        if c.id == volume.selected_cover_id:
+        if c.id in (volume.selected_cover_id, back_id):
             continue
         paths.append(c.path)
         volume.covers.remove(c)
@@ -435,6 +488,7 @@ class _Plan:
     full: tuple[int, int]
     dpi: int
     keep: int | None
+    kind: str = "front"
 
 
 def resolve_cover_upscaler(presets: PresetRegistry, cover: CoverSettings, series: Project) -> LoadedUpscaler | None:
@@ -523,7 +577,9 @@ class CoverExecutor:
                 for p in (str(loaded.preset.defaults.get("negative_prompt", "")).strip(), cover.negative_prompt.strip())
                 if p
             )
-            prefix = transit(f"{series_folder(series)}/tomes/tome-{volume.number:02d}/couverture")
+            kind = str(params.get("kind") or "front")
+            name = "quatrieme" if kind == "back" else "couverture"
+            prefix = transit(f"{series_folder(series)}/tomes/tome-{volume.number:02d}/{name}")
             mapped: dict[str, Any] = {
                 "positive_prompt": str(params.get("prompt") or ""),
                 "negative_prompt": build_negative_prompt(negative, presets.image_prompt),
@@ -540,12 +596,17 @@ class CoverExecutor:
                 loras=loras,
                 references=references,
                 reference_data=reference_data,
-                folder=f"projects/{series.id}/volumes/{volume.id}/covers",
+                folder=f"projects/{series.id}/volumes/{volume.id}/{'back-covers' if kind == 'back' else 'covers'}",
                 prefix=prefix,
                 upload_folder=f"{series_folder(series)}/tomes/tome-{volume.number:02d}",
-                full=fmt.full_px,
+                full=(
+                    (int(params["full_width"]), int(params["full_height"]))
+                    if params.get("full_width") and params.get("full_height")
+                    else fmt.full_px
+                ),
                 dpi=fmt.dpi,
                 keep=cover.versions_kept,
+                kind=kind,
             )
 
     def _wait(
@@ -670,6 +731,7 @@ class CoverExecutor:
                 height=stored.height,
                 seed=built.params["seed"],
                 cover_format=str(params.get("cover_format") or volume.cover_format),
+                kind=plan.kind,
                 params={
                     "preset": preset.id,
                     "preset_name": preset.name,
@@ -694,15 +756,20 @@ class CoverExecutor:
             )
             volume.covers.append(row)
             session.flush()
-            if volume.selected_cover_id is None:
+            if plan.kind == "back":
+                if not volume.back_image:
+                    volume.back_image = {"source": "generated", "id": row.id}
+            elif volume.selected_cover_id is None:
                 volume.selected_cover_id = row.id
             job.params = {**params, "cover_id": row.id, "seed": built.params["seed"]}
-            pruned = prune_covers(session, volume, plan.keep)
+            pruned = prune_covers(session, volume, plan.keep, plan.kind)
             session.commit()
-            count = len(volume.covers)
+            count = sum(1 for c in volume.covers if c.kind == plan.kind)
         for path in pruned:
             self.files.delete(path)
+        what = "Illustration de 4e" if plan.kind == "back" else "Couverture"
+        bleed = "" if plan.kind == "back" else " (fond perdu compris)"
         return (
-            f"Couverture — {stored.width}×{stored.height} px à {plan.dpi} dpi (fond perdu compris), "
+            f"{what} — {stored.width}×{stored.height} px à {plan.dpi} dpi{bleed}, "
             f"seed {built.params['seed']} ({count} version{'s' if count > 1 else ''})"
         )

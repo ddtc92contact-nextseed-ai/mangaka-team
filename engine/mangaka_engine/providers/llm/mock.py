@@ -33,6 +33,11 @@ décalées à chaque « Proposer d'autres palettes ») et concepts de logo qui p
 permis, le titre en une ou deux lignes (`mock_palettes`, `mock_logos`). `[mock:identite-invalide:N]` dans le
 titre de la série : les N premiers essais sont invalides (JSON illisible, puis mauvais schéma).
 
+Résumé de 4e de couverture (`"task": "back_summary"`) : texte déterministe tiré des résumés des chapitres
+(jamais du dernier, la fin du tome) et de phrases d'accroche, dans les bornes de longueur demandées, différent
+du résumé actuel (« Réécrire »). `[mock:resume-invalide:N]` dans le titre du tome : les N premiers essais sont
+invalides (prose, puis résumé trop court).
+
 Pour tester les relances sans vrai LLM, les `invalid_attempts` premiers essais d'une conversation
 renvoient une réponse invalide (variable MOCK_LLM_INVALID_ATTEMPTS, ou `[mock:invalide:N]` dans le
 synopsis du chapitre ; `[mock:da-invalide:N]` pour la seule direction artistique ;
@@ -68,6 +73,7 @@ _PROMPT_INTRUDER_MARK = re.compile(r"\[mock:prompt-intrus:(\d+)\]")
 _DIALOG_INVALID_MARK = re.compile(r"\[mock:dialogue-invalide:(\d+)\]")
 _DRAFT_INVALID_MARK = re.compile(r"\[mock:fiche-invalide:(\d+)\]")
 _IDENTITY_INVALID_MARK = re.compile(r"\[mock:identite-invalide:(\d+)\]")
+_SUMMARY_INVALID_MARK = re.compile(r"\[mock:resume-invalide:(\d+)\]")
 _ANY_MARK = re.compile(r"\s*\[mock:[a-z-]+:\d+\]\s*")
 UNKNOWN_ID = 999_999  # id de décor cité par `[mock:id-invalide:N]` (absent de toute bibliothèque)
 TASKS = (
@@ -79,6 +85,7 @@ TASKS = (
     "cover_prompt",
     "palette",
     "logo",
+    "back_summary",
 )
 
 _PANELS_PER_PAGE = [5, 4, 6, 3, 5, 4]
@@ -486,6 +493,8 @@ class MockLLMProvider:
             return LLMResult(text=json.dumps(mock_cover_prompt(ctx), ensure_ascii=False), model="mock")
         if ctx is not None and ctx.get("task") == "image_prompt":
             return LLMResult(text=self._image_prompt_answer(messages, ctx), model="mock")
+        if ctx is not None and ctx.get("task") == "back_summary":
+            return LLMResult(text=self._summary_answer(messages, ctx), model="mock")
         if ctx is not None and ctx.get("task") == "character_draft":
             return LLMResult(text=self._draft_answer(messages, ctx), model="mock")
         if ctx is not None and ctx.get("task") in ("palette", "logo"):
@@ -566,6 +575,16 @@ class MockLLMProvider:
             return json.dumps({key: [{"name": "Trop court", "colors": [{"role": "dominante", "hex": "rouge"}]}]})
         out = mock_palettes(ctx) if ctx["task"] == "palette" else mock_logos(ctx)
         return json.dumps(out, ensure_ascii=False)
+
+    def _summary_answer(self, messages: list[ChatMessage], ctx: dict[str, Any]) -> str:
+        attempt = 1 + sum(1 for m in messages if m.role == "assistant")
+        mark = _SUMMARY_INVALID_MARK.search(str(ctx.get("volume") or ""))
+        invalid = int(mark.group(1)) if mark else self.invalid_attempts
+        if attempt <= invalid:
+            if attempt % 2:
+                return "Voici un résumé : le héros part à l'aventure…"
+            return json.dumps({"tagline": "Trop court !", "summary": "Un tome."}, ensure_ascii=False)
+        return json.dumps(mock_back_summary(ctx), ensure_ascii=False)
 
     def _direction_answer(self, messages: list[ChatMessage], ctx: dict[str, Any]) -> str:
         attempt = 1 + sum(1 for m in messages if m.role == "assistant")
@@ -780,6 +799,65 @@ _COVER_FILLERS = (
     "Dynamic diagonal composition, wind in their hair and clothes, sparks drifting in the air.",
     "Clean inked outlines with rich painted colours and soft glowing rim light.",
 )
+
+
+# --- résumé de 4e de couverture -------------------------------------------------------------------
+_SUMMARY_FILLERS = (
+    "Chaque choix les rapproche d'un secret que tous préféreraient oublier.",
+    "Les alliances se nouent et se défont au rythme des combats, et la confiance devient un luxe.",
+    "Derrière les sourires de façade, une menace grandit dans l'ombre, patiente et implacable.",
+    "Entre éclats de rire, coups d'épée et regards échangés, l'équipe apprend à se battre ensemble.",
+    "Le passé refait surface au pire moment, et personne n'en sortira tout à fait indemne.",
+    "Une rencontre inattendue va bouleverser l'équilibre fragile qu'ils croyaient avoir trouvé.",
+    "Mais le prix à payer pourrait bien être bien plus lourd que prévu…",
+    "Jusqu'où iront-ils pour protéger ceux qu'ils aiment ?",
+)
+_TAGLINES = (
+    "Le combat ne fait que commencer !",
+    "Quand tout bascule, il faut choisir son camp.",
+    "Un secret, une promesse, et plus de retour en arrière.",
+    "L'aventure prend un tour inattendu !",
+)
+
+
+def _first_sentence(text: str, limit: int = 200) -> str:
+    text = _ANY_MARK.sub(" ", text).strip()
+    first = re.split(r"(?<=[.!?…])\s+", text)[0].strip() if text else ""
+    if len(first) > limit:
+        first = first[:limit].rsplit(" ", 1)[0].rstrip(",;:") + "…"
+    if first and first[-1] not in ".!?…":
+        first += "."
+    return first
+
+
+def mock_back_summary(ctx: dict[str, Any]) -> dict[str, Any]:
+    """Résumé factice : accroche sur la série, premières phrases des chapitres (sauf le dernier, la fin du tome),
+    phrases d'accroche jusqu'à la longueur demandée. Décalé quand un résumé existe déjà (« Réécrire »)."""
+    series = _ANY_MARK.sub(" ", str(ctx.get("series") or "")).strip()
+    low, high = int(ctx.get("min_chars") or 600), int(ctx.get("max_chars") or 900)
+    previous = str(ctx.get("previous") or "")
+    shift = (_seed(previous) % len(_SUMMARY_FILLERS)) if previous else 0
+    first = [f"Dans l'univers de « {series} », rien ne prépare nos héros à ce qui les attend."]
+    for ch in list(ctx.get("chapters") or [])[:-1]:
+        sentence = _first_sentence(str(ch.get("summary") or ""))
+        if sentence and not sentence.startswith("(") and len(" ".join([*first, sentence])) < high // 2:
+            first.append(sentence)
+    second: list[str] = []
+    target = (low + high) // 2
+    for i in range(len(_SUMMARY_FILLERS)):
+        sentence = _SUMMARY_FILLERS[(i + shift) % len(_SUMMARY_FILLERS)]
+        text = " ".join(first) + "\n\n" + " ".join([*second, sentence])
+        if len(" ".join(text.split())) > high:
+            continue
+        second.append(sentence)
+        if len(" ".join(text.split())) >= target:
+            break
+    tagline = _TAGLINES[(_seed(series) + (1 if previous else 0)) % len(_TAGLINES)]
+    return {
+        "tagline": tagline[: int(ctx.get("tagline_max_chars") or 90)],
+        "summary": " ".join(first) + "\n\n" + " ".join(second),
+        "notes": "Résumé du LLM factice (mode mock).",
+    }
 
 
 # --- dialogue sur une case ------------------------------------------------------------------------

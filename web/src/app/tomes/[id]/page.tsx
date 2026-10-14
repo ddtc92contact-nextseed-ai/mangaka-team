@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useConfirm } from "@/components/confirm";
+import { CoverComposition } from "@/components/cover-composition";
 import { useToast } from "@/components/toast";
 import { Alert, Button, Card, Field, Input, Loading, PageHeader, ProgressBar, Select, Textarea } from "@/components/ui";
 import {
@@ -40,6 +41,9 @@ export default function CoverPage() {
         }
       />
       <CoverEditor key={v.id} data={studio.data} onData={studio.setData} reload={studio.reload} />
+      <div className="mt-8">
+        <CoverComposition volumeId={v.id} refreshKey={`${v.selected_cover_id ?? 0}-${v.cover_count}`} />
+      </div>
     </>
   );
 }

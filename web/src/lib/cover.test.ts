@@ -4,12 +4,16 @@ import { test } from "node:test";
 
 import {
   chapterOwners,
+  flatOrderLabel,
   formatSummary,
+  mmLabel,
   nextVolumeNumber,
   orderedChapterIds,
   previewSize,
   rectStyle,
   safetyRect,
+  signCount,
+  summaryLength,
   trimRect,
 } from "./cover.ts";
 
@@ -62,4 +66,23 @@ test("un chapitre dans un seul tome ; numéro suivant ; ordre des chapitres", ()
     { id: 11, number: 2 },
   ];
   assert.deepEqual(orderedChapterIds([12, 10], chapters), [10, 12]);
+});
+
+test("signes du résumé : espaces et paragraphes comptent pour une espace, comme le moteur", () => {
+  assert.equal(signCount("Été  brûlant.\n\nÇa  commence !"), "Été brûlant. Ça commence !".length);
+  assert.equal(signCount("   "), 0);
+});
+
+test("longueur du résumé par rapport aux bornes", () => {
+  assert.equal(summaryLength("a".repeat(599), 600, 900).state, "short");
+  assert.equal(summaryLength("a".repeat(600), 600, 900).state, "ok");
+  const long = summaryLength("a".repeat(901), 600, 900);
+  assert.equal(long.state, "long");
+  assert.match(long.label, /^901 signes · visé 600 à 900/);
+});
+
+test("ordre de la couverture à plat selon le sens de lecture", () => {
+  assert.match(flatOrderLabel(["front", "spine", "back"], "rtl"), /^1re · dos · 4e — .*à gauche du dos/);
+  assert.match(flatOrderLabel(["back", "spine", "front"], "ltr"), /^4e · dos · 1re — .*à droite du dos/);
+  assert.equal(mmLabel(12.14), "12,1 mm");
 });

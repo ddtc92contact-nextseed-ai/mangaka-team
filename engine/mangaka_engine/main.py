@@ -23,6 +23,7 @@ from .api import (
     characters,
     comfyui,
     composition,
+    cover_composition,
     finishing,
     generation,
     identity,
@@ -288,6 +289,7 @@ def create_app(settings: Settings | None = None, providers: Providers | None = N
     app.include_router(comfyui.router)
     app.include_router(chapters.router)
     app.include_router(volumes.router)
+    app.include_router(cover_composition.router)
     app.include_router(stages.router)
     app.include_router(cast.router)
     app.include_router(art_direction.router)
