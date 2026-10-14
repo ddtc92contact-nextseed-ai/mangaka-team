@@ -1,0 +1,10 @@
+id: sobre
+name: Sobre
+description: Lettres pleines sans contour ni ombre, pour un titre élégant posé sur un fond calme.
+outline_em: 0
+outer_outline_em: 0
+shadow: null
+gradient: false
+colors:
+  fill: [texte-sombre, dominante]
+  subtitle: [dominante, texte-sombre]

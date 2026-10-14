@@ -76,6 +76,7 @@ SERIES_TABLES = (
     "series_asset_images",
     "series_assets",
     "series_bibles",
+    "series_logos",
     "jobs",
     "projects",
 )

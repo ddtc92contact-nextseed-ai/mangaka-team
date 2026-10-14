@@ -1,0 +1,13 @@
+# Effet de logo (identity.yaml, pipeline/logo.py) : épaisseurs en em (taille de la ligne), couleurs par défaut
+# données en rôles de la palette retenue, par ordre de préférence (le premier présent dans la palette gagne).
+id: contour-epais
+name: Contour épais
+description: Lettres pleines cernées d'un contour épais et sombre, lisibles sur n'importe quelle illustration.
+outline_em: 0.075          # contour autour des lettres (0 = aucun)
+outer_outline_em: 0        # second contour, autour du premier (0 = aucun)
+shadow: null               # ombre portée { dx_em, dy_em } (null = aucune)
+gradient: false            # remplissage en dégradé vertical (fill → fill_end)
+colors:
+  fill: [dominante, accent]
+  outline: [texte-sombre, ombre]
+  subtitle: [texte-clair, fond]
