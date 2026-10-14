@@ -1,0 +1,34 @@
+# Couverture de tome au format manga 13 × 18 cm (tankōbon), 300 DPI — format par défaut d'un tome.
+# Rogné : 130 × 180 mm → 1535 × 2126 px ; avec 3 mm de fond perdu de chaque côté : 136 × 186 mm → 1606 × 2197 px.
+# Zones réservées (en mm, depuis le coin haut gauche du format rogné, fond perdu non compris) : elles doivent
+# tenir dans la marge de sécurité (`safety_mm`) ; le prompt de couverture garde la zone `clear` dégagée.
+id: manga-13x18-300dpi
+name: Manga 13 × 18 cm — 300 DPI
+default: true
+order: 10
+width_mm: 130
+height_mm: 180
+dpi: 300
+bleed_mm: 3
+safety_mm: 5
+zones:
+  # Bandeau du logo et du titre : ~25 % de la hauteur, en haut.
+  - id: logo
+    label: Logo et titre
+    x_mm: 5
+    y_mm: 5
+    width_mm: 120
+    height_mm: 45
+    clear: true
+  - id: tome
+    label: Numéro de tome
+    x_mm: 103
+    y_mm: 52
+    width_mm: 22
+    height_mm: 16
+  - id: auteur
+    label: Nom de l'auteur
+    x_mm: 5
+    y_mm: 163
+    width_mm: 120
+    height_mm: 12

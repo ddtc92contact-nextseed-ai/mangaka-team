@@ -16,6 +16,8 @@ Arborescence attendue :
       identity.yaml            # identité visuelle de la série : palettes proposées, logo du titre
       logo_styles/*.yaml       # effets du logo du titre (contours, ombre, dégradé, couleurs par défaut)
       page_formats/*.yaml      # formats de page
+      cover_formats/*.yaml     # formats de couverture d'un tome (13 × 18, A4) et zones réservées
+      cover.yaml               # couverture d'un tome : flux ComfyUI dédié, rendu couleur, prompt
       layouts/*.yaml           # gabarits de planche
       layout_styles/*.yaml     # grammaires de mise en page par série (biais, gouttières, gabarits favoris)
       prompts/*.yaml           # prompts des étapes LLM
@@ -47,6 +49,8 @@ from pydantic import BaseModel, ValidationError
 from .schemas import (
     AgentPreset,
     CameraLoraCatalog,
+    CoverFormat,
+    CoverSettings,
     Defaults,
     FontsPreset,
     IdentitySettings,
@@ -111,6 +115,9 @@ class PresetIssue:
 class PresetRegistry:
     root: Path
     page_formats: dict[str, PageFormat] = field(default_factory=dict)
+    cover_formats: dict[str, CoverFormat] = field(default_factory=dict)
+    # Couverture d'un tome (cover.yaml) ; None : absente ou invalide (écran « Couverture » indisponible).
+    cover: CoverSettings | None = None
     workflows: dict[str, LoadedWorkflow] = field(default_factory=dict)
     upscalers: dict[str, LoadedUpscaler] = field(default_factory=dict)
     layout_templates: dict[str, LayoutTemplate] = field(default_factory=dict)
@@ -144,6 +151,22 @@ class PresetRegistry:
             return self.page_formats[preset_id]
         except KeyError:
             raise PresetError(f"format de page inconnu : « {preset_id} »") from None
+
+    def cover_format(self, preset_id: str) -> CoverFormat:
+        try:
+            return self.cover_formats[preset_id]
+        except KeyError:
+            raise PresetError(f"format de couverture inconnu : « {preset_id} »") from None
+
+    @property
+    def default_cover_format(self) -> str | None:
+        """Format des nouveaux tomes : `default: true`, sinon le premier."""
+        return next((f.id for f in self.cover_formats.values() if f.default), next(iter(self.cover_formats), None))
+
+    def require_cover(self) -> CoverSettings:
+        if self.cover is None:
+            raise PresetError("presets/cover.yaml absent ou invalide : couverture indisponible")
+        return self.cover
 
     def workflow(self, preset_id: str) -> LoadedWorkflow:
         try:
@@ -438,8 +461,64 @@ class PresetRegistry:
             reg._register(reg.reference_sheets, sheet.id, sheet, path)
         reg.reference_sheets = dict(sorted(reg.reference_sheets.items(), key=lambda kv: (kv[1].order, kv[1].name)))
         reg._load_styles()
+        reg._load_covers()
         reg._load_identity()
         return reg
+
+    def _load_covers(self) -> None:
+        """Formats de couverture (dimensions reprises d'un format de page si `page_format`) et cover.yaml."""
+        root = self.root
+        formats: dict[str, CoverFormat] = {}
+        for path in sorted((root / "cover_formats").glob("*.y*ml")):
+            data = self._read_yaml(path)
+            if not isinstance(data, dict):
+                if data is not None:
+                    self.issues.append(PresetIssue(self._rel(path), "objet YAML attendu"))
+                continue
+            base_id = data.get("page_format")
+            if base_id is not None:
+                base = self.page_formats.get(str(base_id))
+                if base is None:
+                    self.issues.append(PresetIssue(self._rel(path), f"format de page inconnu : {base_id}"))
+                    continue
+                inherited = {k: getattr(base, k) for k in ("width_mm", "height_mm", "dpi", "bleed_mm")}
+                data = {**inherited, **data}
+            try:
+                fmt = CoverFormat.model_validate(data)
+            except ValidationError as exc:
+                self.issues.append(PresetIssue(self._rel(path), format_validation_error(exc)))
+                continue
+            self._register(formats, fmt.id, fmt, path)
+        defaults = [f.id for f in formats.values() if f.default]
+        if len(defaults) > 1:
+            self.issues.append(PresetIssue("cover_formats", f"plusieurs formats par défaut : {', '.join(defaults)}"))
+        self.cover_formats = dict(sorted(formats.items(), key=lambda kv: (kv[1].order, kv[1].name)))
+
+        path = root / "cover.yaml"
+        if not path.exists():
+            return
+        cover = self._parse(path, CoverSettings)
+        if cover is None:
+            return
+        problems: list[str] = []
+        wf = self.workflows.get(cover.workflow)
+        if wf is None:
+            problems.append(f"workflow inconnu : {cover.workflow}")
+        elif wf.preset.role != "generation" or wf.preset.is_inpaint:
+            problems.append(f"workflow {cover.workflow} : un workflow de génération est attendu")
+        if cover.upscaler and cover.upscaler not in self.upscalers:
+            problems.append(f"agrandisseur inconnu : {cover.upscaler}")
+        rendering = self.style_renderings.get(cover.rendering)
+        if rendering is None:
+            problems.append(f"rendu inconnu : {cover.rendering}")
+        elif rendering.monochrome:
+            problems.append(f"rendu {cover.rendering} en noir et blanc : la couverture est toujours en couleur")
+        if cover.prompt not in self.prompts:
+            problems.append(f"prompt introuvable : prompts/{cover.prompt}.yaml")
+        if problems:
+            self.issues.append(PresetIssue(self._rel(path), " ; ".join(problems)))
+        else:
+            self.cover = cover
 
     def _load_identity(self) -> None:
         """Identité visuelle (identity.yaml + logo_styles/) : chargée après les polices, qu'elle référence."""

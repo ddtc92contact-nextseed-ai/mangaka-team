@@ -16,6 +16,7 @@ import { SeriesIdentityCard } from "@/components/series-identity";
 import { StyleBoardBanner, StyleBoardCard, useStyleBoard } from "@/components/style-board";
 import { DIRECTIONS, DirectionBadge } from "@/components/reading-direction";
 import { SeriesStatusBadge } from "@/components/status";
+import { VolumeList } from "@/components/volume-list";
 import { Alert, Button, ButtonLink, Card, Loading, PageHeader } from "@/components/ui";
 import { api, errorMessage, type LibraryKind, type Project } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
@@ -99,6 +100,9 @@ export default function ProjectPage() {
       </div>
       <div className="mb-6">
         <ChapterList projectId={id} />
+      </div>
+      <div className="mb-6">
+        <VolumeList projectId={id} />
       </div>
       <div className="mb-6">
         <StyleBoardCard projectId={id} board={styleBoard} />

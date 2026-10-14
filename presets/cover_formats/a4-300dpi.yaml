@@ -1,0 +1,28 @@
+# Couverture au format A4 portrait, 300 DPI : dimensions, DPI et fond perdu repris du format de page
+# `page_formats/a4-300dpi.yaml` (210 × 297 mm, 3 mm de fond perdu → 2551 × 3579 px fond perdu compris).
+# Zones réservées : voir manga-13x18-300dpi.yaml (mêmes proportions, ~25 % de la hauteur pour le logo).
+id: a4-300dpi
+name: A4 portrait — 300 DPI
+page_format: a4-300dpi
+order: 20
+safety_mm: 8
+zones:
+  - id: logo
+    label: Logo et titre
+    x_mm: 8
+    y_mm: 8
+    width_mm: 194
+    height_mm: 74
+    clear: true
+  - id: tome
+    label: Numéro de tome
+    x_mm: 168
+    y_mm: 86
+    width_mm: 34
+    height_mm: 26
+  - id: auteur
+    label: Nom de l'auteur
+    x_mm: 8
+    y_mm: 270
+    width_mm: 194
+    height_mm: 19

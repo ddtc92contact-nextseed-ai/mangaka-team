@@ -73,6 +73,7 @@ def test_presets_endpoint(client: TestClient) -> None:
         "direction-artistique",
         "logo",
         "palette",
+        "redacteur-couverture",
         "redacteur-image",
         "redacteur-image-dialogue",
         "script",

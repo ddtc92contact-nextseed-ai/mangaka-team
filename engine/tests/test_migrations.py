@@ -903,10 +903,10 @@ def test_v27_database_gets_the_knowledge_stamp_of_written_prompts(make_settings:
     assert _columns(settings.database_path) == _columns(fresh)
 
 
-def test_v31_database_gets_the_series_identity_with_no_palette_nor_logo(
+def test_v32_database_gets_the_series_identity_with_no_palette_nor_logo(
     make_settings: Callable[..., Settings],
 ) -> None:
-    """v31 → v32 : palette retenue, propositions et versions du logo ; les séries existantes n'en ont aucun."""
+    """v32 → v33 : palette retenue, propositions et versions du logo ; les séries existantes n'en ont aucun."""
     settings = make_settings()
     with TestClient(create_app(settings)) as c:
         s = c.post("/projects", json={**STYLE, "title": "Ancienne"}).json()
@@ -914,7 +914,7 @@ def test_v31_database_gets_the_series_identity_with_no_palette_nor_logo(
     for column in ("palette", "palette_proposals", "logo_proposals"):
         con.execute(f"ALTER TABLE projects DROP COLUMN {column}")
     con.execute("DROP TABLE series_logos")
-    con.execute("PRAGMA user_version = 31")
+    con.execute("PRAGMA user_version = 32")
     con.commit()
     con.close()
 

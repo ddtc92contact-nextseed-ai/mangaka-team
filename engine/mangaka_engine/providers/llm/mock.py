@@ -65,7 +65,7 @@ _DIALOG_INVALID_MARK = re.compile(r"\[mock:dialogue-invalide:(\d+)\]")
 _IDENTITY_INVALID_MARK = re.compile(r"\[mock:identite-invalide:(\d+)\]")
 _ANY_MARK = re.compile(r"\s*\[mock:[a-z-]+:\d+\]\s*")
 UNKNOWN_ID = 999_999  # id de décor cité par `[mock:id-invalide:N]` (absent de toute bibliothèque)
-TASKS = ("script", "art_direction", "image_prompt", "image_prompt_dialog", "palette", "logo")
+TASKS = ("script", "art_direction", "image_prompt", "image_prompt_dialog", "cover_prompt", "palette", "logo")
 
 _PANELS_PER_PAGE = [5, 4, 6, 3, 5, 4]
 _KINDS = ["speech", "speech", "thought", "speech", "shout"]
@@ -468,6 +468,8 @@ class MockLLMProvider:
         ctx = _task_context(messages) if json_mode else None
         if ctx is not None and ctx.get("task") == "image_prompt_dialog":
             return LLMResult(text=self._dialog_answer(messages, ctx), model="mock")
+        if ctx is not None and ctx.get("task") == "cover_prompt":
+            return LLMResult(text=json.dumps(mock_cover_prompt(ctx), ensure_ascii=False), model="mock")
         if ctx is not None and ctx.get("task") == "image_prompt":
             return LLMResult(text=self._image_prompt_answer(messages, ctx), model="mock")
         if ctx is not None and ctx.get("task") in ("palette", "logo"):
@@ -674,6 +676,46 @@ def mock_image_prompt(ctx: dict[str, Any]) -> dict[str, Any]:
     if lang == "en" and description:
         notes += f" Case (non traduite) : {description[:600]}"
     return {"prompt": " ".join(sentences), "language": lang, "notes": notes}
+
+
+def mock_cover_prompt(ctx: dict[str, Any]) -> dict[str, Any]:
+    """Prompt de couverture déterministe : phrase d'ouverture → rôles des images → personnages → intention →
+    décor en couleur → zone du logo → style (aucune règle de couleur : la couverture est toujours en couleur)."""
+    sentences = [str(ctx["style_lead"])] if ctx.get("style_lead") else []
+    sentences += [
+        f"{r['tag']} is the identity reference for {r['name']}: keep the face, hair and outfit."
+        for r in ctx.get("references") or []
+    ]
+    names = [str(c.get("name")) for c in ctx.get("characters") or [] if c.get("name")]
+    if names:
+        sentences.append(f"{' and '.join(names)} stand in the lower two thirds of the cover in a bold heroic pose.")
+    intent = _ANY_MARK.sub(" ", str(ctx.get("intent") or "")).strip()
+    if intent:
+        sentences.append(f"The author's idea for the cover: {intent.rstrip('.')}.")
+    sentences.append(
+        "Behind them a vast city glows under a crimson and golden sunset, warm orange light on their faces."
+    )
+    if ctx.get("clear_zone"):
+        sentences.append(f"Keep {ctx['clear_zone']} as open sky for the title logo.")
+    target = int(ctx.get("min_words") or 90)
+    i = 0
+    while len(" ".join(sentences).split()) < target:
+        sentences.append(_COVER_FILLERS[i % len(_COVER_FILLERS)])
+        i += 1
+    if ctx.get("style"):
+        sentences.append(str(ctx["style"]).rstrip(".") + ".")
+    return {
+        "prompt": " ".join(sentences),
+        "language": "en",
+        "notes": "Prompt de couverture du LLM factice (mode mock).",
+    }
+
+
+_COVER_FILLERS = (
+    "Saturated blues and teals in the shadows contrast with the warm highlights.",
+    "Dynamic diagonal composition, wind in their hair and clothes, sparks drifting in the air.",
+    "Clean inked outlines with rich painted colours and soft glowing rim light.",
+)
 
 
 # --- dialogue sur une case ------------------------------------------------------------------------

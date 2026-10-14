@@ -14,6 +14,8 @@ Après modification d'un preset, redémarre le moteur (`npm run dev`).
 | `defaults.yaml` | Format de page, workflow (palier **Rapide**) et style de mise en page (`layout_style`) appliqués aux nouvelles séries ; workflow « avec références » de repli pour un preset qui ne déclare pas `with_references` (`workflow_with_references`) ; palier de « Régénérer en Qualité » (`workflow_quality`) ; palier des fiches de référence et de la planche de style (`workflow_library`, Turbo) ; agrandisseur de la finition d'impression (`upscaler`) et tolérance de dpi (`finishing_tolerance`) ; preset de réparation ciblée de repli (`workflow_inpaint`) ; palier croquis (`sketch_enabled`, `workflow_sketch`) ; planche de style (`style_board`) |
 | `providers.yaml` | Paramètres des fournisseurs (URL, modèle LLM, timeouts). **Aucune clé d'API ici** : elles vont dans `.env` |
 | `page_formats/*.yaml` | Formats de page (dimensions en mm, DPI, marges, gouttières) : A4 (défaut) et B4 JIS à 300 DPI |
+| `cover_formats/*.yaml` | Formats de couverture d'un tome : manga 13 × 18 cm (défaut) et A4 (dimensions reprises de `page_formats/a4-300dpi.yaml`), 300 DPI, fond perdu, marge de sécurité, zones réservées (logo, numéro de tome, auteur) |
+| `cover.yaml` | Couverture d'un tome : workflow dédié, taille générée, agrandisseur, rendu couleur (toujours, même en série N&B), phrase d'ouverture et règles du prompt (zone du logo dégagée, aucun texte) |
 | `layout.yaml` | Découpage : taille mini d'une case, taille cible de génération, zones de bulles, seuil de régénération conseillée |
 | `layouts/*.yaml` | Bibliothèque de gabarits de planche (arbres de découpes) |
 | `layout_styles/*.yaml` | Grammaires de mise en page par série : `sage`, `dynamique` (défaut), `nerveuse` — biais, gouttières, gabarits favoris |
@@ -55,6 +57,29 @@ gutters_mm: { horizontal: 6, vertical: 4 }                   # espaces entre cas
 ```
 
 La taille en pixels est calculée : `round(mm / 25.4 × dpi)` → A4 300 DPI = 2480 × 3508 px.
+
+## Couverture d'un tome (`cover_formats/*.yaml`, `cover.yaml`)
+
+```yaml
+id: manga-13x18-300dpi
+name: Manga 13 × 18 cm — 300 DPI
+default: true            # format des nouveaux tomes
+width_mm: 130            # format rogné ; ou `page_format: a4-300dpi` pour reprendre un format de page
+height_mm: 180
+dpi: 300
+bleed_mm: 3              # fond perdu, des quatre côtés
+safety_mm: 5             # marge de sécurité : chaque zone doit y tenir (sinon le format est écarté)
+zones:                   # en mm depuis le coin haut gauche du format rogné
+  - { id: logo, label: Logo et titre, x_mm: 5, y_mm: 5, width_mm: 120, height_mm: 45, clear: true }
+```
+
+Image produite : format + fond perdu, au DPI du format (13 × 18 → 1606 × 2197 px). Le flux de `cover.yaml`
+(`workflow`, ici `qwen-image-couverture` : Qwen-Image 2.1 Qualité avec images de référence) génère au ratio du
+format, plus grand côté `long_side`, puis l'agrandisseur (`upscaler` de cover.yaml, sinon celui de la série,
+sinon celui de defaults.yaml) l'amène au DPI réel, et le moteur la recadre au pixel près. Le prompt est rédigé
+par le LLM du Dessinateur (`prompts/redacteur-couverture.yaml`) d'après la bible, les personnages choisis et
+l'intention de l'auteur ; il est toujours en couleur (`rendering`, un rendu non N&B) et reçoit toujours les
+`rules` (zone `clear` dégagée, aucun texte).
 
 ## Gabarits de planche (`layouts/*.yaml`)
 

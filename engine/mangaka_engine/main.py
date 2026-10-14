@@ -41,6 +41,7 @@ from .api import (
     storage,
     style_board,
     system,
+    volumes,
 )
 from .api.deps import AppContext
 from .api.errors import install_error_handlers
@@ -50,6 +51,8 @@ from .pipeline.comfy_trial import STEP as TRIAL_STEP
 from .pipeline.comfy_trial import TrialExecutor
 from .pipeline.composition import STEP as CONTROL_MAP_STEP
 from .pipeline.composition import ControlMapExecutor
+from .pipeline.covers import STEP as COVER_STEP
+from .pipeline.covers import CoverExecutor
 from .pipeline.finishing import STEP as FINISHING_STEP
 from .pipeline.finishing import FinishingExecutor
 from .pipeline.generation import STEP as GENERATION_STEP
@@ -231,6 +234,18 @@ def build_context(settings: Settings, providers: Providers | None = None) -> App
     queue.add_step(
         CONTROL_MAP_STEP, QueueStep(execute=control_map, describe_error=describe_error, interrupt=control_map.interrupt)
     )
+    # Couverture d'un tome (génération puis agrandissement au DPI du format) : même file, une à la fois.
+    covers = CoverExecutor(
+        db,
+        presets,
+        files,
+        providers.comfyui,
+        comfyui_error=providers.errors.get("comfyui"),
+        poll_s=settings.comfyui_poll_s,
+        presets_for=agents_service.presets_for,
+        folders=folders,
+    )
+    queue.add_step(COVER_STEP, QueueStep(execute=covers, describe_error=describe_error, interrupt=covers.interrupt))
     queue.start()
     return AppContext(
         settings=settings,
@@ -271,6 +286,7 @@ def create_app(settings: Settings | None = None, providers: Providers | None = N
     app.include_router(identity.router)
     app.include_router(comfyui.router)
     app.include_router(chapters.router)
+    app.include_router(volumes.router)
     app.include_router(stages.router)
     app.include_router(art_direction.router)
     app.include_router(jobs.router)
