@@ -1968,6 +1968,132 @@ const json = (method: string, body: unknown): RequestInit => ({
   body: JSON.stringify(body),
 });
 
+// --- Tomes et couverture -----------------------------------------------------
+/** Zone réservée d'une couverture (logo et titre, numéro de tome, auteur). */
+export interface CoverZone {
+  id: string;
+  label: string;
+  /** Zone à garder dégagée dans l'illustration (le logo s'y pose). */
+  clear: boolean;
+  x_mm: number;
+  y_mm: number;
+  width_mm: number;
+  height_mm: number;
+  /** Dans l'image complète (fond perdu compris), en px. */
+  px: { x: number; y: number; width: number; height: number };
+  /** Dans l'image complète, en fraction de sa largeur / hauteur (surimpression de l'aperçu). */
+  rel: { x: number; y: number; width: number; height: number };
+}
+
+/** Format de couverture (presets/cover_formats/). */
+export interface CoverFormat {
+  id: string;
+  name: string;
+  default: boolean;
+  page_format: string | null;
+  width_mm: number;
+  height_mm: number;
+  dpi: number;
+  bleed_mm: number;
+  safety_mm: number;
+  full_width_mm: number;
+  full_height_mm: number;
+  trim_width_px: number;
+  trim_height_px: number;
+  full_width_px: number;
+  full_height_px: number;
+  bleed_px: number;
+  zones: CoverZone[];
+  /** Taille générée par le flux de couverture, avant l'agrandissement au DPI du format. */
+  generation_width: number | null;
+  generation_height: number | null;
+}
+
+export interface VolumeChapter {
+  id: number;
+  number: number;
+  title: string;
+  status: ChapterStatus;
+}
+
+/** Un tome d'une série. */
+export interface Volume {
+  id: number;
+  project_id: number;
+  number: number;
+  title: string;
+  cover_format: string;
+  cover_format_name: string | null;
+  /** Chapitres inclus, dans l'ordre du tome. */
+  chapters: VolumeChapter[];
+  cover_character_ids: number[];
+  cover_intent: string;
+  cover_prompt: string;
+  /** ai : rédigé par l'IA ; manual : saisi ou retouché ; null : pas encore de prompt. */
+  cover_prompt_source: "ai" | "manual" | null;
+  cover_prompt_notes: string;
+  selected_cover_id: number | null;
+  selected_cover_url: string | null;
+  cover_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface VolumeInput {
+  number?: number | null;
+  title?: string;
+  cover_format?: string | null;
+  chapter_ids?: number[];
+  cover_character_ids?: number[];
+  cover_intent?: string;
+  cover_prompt?: string;
+}
+
+export interface CoverCharacter {
+  id: number;
+  name: string;
+  has_reference: boolean;
+  image_url: string | null;
+}
+
+export interface CoverVersion {
+  id: number;
+  url: string;
+  width: number;
+  height: number;
+  seed: Seed | null;
+  selected: boolean;
+  cover_format: string;
+  prompt: string;
+  preset_name: string | null;
+  upscaler_name: string | null;
+  generated_width: number | null;
+  generated_height: number | null;
+  created_at: string;
+}
+
+/** Écran « Couverture » d'un tome. */
+export interface CoverStudio {
+  volume: Volume;
+  format: CoverFormat | null;
+  formats: CoverFormat[];
+  characters: CoverCharacter[];
+  max_characters: number;
+  reference_slots: number;
+  /** Plus récentes d'abord. */
+  versions: CoverVersion[];
+  active_jobs: Job[];
+  /** Couverture indisponible (cover.yaml absent, format inconnu). */
+  problem: string | null;
+  /** La série est en noir et blanc : la couverture, elle, est toujours en couleur. */
+  monochrome_series: boolean;
+  style: string;
+  clear_zone: string | null;
+  workflow: string | null;
+  workflow_name: string | null;
+  upscaler_name: string | null;
+}
+
 // --- Savoir-faire et bible ---------------------------------------------------
 export interface KnowledgeCollection {
   id: number;
@@ -2490,6 +2616,19 @@ export const api = {
   listCharacters: (projectId: number) => request<Character[]>(`/projects/${projectId}/characters`),
 
   listChapters: (projectId: number) => request<Chapter[]>(`/projects/${projectId}/chapters`),
+  coverFormats: () => request<CoverFormat[]>("/presets/cover-formats"),
+  listVolumes: (projectId: number) => request<Volume[]>(`/projects/${projectId}/volumes`),
+  createVolume: (projectId: number, body: VolumeInput) =>
+    request<Volume>(`/projects/${projectId}/volumes`, json("POST", body)),
+  updateVolume: (id: number, body: VolumeInput) => request<Volume>(`/volumes/${id}`, json("PATCH", body)),
+  deleteVolume: (id: number) => request<void>(`/volumes/${id}`, { method: "DELETE" }),
+  coverStudio: (volumeId: number) => request<CoverStudio>(`/volumes/${volumeId}/cover`),
+  writeCoverPrompt: (volumeId: number, body: { intent?: string; character_ids?: number[] }) =>
+    request<CoverStudio>(`/volumes/${volumeId}/cover/prompt`, json("POST", body)),
+  generateCover: (volumeId: number, body: { prompt?: string; seed?: Seed | null } = {}) =>
+    request<Job>(`/volumes/${volumeId}/cover/generate`, json("POST", body)),
+  selectCover: (coverId: number) => request<CoverStudio>(`/volume-covers/${coverId}/select`, { method: "POST" }),
+  deleteCover: (coverId: number) => request<void>(`/volume-covers/${coverId}`, { method: "DELETE" }),
   upcomingChapters: (days = 7) => request<Chapter[]>(`/chapters/upcoming?days=${days}`),
   getChapter: (id: number) => request<Chapter>(`/chapters/${id}`),
   createChapter: (projectId: number, body: Partial<ChapterInput>) =>
