@@ -15,6 +15,7 @@ import { SeriesBible } from "@/components/series-bible";
 import { SeriesDnaCard } from "@/components/series-dna";
 import { SeriesFiles } from "@/components/series-files";
 import { SeriesIdentityCard } from "@/components/series-identity";
+import { SeriesLocationsCard } from "@/components/series-locations";
 import { StyleBoardBanner, StyleBoardCard, useStyleBoard } from "@/components/style-board";
 import { DIRECTIONS, DirectionBadge } from "@/components/reading-direction";
 import { SeriesStatusBadge } from "@/components/status";
@@ -155,6 +156,9 @@ export default function ProjectPage() {
             <LibraryList key={tab} kind={tab} projectId={id} compact />
           </div>
         </Card>
+      </div>
+      <div className="mt-6">
+        <SeriesLocationsCard projectId={id} />
       </div>
       <div className="mt-6">
         <SeriesDnaCard projectId={id} genreKey={project.data.style_genre} />

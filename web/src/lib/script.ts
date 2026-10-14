@@ -46,7 +46,7 @@ export interface DraftDialogue {
   kind: BubbleKind;
 }
 
-export interface DraftPanel extends Omit<PanelInput, "characters" | "dialogues" | "decor" | "objets" | "setting" | "staging"> {
+export interface DraftPanel extends Omit<PanelInput, "characters" | "dialogues" | "decor" | "objets" | "setting" | "staging" | "location"> {
   key: string;
   charactersText: string;
   /** Lieu et mise en scène (prompt image : « Lieu : … », « Mise en scène : … »). */
@@ -57,6 +57,8 @@ export interface DraftPanel extends Omit<PanelInput, "characters" | "dialogues" 
   /** Bibliothèque de la série : décor (id) et objets (ids) de la case. */
   decor: number | null;
   objets: number[];
+  /** Lieu de la série (unité de lieu) ; `setting` en est la précision de cadrage. */
+  location: number | null;
   dialogues: DraftDialogue[];
 }
 
@@ -84,6 +86,7 @@ export function toDraft(pages: PageData[]): DraftPage[] {
       charactersText: pa.characters.join(", "),
       decor: pa.decor ?? null,
       objets: pa.objets ?? [],
+      location: pa.location ?? null,
       shot_type: pa.shot_type,
       importance: pa.importance,
       intensity: pa.intensity,
@@ -108,6 +111,7 @@ export function fromDraft(pages: DraftPage[]): PageInput[] {
         .filter(Boolean),
       decor: pa.decor,
       objets: pa.objets,
+      location: pa.location,
       shot_type: pa.shot_type || null,
       importance: pa.importance,
       intensity: pa.intensity ?? null,
@@ -127,6 +131,7 @@ export const newPanel = (): DraftPanel => ({
   charactersText: "",
   decor: null,
   objets: [],
+  location: null,
   shot_type: null, // le plan vient de la direction artistique
   importance: 2,
   dialogues: [],

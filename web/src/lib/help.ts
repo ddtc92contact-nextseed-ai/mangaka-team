@@ -110,7 +110,9 @@ export const HELP = {
   "scenario.objets":
     "Les objets récurrents de la bibliothèque visibles dans la case : leur description et leurs références sont jointes à la génération pour qu'ils restent identiques.",
   "scenario.setting":
-    "Où et quand se passe la case : lieu, moment (heure, météo) et éléments visibles du décor. Il devient « Lieu : … » dans le prompt image, même sans décor récurrent : sans lui, le modèle dessine souvent un fond blanc.",
+    "Précision de cadrage du lieu : moment (heure, météo), coin du lieu et éléments visibles du décor. Il devient « Lieu : … » dans le prompt image, même sans décor récurrent : sans lui, le modèle dessine souvent un fond blanc.",
+  "scenario.location":
+    "Le lieu de la série où se passe la case (la clairière, la crique…) : toutes les cases d'un même endroit portent le même lieu. Son décor de la bibliothèque est envoyé comme référence de lieu à la génération, pour que le décor ne dérive pas d'une case à l'autre. Les lieux se gèrent depuis la fiche de la série.",
   "scenario.staging":
     "Qui fait quoi et où dans le cadre : premier plan, arrière-plan, gauche, droite, regards et gestes entre personnages. Il devient « Mise en scène : … » dans le prompt image, sauf sur une case sans personnage où il n'est pas utilisé.",
   "scenario.characters":
