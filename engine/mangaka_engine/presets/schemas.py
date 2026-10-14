@@ -1763,6 +1763,51 @@ class PreDirectionSettings(_Strict):
             raise ValueError(f"genres.{genre_id} : {exc}") from None
 
 
+class CreatorChoice(_Strict):
+    """Réponse à cliquer d'une question du créateur de série, avec ses pistes d'ADN (données à l'agent, jamais
+    appliquées seules) : `shift` = écart à ajouter à la valeur du genre, `set` = valeur à prendre."""
+
+    id: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]*$")
+    label: str = Field(min_length=1)
+    shift: dict[str, float] = Field(default_factory=dict)
+    set: dict[str, float | bool] = Field(default_factory=dict)
+
+    def hints(self) -> list[str]:
+        return [*self.shift, *self.set]
+
+
+class CreatorQuestion(_Strict):
+    id: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]*$")
+    label: str = Field(min_length=1)
+    help: str = ""
+    choices: list[CreatorChoice] = Field(min_length=2, max_length=6)
+
+    @model_validator(mode="after")
+    def _unique(self) -> CreatorQuestion:
+        ids = [c.id for c in self.choices]
+        if len(set(ids)) != len(ids):
+            raise ValueError(f"{self.id} : choix en double")
+        return self
+
+
+class SeriesCreatorSettings(_Strict):
+    """`presets/series_creator.yaml` : questions fermées de l'échange avec l'auteur et bornes de la réponse."""
+
+    prompt: str = Field(default="createur-serie", description="Prompt de l'agent (presets/prompts/)")
+    max_chapter_summaries: int = Field(default=12, ge=0, le=100)
+    max_section_chars: int = Field(default=1500, ge=100, le=20000)
+    max_note_chars: int = Field(default=800, ge=50, le=4000)
+    max_free_chars: int = Field(default=500, ge=0, le=4000)
+    questions: list[CreatorQuestion] = Field(min_length=1, max_length=15)
+
+    @model_validator(mode="after")
+    def _unique(self) -> SeriesCreatorSettings:
+        ids = [q.id for q in self.questions]
+        if len(set(ids)) != len(ids):
+            raise ValueError("questions en double")
+        return self
+
+
 class PromptPreset(_Strict):
     """Gabarits `string.Template` ($variable) d'une étape LLM."""
 

@@ -1,0 +1,85 @@
+# Agent de la création d'une série, avant tout chapitre — voir presets/README.md (« Créateur de série »).
+# Un échange guidé avec l'auteur (questions fermées de presets/series_creator.yaml) qui propose l'ADN de la série
+# et rédige sa bible ; relançable sur une série existante (différentiel, rien n'est écrasé sans confirmation).
+id: createur-serie
+name: Créateur de série
+icon: "🧭"
+role: >-
+  À la création d'une série, pose quelques questions à l'auteur (rythme, dialogue, dureté du monde, humour, plans,
+  fins de chapitre…) puis propose l'ADN de la série et rédige sa bible : univers, ton, règles, motifs et une note
+  par personnage.
+step: 0
+step_label: Création de la série
+providers: [llm]
+llm: { provider: provider, model: model }
+knowledge_role: series_creation   # savoir-faire livré : presets/knowledge.yaml › agents.series_creation
+summary: [provider, model]
+secrets:
+  - { env: DEEPSEEK_API_KEY, label: Clé d'API DeepSeek }
+settings:
+  - key: provider
+    label: Fournisseur LLM
+    group: Modèle
+    type: choice
+    choices: [deepseek, ollama, claude, mock]
+    choice_labels: { deepseek: DeepSeek, ollama: Ollama (local), claude: Claude, mock: Factice (mode mock) }
+    source: env:LLM_PROVIDER
+    fallback: mock
+    help: Ollama et Claude sont prévus mais pas encore disponibles.
+  - key: model
+    label: Modèle
+    group: Modèle
+    type: text
+    source: providers.yaml#deepseek.model
+    env_override: DEEPSEEK_MODEL
+    help: Nom du modèle chez le fournisseur (ex. deepseek-chat).
+  - key: temperature
+    label: Température
+    group: Modèle
+    type: number
+    min: 0
+    max: 2
+    step: 0.05
+    source: prompts/createur-serie.yaml#temperature
+    help: 0 = réponses très régulières, 1 et plus = plus d'invention.
+  - key: max_retries
+    label: Nouveaux essais après une réponse invalide
+    group: Modèle
+    type: integer
+    min: 0
+    max: 2
+    source: prompts/createur-serie.yaml#max_retries
+  - key: system
+    label: Consignes système
+    group: Prompts
+    type: prompt
+    source: prompts/createur-serie.yaml#system
+    variables: &creator_vars
+      - series_title
+      - genre
+      - style_packs
+      - style_guidelines
+      - reading_direction
+      - pitch
+      - answers
+      - characters
+      - chapters
+      - current_bible
+      - genre_dna
+      - max_section_chars
+      - max_note_chars
+      - savoir_faire
+      - context_json
+  - key: user
+    label: Gabarit de l'échange
+    group: Prompts
+    type: prompt
+    source: prompts/createur-serie.yaml#user
+    variables: *creator_vars
+    help: Gardez le bloc <contexte>$context_json</contexte> pour le mode mock.
+  - key: retry
+    label: Consigne de relance
+    group: Prompts
+    type: prompt
+    source: prompts/createur-serie.yaml#retry
+    variables: [error]

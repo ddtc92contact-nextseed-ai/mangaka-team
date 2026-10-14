@@ -42,9 +42,30 @@ bible_max_tokens: 2500
 #
 # Les collections « Structure · … » viennent du pack presets/knowledge_packs/manga_story_structure (14/10/2026 :
 # déroulé d'un chapitre, courbes de tension par genre, plans selon le moment, fins de chapitre, rythme d'un arc,
-# silence et dialogue). Lues par le scénariste seulement (le futur agent de création de série les recevra aussi) ;
-# petites, elles sont cherchées et jamais injectées entières (comme toute collection d'un pack chez le scénariste).
+# silence et dialogue). Lues par le scénariste et par le créateur de série ; petites, elles sont cherchées et
+# jamais injectées entières (comme toute collection d'un pack chez le scénariste).
 agents:
+  # Créateur de série (échange avec l'auteur, avant tout chapitre) : structure et rythme, écriture, humour. La bible
+  # actuelle lui est donnée à part (« ce que l'auteur a déjà écrit ») : pas de bible injectée ici.
+  series_creation:
+    label: Créateur de série (avant l'étape 1)
+    collections:
+      - Écriture de scénario
+      - Rythme et découpage
+      - Humour jeunesse
+      - Mise en scène · Fondamentaux
+      - Structure · Déroulé du chapitre
+      - Structure · Courbes par genre
+      - Structure · Plans selon le moment
+      - Structure · Fins de chapitre
+      - Structure · Rythme d'un arc
+      - Structure · Silence et dialogue
+    series_collections: true
+    budget_tokens: 3000
+    top_k: 8
+    bible: false
+    # Ajouté à la requête (titre, idée, genre, réponses de l'auteur).
+    query_hint: Rythme, dialogue, plans, fin de chapitre, arc, ton
   script:
     label: Scénariste (étape 1)
     collections:

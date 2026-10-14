@@ -70,6 +70,7 @@ def test_presets_endpoint(client: TestClient) -> None:
     assert formats["b4-300dpi"]["dpi"] == 300
     assert any(t["panel_count"] == 6 for t in data["layout_templates"])
     assert data["prompts"] == [
+        "createur-serie",
         "direction-artistique",
         "fiche-intervenant",
         "logo",

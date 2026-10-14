@@ -53,9 +53,10 @@ def _script(c: TestClient, series_id: int) -> dict[str, Any]:
 
 
 # --- registre --------------------------------------------------------------------------------
-def test_registry_lists_the_six_agents_ready_in_mock_mode(c: TestClient) -> None:
+def test_registry_lists_the_seven_agents_ready_in_mock_mode(c: TestClient) -> None:
     agents = c.get("/agents").json()
     assert [a["id"] for a in agents] == [
+        "createur-serie",
         "scenariste",
         "directeur-artistique",
         "metteur-en-page",
@@ -63,9 +64,9 @@ def test_registry_lists_the_six_agents_ready_in_mock_mode(c: TestClient) -> None
         "controleur-qualite",
         "lettreur",
     ]
-    assert [a["name"] for a in agents][0] == "Scénariste"
+    assert [a["name"] for a in agents][:2] == ["Créateur de série", "Scénariste"]
     assert all(a["status"]["state"] == "ready" for a in agents), agents
-    scen = agents[0]
+    scen = agents[1]
     assert scen["step"] == 1 and scen["model"] == "Factice (mode mock)" and scen["last_run"] is None
     assert not _ctx(c).presets.issues, _ctx(c).presets.issues
 
@@ -271,7 +272,7 @@ def test_scenariste_prompt_and_temperature_are_used_by_step_1(c: TestClient) -> 
     assert llm.requests[-1]["temperature"] == 0.9  # surcharge de la série A
     assert llm.requests[-1]["messages"][0].content.startswith("Tu es le scénariste maison de « A »")
 
-    scen = c.get("/agents").json()[0]
+    scen = next(a for a in c.get("/agents").json() if a["id"] == "scenariste")
     assert scen["last_run"]["status"] == "succeeded" and scen["last_run"]["duration_ms"] is not None
 
 
@@ -297,7 +298,7 @@ def test_dessinateur_settings_reach_the_panel_prompt(c: TestClient) -> None:
 def test_provider_without_key_is_misconfigured(make_settings: Callable[..., Settings]) -> None:
     with TestClient(create_app(make_settings())) as c:
         assert _save(c, "scenariste", {"provider": "deepseek"}).status_code == 200
-        scen = c.get("/agents").json()[0]
+        scen = next(a for a in c.get("/agents").json() if a["id"] == "scenariste")
         assert scen["status"]["state"] == "misconfigured"
         assert "DEEPSEEK_API_KEY" in scen["status"]["detail"]
         assert scen["model"] == "DeepSeek · deepseek-chat"

@@ -38,6 +38,11 @@ Résumé de 4e de couverture (`"task": "back_summary"`) : texte déterministe ti
 du résumé actuel (« Réécrire »). `[mock:resume-invalide:N]` dans le titre du tome : les N premiers essais sont
 invalides (prose, puis résumé trop court).
 
+Créateur de série (`"task": "series_creation"`, pipeline/series_creator.py) : reprend les pistes d'ADN des
+réponses (`suggested`) avec une explication qui cite la réponse, écrit une bible tirée du titre, de l'idée et des
+réponses, et une note par personnage. `[mock:createur-invalide:N]` dans l'idée de la série : les N premiers essais
+sont invalides (prose, puis bible vide et réglage inconnu).
+
 Pour tester les relances sans vrai LLM, les `invalid_attempts` premiers essais d'une conversation
 renvoient une réponse invalide (variable MOCK_LLM_INVALID_ATTEMPTS, ou `[mock:invalide:N]` dans le
 synopsis du chapitre ; `[mock:da-invalide:N]` pour la seule direction artistique ;
@@ -81,6 +86,7 @@ _DIALOG_INVALID_MARK = re.compile(r"\[mock:dialogue-invalide:(\d+)\]")
 _DRAFT_INVALID_MARK = re.compile(r"\[mock:fiche-invalide:(\d+)\]")
 _IDENTITY_INVALID_MARK = re.compile(r"\[mock:identite-invalide:(\d+)\]")
 _SUMMARY_INVALID_MARK = re.compile(r"\[mock:resume-invalide:(\d+)\]")
+_CREATOR_INVALID_MARK = re.compile(r"\[mock:createur-invalide:(\d+)\]")
 _ANY_MARK = re.compile(r"\s*\[mock:[a-z-]+:\d+\]\s*")
 UNKNOWN_ID = 999_999  # id de décor cité par `[mock:id-invalide:N]` (absent de toute bibliothèque)
 TASKS = (
@@ -93,6 +99,7 @@ TASKS = (
     "palette",
     "logo",
     "back_summary",
+    "series_creation",
 )
 
 _PANELS_PER_PAGE = [5, 4, 6, 3, 5, 4]
@@ -751,6 +758,8 @@ class MockLLMProvider:
             return LLMResult(text=self._image_prompt_answer(messages, ctx), model="mock")
         if ctx is not None and ctx.get("task") == "back_summary":
             return LLMResult(text=self._summary_answer(messages, ctx), model="mock")
+        if ctx is not None and ctx.get("task") == "series_creation":
+            return LLMResult(text=self._creator_answer(messages, ctx), model="mock")
         if ctx is not None and ctx.get("task") == "character_draft":
             return LLMResult(text=self._draft_answer(messages, ctx), model="mock")
         if ctx is not None and ctx.get("task") in ("palette", "logo"):
@@ -842,6 +851,16 @@ class MockLLMProvider:
             return json.dumps({"tagline": "Trop court !", "summary": "Un tome."}, ensure_ascii=False)
         return json.dumps(mock_back_summary(ctx), ensure_ascii=False)
 
+    def _creator_answer(self, messages: list[ChatMessage], ctx: dict[str, Any]) -> str:
+        attempt = 1 + sum(1 for m in messages if m.role == "assistant")
+        mark = _CREATOR_INVALID_MARK.search(str(ctx.get("pitch") or ""))
+        invalid = int(mark.group(1)) if mark else self.invalid_attempts
+        if attempt <= invalid:
+            if attempt % 2:
+                return "Voici ce que je propose : un rythme soutenu, des dialogues vifs…"
+            return json.dumps({"dna": [{"path": "rythme.global", "value": 3}], "bible": {"world": ""}})
+        return json.dumps(mock_series_creation(ctx), ensure_ascii=False)
+
     def _direction_answer(self, messages: list[ChatMessage], ctx: dict[str, Any]) -> str:
         attempt = 1 + sum(1 for m in messages if m.role == "assistant")
         mark = _DA_INVALID_MARK.search(str((ctx.get("chapter") or {}).get("synopsis") or ""))
@@ -851,6 +870,64 @@ class MockLLMProvider:
                 return "Voici mes choix de mise en scène : page 1 calme…"
             return json.dumps({"pages": [{"page": 1, "rythme": "tempête", "panels": [{"panel": 1, "plan": "drone"}]}]})
         return json.dumps(mock_art_direction(ctx), ensure_ascii=False)
+
+
+# --- créateur de série ----------------------------------------------------------------------------------------
+def mock_series_creation(ctx: dict[str, Any]) -> dict[str, Any]:
+    """Proposition factice et déterministe du créateur de série : pistes d'ADN reprises, bible et notes tirées du
+    titre, de l'idée et des réponses de l'auteur (dans les longueurs demandées)."""
+    title = str(ctx.get("title") or "la série")
+    pitch = _ANY_MARK.sub(" ", str(ctx.get("pitch") or "")).strip()
+    answers = {a["question"]: a for a in ctx.get("answers") or []}
+
+    def picked(question: str, default: str = "") -> str:
+        a = answers.get(question)
+        return str(a["choice_label"]).rstrip(".").lower() if a else default
+
+    def note(question: str) -> str:
+        a = answers.get(question)
+        return f" {a['note'].rstrip('.')}." if a and a.get("note") else ""
+
+    section = int(ctx.get("max_section_chars") or 1500)
+    limit = int(ctx.get("max_note_chars") or 800)
+    dna = [
+        {"path": s["path"], "value": s["value"], "why": f"Tu as répondu « {s['choice']} » à « {s['question']} »."}
+        for s in ctx.get("suggested") or []
+    ]
+    world = f"« {title} » ({ctx.get('genre') or 'genre libre'}). {pitch or 'Un univers à préciser avec l’auteur.'}"
+    tone = (
+        f"Monde {picked('monde', 'nuancé')}, humour : {picked('humour', 'des touches')}.{note('monde')}{note('humour')}"
+        f" Pensées et récit off : {picked('voix', 'quand c’est utile')}.{note('voix')}"
+    )
+    rules = (
+        f"Rythme : {picked('rythme', 'celui du genre')}.{note('rythme')} Dialogue : {picked('dialogue', 'équilibré')}."
+        f"{note('dialogue')} Mise en page : {picked('nervosite', 'celle du genre')}. Plans : {picked('plans', 'variés')}."
+    )
+    motifs = (
+        f"Fin de chapitre : {picked('fin', 'sur un suspense')}.{note('fin')} Un motif visuel revient à chaque chapitre."
+    )
+    characters = []
+    for i, c in enumerate(ctx.get("characters") or []):
+        name = str(c["name"])
+        role = "personnage principal" if i == 0 else "personnage secondaire"
+        look = " ".join(str(c.get("description") or "").split())[:120]
+        text = (
+            f"Caractère : {'déterminé et têtu' if i % 2 == 0 else 'calme et ironique'}. Rôle : {role}. "
+            f"Arc : apprend à faire confiance aux autres. Tics de langage : « {_REPLIES[i % len(_REPLIES)]} »."
+            + (f" Apparence : {look}." if look else "")
+        )
+        characters.append({"name": name, "note": text[:limit]})
+    return {
+        "dna": dna,
+        "bible": {
+            "world": world[:section],
+            "tone": tone[:section],
+            "rules": rules[:section],
+            "motifs": motifs[:section],
+        },
+        "characters": characters,
+        "notes": f"J'ai retenu {len(dna)} écart{'s' if len(dna) > 1 else ''} au genre d'après tes réponses.",
+    }
 
 
 # --- rédaction du prompt image ---------------------------------------------------------------------
