@@ -554,7 +554,7 @@ def test_series_dna_card_reads_and_adjusts_values(client: TestClient) -> None:
     assert fields["shots.wide.min"]["kind"] == "share" and fields["shots.wide.min"]["label"]
     assert (fields["panels.min_per_page"]["min"], fields["panels.min_per_page"]["max"]) == (1, 9)
     assert fields["rhythm.breath_after_peak"]["kind"] == "bool"
-    assert set(dna["groups"]) == {"panels", "shapes", "shots", "presence", "dialogue", "rhythm"}
+    assert set(dna["groups"]) == {"panels", "shapes", "shots", "presence", "dialogue", "rhythm", "places"}
 
     tuned = _ok(
         client.put(

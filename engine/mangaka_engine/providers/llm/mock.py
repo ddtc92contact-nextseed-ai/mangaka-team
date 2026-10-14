@@ -4,6 +4,9 @@ Pour l'étape « scénario », il reconnaît le bloc `<contexte>{"task": "script
 prompt et renvoie un découpage plausible (nombre de pages visé, personnages de la série ; chaque page
 se passe dans un décor de la bibliothèque, à tour de rôle, et une case sur deux montre un objet).
 
+Chaque case du découpage se rattache à un lieu de la série (`lieu` : l'id d'un lieu existant de même nom, sinon son
+nom) ; le lieu change toutes les trois pages.
+
 Pour la direction artistique (`"task": "art_direction"`), il renvoie des choix variés mais
 déterministes : même chapitre, même audace, même relance → mêmes choix (`mock_art_direction`), qui
 respectent les règles de variété du preset (angles en alternance, jamais 3 plans identiques d'affilée,
@@ -44,7 +47,12 @@ synopsis du chapitre ; `[mock:da-invalide:N]` pour la seule direction artistique
 `[mock:id-invalide:N]` : découpage bien formé qui cite un décor inexistant ;
 `[mock:dialogues-maigres:N]` : découpage valide mais aux dialogues maigres, comme le chapitre 3 « vulcano »
 — une réplique sur deux cases, cases de combat réduites à leur onomatopée, ni pensée ni narration).
+`[mock:sans-etablissement:N]` : les N premiers essais de la direction artistique (relance ciblée comprise)
+n'installent pas les nouveaux lieux (pas de case d'établissement au changement de lieu).
 L'essai courant se déduit des messages : aucun état entre deux appels.
+
+Regroupement des lieux (`"task": "locations"`, pipeline/locations.py) : les variantes de même nom de lieu
+(« clairière », « clairière au centre de l'île ») vont ensemble (`heuristic_groups`).
 
 Le découpage factice respecte les règles de dialogue livrées (presets/prompts/script.yaml) : deux
 répliques courtes par case (une seule sur une page chargée), un cri dans chaque case « choc », une
@@ -81,6 +89,7 @@ _DIALOG_INVALID_MARK = re.compile(r"\[mock:dialogue-invalide:(\d+)\]")
 _DRAFT_INVALID_MARK = re.compile(r"\[mock:fiche-invalide:(\d+)\]")
 _IDENTITY_INVALID_MARK = re.compile(r"\[mock:identite-invalide:(\d+)\]")
 _SUMMARY_INVALID_MARK = re.compile(r"\[mock:resume-invalide:(\d+)\]")
+_NO_ESTABLISHING_MARK = re.compile(r"\[mock:sans-etablissement:(\d+)\]")
 _ANY_MARK = re.compile(r"\s*\[mock:[a-z-]+:\d+\]\s*")
 UNKNOWN_ID = 999_999  # id de décor cité par `[mock:id-invalide:N]` (absent de toute bibliothèque)
 TASKS = (
@@ -93,6 +102,7 @@ TASKS = (
     "palette",
     "logo",
     "back_summary",
+    "locations",
 )
 
 _PANELS_PER_PAGE = [5, 4, 6, 3, 5, 4]
@@ -128,7 +138,7 @@ def _task_context(messages: list[ChatMessage]) -> dict[str, Any] | None:
 
 def _sentences(text: str) -> list[str]:
     text = _ID_INVALID_MARK.sub("", _DA_INVALID_MARK.sub("", _INVALID_MARK.sub("", text)))
-    text = _SPARSE_MARK.sub("", text)
+    text = _NO_ESTABLISHING_MARK.sub("", _SPARSE_MARK.sub("", text))
     parts = [p.strip() for p in re.split(r"(?<=[.!?…])\s+|\n+", text) if p.strip()]
     return parts or ["La scène s'installe."]
 
@@ -139,6 +149,9 @@ _SETTINGS = [
     "village de pierre, midi, ruelles pavées, linge aux fenêtres, foule de marché",
     "forêt dense, nuit de pleine lune, troncs immenses, lucioles, brume au sol",
 ]
+# Lieux du découpage factice (un par série de trois pages), dans l'ordre de `_SETTINGS`.
+_LIEUX = ["La clairière", "La falaise", "Le village", "La forêt"]
+_PAGES_PER_PLACE = 3
 # Ce que fait chaque personnage (geste, posture, regard), jamais sa place dans le cadre : le scénario ne
 # compose pas, la direction artistique cadre.
 _GESTURES = [
@@ -172,6 +185,9 @@ def mock_script(ctx: dict[str, Any], *, sparse: bool = False) -> dict[str, Any]:
     previous = ctx.get("previous_chapters") or []
     decors = [d["id"] for d in ctx.get("decors") or [] if isinstance(d.get("id"), int)]
     objets = [o["id"] for o in ctx.get("objets") or [] if isinstance(o.get("id"), int)]
+    known = {
+        str(e.get("name") or "").casefold(): e["id"] for e in ctx.get("lieux") or [] if isinstance(e.get("id"), int)
+    }
     charter = ctx.get("pre_direction") or {}
     lo = int((charter.get("panels") or {}).get("min_per_page") or 1)
     hi = int((charter.get("panels") or {}).get("max_per_page") or 9)
@@ -221,10 +237,12 @@ def mock_script(ctx: dict[str, Any], *, sparse: bool = False) -> dict[str, Any]:
                 sfx.append({"text": _SFX[(p + i) % len(_SFX)], "intensity": "choc"})
             elif intensity == "calme" and p % 3 == 1:
                 sfx.append({"text": "tic… tac…", "intensity": "calme"})
+            place = (p // _PAGES_PER_PLACE) % len(_LIEUX)
             panels.append(
                 {
                     "description": f"{text} ({who}{' et ' + other if other != who else ''}, page {p + 1}, case {i + 1})",
-                    "setting": _SETTINGS[p % len(_SETTINGS)],
+                    "lieu": known.get(_LIEUX[place].casefold(), _LIEUX[place]),
+                    "setting": _SETTINGS[place],
                     "staging": _staging(cast[0], cast[-1], i),
                     "characters": cast,
                     "importance": importance,
@@ -255,6 +273,8 @@ def _script_charter(pages: list[dict[str, Any]], charter: dict[str, Any]) -> Non
     low, high = int(dialogue.get("min_per_page") or 0), int(dialogue.get("max_per_page") or 99)
     silent = int(dialogue.get("min_silent_panels") or 0)
     empty = float(((charter.get("presence") or {}).get("empty") or {}).get("min") or 0)
+    # Cases de décor muettes (famille « places ») : des cases sans personnage, prises parmi les cases muettes.
+    empty = max(empty, float((charter.get("places") or {}).get("silent_decor_min") or 0))
     empties = math.ceil(empty * sum(len(p["panels"]) for p in pages) - 1e-9)
     for page in pages:
         panels = page["panels"]
@@ -329,8 +349,27 @@ _RYTHME_PHRASES = {
 _BOLDNESS = {"sobre": 0, "equilibree": 1, "audacieuse": 2}
 
 
-def mock_art_direction(ctx: dict[str, Any]) -> dict[str, Any]:
-    """Choix plausibles, variés d'une page à l'autre et déterministes (chapitre, audace, relance)."""
+def _establishing(pages: list[dict[str, Any]]) -> set[tuple[int, int]]:
+    """(page, case) des premières cases d'un nouveau lieu (unité de lieu `lieu` des cases), dans l'ordre."""
+    out: set[tuple[int, int]] = set()
+    previous: Any = None
+    for page in pages:
+        for i, pa in enumerate(page.get("panels") or []):
+            lieu = pa.get("lieu")
+            if lieu is None:
+                continue
+            if lieu != previous:
+                out.add((int(page["page"]), i))
+            previous = lieu
+    return out
+
+
+_FIXED = "_etablissement"  # case d'établissement : son plan large ne bouge plus (retiré de la réponse)
+
+
+def mock_art_direction(ctx: dict[str, Any], *, establish: bool = True) -> dict[str, Any]:
+    """Choix plausibles, variés d'une page à l'autre et déterministes (chapitre, audace, relance). `establish` : la
+    première case d'un nouveau lieu passe en plan large (case d'établissement de la charte)."""
     bold = _BOLDNESS.get(str(ctx.get("variety") or "equilibree"), 1)
     variant = int(ctx.get("variant") or 0)
     number = int((ctx.get("chapter") or {}).get("number") or 1)
@@ -344,6 +383,8 @@ def mock_art_direction(ctx: dict[str, Any]) -> dict[str, Any]:
     charter = ctx.get("pre_direction") or {}
     whole = bool(charter) and len(pages) >= int(charter.get("min_pages") or 4)
     curve = _curve(len(pages), charter) if whole else None
+    places = (charter.get("places") or {}) if whole else {}
+    opening = _establishing(pages) if establish and places.get("establishing") else set()
     for index, page in enumerate(pages):
         n = int(page["page"])
         seed = n * 7 + number * 3 + variant * 5
@@ -375,6 +416,9 @@ def mock_art_direction(ctx: dict[str, Any]) -> dict[str, Any]:
                 cadre = "sans bord" if bold == 1 else "débordement"
             if len(out_panels) >= 2 and out_panels[-1]["plan"] == out_panels[-2]["plan"] == plan:
                 plan = next(p for p in _DA_PLANS[(seed + i) % len(_DA_PLANS) :] + _DA_PLANS if p != plan)
+            fixed = (n, i) in opening
+            if fixed:
+                plan = "plan large"  # case d'établissement : installe le nouveau lieu
             # Spectateur repéré : vue subjective s'il y a quelque chose d'autre à voir, sinon plan de réaction.
             viewers = [str(v) for v in pa.get("spectators") or []]
             others = [c for c in pa.get("characters") or [] if c not in viewers]
@@ -395,6 +439,7 @@ def mock_art_direction(ctx: dict[str, Any]) -> dict[str, Any]:
                     if intensity == "choc"
                     else [],
                     **({"point_de_vue": point_de_vue, "spectateurs": viewers} if point_de_vue else {}),
+                    **({_FIXED: True} if fixed else {}),
                 }
             )
         page_choc = None
@@ -436,6 +481,9 @@ def mock_art_direction(ctx: dict[str, Any]) -> dict[str, Any]:
     if whole:
         _shapes(out, pages, charter)
         _shot_scale(out, charter, ctx.get("variety_rules") or {}, ctx.get("page_rules") or {})
+    for p in out:
+        for pa in p["panels"]:
+            pa.pop(_FIXED, None)
     return {"pages": out}
 
 
@@ -598,7 +646,7 @@ def _shot_scale(
                     if done():
                         return
                     source = cls(pa["plan"])
-                    if source not in donors or (calm_first and pa["intensity"] == "choc"):
+                    if pa.get(_FIXED) or source not in donors or (calm_first and pa["intensity"] == "choc"):
                         continue
                     if source is not None and count(source) - 1 < low(source):
                         continue
@@ -640,7 +688,7 @@ def _page_rules(pages: list[dict[str, Any]], rules: dict[str, Any], variety: dic
         if close_rule and not any(pa["plan"] in close for pa in panels):
             order = sorted(range(n), key=lambda i: (panels[i]["intensity"] != "choc", i == 0, -i))
             for i in order:
-                if panels[i]["plan"] in off_level:
+                if panels[i]["plan"] in off_level or panels[i].get(_FIXED):
                     continue
                 near = {q["plan"] for q in panels[max(0, i - 1) : i + 2] if q is not panels[i]}
                 plan = next((c for c in close if c not in near), None)
@@ -677,6 +725,10 @@ def _tighten(pages: list[dict[str, Any]], rules: dict[str, Any]) -> None:
     share = float(rules.get("max_wide_medium_share", 0.5))
 
     def tighten(panels: list[dict[str, Any]], i: int) -> None:
+        if panels[i].get(_FIXED):  # case d'établissement : c'est sa voisine qui se resserre
+            i = next((j for j in (i - 1, i + 1) if 0 <= j < len(panels) and not panels[j].get(_FIXED)), i)
+            if panels[i].get(_FIXED):
+                return
         near = {q["plan"] for q in panels[max(0, i - 1) : i + 2]}
         panels[i]["plan"] = next(p for p in _DA_TIGHT if p not in near)
 
@@ -692,7 +744,7 @@ def _tighten(pages: list[dict[str, Any]], rules: dict[str, Any]) -> None:
             for i in reversed(range(len(panels))):
                 if sum(1 for q in panels if q["plan"] in tight) >= min_tight:
                     break
-                if panels[i]["plan"] in loose:
+                if panels[i]["plan"] in loose and not panels[i].get(_FIXED):
                     tighten(panels, i)
     total = sum(len(p["panels"]) for p in pages)
     allowed = max(1, int(share * total + 1e-9))
@@ -702,7 +754,7 @@ def _tighten(pages: list[dict[str, Any]], rules: dict[str, Any]) -> None:
             for i in range(len(p["panels"]) - 1, first - 1, -1):
                 if sum(1 for q in pages for pa in q["panels"] if pa["plan"] in loose) <= allowed:
                     return
-                if p["panels"][i]["plan"] in loose:
+                if p["panels"][i]["plan"] in loose and not p["panels"][i].get(_FIXED):
                     tighten(p["panels"], i)
 
 
@@ -755,6 +807,11 @@ class MockLLMProvider:
             return LLMResult(text=self._draft_answer(messages, ctx), model="mock")
         if ctx is not None and ctx.get("task") in ("palette", "logo"):
             return LLMResult(text=self._identity_answer(messages, ctx), model="mock")
+        if ctx is not None and ctx.get("task") == "locations":
+            # Import local : pipeline/locations importe ce paquet (ChatMessage, LLMProvider).
+            from ...pipeline.locations import heuristic_groups
+
+            return LLMResult(text=json.dumps(heuristic_groups(ctx), ensure_ascii=False), model="mock")
         if ctx is not None and ctx.get("task") == "art_direction":
             return LLMResult(text=self._direction_answer(messages, ctx), model="mock")
         if ctx is not None:
@@ -850,7 +907,9 @@ class MockLLMProvider:
             if attempt % 2:
                 return "Voici mes choix de mise en scène : page 1 calme…"
             return json.dumps({"pages": [{"page": 1, "rythme": "tempête", "panels": [{"panel": 1, "plan": "drone"}]}]})
-        return json.dumps(mock_art_direction(ctx), ensure_ascii=False)
+        mark = _NO_ESTABLISHING_MARK.search(str((ctx.get("chapter") or {}).get("synopsis") or ""))
+        establish = not (mark and attempt <= int(mark.group(1)))
+        return json.dumps(mock_art_direction(ctx, establish=establish), ensure_ascii=False)
 
 
 # --- rédaction du prompt image ---------------------------------------------------------------------

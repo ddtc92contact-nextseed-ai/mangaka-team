@@ -1697,8 +1697,16 @@ class DnaRhythm(_Strict):
     final_peak_last_pages: int = Field(ge=0, le=10)  # pic final dans les N dernières planches (0 = libre)
 
 
+class DnaPlaces(_Strict):
+    """Décors et rythme : case d'établissement au changement de lieu (plan large ou d'ensemble de la première case
+    d'un nouveau lieu) et part de cases de décor muettes (sans personnage à l'image ni réplique)."""
+
+    establishing: bool = True
+    silent_decor_min: float = Field(default=0, ge=0, le=1)
+
+
 class PreDirection(_Strict):
-    """ADN d'une série : les six familles de la charte."""
+    """ADN d'une série : les sept familles de la charte."""
 
     panels: DnaPanels
     shapes: DnaShapes
@@ -1706,6 +1714,8 @@ class PreDirection(_Strict):
     presence: DnaPresence
     dialogue: DnaDialogue
     rhythm: DnaRhythm
+    # Absente d'un preset d'avant l'unité de lieu : case d'établissement exigée, pas de case de décor muette.
+    places: DnaPlaces = Field(default_factory=DnaPlaces)
 
 
 ShotClass = Literal["close_up", "medium_close", "medium", "wide", "insert"]

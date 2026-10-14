@@ -79,7 +79,19 @@ from sqlalchemy.orm import Session, object_session
 from ..presets import PageRules, PresetRegistry, PromptPreset, VarietyRules
 from ..providers.llm import ChatMessage, LLMError, LLMProvider
 from ..store.db import Database
-from ..store.models import Bubble, BubbleKind, Chapter, Character, LLMRun, Page, PageDirection, PageKind, Panel, utcnow
+from ..store.models import (
+    Bubble,
+    BubbleKind,
+    Chapter,
+    Character,
+    LLMRun,
+    Page,
+    PageDirection,
+    PageKind,
+    Panel,
+    SeriesLocation,
+    utcnow,
+)
 from ..validation import format_errors
 from .framing import (
     REACTION,
@@ -224,6 +236,8 @@ class DirectionPanel(_LLMModel):
     # Bibliothèque (facultatif) : null ou absent = garder le décor / les objets du scénario.
     decor: int | None = None
     objets: list[int] | None = Field(default=None, max_length=8)
+    # Lieu de la série (id existant, facultatif) : null ou absent = garder le lieu du scénario.
+    lieu: int | None = None
     # Spectateur (voir le module) : null = la case n'a pas de spectateur ; `spectateurs` : null = ceux repérés.
     point_de_vue: PointDeVueName | None = None
     spectateurs: list[Name] | None = Field(default=None, max_length=12)
@@ -242,6 +256,11 @@ class DirectionPanel(_LLMModel):
     @classmethod
     def _unique_objects(cls, v: list[int] | None) -> list[int] | None:
         return None if v is None else list(dict.fromkeys(v))
+
+    @field_validator("lieu", "decor", mode="before")
+    @classmethod
+    def _no_id(cls, v: Any) -> Any:
+        return None if v in ("", "null", "aucun") else v
 
     @field_validator("ambiance", "action", mode="before")
     @classmethod
@@ -339,6 +358,7 @@ class DirectionContext:
                             **({"spectators": pa["spectators"]} if pa.get("spectators") else {}),
                             "decor": pa.get("decor"),
                             "objets": pa.get("objets") or [],
+                            "lieu": pa.get("location"),
                             "shot_type": pa["shot_type"],
                             "importance": pa["importance"],
                             "intensity": pa["intensity"],
@@ -407,6 +427,11 @@ def _panel_brief(panel: Panel, aliases: Aliases | None = None) -> dict[str, Any]
         "perception": spect.verb,
         "decor": panel.decor_id,
         "objets": list(panel.object_ids or []),
+        # Unité de lieu (case d'établissement au changement de lieu, pre_direction.py) et répliques (cases de décor
+        # muettes).
+        "location": panel.location_id,
+        "location_name": panel.location.name if panel.location_id is not None and panel.location else None,
+        "replies": sum(1 for b in panel.bubbles if b.kind != BubbleKind.sfx),
         "shot_type": panel.shot_type,
         "importance": panel.importance,
         "intensity": panel.intensity,
@@ -532,6 +557,7 @@ def build_context(
 def _pages_text(ctx: DirectionContext) -> str:
     names = {e["id"]: e["name"] for e in (*ctx.library.decors, *ctx.library.objets)}
     blocks = []
+    place: Any = None
     for p in ctx.pages:
         lines = [f"Page {p.number} ({len(p.panels)} case{'s' if len(p.panels) > 1 else ''})"]
         if p.rythme:
@@ -553,6 +579,10 @@ def _pages_text(ctx: DirectionContext) -> str:
                 )
             if pa.get("decor") in names:
                 who += f" — décor : {names[pa['decor']]} (id {pa['decor']})"
+            if pa.get("location") is not None:
+                change = " — NOUVEAU LIEU (case d'établissement)" if pa["location"] != place else ""
+                who += f" — lieu : {pa.get('location_name') or '?'} (id {pa['location']}){change}"
+                place = pa["location"]
             things = [f"{names[i]} (id {i})" for i in pa.get("objets") or [] if i in names]
             if things:
                 who += f" — objets : {', '.join(things)}"
@@ -617,6 +647,7 @@ def render_messages(prompt: PromptPreset, ctx: DirectionContext) -> list[ChatMes
         "characters": chars or "(aucun personnage enregistré)",
         "decors": ctx.library.text("decors") or "(aucun décor enregistré)",
         "objets": ctx.library.text("objets") or "(aucun objet enregistré)",
+        "lieux": ctx.library.text("lieux") or "(aucun lieu enregistré)",
         "chapter_number": str(ctx.chapter["number"]),
         "chapter_title": ctx.chapter["title"] or "sans titre",
         "synopsis": ctx.chapter["synopsis"] or "(pas de synopsis)",
@@ -697,7 +728,7 @@ def check_against(out: DirectionOutput, ctx: DirectionContext) -> list[str]:
                 f"page {dp.page} › template : « {dp.template} » impossible ici (choix : {choices}, ou null)"
             )
         for pa in dp.panels:
-            for problem in ctx.library.check_refs(pa.decor, pa.objets or []):
+            for problem in [*ctx.library.check_refs(pa.decor, pa.objets or []), *ctx.library.check_location(pa.lieu)]:
                 problems.append(f"page {dp.page} › case {pa.panel} › {problem}")
     missing = [n for n in expected if n not in seen]
     if missing:
@@ -1011,6 +1042,7 @@ def output_rows(out: DirectionOutput, ctx: DirectionContext) -> list[PageRow]:
             info = brief.panels[pa.panel - 1] if brief and 1 <= pa.panel <= len(brief.panels) else {}
             choice = pa.model_dump()
             visible, hidden = _cast(info.get("characters") or [], info.get("offscreen") or [], choice)
+            location = pa.lieu if pa.lieu is not None else info.get("location")
             panels.append(
                 {
                     **choice,
@@ -1018,6 +1050,9 @@ def output_rows(out: DirectionOutput, ctx: DirectionContext) -> list[PageRow]:
                     "visible": visible,
                     "hidden": hidden,
                     "importance": info.get("importance") or 2,
+                    "location": location,
+                    "location_name": ctx.library.location_name(location) or info.get("location_name"),
+                    "replies": info.get("replies") or 0,
                 }
             )
         rows.append((dp.page, dp.rythme, panels))
@@ -1050,6 +1085,7 @@ def stored_rows(pages: Sequence[Page]) -> list[PageRow]:
             chars = list(panel.character_names or []) if panel else []
             off = list(panel.offscreen_names or []) if panel else []
             visible, hidden = _cast(chars, off, choice)
+            location = panel.location if panel is not None and panel.location_id is not None else None
             panels.append(
                 {
                     **choice,
@@ -1057,6 +1093,10 @@ def stored_rows(pages: Sequence[Page]) -> list[PageRow]:
                     "visible": visible,
                     "hidden": hidden,
                     "importance": panel.importance if panel else 2,
+                    # Lieu appliqué à la case (sinon proposé par la direction) : celui que verra la génération.
+                    "location": location.id if location is not None else choice.get("lieu"),
+                    "location_name": location.name if location is not None else None,
+                    "replies": sum(1 for b in panel.bubbles if b.kind != BubbleKind.sfx) if panel else 0,
                 }
             )
         rows.append((page.number, values.get("rythme"), panels))
@@ -1493,6 +1533,7 @@ def to_values(dp: DirectionPage, page: Page) -> dict[str, Any]:
                 "sfx": [s.model_dump() for s in pa.sfx],
                 **({"decor": pa.decor} if pa.decor is not None else {}),
                 **({"objets": pa.objets} if pa.objets is not None else {}),
+                **({"lieu": pa.lieu} if pa.lieu is not None else {}),
                 **(
                     {
                         "point_de_vue": pa.point_de_vue,
@@ -1922,8 +1963,12 @@ def _apply_viewpoint(
 
 
 def _apply_library(panel: Panel, choice: dict[str, Any], before: dict[str, Any], library: SeriesLibrary) -> None:
-    """Décor et objets proposés : appliqués s'ils existent encore et ont changé depuis l'application
+    """Décor, objets et lieu proposés : appliqués s'ils existent encore et ont changé depuis l'application
     précédente (sinon l'auteur a pu les corriger dans l'écran Scénario : on garde sa version)."""
+    lieu = choice.get("lieu")
+    session = object_session(panel)
+    if lieu is not None and lieu != before.get("lieu") and any(e["id"] == lieu for e in library.lieux) and session:
+        panel.location = session.get(SeriesLocation, lieu)
     decor = choice.get("decor")
     if decor is not None and decor != before.get("decor") and not library.check_refs(decor, []):
         panel.decor_id = decor

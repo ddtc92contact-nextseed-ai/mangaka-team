@@ -318,6 +318,8 @@ class PanelIn(_In):
     # Bibliothèque de la série (ids) : absent = gardés tels quels ; decor null = pas de décor.
     decor: int | None = None
     objets: Annotated[list[int], Field(max_length=MAX_PANEL_OBJECTS)] | None = None
+    # Lieu de la série (id, unité de lieu) : absent = gardé tel quel ; null = aucun lieu.
+    location: int | None = None
 
 
 class PageIn(_In):
@@ -397,7 +399,7 @@ class PanelOut(BaseModel):
     id: int
     index: int
     description: str
-    setting: str = ""  # lieu : lieu, moment, éléments du décor
+    setting: str = ""  # précision de cadrage du lieu : moment, coin du lieu, éléments du décor
     staging: str = ""  # mise en scène : qui fait quoi, où dans le cadre
     characters: list[str]  # présents à l'image (dessinés, avec leur image de référence)
     # Noms de `characters` qui ne désignent aucune fiche personnage (ni nom, ni alias, ni nom partiel) :
@@ -410,6 +412,8 @@ class PanelOut(BaseModel):
     viewpoint: ViewpointOut | None = None
     decor: int | None = None  # décor de la bibliothèque (id)
     objets: list[int] = Field(default_factory=list)  # objets de la bibliothèque (ids)
+    location: int | None = None  # lieu de la série (id) ; `setting` en est la précision de cadrage
+    location_name: str | None = None
     shot_type: str | None
     importance: int
     intensity: IntensityName | None = None

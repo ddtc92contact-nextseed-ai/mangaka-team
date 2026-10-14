@@ -118,6 +118,7 @@ settings:
       - character_names
       - decors
       - objets
+      - lieux
       - previous_chapters
       - chapter_number
       - chapter_title

@@ -32,6 +32,7 @@ from .api import (
     journal,
     knowledge,
     lettering,
+    locations,
     pre_direction,
     production,
     projects,
@@ -286,6 +287,7 @@ def create_app(settings: Settings | None = None, providers: Providers | None = N
     app.include_router(storage.router)
     app.include_router(characters.router)
     app.include_router(assets.router)
+    app.include_router(locations.router)
     app.include_router(reference_sheets.router)
     app.include_router(style_board.router)
     app.include_router(identity.router)

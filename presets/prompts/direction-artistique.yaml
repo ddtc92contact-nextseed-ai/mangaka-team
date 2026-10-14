@@ -7,6 +7,7 @@
 #   $style_guidelines (consignes du genre et du ton : rythme, cases par page, vocabulaire adapté à l'âge)
 #   ($series_style : ancien nom de $style_packs, gardé pour les prompts personnalisés)
 #   $decors $objets      (bibliothèque de la série : « - id N · nom : description courte », un par ligne)
+#   $lieux               (lieux de la série, unité de lieu des cases : « - id N · nom : description (décor : …) »)
 #   $layout_style        (style de mise en page de la série) · $layout_styles (styles disponibles)
 #   $chapter_number $chapter_title $synopsis $summary
 #   $pages               (scénario validé des pages à diriger, avec les gabarits possibles par page)
@@ -108,6 +109,9 @@ user: |
   Objets récurrents (bibliothèque) :
   $objets
 
+  Lieux de la série (chaque case se rattache à l'un d'eux) :
+  $lieux
+
   Bible de la série (à respecter strictement) :
   $bible
 
@@ -163,6 +167,9 @@ user: |
     bibliothèque ci-dessus — jamais un id absent de la liste ;
   - « objets » (facultatif) : null pour garder les objets du scénario, sinon la liste des ids d'objets
     de la bibliothèque visibles dans la case — jamais un id absent de la liste ;
+  - « lieu » (facultatif) : null pour garder le lieu du scénario, sinon l'id d'un lieu de la série
+    ci-dessus si la case se passe ailleurs — jamais un id absent de la liste. La première case d'un
+    NOUVEAU LIEU est une case d'établissement (voir la charte) : elle installe le lieu ;
   - « point_de_vue » : OBLIGATOIRE pour une case marquée SPECTATEUR (le texte dit qu'un personnage voit,
     regarde, aperçoit, découvre, assiste…), null sinon. Choisis explicitement l'une de ces valeurs :
     $points_de_vue — « plan de réaction » : le spectateur est dessiné, on montre son visage et ce qu'il
@@ -179,7 +186,7 @@ user: |
      "rationale": "…",
      "panels": [{"panel": 1, "intensity": "normal", "plan": "plan moyen", "angle": "de trois quarts",
        "cadre": "normal", "ambiance": "…", "action": "…", "sfx": [], "decor": null, "objets": null,
-       "point_de_vue": null, "spectateurs": null}]}]}
+       "lieu": null, "point_de_vue": null, "spectateurs": null}]}]}
 
   <contexte>
   $context_json

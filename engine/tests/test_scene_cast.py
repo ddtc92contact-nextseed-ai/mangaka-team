@@ -251,7 +251,10 @@ def test_mock_scenario_of_a_two_character_story(client: TestClient) -> None:
     jobs.wait(job["id"])
     assert _ok(client.get(f"/jobs/{job['id']}"))["status"] == "succeeded"
     panels = [p for page in _ok(client.get(f"/chapters/{d['chapter']['id']}/pages")) for p in page["panels"]]
-    assert panels and all(p["setting"] and p["staging"] and not p["unmatched_characters"] for p in panels)
+    # Une case de décor muette (ADN de la série) n'a ni personnage ni mise en scène.
+    assert panels and all(
+        p["setting"] and (p["staging"] or not p["characters"]) and not p["unmatched_characters"] for p in panels
+    )
     both = {d["urus"]["id"], d["kael"]["id"]}
     duo = [p for p in panels if len(p["characters"]) == 2]
     assert duo

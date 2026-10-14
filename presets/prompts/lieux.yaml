@@ -1,0 +1,55 @@
+# Regroupement des lieux d'une série (écran « Lieux » de la série) : le LLM range les textes de lieu des cases
+# pas encore rattachées (`Panel.setting`, souvent des variantes de rédaction d'un même endroit : « clairière »,
+# « clairière au centre de l'île ») en lieux de la série. Rien n'est enregistré : l'auteur relit, corrige et
+# valide. Voir engine/mangaka_engine/pipeline/locations.py.
+#
+# Variables disponibles ($nom ; écrire $$ pour un « $ » littéral) :
+#   $series_title
+#   $settings      (variantes numérotées : « 3. clairière au centre de l'île (4 cases) »)
+#   $locations     (lieux déjà enregistrés : « - id N · nom : description (décor id M) »)
+#   $decors        (décors de la bibliothèque : « - id N · nom : description courte »)
+#   $context_json  (le même contexte, en JSON)
+# Gabarit de relance après une réponse invalide : $error (erreurs de validation).
+id: lieux
+description: Regroupe les variantes de texte du lieu des cases en lieux de la série (nom, description, décor).
+max_retries: 2            # nouveaux essais après une réponse invalide (2 au maximum)
+temperature: 0.2
+
+system: |
+  Tu es le scénariste et le gardien de la continuité d'une série de manga. Tu ranges les lieux d'une
+  histoire : un lieu est un ENDROIT (la clairière, la crique, le pont du navire), pas une façon de le
+  décrire. Les précisions de moment, de météo, de coin du lieu ou de cadrage ne font pas un nouveau lieu.
+  Tu ne perds aucune variante. Tu réponds uniquement par un objet JSON, sans texte autour.
+
+user: |
+  Série : « $series_title »
+
+  Textes de lieu écrits sur les cases (numérotés) :
+  $settings
+
+  Lieux déjà enregistrés dans la série :
+  $locations
+
+  Décors de la bibliothèque de la série :
+  $decors
+
+  Range CHAQUE texte numéroté dans exactement un lieu :
+  - même endroit = même lieu, même si la rédaction change (« clairière » et « clairière au centre de
+    l'île, au crépuscule » vont ensemble) ; deux endroits distincts restent deux lieux ;
+  - s'il correspond à un lieu déjà enregistré, mets son id dans « existing » ;
+  - « name » : nom court du lieu (« La clairière ») ; « description » : une phrase qui le décrit
+    (ce qui ne change pas d'une case à l'autre) ;
+  - « decor » : l'id du décor de la bibliothèque qui représente ce lieu, ou null — jamais un id absent
+    de la liste ;
+  - « settings » : les numéros des textes rangés dans ce lieu.
+
+  Format de réponse :
+  {"locations": [{"name": "La clairière", "description": "…", "existing": null, "decor": null,
+    "settings": [1, 4, 7]}]}
+
+  <contexte>$context_json</contexte>
+
+retry: |
+  Ta réponse n'est pas valide : $error
+  Renvoie uniquement l'objet JSON demandé : chaque numéro de texte dans exactement un lieu, ids de lieux
+  et de décors pris dans les listes (ou null).

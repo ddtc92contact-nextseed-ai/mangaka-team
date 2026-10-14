@@ -65,6 +65,8 @@ SERIES_TABLES = (
     "panel_dialog_turns",
     "panels",
     "pages",
+    # Lieux de la série (unité de lieu des cases) : après les cases qui s'y rattachent.
+    "series_locations",
     # Tomes : chapitres inclus et versions de couverture (fichiers sous data/projects/<série>/volumes/).
     "volume_covers",
     "volume_chapters",

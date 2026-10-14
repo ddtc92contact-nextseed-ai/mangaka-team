@@ -24,6 +24,10 @@
 #             prompts/script.yaml) et cases sans réplique par planche (dès `silent_min_panels` cases)
 #   rhythm    courbe des rythmes de page de la direction artistique : position du premier pic, respiration après
 #             un pic, pics d'affilée, pic final dans les N dernières planches (0 = libre)
+#   places    décors et rythme : case d'établissement au changement de lieu (`establishing` : la première case d'un
+#             nouveau lieu de la série est un plan large / d'ensemble, `shot_classes.wide`) et part de cases de
+#             décor muettes, sans personnage à l'image ni réplique (`silent_decor_min`) ; le lieu d'une case est
+#             son unité de lieu (lieux de la série, pipeline/locations.py), jamais son texte libre
 
 # Plans de la direction artistique comptés dans chaque famille (les autres — plongée, contre-plongée — comptent
 # dans le total sans entrer dans une famille). Plans serrés = gros plan + rapproché + insert.
@@ -61,6 +65,7 @@ defaults:
     breath_after_peak: true
     max_peaks_in_a_row: 2
     final_peak_last_pages: 2
+  places: { establishing: true, silent_decor_min: 0.03 }
 
 # Défauts des 7 genres : la prose de leur `llm_guidelines` (style_genres/), chiffrée. Seules les valeurs qui
 # changent sont écrites ; le reste vient de `defaults`.
@@ -82,6 +87,7 @@ genres:
       first_peak: { min: 0.25, max: 0.4 }
       max_peaks_in_a_row: 2
       final_peak_last_pages: 1
+    places: { silent_decor_min: 0.03 }
   # Émotions, 4 à 6 cases (3 quand une grande case porte le regard), gros plans sur les visages, monologues
   # intérieurs : plus de texte par planche.
   shojo:
@@ -101,6 +107,7 @@ genres:
       first_peak: { min: 0.3, max: 0.5 }
       max_peaks_in_a_row: 1
       final_peak_last_pages: 2
+    places: { silent_decor_min: 0.03 }
   # Public adulte, 5 à 7 cases, rythme posé, silences et cases muettes bienvenus.
   seinen:
     panels: { min_per_page: 5, max_per_page: 7 }
@@ -115,6 +122,7 @@ genres:
     dialogue: { min_per_page: 3, max_per_page: 7, min_silent_panels: 2 }
     rhythm:
       first_peak: { min: 0.3, max: 0.5 }
+    places: { silent_decor_min: 0.06 }
   # Lent et contemplatif, 5 à 7 cases, cases de décor et de détails, pas de cliffhanger forcé.
   tranche-de-vie:
     panels: { min_per_page: 5, max_per_page: 7 }
@@ -132,6 +140,7 @@ genres:
       first_peak: { min: 0.3, max: 0.6 }
       max_peaks_in_a_row: 1
       final_peak_last_pages: 0
+    places: { silent_decor_min: 0.1 }
   # Planches denses de 6 à 9 cases en gaufrier régulier, dialogues plus fournis qu'en manga.
   franco-belge:
     panels: { min_per_page: 6, max_per_page: 9 }
@@ -146,6 +155,7 @@ genres:
     dialogue: { min_per_page: 6, max_per_page: 12, min_silent_panels: 1 }
     rhythm:
       first_peak: { min: 0.25, max: 0.5 }
+    places: { silent_decor_min: 0.04 }
   # Enfants de 6 à 10 ans : simple et lisible, 3 à 5 cases, une action par case, phrases courtes.
   jeunesse:
     panels: { min_per_page: 3, max_per_page: 5 }
@@ -162,6 +172,7 @@ genres:
     rhythm:
       first_peak: { min: 0.25, max: 0.45 }
       max_peaks_in_a_row: 1
+    places: { silent_decor_min: 0.03 }
   # Quotidien et combats magiques, 4 à 6 cases, une grande case par transformation ou attaque spéciale.
   magical-girl:
     panels: { min_per_page: 4, max_per_page: 6 }
@@ -174,3 +185,4 @@ genres:
     rhythm:
       first_peak: { min: 0.25, max: 0.4 }
       max_peaks_in_a_row: 2
+    places: { silent_decor_min: 0.03 }

@@ -67,6 +67,10 @@
   existantes sont des 1res de couverture ; aucun résumé, aucun auteur.
 - 35 : ADN de la série (`projects.pre_direction` : valeurs de la charte ajustées par l'auteur). Les séries
   existantes n'ajustent rien : elles reçoivent les défauts de leur genre (presets/pre_direction.yaml).
+- 36 : unité de lieu : lieux de la série (`series_locations` : nom, description, décor de la bibliothèque) et
+  lieu de chaque case (`panels.location_id`). Aucune case n'est rattachée d'office : le texte libre
+  `panels.setting` reste intact, et le regroupement des variantes en lieux (proposé par le LLM, validé par
+  l'auteur, pipeline/locations.py) se fait depuis l'écran « Lieux » de la série.
 
 Une base neuve est créée directement à la dernière version. Chaque migration tourne dans une
 transaction unique, clés étrangères désactivées (recette « 12 étapes » de SQLite pour reconstruire
@@ -109,6 +113,7 @@ from .models import (
     SeriesAsset,
     SeriesAssetImage,
     SeriesBible,
+    SeriesLocation,
     SeriesLogo,
     Volume,
     VolumeChapter,
@@ -118,7 +123,7 @@ from .slugs import RESERVED_ENTRIES, RESERVED_SERIES, slugify, unique_slug
 
 log = logging.getLogger("mangaka_engine")
 
-SCHEMA_VERSION = 35
+SCHEMA_VERSION = 36
 
 
 class MigrationError(RuntimeError):
@@ -554,6 +559,18 @@ def _v34_to_v35(cur: sqlite3.Cursor) -> None:
         cur.execute("ALTER TABLE projects ADD COLUMN pre_direction JSON NOT NULL DEFAULT '{}'")
 
 
+def _v35_to_v36(cur: sqlite3.Cursor) -> None:
+    tables = {row[0] for row in cur.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if SeriesLocation.__tablename__ not in tables:
+        for stmt in _ddl(SeriesLocation.__table__):
+            cur.execute(stmt)
+    if "location_id" not in {row[1] for row in cur.execute("PRAGMA table_info(panels)")}:
+        cur.execute(
+            "ALTER TABLE panels ADD COLUMN location_id INTEGER REFERENCES series_locations (id) ON DELETE SET NULL"
+        )
+        cur.execute("CREATE INDEX ix_panels_location_id ON panels (location_id)")
+
+
 MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     # version de départ → (version d'arrivée, fonction)
     0: (2, _v0_to_v2),
@@ -591,6 +608,7 @@ MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     32: (33, _v32_to_v33),
     33: (34, _v33_to_v34),
     34: (35, _v34_to_v35),
+    35: (36, _v35_to_v36),
 }
 
 

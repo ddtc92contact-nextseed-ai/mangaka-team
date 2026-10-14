@@ -1,10 +1,11 @@
 """Bibliothèque d'une série : objets et décors récurrents (à côté des personnages).
 
 - `SeriesLibrary` : ce que les agents LLM (scénariste, directeur artistique) reçoivent — ids, noms et
-  descriptions courtes — et la vérification des ids qu'ils citent (`check_refs`) : un id inconnu
-  rend la réponse invalide, donc relancée comme une erreur de schéma ;
+  descriptions courtes des décors, objets et lieux de la série — et la vérification des ids qu'ils citent
+  (`check_refs`, `check_location`) : un id inconnu rend la réponse invalide, donc relancée comme une erreur de
+  schéma ;
 - `panel_assets` : décor et objets d'une case, relus en base (ids d'une autre série ou supprimés
-  ignorés) ;
+  ignorés) ; sans décor propre, le décor du lieu de la case (`SeriesLocation.decor_id`, pipeline/locations.py) ;
 - `active_style` : référence de style active de la série (planche de style), avec son image.
 """
 
@@ -18,7 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from ..presets import PresetRegistry
-from ..store.models import AssetKind, Panel, SeriesAsset
+from ..store.models import AssetKind, Panel, SeriesAsset, SeriesLocation
 
 SHORT_DESCRIPTION = 160  # caractères de description envoyés aux agents
 
@@ -30,10 +31,12 @@ def short_description(text: str | None, limit: int = SHORT_DESCRIPTION) -> str:
 
 @dataclass
 class SeriesLibrary:
-    """Objets et décors d'une série, tels que présentés aux agents : [{"id", "name", "description"}]."""
+    """Objets, décors et lieux d'une série, tels que présentés aux agents : [{"id", "name", "description"}] (et
+    "decor", id du décor d'un lieu)."""
 
     decors: list[dict[str, Any]] = field(default_factory=list)
     objets: list[dict[str, Any]] = field(default_factory=list)
+    lieux: list[dict[str, Any]] = field(default_factory=list)
 
     @classmethod
     def load(cls, session: Session, project_id: int) -> SeriesLibrary:
@@ -44,18 +47,51 @@ class SeriesLibrary:
         def entry(a: SeriesAsset) -> dict[str, Any]:
             return {"id": a.id, "name": a.name, "description": short_description(a.visual_description)}
 
+        places = session.scalars(
+            select(SeriesLocation)
+            .where(SeriesLocation.project_id == project_id)
+            .order_by(SeriesLocation.name, SeriesLocation.id)
+        ).all()
         return cls(
             decors=[entry(a) for a in rows if a.kind == AssetKind.decor],
             objets=[entry(a) for a in rows if a.kind == AssetKind.object],
+            lieux=[
+                {
+                    "id": loc.id,
+                    "name": loc.name,
+                    "description": short_description(loc.description),
+                    "decor": loc.decor_id,
+                }
+                for loc in places
+            ],
         )
 
     def as_json(self) -> dict[str, Any]:
-        return {"decors": self.decors, "objets": self.objets}
+        return {"decors": self.decors, "objets": self.objets, "lieux": self.lieux}
 
     def text(self, kind: str) -> str:
-        """« - id 3 · Le labo : description » pour un prompt ; vide sans élément."""
-        items = self.decors if kind == "decors" else self.objets
-        return "\n".join(f"- id {e['id']} · {e['name']} : {e['description'] or '(sans description)'}" for e in items)
+        """« - id 3 · Le labo : description » pour un prompt (un lieu : « (décor id 7) » en plus) ; vide sans
+        élément."""
+        items = {"decors": self.decors, "lieux": self.lieux}.get(kind, self.objets)
+        names = {e["id"]: e["name"] for e in self.decors}
+        return "\n".join(
+            f"- id {e['id']} · {e['name']} : {e['description'] or '(sans description)'}"
+            + (f" (décor : {names[e['decor']]}, id {e['decor']})" if e.get("decor") in names else "")
+            for e in items
+        )
+
+    def location_name(self, location_id: int | None) -> str | None:
+        return next((e["name"] for e in self.lieux if e["id"] == location_id), None)
+
+    def check_location(self, lieu: int | str | None) -> list[str]:
+        """Problème (lisible, renvoyé au LLM) d'un lieu cité par son id ; un nom (nouveau lieu) est toujours permis."""
+        if not isinstance(lieu, int) or any(e["id"] == lieu for e in self.lieux):
+            return []
+        choices = ", ".join(str(e["id"]) for e in self.lieux)
+        hint = (
+            f"ids possibles : {choices}, ou le nom d'un nouveau lieu" if choices else "donne le nom d'un nouveau lieu"
+        )
+        return [f"lieu : id {lieu} inconnu ({hint})"]
 
     def check_refs(self, decor: int | None, objets: Sequence[int]) -> list[str]:
         """Problèmes (lisibles, renvoyés au LLM) d'une case qui cite des ids de la bibliothèque."""
@@ -74,10 +110,22 @@ class SeriesLibrary:
         return problems
 
 
+def panel_decor_id(panel: Panel, project_id: int) -> int | None:
+    """Décor de la case : le sien, sinon celui de son lieu (référence de lieu) ; None sans l'un ni l'autre."""
+    if panel.decor_id is not None:
+        return panel.decor_id
+    location = panel.location if panel.location_id is not None else None
+    if location is not None and location.project_id == project_id:
+        return location.decor_id
+    return None
+
+
 def panel_assets(session: Session, panel: Panel, project_id: int) -> tuple[SeriesAsset | None, list[SeriesAsset]]:
-    """(décor, objets) d'une case, avec leurs images de référence, dans l'ordre de la case."""
+    """(décor, objets) d'une case, avec leurs images de référence, dans l'ordre de la case. Le décor est celui de
+    la case, sinon celui de son lieu."""
     object_ids = [i for i in panel.object_ids or [] if isinstance(i, int)]
-    ids = [*([panel.decor_id] if panel.decor_id is not None else []), *object_ids]
+    decor_id = panel_decor_id(panel, project_id)
+    ids = [*([decor_id] if decor_id is not None else []), *object_ids]
     if not ids:
         return None, []
     found = {
@@ -88,7 +136,7 @@ def panel_assets(session: Session, panel: Panel, project_id: int) -> tuple[Serie
             .options(selectinload(SeriesAsset.reference_images))
         )
     }
-    decor = found.get(panel.decor_id) if panel.decor_id is not None else None
+    decor = found.get(decor_id) if decor_id is not None else None
     if decor is not None and decor.kind != AssetKind.decor:
         decor = None
     objects = [found[i] for i in dict.fromkeys(object_ids) if i in found and found[i].kind == AssetKind.object]

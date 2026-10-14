@@ -72,6 +72,7 @@ def test_presets_endpoint(client: TestClient) -> None:
     assert data["prompts"] == [
         "direction-artistique",
         "fiche-intervenant",
+        "lieux",
         "logo",
         "palette",
         "redacteur-couverture",
