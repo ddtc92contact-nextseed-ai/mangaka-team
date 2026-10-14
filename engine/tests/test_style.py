@@ -68,6 +68,7 @@ def test_v1_packs_are_loaded_in_order_with_their_defaults() -> None:
     assert list(REG.style_tones) == ["lumineux", "neutre", "dark", "humour"]
     assert (REG.default_style_rendering, REG.default_style_tone) == ("nb-trames", "neutre")
     assert {k: list(o.choices) for k, o in REG.style_options.options.items()} == {
+        "dessin": ["detaille", "epure"],
         "trait": ["fin", "moyen", "epais"],
         "trames": ["legeres", "moyennes", "denses"],
         "detail": ["simple", "moyen", "riche"],
@@ -85,15 +86,22 @@ def test_v1_packs_are_loaded_in_order_with_their_defaults() -> None:
 
 
 def test_v1_packs_carry_the_calibrated_keywords_and_their_language() -> None:
-    # Finition (pièce réservée `$finition`, test_finition.py) : « propre » n'a aucun mot-clé.
-    choices = [c for o in REG.style_options.options.values() if o.piece is None for c in o.choices.values()]
+    # Finition (pièce réservée `$finition`, test_finition.py) : « propre » n'a aucun mot-clé ; « Détaillé (genre) »
+    # du dessin non plus (test_drawing.py).
+    choices = [
+        c
+        for o in REG.style_options.options.values()
+        if o.piece is None
+        for c in o.choices.values()
+        if c.prompt_keywords or not any(x.replaces for x in o.choices.values())
+    ]
     packs: list[StylePack | StyleOptionChoice] = [
         *REG.style_genres.values(),
         *REG.style_renderings.values(),
         *REG.style_tones.values(),
         *choices,
     ]
-    assert len(packs) == 7 + 4 + 4 + 9
+    assert len(packs) == 7 + 4 + 4 + 9 + 1
     for pack in packs:
         # Tout le texte côté image est en anglais depuis le 11/10/2026 (langue de Qwen-Image 2.1).
         assert pack.lang == "en" and pack.prompt_keywords and all(pack.prompt_keywords), pack
@@ -363,7 +371,7 @@ def test_presets_endpoint_lists_the_packs(client: TestClient) -> None:
         ("nb-trames", "N&B à trames")
     ]
     assert {r["id"]: r["monochrome"] for r in data["style_renderings"]}["couleur"] is False
-    assert [o["id"] for o in data["style_options"]] == ["trait", "trames", "detail", "finition"]
+    assert [o["id"] for o in data["style_options"]] == ["dessin", "trait", "trames", "detail", "finition"]
     assert any(lo["file"] == "encre-seinen_v2.safetensors" for lo in data["style_loras"])
 
 

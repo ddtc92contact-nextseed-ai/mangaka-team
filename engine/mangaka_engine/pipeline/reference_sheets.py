@@ -76,7 +76,7 @@ from .jobs import JobReporter
 from .journal import REFERENCE_VARIANT, JournalEntry, failure_text
 from .library import active_style, style_for
 from .prompt import build_negative_prompt
-from .style import series_style
+from .style import drawing_record, series_style, series_subject, series_subject_negative
 
 STEP = "reference"
 ACTIVE = (JobStatus.pending, JobStatus.running)
@@ -159,6 +159,12 @@ def _clean(text: str | None) -> str:
     return " ".join((text or "").split()).rstrip(" .;,:")
 
 
+def _sentence(text: str | None) -> str:
+    """Morceau qui forme une phrase à lui seul : majuscule en tête (« Plain smooth untextured surfaces, … »)."""
+    text = _clean(text)
+    return text[:1].upper() + text[1:]
+
+
 def large_build(sheet: ReferenceSheet, entry: LibraryEntry) -> list[str]:
     """Mots de `large_build_keywords` du type de fiche trouvés (mots entiers, sans casse) dans la description
     visuelle ou les mots-clés de la fiche : personnage grand, géant, trapu… à faire tenir en entier."""
@@ -197,6 +203,8 @@ def sheet_prompt(
         "start": "<image1>" if start else "",
         "style_ref": f"<image{style_slot}>" if style_slot else "",
         "large_build": ", ".join(large_build(sheet, entry)),
+        # Dessin « Épuré » : mots anti-détail contre ceux de la description ; vide sinon (prompt inchangé).
+        "subject": _sentence(series_subject(presets, series)),
     }
     parts: list[str] = []
     for part in sheet.prompt:
@@ -258,14 +266,19 @@ def sheet_params(
     *,
     seed: int | None = None,
     filename_prefix: str | None = None,
+    series: Project | None = None,
 ) -> dict[str, Any]:
     """Paramètres mappés du workflow : prompts, seed, taille du type de fiche.
 
     Prompt négatif : celui du type de fiche (« person, people… » pour un objet ou un décor), sinon celui
     du workflow — jamais les deux : le négatif des cases exclut « character sheet, white background »,
-    soit exactement ce qu'est une fiche de personnage. Termes « pas de texte » toujours ajoutés.
+    soit exactement ce qu'est une fiche de personnage. Termes « pas de texte » toujours ajoutés, puis (avec
+    `series`) les termes négatifs du dessin « Épuré » (lus au palier Qualité seulement).
     """
     negative = sheet.negative_prompt.strip() or str(loaded.preset.defaults.get("negative_prompt", "")).strip()
+    extra = series_subject_negative(presets, series) if series is not None else []
+    if extra:
+        negative = ", ".join(p for p in (negative.rstrip(" ,"), ", ".join(extra)) if p)
     params: dict[str, Any] = {
         "positive_prompt": prompt,
         "negative_prompt": build_negative_prompt(negative, presets.image_prompt),
@@ -327,14 +340,19 @@ def enqueue_sheet(
     instruction: str = "",
     start: ReferenceImage | None = None,
     auto_keep: bool = False,
+    rebase: bool = False,
 ) -> list[Job]:
     """Crée `count` jobs `reference` en attente (sans commit).
 
     `parent` : « Affiner » depuis cette variante ; `start` : image de départ (une image de référence de la
     fiche). Sans l'un ni l'autre, la fiche part de zéro (texte → image). `auto_keep` (« Tout créer pour les
     secondaires » de la distribution, pipeline/cast.py) : la variante est gardée comme référence d'office si la
-    fiche n'en a encore aucune ; l'auteur peut la remplacer ensuite.
+    fiche n'en a encore aucune ; l'auteur peut la remplacer ensuite. `rebase` (« Refaire la base en épuré ») :
+    toujours à partir de zéro — l'image de départ figerait l'ancien rendu — et la variante gardée devient
+    l'image principale de la fiche, l'ancienne base restant parmi ses images (`keep_variant`).
     """
+    if rebase and (parent is not None or start is not None):
+        raise GenerationError("« Refaire la base » part sans image de départ")
     if not 1 <= count <= MAX_VARIANTS:
         raise GenerationError(f"entre 1 et {MAX_VARIANTS} variantes par demande")
     kind = entry_kind(entry)
@@ -394,7 +412,10 @@ def enqueue_sheet(
                 "start_image_id": start.id if start is not None else None,
                 "instruction": instruction,
                 "style_asset_id": style.id if style is not None else None,
+                # Dessin de la série à la génération (« Épuré »…) : « Créée avec l'ancien rendu » sinon.
+                "drawing": drawing_record(presets, series),
                 **({"auto_keep": True} if auto_keep else {}),
+                **({"rebase": True} if rebase else {}),
             },
         )
         session.add(job)
@@ -506,7 +527,8 @@ def next_position(entry: LibraryEntry) -> int:
 def keep_variant(
     session: Session, files: FileStore, entry: LibraryEntry, variant: ReferenceVariant, *, accept_people: bool = False
 ) -> ReferenceImage:
-    """Copie la variante parmi les images de référence de la fiche (dernière position) ; sans commit.
+    """Copie la variante parmi les images de référence de la fiche (dernière position ; en tête pour une variante
+    de « Refaire la base », qui devient l'image principale) ; sans commit.
 
     Fiche d'objet ou de décor où un personnage a été détecté : refusé, sauf acceptation à la main
     (`accept_people`, notée sur la variante) — sinon ce personnage apparaîtrait dans chaque case.
@@ -537,6 +559,12 @@ def keep_variant(
         "position": next_position(entry),
         "angle": variant_angle(variant),
     }
+    if (variant.params or {}).get("rebase"):
+        # « Refaire la base » : la nouvelle image devient la principale ; l'ancienne base et les autres images
+        # restent, décalées d'un rang (rien n'est effacé).
+        for img in entry.reference_images:
+            img.position += 1
+        values["position"] = 0
     image: ReferenceImage
     if isinstance(entry, Character):
         image = CharacterImage(**values)
@@ -550,6 +578,8 @@ def keep_variant(
         files.delete(stored.path)
         raise
     variant.kept_image_id = image.id
+    if values["position"] == 0:
+        session.expire(entry, ["reference_images"])  # relue dans le nouvel ordre
     return image
 
 
@@ -773,6 +803,7 @@ class ReferenceExecutor:
                     presets,
                     seed=params.get("seed"),
                     filename_prefix=prefix,
+                    series=series,
                 )
             else:
                 mapped = angle_params(loaded, presets, entry_kind(entry), params, filename_prefix=prefix)
@@ -911,6 +942,9 @@ class ReferenceExecutor:
                     "duration_ms": duration_ms,
                     "comfyui_prompt_id": prompt_id,
                     "comfyui": comfy.name,
+                    # Dessin de la série à la génération (« Nouvel angle » n'en note pas : il garde celui de sa vue).
+                    **({"drawing": params["drawing"]} if isinstance(params.get("drawing"), dict) else {}),
+                    **({"rebase": True} if params.get("rebase") else {}),
                     **({"people_check": check} if check is not None else {}),
                 },
             )

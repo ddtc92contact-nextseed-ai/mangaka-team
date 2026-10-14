@@ -59,6 +59,7 @@ prompt:
   - "Requested change: $instruction."
   - "$start is the starting image: keep the subject, the silhouette and the outfit, and redraw them cleanly in the three requested views, each one complete from head to toe."
   - "Style: $style."
+  - "$subject."
   - "The last image ($style_ref) is a style reference only (line work, screentones, inking): do not copy its character, scene or composition."
   - "Plain white background, neutral lighting, no text or captions."
 negative_prompt: "extra characters, background people, text, different characters, cropped views, background scenery, cropped legs, cut-off feet, feet out of frame, cropped head, out of frame, partial body, half body, knee-up shot, cowboy shot, close-up"

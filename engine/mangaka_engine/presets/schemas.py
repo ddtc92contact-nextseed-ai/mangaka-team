@@ -893,25 +893,39 @@ def _check_keywords(value: list[str]) -> list[str]:
     return list(dict.fromkeys(out))
 
 
-def _split_people(data: Any) -> Any:
+def _split_people(data: Any, *, monochrome: bool = False) -> Any:
     """`prompt_keywords` du YAML : un mot-clé est un texte, ou `{text: …, people: true}` s'il évoque des
-    personnes (« sourire », « jeune héros ») ; ces derniers sont recopiés dans `people_keywords`."""
+    personnes (« sourire », « jeune héros ») ; ces derniers sont recopiés dans `people_keywords`.
+    `monochrome` (choix d'un réglage fin) : `{text: …, monochrome: true}` permis en plus, recopié dans
+    `monochrome_keywords` (mot-clé gardé seulement sur un rendu noir et blanc : « flat white paper »)."""
     if not isinstance(data, dict) or not isinstance(data.get("prompt_keywords"), list):
         return data
     words: list[Any] = []
     people = list(data.get("people_keywords") or [])
+    mono = list(data.get("monochrome_keywords") or [])
+    flags = ("people", "monochrome") if monochrome else ("people",)
     for item in data["prompt_keywords"]:
         if isinstance(item, dict):
-            unknown = set(item) - {"text", "people"}
-            if unknown or not isinstance(item.get("text"), str) or not isinstance(item.get("people", False), bool):
-                raise ValueError("mot-clé : un texte, ou {text: « … », people: true|false}")
+            unknown = set(item) - {"text", *flags}
+            if (
+                unknown
+                or not isinstance(item.get("text"), str)
+                or any(not isinstance(item.get(f, False), bool) for f in flags)
+            ):
+                shape = ", ".join(f"{f}: true|false" for f in flags)
+                raise ValueError(f"mot-clé : un texte, ou {{text: « … », {shape}}}")
             text = " ".join(item["text"].split())
             words.append(text)
             if item.get("people"):
                 people.append(text)
+            if item.get("monochrome"):
+                mono.append(text)
         else:
             words.append(item)
-    return {**data, "prompt_keywords": words, "people_keywords": list(dict.fromkeys(people))}
+    out = {**data, "prompt_keywords": words, "people_keywords": list(dict.fromkeys(people))}
+    if mono:
+        out["monochrome_keywords"] = list(dict.fromkeys(mono))
+    return out
 
 
 class StylePack(_Strict):
@@ -986,19 +1000,31 @@ class StyleTone(StylePack):
 
 class StyleOptionChoice(_Strict):
     name: str = Field(min_length=1)
-    # Vide seulement pour un réglage à pièce réservée (`StyleOption.piece`) : « propre » n'ajoute rien.
+    # Vide seulement pour un réglage à pièce réservée (`StyleOption.piece`) : « propre » n'ajoute rien ; ou pour
+    # le choix neutre d'un réglage qui remplace (« Détaillé (genre) » du réglage `dessin`).
     prompt_keywords: list[str] = Field(default_factory=list)
     people_keywords: list[str] = Field(default_factory=list)  # voir StylePack
-    # Termes ajoutés au prompt négatif de la case (lus à vrai CFG seulement, palier Qualité).
+    # Mots-clés gardés seulement sur un rendu noir et blanc (« flat white paper ») ; dans le YAML :
+    # `{text: …, monochrome: true}` dans prompt_keywords.
+    monochrome_keywords: list[str] = Field(default_factory=list)
+    # Termes ajoutés au prompt négatif de la case (lus à vrai CFG seulement, palier Qualité) ; avec `replaces`,
+    # à celui des fiches de référence aussi.
     negative_keywords: list[str] = Field(default_factory=list)
+    # Remplacer au lieu d'ajouter (réglage `dessin`, 14/10/2026) : mots-clés (sans casse) retirés de `$style`
+    # — genre, rendu, ton et autres réglages fins — et des morceaux de la phrase de style (`lead` du rendu,
+    # coupé aux virgules, et 1er mot-clé du genre) ; les mots-clés du choix passent alors en tête des packs.
+    replaces: list[str] = Field(default_factory=list)
+    # Avec `replaces` seulement : mots ajoutés au prompt positif des fiches (`$subject`) et des cases (pièce
+    # `$finition`), hors `$style`, contre le détail que ramène la description (« no mechanical panel lines »).
+    subject_keywords: list[str] = Field(default_factory=list)
     lang: StyleLang = Field(description="Langue des mots-clés, choisie au calibrage (informatif)")
 
     @model_validator(mode="before")
     @classmethod
     def _people(cls, data: Any) -> Any:
-        return _split_people(data)
+        return _split_people(data, monochrome=True)
 
-    @field_validator("prompt_keywords")
+    @field_validator("prompt_keywords", "subject_keywords")
     @classmethod
     def _keywords(cls, value: list[str]) -> list[str]:
         return _check_keywords(value)
@@ -1010,6 +1036,25 @@ class StyleOptionChoice(_Strict):
         if any(not k or "," in k for k in out):
             raise ValueError("terme négatif vide ou contenant une virgule")
         return list(dict.fromkeys(out))
+
+    @field_validator("replaces")
+    @classmethod
+    def _replaces(cls, value: list[str]) -> list[str]:
+        out = [" ".join(k.split()) for k in value]
+        if any(not k or "," in k for k in out):
+            raise ValueError("mot-clé remplacé vide ou contenant une virgule")
+        return list(dict.fromkeys(out))
+
+    @model_validator(mode="after")
+    def _replacing(self) -> StyleOptionChoice:
+        if self.subject_keywords and not self.replaces:
+            raise ValueError("subject_keywords permis seulement avec `replaces`")
+        if self.replaces and not self.prompt_keywords:
+            raise ValueError("un choix qui remplace (`replaces`) apporte ses propres mots-clés")
+        missing = [k for k in self.monochrome_keywords if k not in self.prompt_keywords]
+        if missing:
+            raise ValueError(f"mot-clé N&B absent de prompt_keywords : « {missing[0]} »")
+        return self
 
 
 # Pièces réservées d'image_prompt.yaml qu'un réglage fin peut remplir à la place de `$style`.
@@ -1037,13 +1082,19 @@ class StyleOption(_Strict):
 
     @model_validator(mode="after")
     def _keywords(self) -> StyleOption:
+        # Réglage qui remplace (un choix a `replaces`) : son choix neutre (« Détaillé ») peut être vide.
+        replacing = any(c.replaces for c in self.choices.values())
         if self.piece is None:
-            empty = [k for k, c in self.choices.items() if not c.prompt_keywords]
+            empty = [k for k, c in self.choices.items() if not c.prompt_keywords and not replacing]
             if empty:
-                raise ValueError(f"choix « {empty[0]} » sans mot-clé (permis seulement avec `piece`)")
-            negative = [k for k, c in self.choices.items() if c.negative_keywords]
+                raise ValueError(f"choix « {empty[0]} » sans mot-clé (permis seulement avec `piece` ou `replaces`)")
+            negative = [k for k, c in self.choices.items() if c.negative_keywords and not c.replaces]
             if negative:
-                raise ValueError(f"choix « {negative[0]} » : negative_keywords permis seulement avec `piece`")
+                raise ValueError(
+                    f"choix « {negative[0]} » : negative_keywords permis seulement avec `piece` ou `replaces`"
+                )
+        elif replacing:
+            raise ValueError("`replaces` n'est pas permis dans un réglage à pièce réservée (`piece`)")
         return self
 
 
@@ -2156,6 +2207,7 @@ REFERENCE_SHEET_VARIABLES = {
     "start",
     "style_ref",
     "large_build",
+    "subject",
 }
 # Sous-dossiers de la bibliothèque lisible tenus par l'appli (vues de « Nouvel angle », images envoyées).
 REFERENCE_SHEET_RESERVED_FOLDERS = frozenset({"angles", "imports"})
@@ -2170,7 +2222,9 @@ class ReferenceSheet(_Strict):
     $instruction (consigne d'« Affiner », vide pour une première génération), $start (« image 1 » si
     une image de départ est envoyée, vide sinon), $style_ref (« image N » si la référence de style de
     la série est jointe, toujours en dernier, vide sinon), $large_build (mots de `large_build_keywords`
-    trouvés dans la description ou les mots-clés de la fiche — personnage grand, géant, trapu… —, vide sinon).
+    trouvés dans la description ou les mots-clés de la fiche — personnage grand, géant, trapu… —, vide sinon),
+    $subject (mots anti-détail du dessin choisi par la série, `subject_keywords` du réglage `dessin` « Épuré »
+    de style_options.yaml, vide sinon).
     """
 
     id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")

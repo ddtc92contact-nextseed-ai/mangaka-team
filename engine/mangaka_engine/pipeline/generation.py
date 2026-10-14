@@ -138,11 +138,11 @@ from .prompt_writer import PROMPT_ID as WRITER_PROMPT_ID
 from .prompt_writer import PromptBrief, PromptWriterError, WriteRun, write_prompt
 from .style import (
     series_finition,
-    series_finition_negative,
     series_monochrome,
     series_rendering,
     series_style,
     series_style_lead,
+    series_style_negative,
 )
 
 log = logging.getLogger("mangaka_engine")
@@ -1636,7 +1636,8 @@ class GenerationExecutor:
                 negative = merge_negative(negative, rendering.tonality_negative)
             # Finition de la série (croquis, scan…) : son négatif anti-lisse, lu lui aussi à vrai CFG seulement
             # (cfg > 1) ; en Turbo, Rapide et croquis, seuls ses mots-clés du prompt positif (`$finition`) portent.
-            negative = merge_negative(negative, ", ".join(series_finition_negative(presets, chapter.project)))
+            # Dessin « Épuré » : son négatif anti-détail (panneaux mécaniques, rivets…), au même régime.
+            negative = merge_negative(negative, ", ".join(series_style_negative(presets, chapter.project)))
             params: dict[str, Any] = {
                 "positive_prompt": prompt,
                 "negative_prompt": negative,

@@ -4,6 +4,74 @@
 # Un réglage non choisi n'ajoute rien au prompt. Ordre des réglages = ordre dans le prompt.
 # Champs : voir presets/README.md (« Packs de style »).
 options:
+  # Dessin des personnages (14/10/2026) : « Épuré » REMPLACE au lieu d'ajouter. Mesuré sur le projet 3 (seinen,
+  # N&B à trames, 14 générations, code de l'appli) : la chaîne complète + des mots épurés ajoutés sort très
+  # détaillée (P1) ; la même chaîne où les mots de détail sont remplacés sort épurée (P2). Champs :
+  # - `replaces` : mots-clés retirés de `$style` (genre, rendu, ton, autres réglages) et des morceaux de la
+  #   phrase de style (`lead` du rendu, coupé aux virgules) ; les mots-clés du choix passent en tête des packs,
+  #   juste après les mots déclencheurs du LoRA (la recette mesurée part entière) ;
+  # - `{text: …, monochrome: true}` : mot-clé gardé seulement sur un rendu N&B (papier blanc, trames grises) ;
+  # - `subject_keywords` : mots anti-détail génériques ajoutés au prompt positif des fiches ($subject) et des cases
+  #   ($finition), hors `$style` — une fois la chaîne épurée, la description reprend la main (« combinaison style
+  #   mechatronique » ramenait des panneaux d'armure) ;
+  # - `negative_keywords` : ajoutés au prompt négatif des fiches et des cases, lu au palier Qualité seulement.
+  # « Détaillé (genre) » (ou « Par défaut ») : rien ne change, `$style` identique octet pour octet.
+  # L'image de départ fige le rendu : une fiche créée avant le passage en Épuré garde son trait, et ses variantes
+  # aussi (« Refaire la base en épuré » sur la fiche, sans image de départ).
+  dessin:
+    name: Dessin des personnages
+    description: >-
+      Épuré : traits fins et simples, peu de détails, pour que la série ne ressemble pas aux autres. Détaillé :
+      le dessin du genre (rendu actuel).
+    choices:
+      detaille:
+        name: Détaillé (genre)
+        lang: en
+        prompt_keywords: []
+      epure:
+        name: Épuré
+        lang: en
+        prompt_keywords:
+          - clean simple manga line art
+          - thin uniform black outlines
+          - { text: flat white paper, monochrome: true }
+          - { text: a few flat grey screentone areas, monochrome: true }
+          - no shading
+          - no gradients
+          - no hatching
+          - minimal detail
+          - simplified facial features
+          - { text: large empty white areas, monochrome: true }
+          - uncluttered
+        replaces:
+          # genre
+          - mature detailed ink style
+          - delicate flowery linework
+          # rendu (mots-clés et morceaux de la phrase de style)
+          - halftone screentone dots
+          - regular grey dot pattern
+          - cross-hatching
+          - cel shading
+          - hand-drawn inked line art with halftone screentone shading
+          - hand-drawn inked line art with cross-hatching and solid blacks
+          # réglages fins
+          - thick bold linework
+          - heavy inking
+          - medium-density halftone dot screentone
+          - medium grey
+          - dense dark screentone
+          - many intricate details
+        subject_keywords:
+          - plain smooth untextured surfaces
+          - no mechanical panel lines
+          - no rivets
+          - no greebles
+        negative_keywords:
+          - mechanical panel lines
+          - rivets
+          - sci-fi greebles
+          - intricate details
+          - cross-hatching
   trait:
     name: Trait
     description: Épaisseur du trait d'encrage.

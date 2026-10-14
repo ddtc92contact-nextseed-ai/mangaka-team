@@ -1237,6 +1237,9 @@ class ReferenceGenerateIn(_In):
     # Image de départ facultative : une image de référence de la fiche (image 1 du workflow « avec
     # références ») ; absente = à partir de zéro, depuis la description seule.
     start_image_id: int | None = None
+    # « Refaire la base en épuré » : à partir de zéro (jamais d'image de départ), la variante gardée devient
+    # l'image principale ; l'ancienne base reste parmi les images de la fiche.
+    rebase: bool = False
 
 
 class AngleViewIn(_In):
@@ -1323,6 +1326,16 @@ class ReferenceVariantOut(BaseModel):
     created_at: datetime
 
 
+class StaleDrawingOut(BaseModel):
+    """« Créée avec l'ancien rendu (détaillé) » : la base de la fiche garde son trait, ses variantes aussi."""
+
+    option: str  # réglage de style_options.yaml (`dessin`)
+    message: str  # « Créée avec l'ancien rendu (détaillé) »
+    action: str  # « Refaire la base en épuré »
+    image_id: int  # image principale concernée
+    sheet: str  # type de fiche de cette image, à refaire
+
+
 class ReferenceStudioOut(BaseModel):
     """Historique des variantes d'une fiche (plus récentes d'abord) et générations en cours."""
 
@@ -1331,6 +1344,8 @@ class ReferenceStudioOut(BaseModel):
     max_kept: int
     kept_count: int
     reference_slots: int  # emplacements d'images de référence d'une case (workflow « avec références »)
+    # Image principale créée avec un autre dessin que celui de la série (« Épuré ») ; None sinon.
+    stale_drawing: StaleDrawingOut | None = None
 
 
 # --- Planche de style ---------------------------------------------------------------
