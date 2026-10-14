@@ -1,0 +1,25 @@
+# Type de fiche de référence : voir presets/README.md (« Fiches de référence »).
+id: vehicule-turnaround
+name: Profil / face / dessus / arrière (turnaround)
+description: "Le même véhicule vu de profil, de face, de dessus et de l'arrière, mêmes proportions sur toutes les vues."
+kinds: [vehicle]
+order: 20
+# Angles de case que montre cette fiche : pour une case de profil, de dos ou en plongée, cette planche passe
+# avant la vue 3/4 (la vue qui correspond au cadrage d'abord).
+angles: [de profil, de dos, plongée, en plongée]
+# Sous-dossier de la bibliothèque lisible (references/vehicules/<nom>/turnaround/).
+folder: turnaround
+width: 1536
+height: 864
+workflow: qwen-image-base-qualite
+prompt:
+  - "Vehicle turnaround sheet of $name: four orthographic views side by side on one line — side view, front view, top view and rear view — the same vehicle at the same scale in every view."
+  - "$description."
+  - "Details: $keywords."
+  - "Requested change: $instruction."
+  - "$start is the starting image: keep the vehicle, its silhouette, proportions and markings, and redraw it cleanly in the four requested views."
+  - "Style: $style."
+  - "$subject."
+  - "The last image ($style_ref) is a style reference only (line work, screentones, inking): do not copy its character, scene or composition."
+  - "Same proportions, colours and markings in all four views, each view whole and uncropped, empty vehicle with no pilot or driver visible, plain white background, neutral lighting, no scenery, no text or captions."
+negative_prompt: "person, people, human, character, pilot, driver, passenger, face, hands, figure, crowd, landscape, road, sky, scenery, background scenery, text, cropped vehicle, perspective distortion, different vehicles"

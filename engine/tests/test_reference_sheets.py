@@ -37,7 +37,14 @@ from tests.test_migrations import _columns, _drop_v16_style
 
 REG = PresetRegistry.load(PRESETS_DIR)
 SHEETS_DIR = PRESETS_DIR / "reference_sheets"
-SEGMENTS = {"character": "characters", "object": "objects", "decor": "decors"}
+SEGMENTS = {
+    "character": "characters",
+    "object": "objects",
+    "decor": "decors",
+    "vehicle": "vehicles",
+    "creature": "creatures",
+}
+KINDS = list(SEGMENTS)
 
 
 def _ok(resp: httpx.Response, status: int = 200) -> Any:
@@ -74,7 +81,7 @@ def test_every_sheet_preset_file_loads_and_builds_a_workflow() -> None:
     assert not [i for i in REG.issues if i.file.startswith("reference_sheets")], REG.issues
     ids = [yaml.safe_load(f.read_text(encoding="utf-8"))["id"] for f in files]
     assert sorted(ids) == sorted(REG.reference_sheets)
-    for kind in ("character", "object", "decor"):
+    for kind in KINDS:
         assert any(kind in s.kinds for s in REG.reference_sheets.values()), kind
     names = {s.name for s in REG.reference_sheets.values()}
     assert {"Portrait de face", "Plein pied face / profil / dos (turnaround)", "Expressions"} <= names
@@ -118,6 +125,12 @@ def test_a_new_sheet_type_is_a_file_and_bad_files_are_reported(tmp_path: Path) -
     (folder / "z-workflow.yaml").write_text(yaml.safe_dump({**bad, "id": "z2", "prompt": ["$name"], "workflow": "?"}))
     (folder / "z-sorte.yaml").write_text(yaml.safe_dump({**bad, "id": "z3", "prompt": ["$name"], "kinds": ["lieu"]}))
     (folder / "z-taille.yaml").write_text(yaml.safe_dump({**bad, "id": "z4", "prompt": ["$name"], "width": 1001}))
+    (folder / "vehicule-eclate.yaml").write_text(
+        yaml.safe_dump({**bad, "id": "vehicule-eclate", "prompt": ["Vue éclatée de $name."], "kinds": ["vehicle"]})
+    )
+    (folder / "z-vaisseau.yaml").write_text(
+        yaml.safe_dump({**bad, "id": "z5", "prompt": ["$name"], "kinds": ["vehicle", "vaisseau"]})
+    )
 
     reg = PresetRegistry.load(root)
     assert reg.reference_sheet("objet-eclate").workflow == "qwen-image-base"
@@ -126,7 +139,12 @@ def test_a_new_sheet_type_is_a_file_and_bad_files_are_reported(tmp_path: Path) -
     assert "workflow inconnu" in problems["reference_sheets/z-workflow.yaml"]
     assert "kinds" in problems["reference_sheets/z-sorte.yaml"]
     assert "width" in problems["reference_sheets/z-taille.yaml"]
-    assert not {"z1", "z2", "z3", "z4"} & set(reg.reference_sheets)
+    assert not {"z1", "z2", "z3", "z4", "z5"} & set(reg.reference_sheets)
+    # Une fiche `kinds: [vehicle]` est valide ; une sorte inconnue est refusée avec un message lisible.
+    assert reg.reference_sheet("vehicule-eclate").kinds == ["vehicle"]
+    assert problems["reference_sheets/z-vaisseau.yaml"] == (
+        "kinds : sorte de fiche inconnue : vaisseau (sortes possibles : character, object, decor, vehicle, creature)"
+    )
 
 
 def test_sheets_are_listed_per_kind(c: TestClient) -> None:
@@ -282,7 +300,13 @@ def _create_entry(c: TestClient, kind: str) -> tuple[dict[str, Any], dict[str, A
         ),
         201,
     )
-    names = {"character": "Aiko", "object": "Robot R-2", "decor": "Le labo"}
+    names = {
+        "character": "Aiko",
+        "object": "Robot R-2",
+        "decor": "Le labo",
+        "vehicle": "Le Faucon",
+        "creature": "Momo",
+    }
     entry = _ok(
         c.post(
             f"/projects/{s['id']}/{SEGMENTS[kind]}",
@@ -293,10 +317,16 @@ def _create_entry(c: TestClient, kind: str) -> tuple[dict[str, Any], dict[str, A
     return s, entry
 
 
-FIRST_SHEET = {"character": "personnage-portrait", "object": "objet-trois-quarts", "decor": "decor-plan-large"}
+FIRST_SHEET = {
+    "character": "personnage-portrait",
+    "object": "objet-trois-quarts",
+    "decor": "decor-plan-large",
+    "vehicle": "vehicule-trois-quarts",
+    "creature": "creature-portrait",
+}
 
 
-@pytest.mark.parametrize("kind", ["character", "object", "decor"])
+@pytest.mark.parametrize("kind", KINDS)
 def test_generate_refine_keep_reorder_then_used_by_panels(c: TestClient, comfy: MockComfyUIClient, kind: str) -> None:
     segment = SEGMENTS[kind]
     s, entry = _create_entry(c, kind)
@@ -306,7 +336,7 @@ def test_generate_refine_keep_reorder_then_used_by_panels(c: TestClient, comfy: 
     assert len(jobs) == 4  # 4 variantes par défaut
     assert all(j["step"] == "reference" and j["status"] == "pending" for j in jobs)
     assert [j["params"]["variant"] for j in jobs] == [1, 2, 3, 4]
-    # Personnage : palier des fiches (Turbo). Objet et décor : palier Qualité imposé (vrai CFG, négatif lu).
+    # Personnage : palier des fiches (Turbo). Les autres : palier Qualité imposé (vrai CFG, négatif lu).
     tier = ("qwen-image-turbo", "Turbo") if kind == "character" else ("qwen-image-base-qualite", "Qualité")
     assert (jobs[0]["params"]["preset"], jobs[0]["params"]["tier"]) == tier
     _idle(c)
@@ -540,6 +570,8 @@ def test_database_v11_keeps_reference_order(make_settings: Callable[..., Setting
 # --- fiches d'objet et de décor : personne dedans -------------------------------------------------
 OBJECT_NEGATIVE = "person, people, human, character, face, hands, figure, crowd, text"
 DECOR_NEGATIVE = "person, people, human, character, figure, crowd, silhouette, animal, text, close-up"
+VEHICLE_NEGATIVE = "person, people, human, character, pilot, driver, passenger, face, hands, figure, crowd, landscape"
+CREATURE_NEGATIVE = "human, person, people, man, woman, child, rider, owner, extra creatures, second animal"
 
 
 class _FaceDetector:
@@ -583,6 +615,10 @@ def test_object_and_decor_sheets_drop_people_keywords_and_use_their_own_negative
         ("objet-trois-quarts", "object", OBJECT_NEGATIVE),
         ("decor-plan-large", "decor", DECOR_NEGATIVE),
         ("decor-autre-angle", "decor", DECOR_NEGATIVE),
+        ("vehicule-trois-quarts", "vehicle", VEHICLE_NEGATIVE),
+        ("vehicule-turnaround", "vehicle", VEHICLE_NEGATIVE),
+        ("creature-portrait", "creature", CREATURE_NEGATIVE),
+        ("creature-turnaround", "creature", "human character, person, people"),
     ):
         sheet = REG.reference_sheet(sheet_id)
         prompt = sheet_prompt(REG, sheet, _entry(kind), series)
@@ -598,7 +634,10 @@ def test_object_and_decor_sheets_drop_people_keywords_and_use_their_own_negative
         assert wf["9"]["inputs"]["cfg"] == 2.5
 
 
-@pytest.mark.parametrize(("kind", "sheet"), [("object", "objet-trois-quarts"), ("decor", "decor-plan-large")])
+@pytest.mark.parametrize(
+    ("kind", "sheet"),
+    [("object", "objet-trois-quarts"), ("decor", "decor-plan-large"), ("vehicle", "vehicule-turnaround")],
+)
 def test_object_and_decor_sheets_never_get_the_style_board(
     make_settings: Callable[..., Settings], comfy: MockComfyUIClient, kind: str, sheet: str
 ) -> None:
@@ -632,7 +671,7 @@ def test_object_and_decor_sheets_never_get_the_style_board(
             assert variant["people_warning"] is None and variant["params"]["people_check"]["status"] == "done"
 
 
-@pytest.mark.parametrize("kind", ["object", "decor"])
+@pytest.mark.parametrize("kind", ["object", "decor", "vehicle"])
 def test_face_detected_in_an_object_or_decor_sheet_warns_and_blocks_panel_use(
     make_settings: Callable[..., Settings], comfy: MockComfyUIClient, kind: str
 ) -> None:
@@ -670,18 +709,21 @@ def test_face_detected_in_an_object_or_decor_sheet_warns_and_blocks_panel_use(
         assert variant["kept"] and variant["people_accepted"]
 
 
+@pytest.mark.parametrize("kind", ["character", "creature"])
 def test_character_sheets_are_not_checked_for_people(
-    make_settings: Callable[..., Settings], comfy: MockComfyUIClient
+    make_settings: Callable[..., Settings], comfy: MockComfyUIClient, kind: str
 ) -> None:
+    """Un personnage, ou une créature (elle a un visage, des yeux, un corps), n'est jamais refusé pour un visage."""
     detector = _FaceDetector(1)
+    segment = SEGMENTS[kind]
     with _client_with_detector(make_settings, comfy, detector) as c:
-        _s, entry = _create_entry(c, "character")
+        _s, entry = _create_entry(c, kind)
         _ok(
-            c.post(f"/characters/{entry['id']}/reference-variants", json={"sheet": "personnage-portrait", "count": 1}),
+            c.post(f"/{segment}/{entry['id']}/reference-variants", json={"sheet": FIRST_SHEET[kind], "count": 1}),
             202,
         )
         _idle(c)
-        [variant] = _ok(c.get(f"/characters/{entry['id']}/reference-variants"))["variants"]
+        [variant] = _ok(c.get(f"/{segment}/{entry['id']}/reference-variants"))["variants"]
         assert detector.calls == 0 and variant["people_warning"] is None and "people_check" not in variant["params"]
         _ok(c.post(f"/reference-variants/{variant['id']}/keep"), 201)
 
@@ -757,3 +799,90 @@ def test_turnaround_fits_tall_or_stocky_characters(description: str, keywords: l
     prompt = sheet_prompt(REG, sheet, entry, _series())
     assert f"The character is tall or heavily built ({found})" in prompt
     assert "never crop the legs or the feet" in prompt
+
+
+# --- véhicules et créatures -------------------------------------------------------------------------------
+def test_vehicle_and_creature_sheets_send_their_template_and_negative_in_mock(
+    c: TestClient, comfy: MockComfyUIClient
+) -> None:
+    """Critère d'acceptation : chaque fiche d'un véhicule et d'une créature, générée en mock, envoie le bon gabarit
+    et le bon négatif — celui de la créature n'interdit ni visage ni yeux ni corps, il interdit les humains."""
+    expected = {
+        "vehicule-trois-quarts": ("Vehicle reference sheet: Le Faucon in three-quarter view", "pilot"),
+        "vehicule-turnaround": ("Vehicle turnaround sheet of Le Faucon: four orthographic views", "pilot"),
+        "creature-portrait": ("Creature reference sheet: front portrait of Momo", "human"),
+        # « human character » plutôt que « human » : la silhouette grise d'échelle reste permise.
+        "creature-turnaround": ("Creature turnaround sheet of Momo: three full-body views", "human character"),
+    }
+    entries = {kind: _create_entry(c, kind)[1] for kind in ("vehicle", "creature")}
+    for sheet_id, (start, forbidden) in expected.items():
+        kind = "vehicle" if sheet_id.startswith("vehicule") else "creature"
+        entry = entries[kind]
+        [job] = _ok(
+            c.post(f"/{SEGMENTS[kind]}/{entry['id']}/reference-variants", json={"sheet": sheet_id, "count": 1}), 202
+        )
+        _idle(c)
+        assert _ok(c.get(f"/jobs/{job['id']}"))["status"] == "succeeded"
+        wf = list(comfy.prompts.values())[-1]
+        prompt, negative = wf["6"]["inputs"]["prompt"], wf["6"]["inputs"]["negative_prompt"]
+        assert prompt.startswith(start), sheet_id
+        assert forbidden in negative.split(", "), sheet_id
+        words = set(negative.split(", "))
+        if kind == "creature":
+            assert not {"face", "eyes", "body", "hands", "figure", "silhouette", "animal"} & words, negative
+            assert "extra creatures" in words
+        else:
+            assert {"person", "driver", "face", "scenery"} <= words, negative
+    turnaround = REG.reference_sheet("creature-turnaround")
+    with_scale = sheet_prompt(REG, turnaround, _entry("creature", name="Momo"), _series())
+    assert "For scale only: a flat light-grey human silhouette" in with_scale
+    # Repère d'échelle facultatif : vide dans le preset, le morceau disparaît.
+    no_scale = sheet_prompt(REG, turnaround.model_copy(update={"scale": ""}), _entry("creature"), _series())
+    assert "For scale" not in no_scale and "silhouette" not in no_scale
+    # Une fiche d'une autre sorte est refusée lisiblement (« une créature »).
+    bad = c.post(f"/creatures/{entries['creature']['id']}/reference-variants", json={"sheet": "vehicule-turnaround"})
+    assert bad.status_code == 422 and "ne s'applique pas à une créature" in bad.text
+    assert [s["id"] for s in _ok(c.get("/presets/reference-sheets", params={"kind": "vehicle"}))] == [
+        "vehicule-trois-quarts",
+        "vehicule-turnaround",
+    ]
+
+
+def test_an_object_becomes_a_vehicle_with_its_images_variants_and_panels(c: TestClient) -> None:
+    """Critère d'acceptation : changer un objet en véhicule garde ses images, ses variantes et les cases qui le
+    montrent ; il reçoit ensuite les fiches de véhicule."""
+    s, entry = _create_entry(c, "object")
+    oid = entry["id"]
+    _ok(c.post(f"/objects/{oid}/images", files=[("files", ("a.png", png_bytes(), "image/png"))]), 201)
+    _ok(c.post(f"/objects/{oid}/reference-variants", json={"sheet": "objet-trois-quarts", "count": 2}), 202)
+    _idle(c)
+    variants = _ok(c.get(f"/objects/{oid}/reference-variants"))["variants"]
+    kept = _ok(c.post(f"/reference-variants/{variants[0]['id']}/keep"), 201)
+    images = [(img["id"], img["width"]) for img in kept["reference_images"]]
+    ch = _ok(c.post(f"/projects/{s['id']}/chapters", json={"title": "Un"}), 201)
+    [page] = _ok(
+        c.put(f"/chapters/{ch['id']}/pages", json={"pages": [{"panels": [{"description": "x", "objets": [oid]}]}]})
+    )
+
+    moved = _ok(c.post(f"/objects/{oid}/kind", json={"kind": "vehicle"}))
+    assert moved["kind"] == "vehicle" and moved["id"] == oid
+    assert [(img["id"], img["width"]) for img in moved["reference_images"]] == images
+    assert c.get(f"/objects/{oid}").status_code == 404
+    vehicle = _ok(c.get(f"/vehicles/{oid}"))
+    for img in vehicle["reference_images"]:
+        file = c.get(img["url"])
+        assert img["url"].startswith(f"/vehicles/{oid}/") and file.status_code == 200
+    studio = _ok(c.get(f"/vehicles/{oid}/reference-variants"))
+    assert [v["id"] for v in studio["variants"]] == [v["id"] for v in variants]
+    assert [v["kept"] for v in studio["variants"]] == [True, False]
+    assert [o["id"] for o in _ok(c.get(f"/projects/{s['id']}/objects"))] == []
+    assert [o["id"] for o in _ok(c.get(f"/projects/{s['id']}/vehicles"))] == [oid]
+    panel = _ok(c.get(f"/panels/{page['panels'][0]['id']}"))
+    assert panel["objets"] == [{"id": oid, "kind": "vehicle", "name": "Robot R-2"}]
+    _ok(c.post(f"/vehicles/{oid}/reference-variants", json={"sheet": "vehicule-turnaround", "count": 1}), 202)
+    _idle(c)
+    assert len(_ok(c.get(f"/vehicles/{oid}/reference-variants"))["variants"]) == 3
+    # Et retour, ou vers une créature ; jamais un décor.
+    assert _ok(c.post(f"/vehicles/{oid}/kind", json={"kind": "creature"}))["kind"] == "creature"
+    assert c.post(f"/creatures/{oid}/kind", json={"kind": "decor"}).status_code == 422
+    assert "kind" not in {r.path.rsplit("/", 1)[-1] for r in c.app.routes if "/decors/" in getattr(r, "path", "")}

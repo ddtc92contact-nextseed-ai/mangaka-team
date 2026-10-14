@@ -1,8 +1,13 @@
-"""CRUD des objets et des décors récurrents de la bibliothèque d'une série.
+"""CRUD des objets, décors, véhicules et créatures récurrents de la bibliothèque d'une série.
 
 Même forme d'API que les personnages (`characters.py`), une famille de routes par sorte :
-`/projects/{id}/objects`, `/objects/{id}`, `/objects/{id}/images`… et de même pour `/decors`.
-Supprimer un objet ou un décor le retire des cases qui le citaient (et un décor, des lieux qu'il illustrait).
+`/projects/{id}/objects`, `/objects/{id}`, `/objects/{id}/images`… et de même pour `/decors`, `/vehicles` et
+`/creatures`. Supprimer une fiche la retire des cases qui la citaient (et un décor, des lieux qu'il illustrait).
+
+`POST /objects/{id}/kind` (et `/vehicles/…`, `/creatures/…`) change la catégorie d'un objet, d'un véhicule ou
+d'une créature (objet → véhicule) : même id, mêmes images (leurs fichiers ne bougent pas dans data/), mêmes
+variantes (`ReferenceVariant.entry_kind` suit), mêmes cases ; son dossier de ComfyUI passe sous la nouvelle
+sorte (`objets/<nom>` → `vehicules/<nom>`), la bibliothèque lisible suit au commit.
 """
 
 from __future__ import annotations
@@ -12,19 +17,32 @@ from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from ..pipeline.reference_sheets import delete_entry_variants, entry_folder, next_position
+from ..pipeline.reference_sheets import FOLDERS, active_jobs, delete_entry_variants, entry_folder, next_position
 from ..store.files import StoredImage, cache_headers, versioned_url
-from ..store.models import AssetKind, Chapter, Page, Panel, SeriesAsset, SeriesAssetImage, SeriesLocation
+from ..store.models import (
+    PANEL_OBJECT_KINDS,
+    AssetKind,
+    Chapter,
+    Page,
+    Panel,
+    ReferenceVariant,
+    SeriesAsset,
+    SeriesAssetImage,
+    SeriesLocation,
+)
+from ..store.slugs import KIND_FOLDERS, entry_slug
 from .characters import apply_changes, check_room, read_uploads, reference_image_out, store_uploads
 from .deps import AppContext, get_ctx, get_session
 from .projects import get_project_or_404
-from .schemas import AssetCreate, AssetOut, AssetUpdate
+from .schemas import AssetCreate, AssetKindIn, AssetOut, AssetUpdate
 from .storage import move_folders, remove_entry_folders, rename_entry, set_entry_slug
 
 # Sorte → (segment d'URL, libellé « introuvable », dossier sous data/projects/{id}/).
 ROUTES = {
     AssetKind.object: ("objects", "Objet introuvable"),
     AssetKind.decor: ("decors", "Décor introuvable"),
+    AssetKind.vehicle: ("vehicles", "Véhicule introuvable"),
+    AssetKind.creature: ("creatures", "Créature introuvable"),
 }
 
 
@@ -58,8 +76,8 @@ def get_asset_or_404(session: Session, kind: AssetKind, asset_id: int) -> Series
 
 
 def unlink_asset(session: Session, asset: SeriesAsset) -> int:
-    """Retire un objet ou un décor des cases (et un décor des lieux) de sa série ; renvoie le nombre de cases
-    modifiées."""
+    """Retire un objet (véhicule, créature) ou un décor des cases (et un décor des lieux) de sa série ; renvoie le
+    nombre de cases modifiées."""
     if asset.kind == AssetKind.decor:
         for loc in session.scalars(
             select(SeriesLocation).where(
@@ -78,10 +96,41 @@ def unlink_asset(session: Session, asset: SeriesAsset) -> int:
         if asset.kind == AssetKind.decor and panel.decor_id == asset.id:
             panel.decor_id = None
             changed += 1
-        elif asset.kind == AssetKind.object and asset.id in (panel.object_ids or []):
+        elif asset.kind in PANEL_OBJECT_KINDS and asset.id in (panel.object_ids or []):
             panel.object_ids = [i for i in panel.object_ids if i != asset.id]
             changed += 1
     return changed
+
+
+def change_kind(
+    ctx: AppContext, session: Session, asset: SeriesAsset, kind: AssetKind
+) -> tuple[list[str], list[str]] | None:
+    """Nouvelle catégorie d'un objet, d'un véhicule ou d'une créature (sans commit, dossiers de ComfyUI déplacés
+    après) : variantes et jobs terminés suivent, images et cases ne changent pas. Refusé pendant une génération de
+    ses fiches (le job relirait la fiche sous son ancienne sorte)."""
+    old = asset.kind
+    if old not in PANEL_OBJECT_KINDS or kind not in PANEL_OBJECT_KINDS:
+        raise HTTPException(status_code=422, detail="seuls un objet, un véhicule ou une créature changent de catégorie")
+    if active_jobs(session, old.value, asset.id, asset.project_id):
+        raise HTTPException(
+            status_code=409, detail="génération de fiches en cours : attends la fin (ou annule-la) avant de changer"
+        )
+    for variant in session.scalars(
+        select(ReferenceVariant).where(ReferenceVariant.entry_kind == old.value, ReferenceVariant.entry_id == asset.id)
+    ):
+        variant.entry_kind = kind.value
+    series = asset.project
+    before = asset.slug
+    asset.kind = kind
+    asset.slug = entry_slug(session, asset, on_disk=ctx.folders.existing_entries(series.slug, kind.value))
+    return (
+        (
+            [series.slug, KIND_FOLDERS[old.value], before],
+            [series.slug, KIND_FOLDERS[kind.value], asset.slug],
+        )
+        if before
+        else None
+    )
 
 
 def _router(kind: AssetKind) -> APIRouter:
@@ -127,6 +176,25 @@ def _router(kind: AssetKind) -> APIRouter:
         move_folders(ctx, move)
         return asset_out(asset)
 
+    if kind in PANEL_OBJECT_KINDS:
+
+        @router.post(f"/{segment}/{{asset_id}}/kind", response_model=AssetOut, name=f"change_{segment}_kind")
+        def change_asset_kind(
+            asset_id: int,
+            body: AssetKindIn,
+            session: Session = Depends(get_session),
+            ctx: AppContext = Depends(get_ctx),
+        ) -> AssetOut:
+            """Change la catégorie (objet ↔ véhicule ↔ créature) en gardant images, variantes et cases."""
+            asset = get_asset_or_404(session, kind, asset_id)
+            target = AssetKind(body.kind)
+            if target == asset.kind:
+                return asset_out(asset)
+            move = change_kind(ctx, session, asset, target)
+            session.commit()
+            move_folders(ctx, move)
+            return asset_out(get_asset_or_404(session, target, asset_id))
+
     @router.delete(f"/{segment}/{{asset_id}}", status_code=204, name=f"delete_{segment}")
     def delete_asset(
         asset_id: int, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
@@ -141,6 +209,9 @@ def _router(kind: AssetKind) -> APIRouter:
         for path in paths:
             ctx.files.delete(path)
         ctx.files.delete_tree(entry_folder(asset))
+        if asset.kind in PANEL_OBJECT_KINDS:  # dossiers d'avant un changement de catégorie (ids jamais réutilisés)
+            for other in PANEL_OBJECT_KINDS:
+                ctx.files.delete_tree(f"projects/{asset.project_id}/{FOLDERS[other.value]}/{asset.id}")
         remove_entry_folders(ctx, series, asset)
         return Response(status_code=204)
 

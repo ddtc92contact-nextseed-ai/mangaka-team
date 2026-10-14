@@ -60,10 +60,13 @@ style_board:
   # always = jointe à chaque fiche (seule image envoyée sans image de départ) ; never = jamais.
   # Objets et décors : never (11/10/2026) — la planche montre des personnages, qui apparaissaient dans
   # la fiche puis dans chaque case qui l'utilise comme référence (même fuite que sur les cases le 10/10).
+  # Véhicules et créatures : never aussi (même fuite des sujets de la planche).
   reference_sheets:
     character: with_subject
     object: never
     decor: never
+    vehicle: never
+    creature: never
   # Cases : with_subject = jointe s'il reste un emplacement libre parmi les images de référence du
   # workflow (priorité : personnages > décor > objets > style), et seulement si la case a déjà une image
   # d'un personnage, de son décor ou d'un objet : jamais seule (le modèle d'édition la redessinerait

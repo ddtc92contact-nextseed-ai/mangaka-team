@@ -93,6 +93,9 @@ sheet_negatives:
   character: "extra characters, background people, text, multiple views, collage, character sheet"
   object: "person, people, human, character, face, hands, figure, crowd, text, cluttered background"
   decor: "person, people, human, character, figure, crowd, silhouette, animal, text"
+  vehicle: "person, people, human, character, pilot, driver, passenger, face, hands, figure, crowd, scenery, text"
+  # Une créature a un visage et un corps : seuls les humains et les autres créatures sont interdits.
+  creature: "human, person, people, rider, owner, extra creatures, second animal, crowd, text"
 # Taille de la nouvelle vue : même ratio que la vue de départ, environ side × side pixels (multiples de 16).
 sheet_side: 1024
 

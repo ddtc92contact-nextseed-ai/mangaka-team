@@ -869,10 +869,10 @@ class CompositionLockOut(BaseModel):
 
 
 class LibraryRef(BaseModel):
-    """Élément de la bibliothèque cité par une case (personnage, objet ou décor)."""
+    """Élément de la bibliothèque cité par une case (personnage, objet, décor, véhicule ou créature)."""
 
     id: int
-    kind: Literal["character", "object", "decor"]
+    kind: Literal["character", "object", "decor", "vehicle", "creature"]
     name: str
 
 
@@ -1198,14 +1198,21 @@ class CharacterOut(BaseModel):
     aliases: list[str] = Field(default_factory=list)  # personnages seulement
 
 
-# --- Objets et décors de la bibliothèque (mêmes champs qu'un personnage) ------
-AssetKindName = Literal["object", "decor"]
+# --- Objets, décors, véhicules et créatures de la bibliothèque (mêmes champs qu'un personnage) ------
+AssetKindName = Literal["object", "decor", "vehicle", "creature"]
 AssetCreate = EntryCreate
 AssetUpdate = EntryUpdate
 
 
 class AssetOut(CharacterOut):
     kind: AssetKindName
+
+
+class AssetKindIn(_In):
+    """Changer de catégorie un objet, un véhicule ou une créature (objet → véhicule…) : images, variantes et cases
+    qui le montrent gardées."""
+
+    kind: Literal["object", "vehicle", "creature"]
 
 
 class ImageOrderIn(_In):
@@ -1215,7 +1222,7 @@ class ImageOrderIn(_In):
 
 
 # --- « Créer des références » (fiches générées par ComfyUI) ---------------------
-LibraryKindName = Literal["character", "object", "decor"]
+LibraryKindName = Literal["character", "object", "decor", "vehicle", "creature"]
 Instruction = Annotated[str, StringConstraints(strip_whitespace=True, max_length=500)]
 
 
@@ -1691,6 +1698,8 @@ class BibleOut(BaseModel):
     characters: list[BibleCharacter]
     decors: list[BibleAsset] = Field(default_factory=list)
     objets: list[BibleAsset] = Field(default_factory=list)
+    vehicules: list[BibleAsset] = Field(default_factory=list)
+    creatures: list[BibleAsset] = Field(default_factory=list)
     chapter_summaries: list[ChapterSummaryEntry]
     rendered: BibleSummary | None
     updated_at: datetime | None

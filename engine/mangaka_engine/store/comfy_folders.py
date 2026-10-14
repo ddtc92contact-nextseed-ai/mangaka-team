@@ -5,11 +5,11 @@ images envoyées (`input/`) ; `transit(…)` du même chemin donne le préfixe d
 
     input/mangaka/<série>/personnages/<nom>/reference-12.png                  (image de référence envoyée)
     output/mangaka/<série>/_transit/personnages/<nom>/<fiche>/variante-1_00001_.png   (sorties brutes)
-    …/objets/<nom>/…  …/decors/<nom>/…  …/style/essais/…  …/style/<référence>/…
+    …/objets/<nom>/…  …/decors/<nom>/…  …/vehicules/<nom>/…  …/creatures/<nom>/…  …/style/essais/…  …/style/<référence>/…
     …/chapitre-01/page-01/case-01, case-01-croquis, case-01-controle, case-01-finition, case-01-reparation…
 
 Le reste de `output/mangaka/<série>/` est la **bibliothèque lisible** (copie rangée de ce qui est retenu,
-`pipeline/comfy_library.py`) : `references/{personnages,objets,decors,style}/…` (un sous-dossier par type de fiche),
+`pipeline/comfy_library.py`) : `references/{personnages,objets,decors,vehicules,creatures,style}/…` (un sous-dossier par type de fiche),
 `chapitre-01/page-01/…`, et sa corbeille `trash/…` (ce qui est généré sans être retenu).
 
 Disque (`ComfyFolders`) : ComfyUI n'a pas d'API pour effacer un fichier, le moteur agit donc directement
@@ -57,7 +57,7 @@ def series_folder(project: Project) -> str:
 
 
 def entry_folder(entry: Character | SeriesAsset, series: Project) -> str:
-    """`mangaka/<série>/personnages|objets|decors|style/<nom>`."""
+    """`mangaka/<série>/personnages|objets|decors|vehicules|creatures|style/<nom>`."""
     return f"{series_folder(series)}/{KIND_FOLDERS[entry_kind_of(entry)]}/{entry.slug or f'fiche-{entry.id}'}"
 
 

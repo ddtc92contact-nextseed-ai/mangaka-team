@@ -1,5 +1,6 @@
-// Bibliothèque d'une série : personnages, objets et décors récurrents (mêmes fiches, mêmes écrans).
-import type { LibraryKind } from "./api";
+// Bibliothèque d'une série : personnages, objets, décors, véhicules et créatures récurrents (mêmes fiches, mêmes
+// écrans).
+import type { LibraryKind, PanelObjectKind } from "./api";
 
 export interface LibraryKindInfo {
   kind: LibraryKind;
@@ -7,7 +8,7 @@ export interface LibraryKindInfo {
   tab: string;
   /** Segment d'URL des écrans (`/bibliotheque/objets/…`) et valeur de `?onglet=`. */
   slug: string;
-  /** « personnage », « objet », « décor ». */
+  /** « personnage », « objet », « décor », « véhicule », « créature ». */
   singular: string;
   newTitle: string;
   createLabel: string;
@@ -24,6 +25,8 @@ export interface LibraryKindInfo {
   imagesHint: string;
   /** Pastille dans l'atelier et le scénario. */
   badge: string;
+  /** Libellé du choix de catégorie (objet ↔ véhicule ↔ créature). */
+  category?: string;
 }
 
 export const LIBRARY_KINDS: Record<LibraryKind, LibraryKindInfo> = {
@@ -66,6 +69,7 @@ export const LIBRARY_KINDS: Record<LibraryKind, LibraryKindInfo> = {
     loraPlaceholder: "robot_r2_v1.safetensors",
     imagesHint: "Vues de face, de profil, détails : elles guideront chaque case où l'objet apparaît.",
     badge: "bg-sky-500/15 text-sky-200",
+    category: "Objet (accessoire, arme, outil…)",
   },
   decor: {
     kind: "decor",
@@ -87,9 +91,58 @@ export const LIBRARY_KINDS: Record<LibraryKind, LibraryKindInfo> = {
     imagesHint: "Plans d'ensemble, angles caractéristiques : ils guideront chaque case qui s'y passe.",
     badge: "bg-amber-500/15 text-amber-200",
   },
+  vehicle: {
+    kind: "vehicle",
+    tab: "Véhicules",
+    slug: "vehicules",
+    singular: "véhicule",
+    newTitle: "Nouveau véhicule",
+    createLabel: "Créer le véhicule",
+    addLabel: "Créer un véhicule",
+    emptyList: "Aucun véhicule récurrent dans cette série",
+    saved: "Véhicule enregistré.",
+    deleteConfirm: (name) => `Supprimer le véhicule « ${name} » et ses images de référence ? Il sera retiré des cases qui le montrent.`,
+    namePlaceholder: "Le Faucon d'argent",
+    descriptionHint: "Silhouette, proportions, couleurs, marquages, détails : ce qui doit rester identique sous tous les angles.",
+    descriptionPlaceholder: "Vaisseau effilé argenté, deux réacteurs bleus à l'arrière, cockpit vitré à l'avant, bande rouge sur le flanc",
+    keywordsPlaceholder: "vaisseau argenté, réacteurs bleus, bande rouge",
+    loraLabel: "LoRA du véhicule (optionnel)",
+    loraPlaceholder: "faucon_v1.safetensors",
+    imagesHint: "Vue 3/4, profil, face, dessus, arrière : la vue qui correspond au cadrage de la case passe en premier.",
+    badge: "bg-emerald-500/15 text-emerald-200",
+    category: "Véhicule (vaisseau, voiture, moto, mécha piloté…)",
+  },
+  creature: {
+    kind: "creature",
+    tab: "Créatures",
+    slug: "creatures",
+    singular: "créature",
+    newTitle: "Nouvelle créature",
+    createLabel: "Créer la créature",
+    addLabel: "Créer une créature",
+    emptyList: "Aucune créature récurrente dans cette série",
+    saved: "Créature enregistrée.",
+    deleteConfirm: (name) => `Supprimer la créature « ${name} » et ses images de référence ? Elle sera retirée des cases qui la montrent.`,
+    namePlaceholder: "Momo",
+    descriptionHint: "Tête, corps, pelage ou écailles, marques, taille : ce qui la rend reconnaissable. Une créature ne parle pas : elle n'entre pas dans la distribution.",
+    descriptionPlaceholder: "Petit chat roux aux oreilles noires, tache blanche en étoile sur le front, queue touffue",
+    keywordsPlaceholder: "chat roux, oreilles noires, étoile blanche",
+    loraLabel: "LoRA de la créature (optionnel)",
+    loraPlaceholder: "momo_v1.safetensors",
+    imagesHint: "Portrait de face, corps entier de face, de profil et de dos : elles guideront chaque case où elle apparaît.",
+    badge: "bg-lime-500/15 text-lime-200",
+    category: "Créature (animal, monstre, créature récurrente)",
+  },
 };
 
-export const LIBRARY_ORDER: LibraryKind[] = ["character", "object", "decor"];
+export const LIBRARY_ORDER: LibraryKind[] = ["character", "object", "decor", "vehicle", "creature"];
+
+/** Sortes qu'une case montre dans « objets » (et entre lesquelles une fiche peut changer de catégorie). */
+export const PANEL_OBJECT_KINDS: PanelObjectKind[] = ["object", "vehicle", "creature"];
+
+export function isPanelObjectKind(kind: LibraryKind | string | undefined): kind is PanelObjectKind {
+  return PANEL_OBJECT_KINDS.includes(kind as PanelObjectKind);
+}
 
 export function kindFromSlug(slug: string | null | undefined): LibraryKind | null {
   return LIBRARY_ORDER.find((k) => LIBRARY_KINDS[k].slug === slug) ?? null;

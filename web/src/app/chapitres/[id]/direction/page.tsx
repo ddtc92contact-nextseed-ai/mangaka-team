@@ -44,10 +44,10 @@ export default function DirectionPage() {
   const { chapter, reloadStages } = useChapter();
   const direction = useEngineData(() => api.getDirection(chapter.id), [chapter.id]);
   const pages = useEngineData(() => api.listPages(chapter.id), [chapter.id]);
-  // Noms des décors et objets de la bibliothèque (propositions de l'agent, affichées par case).
+  // Noms des décors, objets, véhicules et créatures de la bibliothèque (propositions de l'agent, affichées par case).
   const library = useEngineData(
     () =>
-      Promise.all([api.listLibrary("decor", chapter.project_id), api.listLibrary("object", chapter.project_id)]).then(
+      Promise.all([api.listLibrary("decor", chapter.project_id), api.listPanelObjects(chapter.project_id)]).then(
         ([decors, objets]) => Object.fromEntries([...decors, ...objets].map((e) => [e.id, e.name])) as Record<number, string>,
       ),
     [chapter.project_id],

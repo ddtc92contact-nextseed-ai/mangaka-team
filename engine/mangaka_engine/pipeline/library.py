@@ -1,10 +1,13 @@
-"""Bibliothèque d'une série : objets et décors récurrents (à côté des personnages).
+"""Bibliothèque d'une série : objets, décors, véhicules et créatures récurrents (à côté des personnages).
 
 - `SeriesLibrary` : ce que les agents LLM (scénariste, directeur artistique) reçoivent — ids, noms et
   descriptions courtes des décors, objets et lieux de la série — et la vérification des ids qu'ils citent
   (`check_refs`, `check_location`) : un id inconnu rend la réponse invalide, donc relancée comme une erreur de
   schéma ;
-- `panel_assets` : décor et objets d'une case, relus en base (ids d'une autre série ou supprimés
+  Véhicules et créatures sont dans la liste des objets (« objets » d'une case, `Panel.object_ids`), leur sorte
+  écrite après le nom (« Le Faucon (véhicule) ») : une créature ne parle pas par défaut, elle n'entre pas dans
+  la distribution comme un personnage ;
+- `panel_assets` : décor et objets (véhicules et créatures compris) d'une case, relus en base (ids d'une autre série ou supprimés
   ignorés) ; sans décor propre, le décor du lieu de la case (`SeriesLocation.decor_id`, pipeline/locations.py) ;
 - `active_style` : référence de style active de la série (planche de style), avec son image.
 """
@@ -19,9 +22,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from ..presets import PresetRegistry
-from ..store.models import AssetKind, Panel, SeriesAsset, SeriesLocation
+from ..store.models import PANEL_OBJECT_KINDS, AssetKind, Panel, SeriesAsset, SeriesLocation
+from .names import name_key
 
 SHORT_DESCRIPTION = 160  # caractères de description envoyés aux agents
+# Sorte écrite après le nom dans la liste des objets (« - id 7 · Le Faucon (véhicule) : … »).
+OBJECT_KIND_LABELS = {AssetKind.vehicle: "véhicule", AssetKind.creature: "créature"}
 
 
 def short_description(text: str | None, limit: int = SHORT_DESCRIPTION) -> str:
@@ -32,7 +38,7 @@ def short_description(text: str | None, limit: int = SHORT_DESCRIPTION) -> str:
 @dataclass
 class SeriesLibrary:
     """Objets, décors et lieux d'une série, tels que présentés aux agents : [{"id", "name", "description"}] (et
-    "decor", id du décor d'un lieu)."""
+    "decor", id du décor d'un lieu ; "sorte" d'un véhicule ou d'une créature, rangés avec les objets)."""
 
     decors: list[dict[str, Any]] = field(default_factory=list)
     objets: list[dict[str, Any]] = field(default_factory=list)
@@ -45,7 +51,10 @@ class SeriesLibrary:
         ).all()
 
         def entry(a: SeriesAsset) -> dict[str, Any]:
-            return {"id": a.id, "name": a.name, "description": short_description(a.visual_description)}
+            out = {"id": a.id, "name": a.name, "description": short_description(a.visual_description)}
+            if a.kind in OBJECT_KIND_LABELS:
+                out["sorte"] = OBJECT_KIND_LABELS[a.kind]
+            return out
 
         places = session.scalars(
             select(SeriesLocation)
@@ -54,7 +63,8 @@ class SeriesLibrary:
         ).all()
         return cls(
             decors=[entry(a) for a in rows if a.kind == AssetKind.decor],
-            objets=[entry(a) for a in rows if a.kind == AssetKind.object],
+            # Objets, puis véhicules, puis créatures (chacun par nom).
+            objets=[entry(a) for kind in PANEL_OBJECT_KINDS for a in rows if a.kind == kind],
             lieux=[
                 {
                     "id": loc.id,
@@ -69,13 +79,17 @@ class SeriesLibrary:
     def as_json(self) -> dict[str, Any]:
         return {"decors": self.decors, "objets": self.objets, "lieux": self.lieux}
 
-    def text(self, kind: str) -> str:
-        """« - id 3 · Le labo : description » pour un prompt (un lieu : « (décor id 7) » en plus) ; vide sans
-        élément."""
+    def text(self, kind: str, sorte: str | None = None) -> str:
+        """« - id 3 · Le labo : description » pour un prompt (un lieu : « (décor id 7) » en plus ; un véhicule ou
+        une créature : « (véhicule) » après le nom) ; vide sans élément. `sorte` (objets) : seulement ceux-là
+        (« véhicule », « créature », ou "" pour les objets eux-mêmes)."""
         items = {"decors": self.decors, "lieux": self.lieux}.get(kind, self.objets)
+        if sorte is not None:
+            items = [e for e in items if e.get("sorte", "") == sorte]
         names = {e["id"]: e["name"] for e in self.decors}
         return "\n".join(
-            f"- id {e['id']} · {e['name']} : {e['description'] or '(sans description)'}"
+            f"- id {e['id']} · {e['name']}{f' ({e["sorte"]})' if e.get('sorte') else ''} : "
+            f"{e['description'] or '(sans description)'}"
             + (f" (décor : {names[e['decor']]}, id {e['decor']})" if e.get("decor") in names else "")
             for e in items
         )
@@ -105,9 +119,50 @@ class SeriesLibrary:
         unknown = [i for i in objets if i not in object_ids]
         if unknown:
             choices = ", ".join(str(i) for i in sorted(object_ids))
-            hint = f"ids possibles : {choices}" if choices else "la série n'a aucun objet : liste vide"
+            hint = (
+                f"ids possibles : {choices}"
+                if choices
+                else "la série n'a aucun objet, véhicule ni créature : liste vide"
+            )
             problems.append(f"objets : id(s) {', '.join(map(str, unknown))} inconnu(s) ({hint})")
         return problems
+
+
+def named_objects(session: Session, project_id: int, taken: set[str] | frozenset[str] = frozenset()) -> dict[str, int]:
+    """Véhicules et créatures de la série par nom comparable (`name_key`) → id, sauf les noms de `taken` (ceux
+    d'un personnage : la fiche personnage l'emporte). Sert à rattacher par son nom un véhicule ou une créature
+    que le scénario a mis parmi les personnages de la case."""
+    rows = session.scalars(
+        select(SeriesAsset)
+        .where(SeriesAsset.project_id == project_id, SeriesAsset.kind.in_((AssetKind.vehicle, AssetKind.creature)))
+        .order_by(SeriesAsset.id)
+    )
+    out: dict[str, int] = {}
+    for a in rows:
+        key = name_key(a.name)
+        if key and key not in taken:
+            out.setdefault(key, a.id)
+    return out
+
+
+def split_named_objects(names: Sequence[str], named: dict[str, int]) -> tuple[list[str], list[int]]:
+    """(noms qui restent des personnages, ids des véhicules et créatures cités par leur nom exact)."""
+    kept: list[str] = []
+    ids: list[int] = []
+    for name in names:
+        asset_id = named.get(name_key(name))
+        if asset_id is None:
+            kept.append(name)
+        elif asset_id not in ids:
+            ids.append(asset_id)
+    return kept, ids
+
+
+def named_in_text(text: str | None, named: dict[str, int]) -> list[int]:
+    """Ids des véhicules et créatures dont le nom entier (mots entiers, sans casse ni accents) est écrit dans
+    `text` (description de la case : « Le Faucon décolle »)."""
+    words = f" {name_key(text)} "
+    return [asset_id for key, asset_id in named.items() if len(key) >= 3 and f" {key} " in words]
 
 
 def panel_decor_id(panel: Panel, project_id: int) -> int | None:
@@ -121,8 +176,8 @@ def panel_decor_id(panel: Panel, project_id: int) -> int | None:
 
 
 def panel_assets(session: Session, panel: Panel, project_id: int) -> tuple[SeriesAsset | None, list[SeriesAsset]]:
-    """(décor, objets) d'une case, avec leurs images de référence, dans l'ordre de la case. Le décor est celui de
-    la case, sinon celui de son lieu."""
+    """(décor, objets) d'une case, avec leurs images de référence, dans l'ordre de la case (véhicules et créatures
+    compris dans les objets). Le décor est celui de la case, sinon celui de son lieu."""
     object_ids = [i for i in panel.object_ids or [] if isinstance(i, int)]
     decor_id = panel_decor_id(panel, project_id)
     ids = [*([decor_id] if decor_id is not None else []), *object_ids]
@@ -139,7 +194,7 @@ def panel_assets(session: Session, panel: Panel, project_id: int) -> tuple[Serie
     decor = found.get(decor_id) if decor_id is not None else None
     if decor is not None and decor.kind != AssetKind.decor:
         decor = None
-    objects = [found[i] for i in dict.fromkeys(object_ids) if i in found and found[i].kind == AssetKind.object]
+    objects = [found[i] for i in dict.fromkeys(object_ids) if i in found and found[i].kind in PANEL_OBJECT_KINDS]
     return decor, objects
 
 

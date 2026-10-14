@@ -64,7 +64,13 @@ from .schemas import (
 
 router = APIRouter(tags=["bibliothèque"])
 
-NOT_FOUND = {"character": "Personnage introuvable", "object": "Objet introuvable", "decor": "Décor introuvable"}
+NOT_FOUND = {
+    "character": "Personnage introuvable",
+    "object": "Objet introuvable",
+    "decor": "Décor introuvable",
+    "vehicle": "Véhicule introuvable",
+    "creature": "Créature introuvable",
+}
 
 
 def entry_out(entry: LibraryEntry) -> CharacterOut | AssetOut:
@@ -156,7 +162,8 @@ def _require_comfyui(ctx: AppContext) -> None:
 
 @router.get("/presets/reference-sheets", response_model=list[ReferenceSheetOut])
 def list_reference_sheets(
-    kind: str | None = Query(default=None, pattern="^(character|object|decor)$"), ctx: AppContext = Depends(get_ctx)
+    kind: str | None = Query(default=None, pattern="^(character|object|decor|vehicle|creature)$"),
+    ctx: AppContext = Depends(get_ctx),
 ) -> list[ReferenceSheetOut]:
     """Types de fiches de référence (presets/reference_sheets/), éventuellement pour une sorte."""
     return [

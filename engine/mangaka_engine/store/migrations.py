@@ -71,6 +71,10 @@
   lieu de chaque case (`panels.location_id`). Aucune case n'est rattachée d'office : le texte libre
   `panels.setting` reste intact, et le regroupement des variantes en lieux (proposé par le LLM, validé par
   l'auteur, pipeline/locations.py) se fait depuis l'écran « Lieux » de la série.
+- 37 : véhicules et créatures dans la bibliothèque (`series_assets.kind` : `vehicle`, `creature`). La colonne
+  est un texte sans contrainte : rien ne change pour les fiches existantes (objets, décors, style gardés tels
+  quels, ids, images et variantes compris). Une table `series_assets` créée avec une contrainte CHECK sur la
+  sorte (ancien SQLAlchemy) est reconstruite sans elle, lignes et ids gardés.
 
 Une base neuve est créée directement à la dernière version. Chaque migration tourne dans une
 transaction unique, clés étrangères désactivées (recette « 12 étapes » de SQLite pour reconstruire
@@ -123,7 +127,7 @@ from .slugs import RESERVED_ENTRIES, RESERVED_SERIES, slugify, unique_slug
 
 log = logging.getLogger("mangaka_engine")
 
-SCHEMA_VERSION = 36
+SCHEMA_VERSION = 37
 
 
 class MigrationError(RuntimeError):
@@ -571,6 +575,12 @@ def _v35_to_v36(cur: sqlite3.Cursor) -> None:
         cur.execute("CREATE INDEX ix_panels_location_id ON panels (location_id)")
 
 
+def _v36_to_v37(cur: sqlite3.Cursor) -> None:
+    row = cur.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='series_assets'").fetchone()
+    if row is not None and "CHECK" in (row[0] or "").upper():
+        _rebuild(cur, SeriesAsset.__table__)  # type: ignore[arg-type]
+
+
 MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     # version de départ → (version d'arrivée, fonction)
     0: (2, _v0_to_v2),
@@ -609,6 +619,7 @@ MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     33: (34, _v33_to_v34),
     34: (35, _v34_to_v35),
     35: (36, _v35_to_v36),
+    36: (37, _v36_to_v37),
 }
 
 

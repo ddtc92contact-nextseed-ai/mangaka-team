@@ -6,6 +6,7 @@ import { useConfirm } from "@/components/confirm";
 import { HelpLabel, InfoTip } from "@/components/info-tip";
 import { PassageList, formatTokens } from "@/components/knowledge";
 import { useToast } from "@/components/toast";
+import { LibraryIcon } from "@/components/library-icon";
 import { UnmatchedNames } from "@/components/unmatched-names";
 import { Alert, Button, ButtonLink, Card, EmptyState, Field, Input, Loading, Select, Textarea } from "@/components/ui";
 import {
@@ -16,6 +17,7 @@ import {
   type Intensity,
   type Job,
   type LibraryEntry,
+  type LibraryKind,
   type SeriesLocation,
   type Rythme,
   type ScriptBrief,
@@ -52,7 +54,8 @@ export default function ScenarioPage() {
   const pages = useEngineData(() => api.listPages(chapter.id), [chapter.id]);
   const characters = useEngineData(() => api.listCharacters(chapter.project_id), [chapter.project_id]);
   const decors = useEngineData(() => api.listLibrary("decor", chapter.project_id), [chapter.project_id]);
-  const objets = useEngineData(() => api.listLibrary("object", chapter.project_id), [chapter.project_id]);
+  // Objets, véhicules et créatures : une case les montre tous par sa liste « objets ».
+  const objets = useEngineData(() => api.listPanelObjects(chapter.project_id), [chapter.project_id]);
   const places = useEngineData(() => api.listLocations(chapter.project_id), [chapter.project_id]);
   const library: SceneLibrary = {
     decors: decors.data ?? [],
@@ -537,18 +540,21 @@ function ObjectPicker({
   disabled: boolean;
 }) {
   const unknown = value.filter((v) => !library.objets.some((o) => o.id === v));
-  const options = [...library.objets.map((o) => ({ id: o.id, name: o.name })), ...unknown.map((v) => ({ id: v, name: `Objet n° ${v}` }))];
+  const options: { id: number; name: string; kind: LibraryKind }[] = [
+    ...library.objets.map((o) => ({ id: o.id, name: o.name, kind: "kind" in o ? o.kind : ("object" as const) })),
+    ...unknown.map((v) => ({ id: v, name: `Objet n° ${v}`, kind: "object" as const })),
+  ];
   return (
     <div className="mt-3 space-y-1" role="group" aria-labelledby={`${id}-label`}>
       <div className="flex items-center gap-1.5">
         <p id={`${id}-label`} className="text-xs text-zinc-400">
-          Objets récurrents visibles
+          Objets, véhicules et créatures visibles
         </p>
-        <InfoTip help="scenario.objets" label="Objets récurrents visibles" />
+        <InfoTip help="scenario.objets" label="Objets, véhicules et créatures visibles" />
       </div>
       {options.length === 0 ? (
         <p className="text-xs text-zinc-600">
-          Aucun objet dans la bibliothèque de la série.{" "}
+          Aucun objet, véhicule ni créature dans la bibliothèque de la série.{" "}
           <Link href={libraryHref(library.projectId, "object")} className="underline-offset-2 hover:text-zinc-300 hover:underline">
             En ajouter
           </Link>
@@ -564,13 +570,14 @@ function ObjectPicker({
                 aria-pressed={on}
                 disabled={disabled}
                 onClick={() => onChange(on ? value.filter((v) => v !== o.id) : [...value, o.id])}
-                className={`rounded-full border px-2.5 py-1 text-xs transition-colors focus-visible:outline-2 focus-visible:outline-rose-400 disabled:opacity-50 ${
+                title={LIBRARY_KINDS[o.kind].singular}
+                className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors focus-visible:outline-2 focus-visible:outline-rose-400 disabled:opacity-50 ${
                   on
-                    ? `border-transparent ${LIBRARY_KINDS.object.badge}`
+                    ? `border-transparent ${LIBRARY_KINDS[o.kind].badge}`
                     : "border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-zinc-200"
                 }`}
               >
-                {on ? "✓ " : ""}
+                {on ? "✓ " : <LibraryIcon kind={o.kind} className="h-3 w-3" />}
                 {o.name}
               </button>
             );
@@ -585,7 +592,7 @@ function SmallButton(props: ComponentProps<typeof Button>) {
   return <Button variant="ghost" className="px-2 py-1 text-xs" {...props} />;
 }
 
-/** Décors, objets et lieux de la série, proposés dans chaque case. */
+/** Décors, objets (véhicules et créatures compris) et lieux de la série, proposés dans chaque case. */
 interface SceneLibrary {
   decors: LibraryEntry[];
   objets: LibraryEntry[];

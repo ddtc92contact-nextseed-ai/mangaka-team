@@ -6,6 +6,7 @@ import { AnnotationBar } from "@/components/annotation";
 import { VersionJournal } from "@/components/journal";
 import { TierRestriction } from "@/components/camera-angle";
 import { InfoTip } from "@/components/info-tip";
+import { LibraryIcon } from "@/components/library-icon";
 import { NegativeBadge } from "@/components/negative-badge";
 import { DpiBadge } from "@/components/print-dpi";
 import { ProductionLink } from "@/components/production-link";
@@ -313,11 +314,20 @@ export function PanelInspector({
                   Décor : {d.decor.name}
                 </span>
               )}
-              {d.objets.map((o) => (
-                <span key={o.id} className={`rounded px-2 py-0.5 ${LIBRARY_KINDS.object.badge}`} title="Objet récurrent">
-                  {o.name}
-                </span>
-              ))}
+              {d.objets.map((o) => {
+                const info = LIBRARY_KINDS[o.kind] ?? LIBRARY_KINDS.object;
+                return (
+                  <span
+                    key={o.id}
+                    className={`inline-flex items-center gap-1 rounded px-2 py-0.5 ${info.badge}`}
+                    title={`${info.singular[0].toUpperCase()}${info.singular.slice(1)} récurrent${o.kind === "creature" ? "e" : ""}`}
+                    data-kind={o.kind}
+                  >
+                    <LibraryIcon kind={info.kind} className="h-3 w-3" />
+                    {o.name}
+                  </span>
+                );
+              })}
             </div>
             <CastBlock
               detail={d}

@@ -106,8 +106,14 @@ def test_every_genre_has_a_french_scene_test() -> None:
     assert settings is not None and settings.trials == 4
     # Cases : jamais (10/10/2026, la planche faisait apparaître ses propres sujets dans la case).
     # Fiches : personnages après une image du sujet ; objets et décors jamais (11/10/2026, la planche
-    # montre des personnages, qui apparaissaient dans la fiche).
-    assert settings.reference_sheets == {"character": "with_subject", "object": "never", "decor": "never"}
+    # montre des personnages, qui apparaissaient dans la fiche) ; véhicules et créatures non plus.
+    assert settings.reference_sheets == {
+        "character": "with_subject",
+        "object": "never",
+        "decor": "never",
+        "vehicle": "never",
+        "creature": "never",
+    }
     assert settings.panels == "never"
 
 

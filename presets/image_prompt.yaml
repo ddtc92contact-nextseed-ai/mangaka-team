@@ -112,6 +112,8 @@ references:
   character: "<image$slot> is the identity reference for $name: keep the face, hair, outfit and colours; ignore its pose, framing and background."
   decor: "<image$slot> is the location reference for $name: keep its layout, architecture and materials; show it from the new camera angle."
   object: "<image$slot> is the design reference for the object $name: keep its shape, colours and details."
+  vehicle: "<image$slot> is the design reference for the vehicle $name: keep its shape, proportions, colours and markings; show it from the new camera angle."
+  creature: "<image$slot> is the identity reference for the creature $name: keep its head, body shape, markings and colours; ignore its pose, framing and background."
   style: "<image$slot> is a style reference only (line work, inking, screentones, colours): do not copy its characters, scene or composition."
   # Consigne de tri de chaque image envoyée ($sorting, dans l'ordre des emplacements) : ce qu'il faut en
   # prendre, et ce qu'il faut ignorer de la planche (mise en page, grille de poses, règles, étiquettes,
@@ -121,6 +123,8 @@ references:
     character: "From <image$slot> take only the face, hair, body and outfit of $name; ignore its layout, pose grid, rules, labels and white background."
     decor: "From <image$slot> take only the shape, architecture, materials and details of the location $name; ignore its layout, framing, labels and any people."
     object: "From <image$slot> take only the shape and details of the object $name; ignore its layout, rules, labels and white background."
+    vehicle: "From <image$slot> take only the shape, proportions and markings of the vehicle $name; ignore its layout, multiple views, labels and white background."
+    creature: "From <image$slot> take only the head, body, markings and colours of the creature $name; ignore its layout, multiple views, the grey scale silhouette, labels and white background."
     style: "From <image$slot> take only the rendering (line work, inking, screentones, colours); never take its characters or its scene."
   separator: " "
   # Morceaux avant / après le prompt de la case : $images (les lignes ci-dessus), $count (nombre d'images),
@@ -136,8 +140,11 @@ references:
   monochrome:
     character: "<image$slot> is the identity reference for $name: keep the face, hair and outfit; ignore its pose, framing and background."
     object: "<image$slot> is the design reference for the object $name: keep its shape and details."
+    vehicle: "<image$slot> is the design reference for the vehicle $name: keep its shape, proportions and markings; show it from the new camera angle."
+    creature: "<image$slot> is the identity reference for the creature $name: keep its head, body shape and markings; ignore its pose, framing and background."
     style: "<image$slot> is a style reference only (line work, inking, screentones): do not copy its characters, scene or composition."
     sorting:
+      creature: "From <image$slot> take only the head, body and markings of the creature $name; ignore its layout, multiple views, the grey scale silhouette, labels and white background."
       style: "From <image$slot> take only the rendering (line work, inking, screentones); never take its characters or its scene."
     after:
       - "$sorting"

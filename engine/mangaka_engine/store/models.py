@@ -263,13 +263,22 @@ class CharacterImage(Base):
 
 
 class AssetKind(enum.StrEnum):
-    object = "object"  # objet récurrent : un robot, une épée, une voiture…
+    object = "object"  # objet récurrent : un robot, une épée, un sac…
     decor = "decor"  # décor récurrent : la salle de classe, le labo, la rue…
     style = "style"  # référence de style de la planche de style (une seule active par série)
+    vehicle = "vehicle"  # véhicule récurrent : le vaisseau, la voiture, la moto, le mécha piloté…
+    creature = "creature"  # créature récurrente : l'animal de compagnie, le monstre (ne parle pas par défaut)
+
+
+# Sortes rattachées aux cases par `Panel.object_ids` (liste « objets » du scénario et de la direction
+# artistique) : un véhicule ou une créature apparaît dans une case comme un objet, avec sa fiche à elle.
+PANEL_OBJECT_KINDS = (AssetKind.object, AssetKind.vehicle, AssetKind.creature)
 
 
 class SeriesAsset(TimestampMixin, Base):
-    """Objet ou décor récurrent de la bibliothèque d'une série (mêmes champs qu'un personnage).
+    """Objet, décor, véhicule ou créature récurrent de la bibliothèque d'une série (mêmes champs qu'un
+    personnage). Un objet, un véhicule ou une créature peut changer de sorte (`PANEL_OBJECT_KINDS`) en gardant
+    ses images et ses variantes (api/assets.py).
 
     Une référence de style (`kind = style`) a une seule image : l'essai de la planche de style passé au
     propre ; `visual_description` garde le `$style` de la série au moment des essais.
@@ -282,7 +291,8 @@ class SeriesAsset(TimestampMixin, Base):
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     kind: Mapped[AssetKind] = mapped_column(_enum(AssetKind))
     name: Mapped[str] = mapped_column(String(120))
-    # Dossier dans ComfyUI (`<série>/objets|decors|style/<slug>`) : tiré du nom, unique par sorte dans la série.
+    # Dossier dans ComfyUI (`<série>/objets|decors|vehicules|creatures|style/<slug>`) : tiré du nom, unique par
+    # sorte dans la série.
     slug: Mapped[str] = mapped_column(String(120), default="", server_default="")
     visual_description: Mapped[str] = mapped_column(Text, default="")
     prompt_keywords: Mapped[list[str]] = mapped_column(JSON, default=list)
@@ -349,7 +359,7 @@ class ReferenceVariant(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
-    # character | object | decor ; `style` : essai de la planche de style (entry_id = id de la série).
+    # character | object | decor | vehicle | creature ; `style` : essai de la planche de style (entry_id = id de la série).
     entry_kind: Mapped[str] = mapped_column(String(20))
     entry_id: Mapped[int] = mapped_column(Integer, index=True)
     job_id: Mapped[int | None] = mapped_column(ForeignKey("jobs.id", ondelete="SET NULL"), default=None)

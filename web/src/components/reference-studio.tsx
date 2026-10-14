@@ -42,7 +42,7 @@ function plural(n: number, word: string): string {
 }
 
 /**
- * « Créer des références » d'une fiche (personnage, objet ou décor) : génère des variantes d'un type de
+ * « Créer des références » d'une fiche (personnage, objet, décor, véhicule ou créature) : génère des variantes d'un type de
  * fiche dans la file ComfyUI, les affiche au fil de l'eau, « Affiner » repart d'une variante, « Garder
  * comme référence » l'ajoute aux images de référence de la fiche. Les variantes restent dans l'historique.
  */
@@ -240,12 +240,16 @@ export function ReferenceStudio({
         de la fiche ; une image de départ est facultative.{" "}
         {kind === "character"
           ? "La référence de style de la série (planche de style) ne sert qu’au trait : elle n’est jointe qu’après une image de départ ou la variante à affiner."
-          : "Personne ne doit y apparaître : jamais de planche de style, prompt négatif « aucune personne » actif (palier Qualité), et une variante où un visage est détecté ne peut pas servir de référence aux cases sans ton accord."}{" "}
+          : kind === "creature"
+            ? "Aucun humain ni autre créature ne doit y apparaître : jamais de planche de style, prompt négatif « aucun humain, aucune autre créature » actif (palier Qualité) — il n’interdit ni visage, ni yeux, ni corps."
+            : kind === "vehicle"
+              ? "Personne ne doit y apparaître, pas même le pilote : jamais de planche de style, prompt négatif « aucune personne, aucun pilote, aucun décor » actif (palier Qualité), et une variante où un visage est détecté ne peut pas servir de référence aux cases sans ton accord."
+              : "Personne ne doit y apparaître : jamais de planche de style, prompt négatif « aucune personne » actif (palier Qualité), et une variante où un visage est détecté ne peut pas servir de référence aux cases sans ton accord."}{" "}
         Les variantes non gardées restent dans l&apos;historique : tu peux les garder plus tard ou les supprimer.
       </p>
       {!sheetList.length ? (
         <Alert tone="info">
-          Aucun type de fiche pour un {info.singular} : ajoute un fichier dans presets/reference_sheets/.
+          Aucun type de fiche pour {kind === "creature" ? "une" : "un"} {info.singular} : ajoute un fichier dans presets/reference_sheets/.
         </Alert>
       ) : (
         <form onSubmit={generate} className="space-y-4">

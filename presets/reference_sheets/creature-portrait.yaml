@@ -1,0 +1,25 @@
+# Type de fiche de référence : voir presets/README.md (« Fiches de référence »).
+id: creature-portrait
+name: Portrait de face
+description: "Tête et buste de la créature, de face, fond neutre : la référence principale de sa tête."
+kinds: [creature]
+order: 10
+# Plans de case que sert cette fiche : pour un plan serré, le portrait de la créature passe en tête.
+shots: [gros plan, très gros plan, plan rapproché, insert]
+angles: [de face]
+width: 1024
+height: 1024
+# Palier Qualité (vrai CFG) : le négatif « aucun humain, aucune autre créature » est lu. Il n'interdit ni
+# visage, ni yeux, ni corps : c'est le sujet de la fiche.
+workflow: qwen-image-base-qualite
+prompt:
+  - "Creature reference sheet: front portrait of $name, head and chest framed, facing the viewer, calm expression."
+  - "$description."
+  - "Details: $keywords."
+  - "Requested change: $instruction."
+  - "$start is the starting image: keep the creature, its head, markings and colours, and redraw it cleanly as the sheet requires."
+  - "Style: $style."
+  - "$subject."
+  - "The last image ($style_ref) is a style reference only (line work, screentones, inking): do not copy its character, scene or composition."
+  - "Plain white background, even neutral lighting, a single creature, no human, no text."
+negative_prompt: "human, person, people, man, woman, child, rider, owner, extra creatures, second animal, multiple creatures, crowd, text, cluttered background, back view"

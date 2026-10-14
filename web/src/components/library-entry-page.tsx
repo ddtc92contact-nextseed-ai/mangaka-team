@@ -4,15 +4,17 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useConfirm } from "@/components/confirm";
-import { Alert, Button, Card, Loading, PageHeader } from "@/components/ui";
-import { api, errorMessage, type LibraryKind } from "@/lib/api";
+import { Alert, Button, Card, Field, Loading, PageHeader, Select } from "@/components/ui";
+import { api, errorMessage, type LibraryKind, type PanelObjectKind } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
-import { LIBRARY_KINDS, entryHref, libraryHref } from "@/lib/library";
+import { LIBRARY_KINDS, PANEL_OBJECT_KINDS, entryHref, isPanelObjectKind, libraryHref } from "@/lib/library";
+import { LibraryIcon } from "./library-icon";
 import { LibraryEntryForm, ReferenceImages } from "./library-entry-form";
 import { ReferenceStudio } from "./reference-studio";
 import { useToast } from "./toast";
 
-/** Fiche d'un personnage, d'un objet ou d'un décor : champs, images de référence, suppression. */
+/** Fiche d'un personnage, d'un objet, d'un décor, d'un véhicule ou d'une créature : champs, images de référence,
+ * catégorie (objet ↔ véhicule ↔ créature), suppression. */
 export function LibraryEntryPage({ kind, id }: { kind: LibraryKind; id: number }) {
   const info = LIBRARY_KINDS[kind];
   const router = useRouter();
@@ -55,8 +57,8 @@ export function LibraryEntryPage({ kind, id }: { kind: LibraryKind; id: number }
         title={e.name}
         subtitle={
           <span className="flex flex-wrap items-center gap-3">
-            <Link href={libraryHref(e.project_id, kind)} className="hover:text-zinc-200">
-              ← Bibliothèque · {info.tab}
+            <Link href={libraryHref(e.project_id, kind)} className="flex items-center gap-1.5 hover:text-zinc-200">
+              ← Bibliothèque · <LibraryIcon kind={kind} className="h-3.5 w-3.5" /> {info.tab}
             </Link>
             <Link href={`/projets/${e.project_id}`} className="hover:text-zinc-200">
               Voir la série
@@ -93,6 +95,7 @@ export function LibraryEntryPage({ kind, id }: { kind: LibraryKind; id: number }
               toast(info.saved.replace(/\.$/, ""));
             }}
           />
+          {isPanelObjectKind(kind) && <KindSwitcher kind={kind} id={e.id} name={e.name} />}
         </Card>
         <Card>
           <h2 className="mb-1 font-semibold text-zinc-100">Images de référence</h2>
@@ -110,6 +113,54 @@ export function LibraryEntryPage({ kind, id }: { kind: LibraryKind; id: number }
         <ReferenceStudio kind={kind} entry={e} onEntryChange={entry.setData} />
       </Card>
     </>
+  );
+}
+
+/** Catégorie d'un objet, d'un véhicule ou d'une créature : la changer garde images, variantes et cases. */
+function KindSwitcher({ kind, id, name }: { kind: PanelObjectKind; id: number; name: string }) {
+  const router = useRouter();
+  const toast = useToast();
+  const confirm = useConfirm();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function change(target: PanelObjectKind) {
+    if (target === kind) return;
+    const ok = await confirm({
+      title: "Changer de catégorie ?",
+      message: `« ${name} » devient ${target === "creature" ? "une" : "un"} ${LIBRARY_KINDS[target].singular}. Ses images de référence, ses variantes et les cases qui le montrent sont gardées ; les fiches proposées deviennent celles de sa nouvelle catégorie.`,
+      confirmLabel: "Changer",
+    });
+    if (!ok) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.changeLibraryKind(kind, id, target);
+      toast(`Catégorie : ${LIBRARY_KINDS[target].singular}`);
+      router.replace(entryHref(target, id));
+    } catch (err) {
+      setError(errorMessage(err));
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-6 border-t border-zinc-800 pt-4">
+      <Field label="Catégorie" htmlFor={`kind-${id}`} hint="Un vaisseau rangé en objet ? Change-le de catégorie : il reçoit les fiches et le négatif des véhicules, sans perdre ses images.">
+        <Select id={`kind-${id}`} value={kind} disabled={busy} onChange={(ev) => change(ev.target.value as PanelObjectKind)}>
+          {PANEL_OBJECT_KINDS.map((k) => (
+            <option key={k} value={k}>
+              {LIBRARY_KINDS[k].category ?? LIBRARY_KINDS[k].singular}
+            </option>
+          ))}
+        </Select>
+      </Field>
+      {error && (
+        <div className="mt-2">
+          <Alert>{error}</Alert>
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -27,7 +27,7 @@ export default function LibraryPage() {
   );
 }
 
-/** Bibliothèque d'une série : onglets Personnages / Objets / Décors (`?serie=…&onglet=…`). */
+/** Bibliothèque d'une série : onglets Personnages / Objets / Décors / Véhicules / Créatures (`?serie=…&onglet=…`). */
 function Library() {
   const router = useRouter();
   const pathname = usePathname();
@@ -63,7 +63,7 @@ function Library() {
     <>
       <PageHeader
         title="Bibliothèque"
-        subtitle="Personnages, objets et décors récurrents de la série : description, mots-clés, LoRA et images de référence, pour qu'ils restent les mêmes d'une page à l'autre."
+        subtitle="Personnages, objets, décors, véhicules et créatures récurrents de la série : description, mots-clés, LoRA et images de référence, pour qu'ils restent les mêmes d'une page à l'autre."
         actions={projectId !== null && <ButtonLink href={newEntryHref(kind, projectId)}>{info.addLabel}</ButtonLink>}
       />
       {projects.loading ? (

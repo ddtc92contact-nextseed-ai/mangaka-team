@@ -6,7 +6,8 @@
 #   $style_packs      (packs de style de la série : genre, rendu, ton, réglages fins — noms et descriptions)
 #   $style_guidelines (consignes du genre et du ton : rythme, cases par page, vocabulaire adapté à l'âge)
 #   ($series_style : ancien nom de $style_packs, gardé pour les prompts personnalisés)
-#   $decors $objets (bibliothèque de la série : « - id N · nom : description courte », un par ligne)
+#   $decors $objets (bibliothèque de la série : « - id N · nom : description courte », un par ligne ; les
+#                    véhicules et créatures sont dans $objets, leur sorte après le nom : « Le Faucon (véhicule) »)
 #   $lieux          (lieux de la série, unité de lieu des cases : « - id N · nom : description (décor : …) »)
 #   $chapter_number $chapter_title $synopsis $target_pages $bubble_kinds
 #   ($shot_types : liste des plans, plus utilisée — la direction artistique cadre les cases ; gardée pour
@@ -75,7 +76,7 @@ user: |
   Décors récurrents de la série (bibliothèque) :
   $decors
 
-  Objets récurrents de la série (bibliothèque) :
+  Objets, véhicules et créatures récurrents de la série (bibliothèque ; la sorte suit le nom) :
   $objets
 
   Lieux de la série (déjà installés dans les chapitres précédents) :
@@ -135,8 +136,10 @@ user: |
   - « description » raconte l'action de la case ; « setting » et « staging » la complètent sans la répéter ;
   - « decor » : l'id (nombre) du décor récurrent où se passe la case, pris UNIQUEMENT dans la liste
     des décors ci-dessus, ou null si la case se passe ailleurs ;
-  - « objets » : les ids (nombres) des objets récurrents visibles dans la case, pris UNIQUEMENT dans
-    la liste des objets ci-dessus ([] s'il n'y en a pas) ; n'invente jamais d'id ;
+  - « objets » : les ids (nombres) des objets, véhicules et créatures récurrents visibles dans la case,
+    pris UNIQUEMENT dans la liste ci-dessus ([] s'il n'y en a pas) ; n'invente jamais d'id. Un véhicule
+    (le vaisseau, la moto) ou une créature (l'animal de compagnie, le monstre) qui a une fiche va dans
+    « objets », jamais dans « characters » : une créature ne parle pas et n'est pas un personnage ;
   - répliques courtes, en français, comme dans un vrai manga ; « dialogues » ne contient jamais
     d'onomatopée (elles vont dans « sfx ») ;
   - « summary » : résumé du chapitre en 3 à 6 phrases, pour assurer la continuité des chapitres suivants.

@@ -179,15 +179,17 @@ function BibleForm({ projectId, initial, onSaved }: { projectId: number; initial
   );
 }
 
-/** Décors et objets de la bibliothèque : repris tels quels dans la bible (à modifier depuis leur fiche). */
+/** Décors, objets, véhicules et créatures de la bibliothèque : repris tels quels dans la bible (à modifier depuis leur fiche). */
 function BibleLibrary({ projectId, bible }: { projectId: number; bible: Bible }) {
   const groups = [
     { kind: "decor" as const, label: "Décors récurrents", items: bible.decors ?? [] },
     { kind: "object" as const, label: "Objets récurrents", items: bible.objets ?? [] },
+    { kind: "vehicle" as const, label: "Véhicules récurrents", items: bible.vehicules ?? [] },
+    { kind: "creature" as const, label: "Créatures récurrentes", items: bible.creatures ?? [] },
   ];
   return (
     <div data-testid="bible-library">
-      <p className="mb-1 text-sm font-medium text-zinc-300">Décors et objets récurrents</p>
+      <p className="mb-1 text-sm font-medium text-zinc-300">Décors, objets, véhicules et créatures récurrents</p>
       <p className="mb-2 text-xs text-zinc-500">
         Repris automatiquement de la{" "}
         <Link href={libraryHref(projectId, "decor")} className="underline-offset-2 hover:text-zinc-300 hover:underline">

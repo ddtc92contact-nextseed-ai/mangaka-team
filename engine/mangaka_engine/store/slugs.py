@@ -6,6 +6,7 @@ style) un slug tiré de son nom, unique parmi les fiches de même sorte de la s�
 dossiers de ComfyUI (voir `store/comfy_folders.py`) :
 
     mangaka/<série>/personnages/<nom>/…   mangaka/<série>/objets/<nom>/…   mangaka/<série>/decors/<nom>/…
+    mangaka/<série>/vehicules/<nom>/…     mangaka/<série>/creatures/<nom>/…
     mangaka/<série>/style/…               mangaka/<série>/chapitre-01/page-01/case-01…
 
 `old` (dossier gardé à la main dans ComfyUI) n'est jamais le slug d'une série. Une fiche ou une série
@@ -25,7 +26,14 @@ from .models import Character, Project, SeriesAsset
 
 MAX_LEN = 60
 # Dossier de chaque sorte de fiche sous celui de la série.
-KIND_FOLDERS = {"character": "personnages", "object": "objets", "decor": "decors", "style": "style"}
+KIND_FOLDERS = {
+    "character": "personnages",
+    "object": "objets",
+    "decor": "decors",
+    "vehicle": "vehicules",
+    "creature": "creatures",
+    "style": "style",
+}
 # Slugs interdits : `old` (archives gardées à la main dans ComfyUI/output/mangaka/) pour une série ;
 # `essais` (essais de la planche de style, `style/essais/`) pour une référence de style.
 RESERVED_SERIES = frozenset({"old"})
