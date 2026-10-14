@@ -1113,7 +1113,8 @@ def get_queue(session: Session = Depends(get_session), ctx: AppContext = Depends
             if series is not None:
                 label = f"{series.title} · {label}"
         elif job.step == COVER_STEP:
-            label = f"Couverture · tome {params.get('volume_number') or '?'}"
+            what = "Illustration de 4e" if params.get("kind") == "back" else "Couverture"
+            label = f"{what} · tome {params.get('volume_number') or '?'}"
             if series is not None:
                 label = f"{series.title} · {label}"
         elif job.step == TRIAL_STEP:

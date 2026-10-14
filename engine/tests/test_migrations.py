@@ -927,3 +927,47 @@ def test_v32_database_gets_the_series_identity_with_no_palette_nor_logo(
     fresh = settings.database_path.parent / "fresh.db"
     create_db_engine(fresh).dispose()
     assert _columns(settings.database_path) == _columns(fresh)
+
+
+def test_v33_database_gets_the_cover_composition_with_nothing_filled(
+    make_settings: Callable[..., Settings],
+) -> None:
+    """v33 → v34 : auteur, placement du logo, 4e de couverture, sorte des versions ; rien de rempli, les versions
+    existantes restent des 1res de couverture."""
+    settings = make_settings()
+    with TestClient(create_app(settings)) as c:
+        s = c.post("/projects", json={**STYLE, "title": "Ancienne"}).json()
+        v = c.post(f"/projects/{s['id']}/volumes", json={"title": "Le début"}).json()
+    con = sqlite3.connect(settings.database_path)
+    con.execute("ALTER TABLE projects DROP COLUMN author")
+    for column in (
+        "author",
+        "cover_layout",
+        "back_summary",
+        "back_tagline",
+        "back_summary_source",
+        "back_summary_notes",
+        "back_layout",
+        "back_image",
+        "back_prompt",
+    ):
+        con.execute(f"ALTER TABLE volumes DROP COLUMN {column}")
+    con.execute(
+        "INSERT INTO volume_covers (volume_id, path, content_type, width, height, cover_format, params, created_at) "
+        "VALUES (?, 'x.png', 'image/png', 10, 10, 'manga-13x18-300dpi', '{}', '2026-10-01 10:00:00')",
+        (v["id"],),
+    )
+    con.execute("ALTER TABLE volume_covers DROP COLUMN kind")
+    con.execute("PRAGMA user_version = 33")
+    con.commit()
+    con.close()
+
+    with TestClient(create_app(settings)) as c:
+        comp = c.get(f"/volumes/{v['id']}/composition").json()
+        assert comp["summary"] == "" and comp["tagline"] == "" and comp["author"] == "" and comp["series_author"] == ""
+        assert comp["back_image"] is None and comp["back_versions"] == []
+        assert c.get(f"/volumes/{v['id']}").json()["cover_count"] == 1  # version existante : une 1re
+    assert _version(settings.database_path) == SCHEMA_VERSION
+    fresh = settings.database_path.parent / "fresh.db"
+    create_db_engine(fresh).dispose()
+    assert _columns(settings.database_path) == _columns(fresh)

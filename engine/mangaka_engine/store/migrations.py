@@ -62,6 +62,9 @@
 - 33 : identité visuelle de la série : palette retenue et dernières propositions (`projects.palette`,
   `palette_proposals`, `logo_proposals`) et versions du logo du titre (`series_logos`). Les séries existantes
   n'ont ni palette ni logo.
+- 34 : composition de la couverture : nom d'auteur (série et tome), placement du logo, résumé et accroche de
+  4e, gabarit et petite illustration de 4e, sorte des versions d'illustration (`front` / `back`). Les versions
+  existantes sont des 1res de couverture ; aucun résumé, aucun auteur.
 
 Une base neuve est créée directement à la dernière version. Chaque migration tourne dans une
 transaction unique, clés étrangères désactivées (recette « 12 étapes » de SQLite pour reconstruire
@@ -113,7 +116,7 @@ from .slugs import RESERVED_ENTRIES, RESERVED_SERIES, slugify, unique_slug
 
 log = logging.getLogger("mangaka_engine")
 
-SCHEMA_VERSION = 33
+SCHEMA_VERSION = 34
 
 
 class MigrationError(RuntimeError):
@@ -518,6 +521,31 @@ def _v32_to_v33(cur: sqlite3.Cursor) -> None:
             cur.execute(stmt)
 
 
+def _v33_to_v34(cur: sqlite3.Cursor) -> None:
+    def add(table: str, columns: dict[str, str]) -> None:
+        existing = {row[1] for row in cur.execute(f"PRAGMA table_info({table})")}
+        for name, ddl in columns.items():
+            if name not in existing:
+                cur.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
+
+    add("projects", {"author": "VARCHAR(200) NOT NULL DEFAULT ''"})
+    add(
+        "volumes",
+        {
+            "author": "VARCHAR(200) NOT NULL DEFAULT ''",
+            "cover_layout": "JSON NOT NULL DEFAULT '{}'",
+            "back_summary": "TEXT NOT NULL DEFAULT ''",
+            "back_tagline": "VARCHAR(300) NOT NULL DEFAULT ''",
+            "back_summary_source": "VARCHAR(20)",
+            "back_summary_notes": "TEXT NOT NULL DEFAULT ''",
+            "back_layout": "VARCHAR(100)",
+            "back_image": "JSON",
+            "back_prompt": "TEXT NOT NULL DEFAULT ''",
+        },
+    )
+    add("volume_covers", {"kind": "VARCHAR(10) NOT NULL DEFAULT 'front'"})
+
+
 MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     # version de départ → (version d'arrivée, fonction)
     0: (2, _v0_to_v2),
@@ -553,6 +581,7 @@ MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     30: (31, _v30_to_v31),
     31: (32, _v31_to_v32),
     32: (33, _v32_to_v33),
+    33: (34, _v33_to_v34),
 }
 
 

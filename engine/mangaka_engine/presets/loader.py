@@ -18,6 +18,8 @@ Arborescence attendue :
       page_formats/*.yaml      # formats de page
       cover_formats/*.yaml     # formats de couverture d'un tome (13 × 18, A4) et zones réservées
       cover.yaml               # couverture d'un tome : flux ComfyUI dédié, rendu couleur, prompt
+      cover_composition.yaml   # composition de la couverture : résumé de 4e, dos, textes, logo, export
+      back_layouts/*.yaml      # gabarits de 4e de couverture (accroche, résumé, illustration, titre)
       layouts/*.yaml           # gabarits de planche
       layout_styles/*.yaml     # grammaires de mise en page par série (biais, gouttières, gabarits favoris)
       prompts/*.yaml           # prompts des étapes LLM
@@ -48,7 +50,9 @@ from pydantic import BaseModel, ValidationError
 
 from .schemas import (
     AgentPreset,
+    BackLayout,
     CameraLoraCatalog,
+    CoverCompositionSettings,
     CoverFormat,
     CoverSettings,
     Defaults,
@@ -143,6 +147,9 @@ class PresetRegistry:
     camera_loras: CameraLoraCatalog = field(default_factory=CameraLoraCatalog)
     identity: IdentitySettings | None = None
     logo_styles: dict[str, LogoStyle] = field(default_factory=dict)
+    # Composition de la couverture (cover_composition.yaml) ; None : absente ou invalide.
+    composition: CoverCompositionSettings | None = None
+    back_layouts: dict[str, BackLayout] = field(default_factory=dict)
     issues: list[PresetIssue] = field(default_factory=list)
 
     # --- accès -----------------------------------------------------------
@@ -463,6 +470,7 @@ class PresetRegistry:
         reg._load_styles()
         reg._load_covers()
         reg._load_identity()
+        reg._load_composition()
         return reg
 
     def _load_covers(self) -> None:
@@ -548,6 +556,50 @@ class PresetRegistry:
                     PresetIssue(f"logo_styles/{style.id}", f"rôle de palette inconnu : {', '.join(bad)}")
                 )
         self.identity = identity
+
+    def _load_composition(self) -> None:
+        """Composition de la couverture (cover_composition.yaml + back_layouts/) : après les polices, les prompts
+        et l'identité visuelle, qu'elle référence."""
+        roles = set(self.identity.palette.roles) if self.identity else None
+        for path in sorted((self.root / "back_layouts").glob("*.y*ml")):
+            layout = self._parse(path, BackLayout)
+            if layout is None:
+                continue
+            used = {*layout.background, *(layout.summary_panel or []), *layout.tagline_color}
+            bad = sorted(r for r in used if roles is not None and r not in roles)
+            if bad:
+                self.issues.append(PresetIssue(self._rel(path), f"rôle de palette inconnu : {', '.join(bad)}"))
+                continue
+            self._register(self.back_layouts, layout.id, layout, path)
+        self.back_layouts = dict(sorted(self.back_layouts.items(), key=lambda kv: (kv[1].order, kv[1].name)))
+        path = self.root / "cover_composition.yaml"
+        if not path.exists():
+            return
+        settings = self._parse(path, CoverCompositionSettings)
+        if settings is None:
+            return
+        problems: list[str] = []
+        known = self.fonts.fonts if self.fonts else {}
+        for name, style in settings.texts:
+            if style.font not in known:
+                problems.append(f"texts.{name} : police inconnue « {style.font} »")
+        if settings.summary.prompt not in self.prompts:
+            problems.append(f"summary.prompt : prompts/{settings.summary.prompt}.yaml introuvable")
+        if settings.default_back_layout and settings.default_back_layout not in self.back_layouts:
+            problems.append(f"default_back_layout : gabarit inconnu « {settings.default_back_layout} »")
+        if not self.back_layouts:
+            problems.append("back_layouts/ vide ou invalide : aucun gabarit de 4e de couverture")
+        if problems:
+            self.issues.append(PresetIssue(self._rel(path), " ; ".join(problems)))
+        else:
+            self.composition = settings
+
+    def require_composition(self) -> CoverCompositionSettings:
+        if self.composition is None:
+            raise PresetError(
+                "presets/cover_composition.yaml absent ou invalide : composition de la couverture indisponible"
+            )
+        return self.composition
 
     def require_identity(self) -> IdentitySettings:
         if self.identity is None:

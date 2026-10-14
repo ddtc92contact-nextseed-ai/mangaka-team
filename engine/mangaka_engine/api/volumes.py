@@ -237,7 +237,7 @@ def cover_url(cover: VolumeCover) -> str:
 
 def volume_out(volume: Volume, presets: PresetRegistry) -> VolumeOut:
     fmt = presets.cover_formats.get(volume.cover_format)
-    selected = next((c for c in volume.covers if c.id == volume.selected_cover_id), None)
+    selected = next((c for c in volume.covers if c.id == volume.selected_cover_id and c.kind == "front"), None)
     return VolumeOut(
         id=volume.id,
         project_id=volume.project_id,
@@ -258,7 +258,7 @@ def volume_out(volume: Volume, presets: PresetRegistry) -> VolumeOut:
         cover_prompt_notes=volume.cover_prompt_notes,
         selected_cover_id=selected.id if selected else None,
         selected_cover_url=cover_url(selected) if selected else None,
-        cover_count=len(volume.covers),
+        cover_count=sum(1 for c in volume.covers if c.kind == "front"),
         created_at=volume.created_at,
         updated_at=volume.updated_at,
     )
@@ -315,7 +315,11 @@ def studio_out(session: Session, presets: PresetRegistry, volume: Volume) -> Cov
         ],
         max_characters=cover.max_characters if cover else 0,
         reference_slots=len(loaded.preset.reference_images) if loaded else 0,
-        versions=[version_out(c, volume.selected_cover_id) for c in sorted(volume.covers, key=lambda c: -c.id)],
+        versions=[
+            version_out(c, volume.selected_cover_id)
+            for c in sorted(volume.covers, key=lambda c: -c.id)
+            if c.kind == "front"
+        ],
         active_jobs=[job_out(j) for j in active_cover_jobs(session, volume.id)],
         problem=problem,
         monochrome_series=style.monochrome_series if style else False,
@@ -484,7 +488,7 @@ def delete_volume(
 ) -> Response:
     """Supprime le tome, ses versions de couverture et leurs fichiers ; ses chapitres restent dans la série."""
     volume = get_volume_or_404(session, volume_id)
-    if active_cover_jobs(session, volume.id):
+    if active_cover_jobs(session, volume.id, None):
         raise HTTPException(status_code=409, detail="Couverture en cours de génération : annule-la d'abord")
     folder = f"projects/{volume.project_id}/volumes/{volume.id}"
     session.delete(volume)
@@ -567,7 +571,10 @@ def select_cover(
 ) -> CoverStudioOut:
     cover = _cover_or_404(session, cover_id)
     volume = cover.volume
-    volume.selected_cover_id = cover.id
+    if cover.kind == "back":
+        volume.back_image = {"source": "generated", "id": cover.id}
+    else:
+        volume.selected_cover_id = cover.id
     session.commit()
     session.refresh(volume)
     return studio_out(session, _presets(ctx, volume.project_id), volume)
@@ -583,6 +590,8 @@ def delete_cover(
     volume.covers.remove(cover)
     if volume.selected_cover_id == cover_id:
         volume.selected_cover_id = None
+    if (volume.back_image or {}).get("source") == "generated" and (volume.back_image or {}).get("id") == cover_id:
+        volume.back_image = None
     session.commit()
     ctx.files.delete(path)
     return Response(status_code=204)

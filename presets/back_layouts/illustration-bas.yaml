@@ -1,0 +1,12 @@
+# Gabarit de 4e de couverture : accroche et résumé d'abord, petite illustration en bas, titre en pied.
+# Boîtes en fraction de la zone de sécurité ; couleurs : rôles de la palette de la série.
+id: illustration-bas
+name: Illustration en bas
+description: Accroche, résumé sur le fond de la palette, illustration en bas, titre et tome en pied.
+order: 20
+background: [fond, texte-clair]
+tagline_color: [dominante, accent]
+tagline: { x: 0, y: 0, width: 1, height: 0.11, align: left }
+summary: { x: 0, y: 0.125, width: 1, height: 0.42, align: left }
+illustration: { x: 0.1, y: 0.565, width: 0.8, height: 0.345, align: center }
+title: { x: 0, y: 0.925, width: 1, height: 0.075, align: right }

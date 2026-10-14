@@ -1,0 +1,13 @@
+# Gabarit de 4e de couverture : illustration en encart à droite de l'accroche, résumé pleine largeur dessous.
+# Boîtes en fraction de la zone de sécurité ; couleurs : rôles de la palette de la série.
+id: encart
+name: Illustration en encart
+description: Illustration en encart à côté de l'accroche, long résumé pleine largeur, titre et tome en pied.
+order: 30
+background: [secondaire, dominante]
+summary_panel: [fond, texte-clair]
+tagline_color: [accent, texte-clair]
+tagline: { x: 0, y: 0.02, width: 0.44, height: 0.3, align: left }
+illustration: { x: 0.47, y: 0, width: 0.53, height: 0.34, align: right }
+summary: { x: 0, y: 0.37, width: 1, height: 0.54, align: left }
+title: { x: 0, y: 0.925, width: 1, height: 0.075, align: center }

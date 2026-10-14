@@ -39,6 +39,7 @@ Après modification d'un preset, redémarre le moteur (`npm run dev`).
 | `agents/*.yaml` | Agents du pipeline (écran « L'équipe ») : nom, rôle, étape et réglages éditables depuis l'UI |
 | `reference_sheets/*.yaml` | Types de fiches de référence de « Créer des références » (portrait, turnaround, expressions, vue 3/4, plan large, autre angle) : gabarit de prompt, taille, workflow facultatif |
 
+| `cover_composition.yaml` + `back_layouts/*.yaml` | Composition de la couverture d'un tome : résumé de 4e par l'IA (longueurs), petite illustration de 4e (ratio, taille), dos (épaisseur du papier), placement du logo, styles de texte, palette de repli ; gabarits de 4e — voir « Composition de la couverture » |
 | `identity.yaml` + `logo_styles/*.yaml` | Identité visuelle de la série (fiche série) : palettes proposées par l'IA (nombre, couleurs, rôles), logo du titre (polices permises, tailles, contraste minimal, bornes des réglages) et effets du logo — voir « Identité visuelle » |
 | `knowledge.yaml` | Savoir-faire (RAG local) : découpage des documents, recherche hybride, seuil « petite collection », budget de la bible, collections lues par chaque agent |
 | `knowledge_packs/*.yaml` + `*.md` | Packs de savoir-faire livrés (fiches de mise en scène manga) : importés au démarrage dans des collections « pack » en lecture seule |
@@ -80,6 +81,32 @@ sinon celui de defaults.yaml) l'amène au DPI réel, et le moteur la recadre au 
 par le LLM du Dessinateur (`prompts/redacteur-couverture.yaml`) d'après la bible, les personnages choisis et
 l'intention de l'auteur ; il est toujours en couleur (`rendering`, un rendu non N&B) et reçoit toujours les
 `rules` (zone `clear` dégagée, aucun texte).
+
+## Composition de la couverture (`cover_composition.yaml`, `back_layouts/`)
+
+Écran « Couverture » d'un tome, sous l'illustration. Aucun texte n'est dessiné par le modèle d'image : titre,
+logo, numéro de tome, auteur, accroche et résumé sont posés en vectoriel (polices de `fonts.yaml`, couleurs de
+la palette retenue de la série ; sans palette, `fallback_palette`).
+
+- **1re** : illustration retenue à fond perdu ; logo de la série (dernière version) dans la zone `clear` du
+  format, taille `front.logo_scale` × la plus grande qui tient dans la zone, centre déplaçable, toujours dans la
+  marge de sécurité ; sans logo, titre en `texts.fallback_title` et avertissement ; badge du numéro (zone
+  `tome`) ; nom d'auteur (zone `auteur` ; celui du tome, sinon celui de la série).
+- **4e** : gabarit de `back_layouts/` (boîtes en fraction de la zone de sécurité, rôles de palette du fond, de
+  l'encart du résumé et de l'accroche). Le résumé est réduit par pas de `step_pt` jusqu'à `min_size_pt` pour
+  tenir dans son cadre, jamais coupé : au-delà, erreur lisible et export refusé.
+- **Résumé** (`prompts/resume-quatrieme.yaml`, LLM du Scénariste) : `summary.min_chars` à `max_chars` signes,
+  accroche de `tagline_max_chars` signes au plus, d'après les résumés des chapitres du tome et la bible ; une
+  réponse qui reprend `spoiler_words` mots d'affilée de la fin du dernier chapitre est refusée (pas de
+  révélation) ; 2 nouveaux essais au plus, puis erreur lisible. « Réécrire » montre le texte actuel à l'agent.
+- **Petite illustration de 4e** : une case retenue du tome, ou une génération par le flux de `cover.yaml` au
+  ratio `back_illustration.aspect`, agrandie à `width_mm` au DPI du format, règles « aucun texte ».
+- **Dos** : `ceil(pages / 2) × spine.sheet_thickness_mm + spine.cover_mm` (au moins `min_width_mm`) ; pages des
+  chapitres du tome (à défaut, leur nombre de pages visé). Titre vertical si le dos fait au moins
+  `title_min_width_mm`.
+- **Export** (job) : ZIP avec `1re-de-couverture`, `4e-de-couverture`, `couverture-a-plat` en PNG (DPI du format)
+  + SVG, et le texte de la 4e. À plat : 4e + dos + 1re en ltr, 1re + dos + 4e en rtl (manga). Options fond perdu
+  et repères de coupe (plus les repères de pli du dos), comme l'export d'un chapitre.
 
 ## Gabarits de planche (`layouts/*.yaml`)
 

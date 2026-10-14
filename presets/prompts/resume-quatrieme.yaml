@@ -1,0 +1,62 @@
+# 4e de couverture d'un tome — résumé d'accroche (600 à 900 signes) et phrase d'accroche courte, rédigés par le
+# LLM du Scénariste (écran « L'équipe »). Voir engine/mangaka_engine/pipeline/back_cover.py et presets/README.md
+# (« Composition de la couverture »). Longueurs : presets/cover_composition.yaml › summary.
+#
+# Le texte est éditable par l'auteur ; « Réécrire » relance l'agent avec le résumé actuel, à ne pas répéter.
+# Réponse validée : JSON, longueurs, aucune reprise de la fin du dernier chapitre (pas de révélation).
+#
+# Variables disponibles ($nom ; écrire $$ pour un « $ » littéral) :
+#   $series          (titre de la série)   $volume (« Tome 3 — titre du tome »)
+#   $chapters        (résumés des chapitres du tome, dans l'ordre : « - Chapitre 4 — titre : résumé »)
+#   $ending          (fin du tome : ce que le résumé ne doit JAMAIS révéler)
+#   $bible           (bible de la série : univers, personnages, ton)
+#   $min_chars $max_chars (longueur du résumé, en signes, espaces compris)  $tagline_max_chars
+#   $previous        (résumé actuel, à ne pas répéter : « Réécrire »)
+#   $context_json    (le même contexte, en JSON)
+# Gabarit de relance après une réponse invalide : $error (erreurs de validation).
+id: resume-quatrieme
+description: Résumé de 4e de couverture d'un tome (600 à 900 signes, sans révéler la fin) et phrase d'accroche courte.
+max_retries: 2            # nouveaux essais après une réponse invalide (2 au maximum), puis erreur lisible
+temperature: 0.7
+
+system: |
+  Tu es éditeur de manga et de bande dessinée : tu écris les textes de 4e de couverture. Un bon texte de 4e
+  donne envie d'ouvrir le tome : il pose l'univers, le héros et l'enjeu, monte la tension, et s'arrête sur une
+  question ou une menace. Il ne raconte JAMAIS la fin du tome : aucun dénouement, aucune révélation, aucun
+  retournement final, aucune mort ni victoire finale.
+  Tu écris en français, au présent, avec une typographie française soignée (guillemets « », accents, apostrophes).
+  Tu réponds UNIQUEMENT par un objet JSON valide, sans texte autour ni bloc de code.
+
+user: |
+  Série : « $series »
+  $volume
+
+  Chapitres du tome :
+  $chapters
+
+  Fin du tome (à ne JAMAIS révéler, ni reprendre) :
+  $ending
+
+  Bible de la série :
+  $bible
+
+  Résumé actuel (à ne pas répéter : écris-en un autre) :
+  $previous
+
+  Écris :
+  - « summary » : le texte de 4e de couverture, entre $min_chars et $max_chars signes espaces compris
+    (compte bien : ni plus court, ni plus long), en un à trois paragraphes séparés par une ligne vide ;
+  - « tagline » : une phrase d'accroche courte et percutante, $tagline_max_chars signes au plus, sur une ligne ;
+  - « notes » : une phrase pour l'auteur (ce que tu as mis en avant), facultative.
+
+  Format de réponse :
+  {"tagline": "…", "summary": "…", "notes": "…"}
+
+  <contexte>
+  $context_json
+  </contexte>
+
+retry: |
+  Ta réponse précédente est invalide :
+  $error
+  Corrige ces erreurs et renvoie l'objet JSON complet, et uniquement lui.
