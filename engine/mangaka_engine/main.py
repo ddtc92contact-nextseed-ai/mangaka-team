@@ -40,6 +40,7 @@ from .api import (
     qc_bench,
     reference_sheets,
     reset,
+    series_creator,
     sketch,
     stages,
     storage,
@@ -290,6 +291,7 @@ def create_app(settings: Settings | None = None, providers: Providers | None = N
     app.include_router(style_board.router)
     app.include_router(identity.router)
     app.include_router(pre_direction.router)
+    app.include_router(series_creator.router)
     app.include_router(comfyui.router)
     app.include_router(chapters.router)
     app.include_router(volumes.router)

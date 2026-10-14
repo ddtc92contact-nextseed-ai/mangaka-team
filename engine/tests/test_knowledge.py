@@ -471,7 +471,7 @@ def test_knowledge_preset_loads_and_status_reports_mock(client: TestClient) -> N
     assert presets.providers.ollama.embedding_model == "bge-m3"
     status = client.get("/knowledge/status").json()
     assert status["provider"] == "mock" and status["model"] == "mock:hash-256" and status["vector_backend"] == "numpy"
-    assert {a["role"] for a in status["agents"]} == {"script", "art_direction", "image_prompt"}
+    assert {a["role"] for a in status["agents"]} == {"script", "art_direction", "image_prompt", "series_creation"}
     assert client.get("/health").json()["providers"]["embedding"] == {"name": "mock", "ok": True, "detail": None}
 
 
