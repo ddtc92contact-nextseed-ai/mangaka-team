@@ -70,15 +70,6 @@ settings:
     max: 6
     source: prompts/script.yaml#dialogue_rules.target_per_panel
     help: Dans chaque case où un personnage présent peut parler, sans dépasser la place de la case.
-  - key: min_per_panel
-    label: Répliques par case au minimum (chapitre)
-    group: Dialogues
-    type: number
-    min: 0
-    max: 6
-    step: 0.1
-    source: prompts/script.yaml#dialogue_rules.min_per_panel
-    help: Moyenne sur le chapitre, onomatopées non comptées (0 = pas d'exigence ; bornée par la place des cases).
   - key: max_words
     label: Mots au plus par réplique
     group: Dialogues
@@ -137,6 +128,7 @@ settings:
       - intensities
       - rythmes
       - dialogue_rules
+      - pre_direction
       - context_json
       - bible
       - savoir_faire

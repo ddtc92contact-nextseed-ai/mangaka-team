@@ -34,6 +34,7 @@ Arborescence attendue :
       style_options.yaml       # réglages fins bornés du style (trait, trames, détail des décors)
       style_loras.yaml         # catalogue des LoRA de style (mots déclencheurs, poids conseillé)
       camera_loras.yaml        # LoRA Multiple-Angles et Cohérence anime, vocabulaire de caméra
+      pre_direction.yaml       # ADN de la série : charte chiffrée, défaut ultime et défauts des 7 genres
 
 Un preset invalide n'empêche pas le moteur de démarrer : il est écarté et
 l'erreur est exposée via `GET /presets` et `GET /health`.
@@ -70,6 +71,8 @@ from .schemas import (
     LetteringSettings,
     LogoStyle,
     PageFormat,
+    PreDirection,
+    PreDirectionSettings,
     PromptPreset,
     ProvidersPreset,
     QCSettings,
@@ -154,6 +157,8 @@ class PresetRegistry:
     back_layouts: dict[str, BackLayout] = field(default_factory=dict)
     # Charte des couvertures (cover_charter.yaml) ; None : absente ou invalide (couvertures sans charte).
     cover_charter: CoverCharterSettings | None = None
+    # ADN de la série (pre_direction.yaml) ; None : absent ou invalide (aucune charte vérifiée).
+    pre_direction: PreDirectionSettings | None = None
     issues: list[PresetIssue] = field(default_factory=list)
 
     # --- accès -----------------------------------------------------------
@@ -472,11 +477,29 @@ class PresetRegistry:
             reg._register(reg.reference_sheets, sheet.id, sheet, path)
         reg.reference_sheets = dict(sorted(reg.reference_sheets.items(), key=lambda kv: (kv[1].order, kv[1].name)))
         reg._load_styles()
+        reg._load_pre_direction()
         reg._load_covers()
         reg._load_identity()
         reg._load_composition()
         reg._load_cover_charter()
         return reg
+
+    def _load_pre_direction(self) -> None:
+        """ADN de la série : défauts des genres connus (un genre inconnu de style_genres/ est signalé)."""
+        path = self.root / "pre_direction.yaml"
+        if not path.exists():
+            return
+        settings = self._parse(path, PreDirectionSettings)
+        if settings is None:
+            return
+        unknown = [g for g in settings.genres if g not in self.style_genres]
+        if unknown:
+            self.issues.append(PresetIssue(self._rel(path), f"genres : genre inconnu « {unknown[0]} » (style_genres/)"))
+        self.pre_direction = settings
+
+    def genre_dna(self, genre_id: str | None) -> PreDirection | None:
+        """ADN par défaut d'un genre (celui de `defaults` sans valeurs propres) ; None sans pre_direction.yaml."""
+        return self.pre_direction.genre(genre_id) if self.pre_direction else None
 
     def _load_covers(self) -> None:
         """Formats de couverture (dimensions reprises d'un format de page si `page_format`) et cover.yaml."""

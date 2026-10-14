@@ -626,7 +626,8 @@ def test_structure_fiches_agree_with_the_presets() -> None:
     assert rules is not None
     silence = fiches["STR_SIL_001"] + fiches["STR_SIL_002"]
     assert f"{rules.max_words} mots au plus, {rules.max_mean_words:g} en moyenne" in silence
-    assert f"{str(rules.min_per_panel).replace('.', ',')} réplique par case" in silence
+    assert f"{rules.min_per_page} à {rules.max_per_page} répliques par planche" in silence
+    assert f"au moins {rules.min_silent_panels_per_page} case muette par planche" in silence
     assert f"la cible est {rules.target_per_panel} répliques" in silence
     # règles par planche de la direction artistique
     page_rules = reg.prompt("direction-artistique").page_rules

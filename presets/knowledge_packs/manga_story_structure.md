@@ -552,11 +552,11 @@ dernière case d'une chute ou d'une ouverture.
 toujours au moins un mot de lui (cri, ordre, réaction) : une case d'action muette est refusée, l'onomatopée
 seule ne suffit pas.
 
-**Combien, dans les règles de l'appli.** Le chapitre doit garder au moins 1,3 réplique par case en moyenne, et
-la cible est 2 répliques dans chaque case où un personnage peut parler. Donc :
+**Combien, dans les règles de l'appli.** Le dialogue se compte par planche : 4 à 8 répliques par planche par
+défaut (l'ADN de la série règle ces chiffres selon le genre), au moins 1 case muette par planche, et la cible
+est 2 répliques dans chaque case où un personnage peut parler. Donc :
 
-- au plus 1 case muette sur 6 environ (≈ 10 à 12 cases sur un chapitre de 15 pages à 5 cases), davantage en
-  seinen seulement si les autres cases compensent ;
+- une case muette par planche au moins (deux en seinen ou en tranche de vie, selon l'ADN de la série) ;
 - jamais plus de 2 cases muettes d'affilée ;
 - de préférence des cases sans personnage (décor, objet, insert), ou sur des pages de 6 cases au plus : sur une
   page de 7 à 9 cases, chaque case n'a la place que d'une réplique, une case muette n'y est pas rattrapable ;
@@ -580,7 +580,8 @@ accélérer l'échange, une case vide le suspend. Un dialogue où chaque case a 
 monotone.
 
 **Le motif de base** (une page de 5 cases) : bavarde (2 répliques), bavarde (2), réplique clé seule (1),
-muette (réaction), relance (2). Soit 7 à 8 répliques pour 5 cases : la moyenne de 1,3 par case est tenue.
+muette (réaction), relance (2). Soit 7 répliques et une case muette pour 5 cases : la planche est dans les
+4 à 8 répliques visées.
 
 **Repères chiffrés, alignés sur les règles de dialogue.**
 

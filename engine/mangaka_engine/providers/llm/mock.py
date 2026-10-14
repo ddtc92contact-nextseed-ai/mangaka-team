@@ -49,12 +49,19 @@ L'essai courant se déduit des messages : aucun état entre deux appels.
 Le découpage factice respecte les règles de dialogue livrées (presets/prompts/script.yaml) : deux
 répliques courtes par case (une seule sur une page chargée), un cri dans chaque case « choc », une
 narration en ouverture et des pensées.
+
+Il respecte aussi la charte de la série (ADN, `pre_direction` du contexte, presets/pre_direction.yaml) : cases
+par planche, répliques comptées par planche avec une case muette, cases sans personnage si le genre en demande ;
+et, en direction artistique, la courbe de rythme (premier pic dans la fenêtre, respiration après, pic final),
+les formes de planche (gabarits variés, part de planches à grande case) et l'échelle des plans (plancher des
+plans larges, plafond des plans serrés).
 """
 
 from __future__ import annotations
 
 import colorsys
 import json
+import math
 import re
 from collections.abc import Callable
 from typing import Any
@@ -165,11 +172,23 @@ def mock_script(ctx: dict[str, Any], *, sparse: bool = False) -> dict[str, Any]:
     previous = ctx.get("previous_chapters") or []
     decors = [d["id"] for d in ctx.get("decors") or [] if isinstance(d.get("id"), int)]
     objets = [o["id"] for o in ctx.get("objets") or [] if isinstance(o.get("id"), int)]
+    charter = ctx.get("pre_direction") or {}
+    lo = int((charter.get("panels") or {}).get("min_per_page") or 1)
+    hi = int((charter.get("panels") or {}).get("max_per_page") or 9)
+    counts = [c for c in _PANELS_PER_PAGE if lo <= c <= hi]
+    if len(set(counts)) < 2:
+        # Au plus 6 cases : au-delà, les répliques factices ne tiennent plus dans les petites cases.
+        counts = list(range(lo, max(lo, min(hi, 6)) + 1))
+    # Peu de planches à grande case voulues : pas de page de 5 cases (tous ses gabarits ont une grande case).
+    big_max = float(((charter.get("shapes") or {}).get("big_panel_share") or {}).get("max", 1))
+    if big_max < 0.7 and 5 in counts:
+        others = [c for c in counts if c != 5]
+        counts = others if len(set(others)) >= 2 else [c for c in range(lo, min(hi, 7) + 1) if c != 5] or counts
     pages = []
     beat = 0
     for p in range(n_pages):
         panels = []
-        count = 1 if p == n_pages - 1 and n_pages > 2 else _PANELS_PER_PAGE[p % len(_PANELS_PER_PAGE)]
+        count = 1 if p == n_pages - 1 and n_pages > 2 else counts[p % len(counts)]
         for i in range(count):
             text = beats[beat % len(beats)]
             beat += 1
@@ -217,9 +236,51 @@ def mock_script(ctx: dict[str, Any], *, sparse: bool = False) -> dict[str, Any]:
                 }
             )
         pages.append({"rythme": _RYTHMES[p % len(_RYTHMES)], "panels": panels})
+    if charter and not sparse:
+        _script_charter(pages, charter)
     recap = f" Suite du chapitre {previous[-1]['number']}." if previous else ""
     summary = f"Chapitre {chapter.get('number', '?')} — {' '.join(beats)[:400]}{recap}"
     return {"pages": pages, "summary": summary}
+
+
+def _replies(panels: list[dict[str, Any]]) -> int:
+    return sum(len(pa["dialogues"]) for pa in panels)
+
+
+def _script_charter(pages: list[dict[str, Any]], charter: dict[str, Any]) -> None:
+    """Charte de la série : une case muette par planche (la plus calme, jamais une case d'action), répliques
+    comptées par planche (des réactions courtes ajoutées là où la place le permet, des secondes répliques
+    retirées au-delà du plafond), et des cases de décor sans personnage si le genre en demande."""
+    dialogue = charter.get("dialogue") or {}
+    low, high = int(dialogue.get("min_per_page") or 0), int(dialogue.get("max_per_page") or 99)
+    silent = int(dialogue.get("min_silent_panels") or 0)
+    empty = float(((charter.get("presence") or {}).get("empty") or {}).get("min") or 0)
+    empties = math.ceil(empty * sum(len(p["panels"]) for p in pages) - 1e-9)
+    for page in pages:
+        panels = page["panels"]
+        n = len(panels)
+        if silent and n >= 2:
+            quiet = [pa for pa in reversed(panels) if pa["intensity"] != "choc" and pa["importance"] < 3]
+            for pa in quiet[:silent]:
+                pa["dialogues"], pa["sfx"] = [], []
+                if empties > 0:
+                    pa.update(characters=[], staging="", description=f"Le décor seul : {pa['setting']}.")
+                    empties -= 1
+        room = 3 if n <= 4 else 2 if n <= 6 else 1
+        if n >= 7:  # petites cases : répliques de quatre mots au plus
+            for pa in panels:
+                for d in pa["dialogues"]:
+                    words = d["text"].split()
+                    d["text"] = " ".join(words[:4]) + ("…" if len(words) > 4 else "")
+
+        for pa in reversed(panels):
+            while len(pa["dialogues"]) > 1 and _replies(panels) > high:
+                pa["dialogues"].pop()
+        for k, pa in enumerate(panels):
+            cap = min(2, room + (1 if pa["importance"] >= 3 else 0))
+            while pa["dialogues"] and pa["characters"] and len(pa["dialogues"]) < cap and _replies(panels) < low:
+                who = pa["characters"][-1]
+                pa["dialogues"].append({"speaker": who, "text": _REPLIES[k % len(_REPLIES)], "kind": "speech"})
 
 
 # --- direction artistique ---------------------------------------------------------
@@ -280,10 +341,15 @@ def mock_art_direction(ctx: dict[str, Any]) -> dict[str, Any]:
     angles = _DA_ANGLES if bold else _DA_ANGLES_SOBRE
     out = []
     last = max((int(p["page"]) for p in pages), default=1)
-    for page in pages:
+    charter = ctx.get("pre_direction") or {}
+    whole = bool(charter) and len(pages) >= int(charter.get("min_pages") or 4)
+    curve = _curve(len(pages), charter) if whole else None
+    for index, page in enumerate(pages):
         n = int(page["page"])
         seed = n * 7 + number * 3 + variant * 5
-        if variant == 0 and n == 1:
+        if curve is not None:
+            rythme = curve[index]
+        elif variant == 0 and n == 1:
             rythme = "calme"
         elif variant == 0 and n == last and last > 1:
             rythme = "climax"
@@ -367,7 +433,197 @@ def mock_art_direction(ctx: dict[str, Any]) -> dict[str, Any]:
     _tighten(out, ctx.get("variety_rules") or {})
     if ctx.get("page_rules"):
         _page_rules(out, ctx["page_rules"], ctx.get("variety_rules") or {})
+    if whole:
+        _shapes(out, pages, charter)
+        _shot_scale(out, charter, ctx.get("variety_rules") or {}, ctx.get("page_rules") or {})
     return {"pages": out}
+
+
+def _window(n: int, charter: dict[str, Any]) -> list[int]:
+    first = (charter.get("rhythm") or {}).get("first_peak") or {}
+    low, high = float(first.get("min", 0)), float(first.get("max", 1))
+    return [i for i in range(n) if i / n <= high + 1e-9 and (i + 1) / n >= low - 1e-9]
+
+
+def _curve(n: int, charter: dict[str, Any]) -> list[str]:
+    """Courbe de rythme de la charte : installation, premier pic dans la fenêtre visée, respiration juste après,
+    montées et respirations en alternance, pic final."""
+    rhythm = charter.get("rhythm") or {}
+    peak = (charter.get("peak_rythmes") or ["climax"])[0]
+    breath = (charter.get("breath_rythmes") or ["respiration"])[0]
+    window = _window(n, charter)
+    first = next((i for i in window if i > 0), window[0] if window else min(1, n - 1))
+    out = ["calme", *(["montée"] * (n - 1))]
+    for i in range(first + 2, n):
+        out[i] = "montée" if (i - first) % 2 == 0 else breath
+    if rhythm.get("final_peak_last_pages"):
+        out[n - 1] = peak
+        if n - 2 > first + 1 and out[n - 2] == peak:
+            out[n - 2] = "montée"
+    out[first] = peak
+    if first + 1 < n and out[first + 1] != peak:
+        out[first + 1] = breath
+    return out
+
+
+def _shapes(pages: list[dict[str, Any]], briefs: list[dict[str, Any]], charter: dict[str, Any]) -> None:
+    """Formes de planche : un gabarit explicite par page, à grande case ou non selon la part visée, jamais le même
+    que la page précédente."""
+    big_templates = set(charter.get("big_templates") or [])
+    share = (charter.get("shapes") or {}).get("big_panel_share") or {}
+    n = len(pages)
+    need = math.ceil(float(share.get("min", 0)) * n - 1e-9)
+    high = float(share.get("max", 1))
+    allowed = max(1, math.floor(high * n + 1e-9)) if high > 0 else 0
+    templates = {int(b["page"]): list(b.get("templates") or []) for b in briefs}
+
+    def is_big(p: dict[str, Any]) -> bool:
+        """Grande case quoi qu'on choisisse : page choc, pleine page, ou aucun gabarit sans grande case."""
+        options = templates[p["page"]]
+        return (
+            bool(p["page_choc"]) or len(p["panels"]) == 1 or bool(options) and all(t in big_templates for t in options)
+        )
+
+    want = [is_big(p) or any(pa["intensity"] == "choc" for pa in p["panels"]) for p in pages]
+    flexible = [
+        i for i, p in enumerate(pages) if not is_big(p) and any(t in big_templates for t in templates[p["page"]])
+    ]
+    for i in flexible:
+        if sum(want) >= need:
+            break
+        want[i] = True
+    for i in reversed(range(n)):
+        if sum(want) <= allowed:
+            break
+        if want[i] and not is_big(pages[i]) and any(t not in big_templates for t in templates[pages[i]["page"]]):
+            want[i] = False
+    in_a_row = int((charter.get("shapes") or {}).get("max_same_in_a_row") or 1)
+    previous, run = None, 0
+    for p, big in zip(pages, want, strict=True):
+        if p["page_choc"]:
+            previous, run = None, 0
+            continue
+        every = templates[p["page"]]
+        options = [t for t in every if (t in big_templates) == big] or every
+        if run >= in_a_row:  # la même forme une fois de trop : un autre gabarit
+            options = [t for t in options if t != previous] or [t for t in every if t != previous] or options
+        if options:
+            p["template"] = p["template"] if p["template"] in options else options[0]
+        run = run + 1 if p["template"] == previous else 1
+        previous = p["template"]
+
+    def shape(p: dict[str, Any]) -> str:
+        return f"choc:{p['page_choc']}" if p["page_choc"] else str(p["template"])
+
+    def longest() -> int:
+        best = run = 0
+        for i, p in enumerate(pages):
+            run = run + 1 if i and shape(p) == shape(pages[i - 1]) else 1
+            best = max(best, run)
+        return best
+
+    # Trop de grandes cases malgré tout (une suite trop longue a imposé un autre gabarit) : des pages repassent
+    # en gaufrier, tant que la suite de même forme reste permise.
+    for p in pages:
+        big = sum(1 for q in pages if is_big(q) or q["template"] in big_templates)
+        if big <= allowed:
+            break
+        if is_big(p) or p["template"] not in big_templates:
+            continue
+        before = p["template"]
+        for t in (t for t in templates[p["page"]] if t not in big_templates):
+            p["template"] = t
+            if longest() <= in_a_row:
+                break
+            p["template"] = before
+
+
+_CLASS_PLAN = {
+    "wide": "plan large",
+    "medium": "plan moyen",
+    "medium_close": "plan rapproché",
+    "close_up": "gros plan",
+    "insert": "insert",
+}
+
+
+def _shot_scale(
+    pages: list[dict[str, Any]], charter: dict[str, Any], variety: dict[str, Any], page_rules: dict[str, Any]
+) -> None:
+    """Échelle des plans de la charte : chaque famille de plans ramenée dans sa part (au-dessus du plafond, des
+    cases passent dans une famille qui a de la place ; sous le plancher, elles viennent d'une famille en surplus),
+    plans serrés sous leur plafond (« élargis ») et plans larges et moyens sous celui de variety_rules. Une page
+    garde son plan serré, son gros plan et sa case hors hauteur d'œil ; jamais deux plans identiques côte à côte."""
+    classes = {k: set(v) for k, v in (charter.get("shot_classes") or {}).items()}
+    shots = charter.get("shots") or {}
+    tight = ("close_up", "medium_close", "insert")
+    close_plans = set(page_rules.get("close_plans") or ["gros plan", "très gros plan", "insert"])
+    off_level = set(variety.get("off_eye_level") or [])
+    wide_medium = set(variety.get("wide_medium_plans") or [])
+    total = sum(len(p["panels"]) for p in pages)
+    loose_cap = math.floor(float(variety.get("max_wide_medium_share", 1)) * total + 1e-9)
+
+    def cls(plan: str) -> str | None:
+        return next((c for c, plans in classes.items() if plan in plans), None)
+
+    def count(*names: str | None) -> int:
+        return sum(1 for p in pages for pa in p["panels"] if cls(pa["plan"]) in names)
+
+    def low(name: str) -> int:
+        return math.ceil(float((shots.get(name) or {}).get("min", 0)) * total - 1e-9)
+
+    def high(name: str) -> int:
+        share = float((shots.get(name) or {}).get("max", 1))
+        return max(1, math.floor(share * total + 1e-9)) if share > 0 else 0
+
+    tight_cap = max(1, math.floor(float(shots.get("tight_max", 1)) * total + 1e-9))
+
+    def legal(panels: list[dict[str, Any]], i: int, plan: str) -> bool:
+        after = [plan if j == i else q["plan"] for j, q in enumerate(panels)]
+        if any(after[j] == plan for j in (i - 1, i + 1) if 0 <= j < len(after)):
+            return False
+        if len(panels) >= 3 and not any(cls(x) in tight for x in after):
+            return False
+        if len(panels) >= 3 and not any(x in close_plans for x in after):
+            return False
+        return not off_level or any(
+            x in off_level or q["angle"] in off_level for x, q in zip(after, panels, strict=True)
+        )
+
+    def move(donors: tuple[str | None, ...], target: str, done: Any) -> None:
+        plan = _CLASS_PLAN[target]
+        for calm_first in (True, False):
+            for p in pages:
+                for i, pa in enumerate(p["panels"]):
+                    if done():
+                        return
+                    source = cls(pa["plan"])
+                    if source not in donors or (calm_first and pa["intensity"] == "choc"):
+                        continue
+                    if source is not None and count(source) - 1 < low(source):
+                        continue
+                    if target in tight and source not in tight and count(*tight) + 1 > tight_cap:
+                        continue
+                    if plan in wide_medium and pa["plan"] not in wide_medium:
+                        loose = sum(1 for q in pages for x in q["panels"] if x["plan"] in wide_medium)
+                        if loose + 1 > loose_cap:
+                            continue
+                    if count(target) + 1 > high(target) or not legal(p["panels"], i, plan):
+                        continue
+                    pa["plan"] = plan
+
+    for _ in range(2):
+        # Plafonds : plans serrés en trop → plan moyen ou large (« élargis ») ; famille en trop → une autre.
+        for target in ("medium", "wide"):
+            move(tight, target, lambda: count(*tight) <= tight_cap)
+        for name in _CLASS_PLAN:
+            others = tuple(c for c in _CLASS_PLAN if c != name)
+            for target in others:
+                move((name,), target, lambda name=name: count(name) <= high(name))
+        # Planchers : d'abord depuis une famille en surplus, puis depuis les plans hors famille (plongées).
+        for name in _CLASS_PLAN:
+            donors = (*(c for c in _CLASS_PLAN if c != name), None)
+            move(donors, name, lambda name=name: count(name) >= low(name))
 
 
 def _page_rules(pages: list[dict[str, Any]], rules: dict[str, Any], variety: dict[str, Any]) -> None:

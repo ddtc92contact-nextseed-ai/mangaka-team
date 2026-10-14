@@ -31,6 +31,12 @@ d'affilée sur le chapitre, l'élément important jamais relégué au fond derri
 personnage dont l'action ne nomme personne. Vérifiées après la réponse : une seule relance ciblée renvoie au LLM
 les seules cases fautives (`enforce_page_rules`), puis ce qui reste devient un avertissement, sans blocage.
 
+Charte de la série (ADN, `pipeline/pre_direction.py`, en clair dans `$pre_direction`) : `check_variety` y lit
+l'échelle des plans (parts par famille, plancher des plans larges, plafond des plans serrés : la relance dit
+« élargis » autant que « resserre ») ; `check_page_rules` les formes de planche, la présence et la courbe de
+rythme, corrigées par la même relance ciblée — sur les champs de la page (rythme, gabarit, page choc) quand la
+règle porte sur la page entière — puis en avertissement.
+
 Spectateur (`pipeline/framing.py`) : quand le texte d'une case met un personnage en spectateur (« voit »,
 « regarde », « aperçoit », « découvre », « assiste »…), l'agent choisit explicitement `point_de_vue` :
 « plan de réaction » (le spectateur est dessiné) ou « vue subjective » (on voit ce qu'il voit, le spectateur
@@ -62,7 +68,7 @@ import math
 import re
 import unicodedata
 from collections import Counter
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Annotated, Any, Literal
 
@@ -95,6 +101,7 @@ from .layout import LayoutError
 from .library import SeriesLibrary
 from .names import CharacterMatcher
 from .pages import applied_values, is_stale, layout_page
+from .pre_direction import Charter, PageView, art_text, chapter_issues, series_charter, shot_problems
 from .script import DIRECTION_LABELS, _render
 from .style import NO_GUIDELINES, style_brief
 
@@ -306,6 +313,7 @@ class DirectionContext:
     library: SeriesLibrary = field(default_factory=SeriesLibrary)
     rules: VarietyRules | None = None  # `variety_rules` du preset
     page_rules: PageRules | None = None  # `page_rules` du preset (règles par planche)
+    charter: Charter | None = None  # ADN de la série (presets/pre_direction.yaml)
 
     def as_json(self) -> dict[str, Any]:
         return {
@@ -351,7 +359,10 @@ class DirectionContext:
             "sfx_intensities": list(SFX_INTENSITIES),
             "points_de_vue": list(POINTS_DE_VUE),
             "variety_rules": self.rules.model_dump() if self.rules is not None else None,
-            "page_rules": self.page_rules.model_dump(exclude={"retry"}) if self.page_rules is not None else None,
+            "page_rules": self.page_rules.model_dump(exclude={"retry", "page_retry"})
+            if self.page_rules is not None
+            else None,
+            "pre_direction": self.charter.as_json() if self.charter is not None else None,
         }
 
 
@@ -514,6 +525,7 @@ def build_context(
         library=SeriesLibrary.load(session, series.id),
         rules=prompt.variety_rules,
         page_rules=prompt.page_rules,
+        charter=series_charter(presets, series),
     )
 
 
@@ -623,6 +635,8 @@ def render_messages(prompt: PromptPreset, ctx: DirectionContext) -> list[ChatMes
         "points_de_vue": ", ".join(POINTS_DE_VUE),
         "variety_rules": variety_text(ctx.rules),
         "page_rules": page_rules_text(ctx.page_rules),
+        # Charte de la série (ADN) : échelle des plans, présence, formes de planche, courbe de rythme.
+        "pre_direction": art_text(ctx.charter, len(ctx.pages)),
         "context_json": json.dumps(ctx.as_json(), ensure_ascii=False, indent=2),
         "savoir_faire": (ctx.knowledge.savoir_faire() if ctx.knowledge else "")
         or "(aucun savoir-faire pour cet agent)",
@@ -836,14 +850,16 @@ def _runs(values: Sequence[str], limit: int) -> list[tuple[int, int, str]]:
 
 
 def check_variety(
-    pages: Sequence[tuple[int, Sequence[dict[str, Any]]]], rules: VarietyRules | None
+    pages: Sequence[tuple[int, Sequence[dict[str, Any]]]], rules: VarietyRules | None, charter: Charter | None = None
 ) -> tuple[dict[int, list[str]], list[str]]:
     """Règles de variété sur des pages (numéro, cases dans l'ordre avec plan, angle, action) :
-    (problèmes par numéro de page, problèmes du chapitre). Messages lisibles, en français."""
+    (problèmes par numéro de page, problèmes du chapitre). Messages lisibles, en français. Avec `charter`
+    (ADN de la série), l'échelle des plans du chapitre suit aussi ses parts par famille de plans."""
     by_page: dict[int, list[str]] = {}
     chapter: list[str] = []
     if rules is None:
-        return by_page, chapter
+        plans = [pa.get("plan") for _n, panels in pages for pa in panels]
+        return by_page, shot_problems(plans, charter, len(pages))
     frontal = {_key(a) for a in rules.frontal_angles}
     off_level = {_key(a) for a in rules.off_eye_level}
     wide_medium = {_key(p) for p in rules.wide_medium_plans}
@@ -911,13 +927,14 @@ def check_variety(
             f"({allowed} au plus, {round(rules.max_wide_medium_share * 100)} %) : resserre sur les visages, "
             "les gestes et les objets"
         )
+    chapter += shot_problems([pa.get("plan") for _n, panels in pages for pa in panels], charter, len(pages))
     return by_page, chapter
 
 
-def output_variety(out: DirectionOutput, rules: VarietyRules | None) -> list[str]:
+def output_variety(out: DirectionOutput, rules: VarietyRules | None, charter: Charter | None = None) -> list[str]:
     """Règles de variété enfreintes par une réponse du LLM (messages pour la relance)."""
     pages = [(dp.page, [pa.model_dump() for pa in sorted(dp.panels, key=lambda p: p.panel)]) for dp in out.pages]
-    by_page, chapter = check_variety(pages, rules)
+    by_page, chapter = check_variety(pages, rules, charter)
     return [f"page {n} : {p}" for n, problems in by_page.items() for p in problems] + chapter
 
 
@@ -926,13 +943,17 @@ def page_warnings(
     rules: VarietyRules | None,
     chapter_level: bool = True,
     page_rules: PageRules | None = None,
+    charter: Charter | None = None,
 ) -> dict[int, list[str]]:
-    """Avertissements de variété et des règles par planche des choix stockés, par id de page (« chapitre : … »
-    sur chacune, ou sur les pages concernées pour des cases « choc » d'affilée d'une page à l'autre)."""
+    """Avertissements de variété, des règles par planche et de la charte de la série des choix stockés, par id
+    de page (« chapitre : … » sur chacune, ou sur les pages concernées pour une règle de la charte ou des cases
+    « choc » d'affilée d'une page à l'autre)."""
     rows = [(p.number, list((p.direction.values or {}).get("panels") or [])) for p in pages if p.direction]
-    by_page, chapter = check_variety(rows, rules)
+    by_page, chapter = check_variety(rows, rules, charter)
     common = [CHAPTER_PREFIX + c for c in chapter] if chapter_level else []
-    ruled = page_rule_warnings(check_page_rules(stored_rows(pages), page_rules, chapter_names(pages)))
+    ruled = page_rule_warnings(
+        check_page_rules(stored_rows(pages), page_rules, chapter_names(pages), charter, stored_info(pages))
+    )
     return {p.id: [*by_page.get(p.number, []), *ruled.get(p.number, []), *common] for p in pages if p.direction}
 
 
@@ -946,17 +967,21 @@ class RuleIssue:
     """Règle par planche enfreinte : message lisible et cases à corriger (page, case numérotée à 1)."""
 
     message: str
+    # Cases à corriger (page, case) ; (page, 0) : les champs de la page (rythme, gabarit, page choc).
     cases: list[tuple[int, int]]
     pages: list[int]
-    chapter: bool = False  # cases « choc » d'affilée à cheval sur plusieurs pages
+    chapter: bool = False  # cases « choc » d'affilée à cheval sur plusieurs pages, règle de la charte
 
     def text(self) -> str:
         return self.message if self.chapter else f"page {self.pages[0]} : {self.message}"
 
 
 # Ligne d'une page pour `check_page_rules` : (numéro, rythme, cases dans l'ordre). Chaque case : plan, angle,
-# intensity, action, staging (mise en scène du scénario), visible (personnages à l'image) et hidden (hors cadre).
+# intensity, action, staging (mise en scène du scénario), visible (personnages à l'image), hidden (hors cadre)
+# et importance (scénario).
 PageRow = tuple[int, str | None, Sequence[dict[str, Any]]]
+# Champs de page lus par la charte (formes de planche) : numéro → {"template": …, "page_choc": …}.
+PageInfo = Mapping[int, Mapping[str, Any]]
 
 
 def _has(text: str, markers: Sequence[str]) -> bool:
@@ -986,9 +1011,29 @@ def output_rows(out: DirectionOutput, ctx: DirectionContext) -> list[PageRow]:
             info = brief.panels[pa.panel - 1] if brief and 1 <= pa.panel <= len(brief.panels) else {}
             choice = pa.model_dump()
             visible, hidden = _cast(info.get("characters") or [], info.get("offscreen") or [], choice)
-            panels.append({**choice, "staging": info.get("staging") or "", "visible": visible, "hidden": hidden})
+            panels.append(
+                {
+                    **choice,
+                    "staging": info.get("staging") or "",
+                    "visible": visible,
+                    "hidden": hidden,
+                    "importance": info.get("importance") or 2,
+                }
+            )
         rows.append((dp.page, dp.rythme, panels))
     return rows
+
+
+def output_info(out: DirectionOutput) -> dict[int, dict[str, Any]]:
+    return {dp.page: {"template": dp.template, "page_choc": dp.page_choc} for dp in out.pages}
+
+
+def stored_info(pages: Sequence[Page]) -> dict[int, dict[str, Any]]:
+    out = {}
+    for page in pages:
+        values = (page.direction.values or {}) if page.direction else {}
+        out[page.number] = {"template": values.get("template"), "page_choc": values.get("page_choc")}
+    return out
 
 
 def stored_rows(pages: Sequence[Page]) -> list[PageRow]:
@@ -1006,7 +1051,13 @@ def stored_rows(pages: Sequence[Page]) -> list[PageRow]:
             off = list(panel.offscreen_names or []) if panel else []
             visible, hidden = _cast(chars, off, choice)
             panels.append(
-                {**choice, "staging": (panel.staging or "") if panel else "", "visible": visible, "hidden": hidden}
+                {
+                    **choice,
+                    "staging": (panel.staging or "") if panel else "",
+                    "visible": visible,
+                    "hidden": hidden,
+                    "importance": panel.importance if panel else 2,
+                }
             )
         rows.append((page.number, values.get("rythme"), panels))
     return rows
@@ -1030,9 +1081,45 @@ def _span(cases: Sequence[tuple[int, int]]) -> str:
     return f"page {p1} case {c1} à page {p2} case {c2}"
 
 
-def check_page_rules(pages: Sequence[PageRow], rules: PageRules | None, names: Sequence[str] = ()) -> list[RuleIssue]:
-    """Règles par planche (`page_rules` du preset) sur des pages dans l'ordre : règles enfreintes, en français."""
-    issues: list[RuleIssue] = []
+def charter_issues(pages: Sequence[PageRow], charter: Charter | None, info: PageInfo | None) -> list[RuleIssue]:
+    """Formes de planche, présence et courbe de rythme (ADN de la série) en règles par planche du chapitre."""
+    info = info or {}
+    views = [
+        PageView(
+            number,
+            rythme,
+            (info.get(number) or {}).get("template"),
+            (info.get(number) or {}).get("page_choc"),
+            panels,
+        )
+        for number, rythme, panels in pages
+    ]
+    every = [number for number, _r, _p in pages]
+    out = []
+    for issue in chapter_issues(views, charter):
+        touched = list(dict.fromkeys([*issue.pages, *(p for p, _c in issue.cases)]))
+        out.append(
+            RuleIssue(
+                issue.message,
+                [*((p, 0) for p in issue.pages), *issue.cases],
+                sorted(touched) or every,
+                chapter=True,
+            )
+        )
+    return out
+
+
+def check_page_rules(
+    pages: Sequence[PageRow],
+    rules: PageRules | None,
+    names: Sequence[str] = (),
+    charter: Charter | None = None,
+    info: PageInfo | None = None,
+) -> list[RuleIssue]:
+    """Règles par planche (`page_rules` du preset) sur des pages dans l'ordre : règles enfreintes, en français.
+    Avec `charter` (ADN de la série) et `info` (gabarit et page choc de chaque page), aussi les formes de planche,
+    la présence et la courbe de rythme du chapitre."""
+    issues: list[RuleIssue] = charter_issues(pages, charter, info) if charter is not None else []
     if rules is None:
         return issues
     close = {_key(p) for p in rules.close_plans}
@@ -1241,7 +1328,7 @@ def _run_full(llm: LLMProvider, prompt: PromptPreset, ctx: DirectionContext, pro
         try:
             output = parse_direction(result.text, ctx)
             viewpoints = viewpoint_problems(output, ctx)
-            variety = output_variety(output, ctx.rules)
+            variety = output_variety(output, ctx.rules, ctx.charter)
             if viewpoints or variety:
                 fallback = DirectionRun(output=output, attempts=attempt, messages=messages, variety=variety)
                 parts = []
@@ -1270,7 +1357,18 @@ def _run_full(llm: LLMProvider, prompt: PromptPreset, ctx: DirectionContext, pro
 
 class _PatchPage(_LLMModel):
     page: int = Field(ge=1, le=200)
-    panels: list[DirectionPanel] = Field(min_length=1, max_length=20)
+    panels: list[DirectionPanel] = Field(default_factory=list, max_length=20)
+    # Champs de la page, pris seulement pour une règle de la charte qui porte sur la page entière.
+    rythme: RythmeName | None = None
+    template: str | None = None
+    page_choc: PageChocName | None = None
+
+    _n = field_validator("rythme", "page_choc", "template", mode="before")(_norm)
+
+    @field_validator("panels", mode="before")
+    @classmethod
+    def _none_panels(cls, v: Any) -> Any:
+        return [] if v is None else v
 
 
 class DirectionPatch(_LLMModel):
@@ -1281,24 +1379,38 @@ class DirectionPatch(_LLMModel):
 
 def output_page_issues(out: DirectionOutput, ctx: DirectionContext) -> list[RuleIssue]:
     names = [c["name"] for c in ctx.characters if c.get("name")]
-    return check_page_rules(output_rows(out, ctx), ctx.page_rules, names)
+    # Charte du chapitre (formes, présence, rythme) : seulement sur toutes les pages dirigées ensemble.
+    charter = None if ctx.single_page else ctx.charter
+    return check_page_rules(output_rows(out, ctx), ctx.page_rules, names, charter, output_info(out))
 
 
 def targeted_text(rules: PageRules, issues: Sequence[RuleIssue]) -> str:
-    """Message de la relance ciblée : les règles enfreintes et les seules cases à renvoyer."""
+    """Message de la relance ciblée : les règles enfreintes et les seules cases à renvoyer (et les pages dont
+    renvoyer aussi les champs de page, pour une règle de la charte qui porte sur la page entière)."""
     cases: dict[int, list[int]] = {}
+    whole: list[int] = []
     for issue in issues:
         for number, case in issue.cases:
-            if case not in cases.setdefault(number, []):
+            if case == 0:
+                if number not in whole:
+                    whole.append(number)
+                cases.setdefault(number, [])
+            elif case not in cases.setdefault(number, []):
                 cases[number].append(case)
     where = " ; ".join(
-        f"page {n} : case{'s' if len(c) > 1 else ''} {', '.join(map(str, sorted(c)))}" for n, c in cases.items()
+        f"page {n} : case{'s' if len(c) > 1 else ''} {', '.join(map(str, sorted(c)))}"
+        if c
+        else f"page {n} : champs de la page"
+        for n, c in sorted(cases.items())
     )
-    return _render(
+    text = _render(
         rules.retry,
         {"error": "\n".join(f"- {i.text()}" for i in issues), "cases": where},
         "page_rules.retry",
     )
+    if whole:
+        text += "\n" + _render(rules.page_retry, {"pages": ", ".join(map(str, sorted(whole)))}, "page_rules.page_retry")
+    return text
 
 
 def _patched(out: DirectionOutput, patch: DirectionPatch, allowed: set[tuple[int, int]]) -> DirectionOutput | None:
@@ -1310,6 +1422,14 @@ def _patched(out: DirectionOutput, patch: DirectionPatch, allowed: set[tuple[int
         dp = pages.get(pp.page)
         if dp is None:
             continue
+        if (pp.page, 0) in allowed:
+            for name in sorted({"rythme", "template", "page_choc"} & pp.model_fields_set):
+                value = getattr(pp, name)
+                if name == "rythme" and value is None:
+                    continue
+                if getattr(dp, name) != value:
+                    setattr(dp, name, value)
+                    changed = True
         for pa in pp.panels:
             if (pp.page, pa.panel) not in allowed:
                 continue
@@ -1345,7 +1465,7 @@ def enforce_page_rules(
         if merged is not None and not check_against(merged, ctx):
             default_viewpoints(merged, ctx)
             after = output_page_issues(merged, ctx)
-            variety = output_variety(merged, ctx.rules)
+            variety = output_variety(merged, ctx.rules, ctx.charter)
             if len(after) + len(variety) < len(issues) + len(run.variety):
                 run = DirectionRun(output=merged, attempts=run.attempts, messages=run.messages, variety=variety)
                 issues = after
@@ -1452,6 +1572,7 @@ def save_direction(
     single_page: bool,
     rules: VarietyRules | None = None,
     page_rules: PageRules | None = None,
+    charter: Charter | None = None,
 ) -> list[int]:
     """Enregistre la proposition ; renvoie les numéros des pages modifiées.
 
@@ -1485,7 +1606,7 @@ def save_direction(
         saved.append(page)
     for page in saved:
         page.direction.values = {**page.direction.values, "warnings": []}
-    for page_id, warnings in page_warnings(saved, rules, page_rules=page_rules).items():
+    for page_id, warnings in page_warnings(saved, rules, page_rules=page_rules, charter=charter).items():
         page = next(p for p in saved if p.id == page_id)
         page.direction.values = {**page.direction.values, "warnings": warnings}
     session.flush()
@@ -1588,8 +1709,9 @@ def edit_direction(
     prompt = presets.prompts.get(PROMPT_ID)
     rules = prompt.variety_rules if prompt is not None else None
     page_rules = prompt.page_rules if prompt is not None else None
+    charter = series_charter(presets, page.chapter.project)
     kept = [w for w in values.get("warnings") or [] if w.startswith(CHAPTER_PREFIX)]
-    fresh = page_warnings([page], rules, chapter_level=False, page_rules=page_rules).get(page.id, [])
+    fresh = page_warnings([page], rules, chapter_level=False, page_rules=page_rules, charter=charter).get(page.id, [])
     d.values = {**values, "warnings": [*fresh, *kept]}
     return d
 
@@ -1913,6 +2035,7 @@ def direction_job(
                 single_page=page_id is not None,
                 rules=prompt.variety_rules,
                 page_rules=prompt.page_rules,
+                charter=ctx.charter,
             )
             session.commit()
         tries = f" en {run.attempts} essais" if run.attempts > 1 else ""

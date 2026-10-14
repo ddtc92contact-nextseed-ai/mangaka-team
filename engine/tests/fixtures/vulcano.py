@@ -4,7 +4,8 @@
 20 cases (0,75 par case), cinq cases de combat réduites à leur onomatopée (TCHAK, RATATATA, BOUM, PAN,
 CRAC, planches 2 à 4), aucune pensée, voix off ni narration. `DENSE` garde les mêmes cases et la même
 brièveté, avec ce qu'un scénariste aurait dû écrire : deux répliques par case, un cri dans chaque case de
-combat, une narration et des pensées.
+combat, une narration et des pensées — et, compté par planche (4 à 8 répliques), une case muette par planche
+là où le silence porte (la planche 3, tout en combat, n'en a pas : une case d'action reste parlée).
 """
 
 from __future__ import annotations
@@ -161,11 +162,11 @@ REPLIQUES_MAIGRES: list[list[tuple[str, str, str]]] = [
 # Même chapitre, densité corrigée : répliques courtes, un cri par case de combat, pensées et narration.
 REPLIQUES_DENSES: list[list[tuple[str, str, str]]] = [
     [("", "Au pied du volcan, le lendemain.", NAR), ("Seku", "C'est là-haut qu'ils balancent leurs saletés ?", S)],
-    [("Angus", "Ils vont voir de quel bois je me chauffe !", S), ("Seku", "Garde ton souffle pour la montée.", S)],
+    [],  # muette : la montée, le souffle court
     [("Seku", "Là ! Les voilà !", SH), ("Angus", "Des barils… en plein cratère ?!", S)],
     [("Trafiquant 1", "Allez, encore un !", S), ("Trafiquant 2", "Personne ne viendra jusqu'ici.", S)],
     [("Angus", "STOP ! Vous allez payer pour ça !", SH), ("Trafiquant 1", "Qu'est-ce que… ?!", S)],
-    [("Trafiquant 2", "Encore ces gamins ?!", S), ("Trafiquant 1", "Je m'en occupe.", S)],
+    [],  # muette : la mitraillette se lève
     [("Angus", "Seku, avec moi !", SH), ("Seku", "J'arrive !", SH)],
     [("Angus", "Raté, l'ami !", SH), ("Trafiquant 1", "Reste tranquille, gamin !", SH)],
     [("Angus", "Prends ça !", SH), ("Trafiquant 1", "Ouf !", SH)],
@@ -173,11 +174,11 @@ REPLIQUES_DENSES: list[list[tuple[str, str, str]]] = [
     [("Seku", "Trop lent !", SH), ("Seku", "Il ne me lâchera pas…", TH)],
     [("Angus", "Tu vas voir ce que c'est, la pollution !", SH), ("Trafiquant 1", "Lâche-moi, brute !", SH)],
     [("Angus", "Et de un !", SH), ("Seku", "Bien joué, Angus !", S)],
-    [("Trafiquant 2", "Non… restez où vous êtes !", S), ("Seku", "C'est fini, rends-toi !", S)],
+    [],  # muette : la panique, au bord du cratère
     [("Trafiquant 2", "AAAAH !", SH), ("Angus", "Non ! Attrape ma main !", SH)],
     [("Angus", "Attention !", SH), ("Seku", "Merci… j'ai failli y passer.", S)],
     [("Seku", "Il s'échappe !", S), ("Angus", "Laisse-le, on le retrouvera.", S)],
-    [("Angus", "On a arrêté le massacre… pour aujourd'hui.", S), ("Seku", "Ce n'est que le début.", TH)],
+    [],  # muette : ils reprennent leur souffle
     [("Seku", "Le volcan… il se réveille !", SH), ("Angus", "Ce poison l'a rendu fou…", TH)],
     [("Angus", "COUREZ !", SH), ("Seku", "Plus vite, la lave arrive !", SH)],
 ]

@@ -20,7 +20,7 @@ from mangaka_engine.pipeline.dialogues import (
 from mangaka_engine.pipeline.layout import Rect, bubble_zone
 from mangaka_engine.pipeline.script import ScriptContext, parse_script, render_messages, run_script, script_panels
 from mangaka_engine.presets import PresetRegistry
-from mangaka_engine.presets.schemas import DialogueRules
+from mangaka_engine.presets.schemas import DialogueRoom, DialogueRules
 from mangaka_engine.providers.llm import ChatMessage, LLMAuthError, LLMResult, MockLLMProvider
 from tests.conftest import PRESETS_DIR, STYLE
 from tests.fixtures import vulcano
@@ -81,7 +81,12 @@ def test_real_chapter_3_is_measured_like_the_audit() -> None:
 def test_real_chapter_3_breaks_every_rule() -> None:
     problems = check_dialogues(_panels(MAIGRE), RULES)
     text = " ; ".join(problems)
-    assert "trop peu de répliques : 15 pour 20 cases (0,75 par case, au moins 1,30 visées)" in text
+    # Compté par planche : 3, 3, 1, 3 et 5 répliques pour 3, 4, 4, 4 et 5 cases.
+    assert "page 1 : 3 répliques (au moins 4 par planche, onomatopées à part)" in text
+    assert "page 3 : 1 réplique (au moins 4 par planche" in text
+    assert "page 2 : 3 répliques (au moins 4 par planche" in text
+    assert "page 4 : 3 répliques (au moins 4 par planche" in text
+    assert not [p for p in problems if p.startswith("page 5 : ") and "répliques (au moins" in p]
     for label, sfx in [
         ("page 2 › case 4", "TCHAK !"),
         ("page 3 › case 1", "RATATATA !"),
@@ -95,6 +100,9 @@ def test_dense_rewrite_meets_the_acceptance_criteria() -> None:
     panels = _panels(DENSE)
     stats = dialogue_stats(panels, RULES)
     assert stats.per_panel >= 1.3
+    for page in range(1, 6):
+        replies = sum(len(p.replies) for p in panels if p.page == page)
+        assert 4 <= replies <= 8, (page, replies)
     assert not _combat_sfx_only(panels)
     assert any(r.kind in ("thought", "off") for p in panels for r in p.replies)
     assert stats.mean_words <= 7
@@ -115,16 +123,79 @@ def _panel(replies: int, *, panels_on_page: int = 4, sfx: list[str] | None = Non
 
 
 def test_thresholds_come_from_the_preset() -> None:
-    assert (RULES.target_per_panel, RULES.min_per_panel, RULES.max_mean_words) == (2, 1.3, 7)
-    panels = [_panel(1), _panel(1)]
-    assert any("trop peu" in p for p in check_dialogues(panels, RULES))
-    lenient = RULES.model_copy(update={"min_per_panel": 1.0, "require_inner_voice": False})
+    assert (RULES.target_per_panel, RULES.max_mean_words) == (2, 7)
+    assert (RULES.min_per_page, RULES.max_per_page, RULES.min_silent_panels_per_page) == (4, 8, 1)
+    panels = [_panel(1), _panel(1), _panel(1)]
+    problems = check_dialogues(panels, RULES)
+    assert any("page 1 : 3 répliques (au moins 4 par planche" in p for p in problems)
+    assert any("page 1 : aucune case muette" in p for p in problems)
+    lenient = RULES.model_copy(
+        update={"min_per_page": 3, "min_silent_panels_per_page": 0, "require_inner_voice": False}
+    )
     assert check_dialogues(panels, lenient) == []
     assert check_dialogues(panels, None) == []
 
 
+def _page(*replies: int, page: int = 1, **kw: Any) -> list[DialoguePanel]:
+    out = []
+    for i, n in enumerate(replies, start=1):
+        p = _panel(n, panels_on_page=len(replies), **kw)
+        p.page, p.index = page, i
+        out.append(p)
+    return out
+
+
+def test_dialogue_is_counted_per_page_from_4_to_8_with_a_silent_panel() -> None:
+    rules = RULES.model_copy(update={"require_inner_voice": False})
+    assert check_dialogues(_page(2, 2, 0, 1), rules) == []  # 5 répliques, une case muette
+    few = check_dialogues(_page(1, 1, 0, 1), rules)
+    assert few == [
+        "page 1 : 3 répliques (au moins 4 par planche, onomatopées à part) : ajoute des répliques "
+        "courtes là où un personnage présent peut parler (cases en dessous : 1, 2, 3, 4)"
+    ]
+    many = check_dialogues(_page(3, 3, 3, 0), rules)
+    assert any("page 1 : 9 répliques (8 au plus par planche)" in p for p in many)
+    mute = check_dialogues(_page(2, 1, 1, 1), rules)
+    assert mute and "page 1 : aucune case muette (au moins 1 case sans aucune réplique par planche)" in mute[0]
+    # Chaque planche compte pour elle-même : la page 2, maigre, est signalée seule.
+    two = check_dialogues([*_page(2, 2, 0, 1), *_page(1, 0, 1, page=2)], rules)
+    assert [p.split(" : ")[0] for p in two] == ["page 2"]
+    # Les onomatopées ne comptent pas comme répliques ; une case qui n'a qu'une onomatopée est muette.
+    sfx = _page(1, 1, 0, 1)
+    sfx[2].sfx = ["BOUM !"]
+    sfx[2].characters = []
+    assert any("3 répliques" in p for p in check_dialogues(sfx, rules))
+
+
+def test_silent_panel_never_contradicts_an_action_panel() -> None:
+    """Planche tout en action (chaque case parle, `action_needs_voice`) : pas de case muette exigée."""
+    rules = RULES.model_copy(update={"require_inner_voice": False})
+    combat = _page(2, 2, 2, 2, intensity="choc")
+    assert check_dialogues(combat, rules) == []
+    assert check_dialogues(combat, rules.model_copy(update={"action_needs_voice": False})) != []
+
+
+def test_per_page_minimum_bends_to_the_room_table() -> None:
+    """Deux cases dont la place n'admet qu'une réplique chacune : 2 répliques suffisent sur la planche."""
+    rules = RULES.model_copy(
+        update={
+            "room": [DialogueRoom(max_panels=9, replies=1)],
+            "big_panel_bonus": 0,
+            "min_silent_panels_per_page": 0,
+            "require_inner_voice": False,
+        }
+    )
+    assert check_dialogues(_page(1, 1), rules) == []
+    assert any("au moins 2 par planche" in p for p in check_dialogues(_page(1, 0), rules))
+
+
+def test_per_page_values_are_validated() -> None:
+    with pytest.raises(ValueError, match="min_per_page"):
+        DialogueRules(min_per_page=9, max_per_page=8)
+
+
 def test_inner_voice_can_be_disabled_by_the_author() -> None:
-    panels = [_panel(2), _panel(2)]
+    panels = [_panel(2), _panel(2), _panel(0)]
     assert any("pensée" in p for p in check_dialogues(panels, RULES))
     assert check_dialogues(panels, RULES.model_copy(update={"require_inner_voice": False})) == []
     panels[0].replies[0] = Reply("off", "On l'appelait le volcan maudit.")
@@ -132,7 +203,7 @@ def test_inner_voice_can_be_disabled_by_the_author() -> None:
 
 
 def test_action_panel_needs_a_voice_not_only_narration() -> None:
-    rules = RULES.model_copy(update={"min_per_panel": 0, "require_inner_voice": False})
+    rules = RULES.model_copy(update={"min_per_page": 0, "min_silent_panels_per_page": 0, "require_inner_voice": False})
     choc = _panel(0, intensity="choc")
     assert any("case d'action muette" in p for p in check_dialogues([choc], rules))
     narrated = _panel(0, sfx=["BOUM !"])
@@ -146,9 +217,9 @@ def test_action_panel_needs_a_voice_not_only_narration() -> None:
 
 
 def test_density_bends_to_the_room_table() -> None:
-    rules = RULES.model_copy(update={"require_inner_voice": False})
-    # Page de 9 cases : une réplique par case au plus ; 1 par case suffit, la cible de 1,3 ne s'applique pas.
-    crowded = [_panel(1, panels_on_page=9) for _ in range(9)]
+    rules = RULES.model_copy(update={"require_inner_voice": False, "max_per_page": 12})
+    # Page de 9 cases : une réplique par case au plus ; 1 par case suffit (et une case muette).
+    crowded = [_panel(1, panels_on_page=9) for _ in range(8)] + [_panel(0, panels_on_page=9)]
     assert check_dialogues(crowded, rules) == []
     too_many = [_panel(3, panels_on_page=6)]
     assert any("3 répliques pour la place d'au plus 2" in p for p in check_dialogues(too_many, rules))
@@ -157,7 +228,7 @@ def test_density_bends_to_the_room_table() -> None:
 
 
 def test_long_replies_are_flagged_one_by_one_and_on_average() -> None:
-    rules = RULES.model_copy(update={"require_inner_voice": False, "min_per_panel": 0})
+    rules = RULES.model_copy(update={"require_inner_voice": False, "min_per_page": 0})
     p = _panel(0)
     p.replies = [Reply("speech", "un deux trois quatre cinq six sept huit neuf dix onze douze treize")]
     problems = check_dialogues([p], rules)
@@ -170,6 +241,7 @@ def test_prompt_states_the_rules() -> None:
     text = dialogue_text(RULES)
     assert text in user.content
     assert "vise 2 répliques dans chaque case" in text
+    assert "4 à 8 répliques par planche" in text and "au moins 1 case sans aucune réplique par planche" in text
     assert "1 à 4 cases → 3 ; 5 à 6 cases → 2 ; 7 à 9 cases → 1" in text
     assert "jamais réduite à son onomatopée" in text
     assert "pensée, voix off, narration" in text
@@ -195,7 +267,8 @@ def test_sparse_answer_triggers_a_corrective_retry() -> None:
     assert retry.role == "user" and "dialogues à revoir" in retry.content
     assert "seulement l'onomatopée « RATATATA ! »" in retry.content
     assert "ajoute ou retire des répliques courtes" in retry.content
-    assert dialogue_stats(script_panels(run.output), RULES).per_panel >= 1.3
+    assert "page 3 : 1 réplique (au moins 4 par planche" in retry.content
+    assert check_dialogues(script_panels(run.output), RULES) == []
 
 
 def test_still_sparse_after_two_retries_is_kept_with_warnings() -> None:
@@ -203,7 +276,7 @@ def test_still_sparse_after_two_retries_is_kept_with_warnings() -> None:
     run = _run(llm)
     assert len(llm.calls) == 3  # 2 relances au plus, jamais bloquant
     assert run.attempts == 3
-    assert any("trop peu de répliques" in w for w in run.warnings)
+    assert any("au moins 4 par planche" in w for w in run.warnings)
     assert dialogue_stats(script_panels(run.output), RULES).replies == 15
 
 
@@ -287,7 +360,7 @@ def test_mock_chapter_passes_the_rules_and_the_room_check(client: TestClient) ->
     assert "avertissement" not in (done["message"] or "") and "essais" not in (done["message"] or "")
     report = _ok(client.get(f"/chapters/{ch['id']}/dialogues"))
     assert report["warnings"] == []
-    assert report["stats"]["per_panel"] >= 1.3 and report["stats"]["inner_voice"] >= 1
+    assert report["stats"]["per_panel"] >= 1 and report["stats"]["inner_voice"] >= 1
     assert report["stats"]["sfx_only"] == 0 and report["stats"]["mean_words"] <= 7
 
 
@@ -296,8 +369,8 @@ def test_sparse_llm_retries_then_warns_without_blocking(client: TestClient) -> N
     done = _decouper(client, ch["id"])
     assert "en 3 essais" in done["message"] and "avertissements de dialogues" in done["message"]
     report = _ok(client.get(f"/chapters/{ch['id']}/dialogues"))
-    assert report["stats"]["per_panel"] < 1.3
-    assert any("trop peu de répliques" in w for w in report["warnings"])
+    assert report["stats"]["per_panel"] < 1
+    assert any("par planche" in w for w in report["warnings"])
     assert any("aucune pensée" in w for w in report["warnings"])
 
     ch2 = _series(client, "Combat au volcan. [mock:dialogues-maigres:1]")
@@ -309,6 +382,10 @@ def test_dense_chapter_3_letters_inside_its_bubble_zones(client: TestClient) -> 
     """Combat (planches 2 à 4) réécrit avec deux répliques par case : chaque bulle reste dans la zone de
     bulles de sa case, sans texte trop long, et les accents français sont rendus tels quels."""
     ch = _series(client, "Vulcano")
+    # Planche 1 de trois cases : la série l'admet dans son ADN (shōnen : 4 à 6 cases par planche).
+    # Planche 3 : huit répliques de combat, la série les admet aussi (shōnen : 7 au plus).
+    overrides = {"panels.min_per_page": 3, "dialogue.max_per_page": 8}
+    _ok(client.put(f"/projects/{ch['project_id']}/pre-direction", json={"overrides": overrides}))
     pages = _ok(client.put(f"/chapters/{ch['id']}/pages", json=vulcano.breakdown(dense=True)))
     report = _ok(client.get(f"/chapters/{ch['id']}/dialogues"))
     assert report["warnings"] == [], report["warnings"]
@@ -317,7 +394,7 @@ def test_dense_chapter_3_letters_inside_its_bubble_zones(client: TestClient) -> 
         let = _ok(client.get(f"/pages/{pages[n - 1]['id']}/lettering"))
         zones = {p["id"]: p["bubble_zone"] for p in let["panels"]}
         assert not [w for w in let["warnings"] if w["code"] == "text_overflow"]
-        assert len(let["bubbles"]) == 8
+        assert len(let["bubbles"]) == {2: 6, 3: 8, 4: 6}[n]
         for b in let["bubbles"]:
             z, box = zones[b["panel_id"]], b["box"]
             assert not b["overflow"]
@@ -326,7 +403,7 @@ def test_dense_chapter_3_letters_inside_its_bubble_zones(client: TestClient) -> 
             seen += " ".join(line["text"] for line in b["lines"]) + " "
     # Cris en capitales, accents gardés ; paroles telles qu'écrites.
     assert "RATÉ" in seen and "AÏE" in seen and "LÂCHE" in seen
-    assert "joué" in seen and "où" in seen
+    assert "joué" in seen and "ÇA" in seen
 
 
 def test_room_check_flags_bubbles_that_leave_their_zone(client: TestClient) -> None:

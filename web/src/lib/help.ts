@@ -47,6 +47,8 @@ export const HELP = {
     "Ce que ControlNet garde du croquis : le trait, la profondeur, les poses ou les grandes lignes. Le trait est le plus fidèle à la composition ; laisse « Par défaut » si tu hésites.",
   "serie.upscaler":
     "Le modèle qui agrandit chaque case jusqu'au dpi d'impression avant l'assemblage de la page (« Finaliser la page »). Les modèles marqués « lent » sont plus fidèles.",
+  "serie.adn":
+    "La charte chiffrée de la série : cases par planche, formes de planche, échelle des plans, présence, dialogue et courbe de rythme. Le genre donne les valeurs ; ajuste celles qui ne collent pas à ta série. Le scénariste et le directeur artistique la reçoivent en clair ; une règle enfreinte les relance, puis s'affiche en avertissement (jamais un blocage).",
   "serie.bible":
     "Univers, ton, règles et notes de personnages transmis à tous les agents de cette série (scénariste, prompts image) pour garder la cohérence d'un chapitre à l'autre.",
   "chapitre_infos.target_pages":

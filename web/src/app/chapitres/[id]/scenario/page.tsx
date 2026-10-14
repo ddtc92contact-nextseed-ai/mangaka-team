@@ -17,6 +17,7 @@ import {
   type Job,
   type LibraryEntry,
   type Rythme,
+  type ScriptBrief,
   type ScriptSources,
 } from "@/lib/api";
 import { capitalize } from "@/lib/direction";
@@ -55,6 +56,7 @@ export default function ScenarioPage() {
   const lastJob = useEngineData(() => api.chapterJobs(chapter.id, "script").then((j) => j[0] ?? null), [chapter.id]);
   const sources = useEngineData(() => api.chapterSources(chapter.id), [chapter.id]);
   const dialogues = useEngineData(() => api.chapterDialogues(chapter.id), [chapter.id]);
+  const brief = useEngineData(() => api.scriptBrief(chapter.id), [chapter.id]);
 
   const [synopsis, setSynopsis] = useState(chapter.synopsis);
   const [startError, setStartError] = useState<string | null>(null);
@@ -77,6 +79,7 @@ export default function ScenarioPage() {
   const current = started ?? lastJob.data ?? null;
   const job = useJob(current, (done) => {
     sources.reload();
+    brief.reload();
     if (done.status === "succeeded") {
       toast("Découpage enregistré automatiquement");
       setEdited(null);
@@ -202,6 +205,8 @@ export default function ScenarioPage() {
         )}
         {job && <JobProgress job={job} onRetry={decouper} />}
       </Card>
+
+      {brief.data && <ScriptBriefCard brief={brief.data} />}
 
       {sources.data && <UsedSources sources={sources.data} />}
 
@@ -381,6 +386,67 @@ function UsedSources({ sources }: { sources: ScriptSources }) {
         </div>
       )}
     </Card>
+  );
+}
+
+/**
+ * Avant « Découper » : alerte « bible vide » (un avertissement, pas un blocage) et charte de la série (son ADN)
+ * telle qu'elle part dans les prompts du scénariste et du directeur artistique (`$pre_direction`).
+ */
+function ScriptBriefCard({ brief }: { brief: ScriptBrief }) {
+  const missing = brief.characters_without_note;
+  const bibleHref = `/projets/${brief.project_id}#bible`;
+  return (
+    <div className="space-y-3">
+      {(brief.bible_empty || missing.length > 0) && (
+        <div
+          role="status"
+          data-testid="bible-warning"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-700/50 bg-amber-950/30 px-4 py-3 text-sm"
+        >
+          <div className="min-w-0">
+            <p className="font-medium text-amber-100">
+              {brief.bible_empty ? "La bible de la série est vide" : "Des personnages n'ont pas de note dans la bible"}
+            </p>
+            <p className="mt-0.5 text-amber-200/80">
+              {brief.bible_empty
+                ? "Le scénariste n'aura ni univers, ni ton, ni règles, ni caractère des personnages à respecter. Tu peux découper quand même."
+                : `Sans note, le scénariste invente leur caractère : ${missing.map((c) => c.name).join(", ")}. Tu peux découper quand même.`}
+            </p>
+          </div>
+          <ButtonLink href={bibleHref} variant="secondary">
+            Bible de la série
+          </ButtonLink>
+        </div>
+      )}
+      <Card data-testid="script-charter">
+        <details>
+          <summary className="cursor-pointer text-sm font-medium text-zinc-200">
+            Charte de la série envoyée aux agents{" "}
+            <span className="font-normal text-zinc-500">
+              (ADN, <code>$pre_direction</code> du prompt) ·{" "}
+              <Link href={`/projets/${brief.project_id}`} className="underline-offset-2 hover:text-zinc-300 hover:underline">
+                régler sur la fiche série
+              </Link>
+            </span>
+          </summary>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <div>
+              <p className="mb-1 text-xs font-medium text-zinc-400">Prompt du scénariste</p>
+              <pre className="whitespace-pre-wrap rounded-md bg-zinc-950/60 p-3 text-xs text-zinc-300" data-testid="script-pre-direction">
+                {brief.pre_direction}
+              </pre>
+            </div>
+            <div>
+              <p className="mb-1 text-xs font-medium text-zinc-400">Prompt du directeur artistique</p>
+              <pre className="whitespace-pre-wrap rounded-md bg-zinc-950/60 p-3 text-xs text-zinc-300">
+                {brief.art_pre_direction}
+              </pre>
+            </div>
+          </div>
+        </details>
+      </Card>
+    </div>
   );
 }
 

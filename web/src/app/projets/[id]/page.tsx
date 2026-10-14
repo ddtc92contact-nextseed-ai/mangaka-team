@@ -12,6 +12,7 @@ import { EstimateLabel } from "@/components/estimate";
 import { LayoutStyleNotices } from "@/components/layout-style-notice";
 import { ProjectForm } from "@/components/project-form";
 import { SeriesBible } from "@/components/series-bible";
+import { SeriesDnaCard } from "@/components/series-dna";
 import { SeriesFiles } from "@/components/series-files";
 import { SeriesIdentityCard } from "@/components/series-identity";
 import { StyleBoardBanner, StyleBoardCard, useStyleBoard } from "@/components/style-board";
@@ -154,6 +155,9 @@ export default function ProjectPage() {
             <LibraryList key={tab} kind={tab} projectId={id} compact />
           </div>
         </Card>
+      </div>
+      <div className="mt-6">
+        <SeriesDnaCard projectId={id} genreKey={project.data.style_genre} />
       </div>
       <div className="mt-6">
         <SeriesBible projectId={id} />

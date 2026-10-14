@@ -42,6 +42,8 @@ VALID = {
                     "dialogues": [{"speaker": "Aiko", "text": "Recule !", "kind": "SHOUT"}],
                     "camera": "ignoré",
                 },
+                # Case muette (dialogue compté par planche : une case sans réplique).
+                {"description": "Les toits ruissellent, la ruelle est vide.", "characters": []},
             ]
         }
     ],

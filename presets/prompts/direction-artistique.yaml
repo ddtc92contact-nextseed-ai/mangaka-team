@@ -16,6 +16,8 @@
 #   $rythmes $intensities $plans $angles $cadres $page_chocs $sfx_intensities $points_de_vue (valeurs autorisées)
 #   $variety_rules       (règles de mise en scène variée ci-dessous, en clair)
 #   $page_rules          (règles par planche ci-dessous, en clair)
+#   $pre_direction       (charte chiffrée de la série, son ADN : échelle des plans, présence, formes de planche,
+#                         courbe de rythme — presets/pre_direction.yaml, réglable sur la fiche série)
 #   $context_json        (le même contexte, en JSON)
 #   $bible               (bible de la série) · $savoir_faire (passages du savoir-faire de l'agent « art_direction »)
 # Gabarit de relance après une réponse invalide : $error (erreurs de validation).
@@ -130,6 +132,9 @@ user: |
 
   Règles par planche (vérifiées : les cases fautives te seront renvoyées pour correction) :
   $page_rules
+
+  Charte de la série (son ADN, chiffré et vérifié : ce qui s'en écarte te sera renvoyé pour correction) :
+  $pre_direction
 
   Scénario des pages :
   $pages

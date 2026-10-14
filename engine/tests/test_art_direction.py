@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 from collections.abc import Callable, Iterator
 from typing import Any
 
@@ -702,7 +703,9 @@ def test_art_direction_knowledge_is_retrieved_per_page(make_settings: Callable[.
         llm = c.app.state.ctx.providers.llm  # type: ignore[attr-defined]
         user = next(m.content for m in llm.calls[-1] if m.role == "user")
         savoir_faire = user.split("Savoir-faire de l'équipe")[1].split("Direction artistique du chapitre")[0]
-        assert "· page 1" in savoir_faire and "· page 2" in savoir_faire
+        # Chaque page a cherché ses fiches ; une fiche retenue pour les deux est tracée « · pages 1, 2 ».
+        traced = {int(n) for found in re.findall(r"· pages? ([\d, ]+)", savoir_faire) for n in found.split(",")}
+        assert traced == {1, 2}, savoir_faire
         assert "Vocabulaire" not in savoir_faire and "Checklist" not in savoir_faire
 
         sources = c.get(f"/chapters/{chapter_id}/sources?agent=art_direction").json()

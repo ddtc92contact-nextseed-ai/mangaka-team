@@ -11,8 +11,9 @@
    (`max_retries` du preset, 2 au maximum) → sinon `ScriptError` lisible ;
    puis les règles de dialogue (`dialogue_rules` du preset, `pipeline/dialogues.py`) : densité, case
    d'action jamais réduite à son onomatopée, pensée / voix off / narration, place réelle des bulles une
-   fois la page mise en page ; enfreintes → même relance, puis le découpage est gardé avec des
-   avertissements (écran Scénario) ;
+   fois la page mise en page ; et la charte de la série (ADN, `pipeline/pre_direction.py`) : cases par
+   planche, dialogue compté par planche ; enfreintes → même relance, puis le découpage est gardé avec des
+   avertissements (écran Scénario). La charte arrive en clair dans le prompt (`$pre_direction`) ;
 4. personnages de chaque case : « characters » = présents à l'image, « offscreen » = cités mais hors cadre ;
    un présent que la description ne cite pas passe hors cadre (`framing.settle_cast`) ;
 5. enregistrement en Pages + Panels + Bubbles (remplace les pages « story » du chapitre) et
@@ -63,6 +64,7 @@ from .layout import LayoutError
 from .library import SeriesLibrary
 from .names import CharacterMatcher, link_speakers, panel_ids
 from .pages import layout_pages
+from .pre_direction import Charter, dialogue_rules_for, panel_count_problems, script_text, series_charter
 from .style import NO_GUIDELINES, style_brief, style_names
 
 AGENT = "script"  # rôle de l'agent dans presets/knowledge.yaml
@@ -294,10 +296,12 @@ class ScriptContext:
     chapter: dict[str, Any]
     knowledge: AgentKnowledge | None = None
     library: SeriesLibrary = field(default_factory=SeriesLibrary)
+    charter: Charter | None = None  # ADN de la série (presets/pre_direction.yaml)
 
     def as_json(self) -> dict[str, Any]:
         return {
             "task": "script",
+            "pre_direction": self.charter.as_json() if self.charter else None,
             "series": self.series,
             "characters": self.characters,
             **self.library.as_json(),
@@ -363,6 +367,7 @@ def build_context(
         if knowledge
         else None,
         library=SeriesLibrary.load(session, series.id),
+        charter=series_charter(presets, series),
     )
 
 
@@ -409,7 +414,9 @@ def render_messages(prompt: PromptPreset, ctx: ScriptContext) -> list[ChatMessag
         "bubble_kinds": ", ".join(BUBBLE_KINDS),
         "intensities": ", ".join(INTENSITIES),
         "rythmes": ", ".join(RYTHMES),
-        "dialogue_rules": dialogue_text(prompt.dialogue_rules),
+        "dialogue_rules": dialogue_text(dialogue_rules_for(prompt.dialogue_rules, ctx.charter)),
+        # Charte de la série (ADN) : cases par planche, dialogue par planche, courbe de rythme.
+        "pre_direction": script_text(ctx.charter, int(ctx.chapter.get("target_pages") or 0)),
         "context_json": json.dumps(ctx.as_json(), ensure_ascii=False, indent=2),
         "savoir_faire": (ctx.knowledge.savoir_faire() if ctx.knowledge else "")
         or "(aucun savoir-faire pour cet agent)",
@@ -477,12 +484,18 @@ def run_script(
             continue
         try:
             output = parse_script(result.text, ctx.library)
-            problems = check_dialogues(script_panels(output), prompt.dialogue_rules)
+            counts = panel_count_problems([len(p.panels) for p in output.pages], ctx.charter)
+            problems = check_dialogues(script_panels(output), dialogue_rules_for(prompt.dialogue_rules, ctx.charter))
             if check is not None:
                 problems += check(output)
-            if problems:
-                fallback = ScriptRun(output=output, attempts=attempt, messages=messages, warnings=problems)
-                raise ScriptValidationError("dialogues à revoir : " + " ; ".join(problems[:12]))
+            if problems or counts:
+                fallback = ScriptRun(output=output, attempts=attempt, messages=messages, warnings=counts + problems)
+                parts = []
+                if counts:
+                    parts.append("cases par planche hors de la charte de la série : " + " ; ".join(counts[:8]))
+                if problems:
+                    parts.append("dialogues à revoir : " + " ; ".join(problems[:12]))
+                raise ScriptValidationError(" ; ".join(parts))
         except ScriptValidationError as exc:
             last_error = str(exc)
             if attempt < total:

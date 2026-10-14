@@ -2,9 +2,11 @@
 
 Mesuré sur les bulles (`bubbles`), onomatopées à part : une onomatopée n'est jamais une réplique.
 
-- **densité** : au moins `min_per_panel` répliques par case sur le chapitre, bornée par la place (on vise
-  `target_per_panel` répliques dans chaque case où un personnage présent peut parler, jamais plus que la
-  place de la case : table `room` selon le nombre de cases de la page) ;
+- **densité, par planche** : de `min_per_page` à `max_per_page` répliques par planche, le minimum borné par la
+  place (on vise `target_per_panel` répliques dans chaque case où un personnage présent peut parler, jamais
+  plus que la place de la case : table `room` selon le nombre de cases de la page), et au moins
+  `min_silent_panels_per_page` case sans réplique par planche (dès `silent_min_panels` cases). Ces trois
+  valeurs viennent de l'ADN de la série quand elle en a un (`pre_direction.dialogue_rules_for`) ;
 - **brièveté** : `max_words` mots au plus par réplique, `max_mean_words` en moyenne ;
 - **action** : une case d'action ou de combat (intensité « choc » ou onomatopée) porte au moins un mot d'un
   personnage (cri, ordre, réaction) en plus de l'onomatopée ;
@@ -162,19 +164,8 @@ def check_dialogues(panels: Sequence[DialoguePanel], rules: DialogueRules | None
                 f"{p.label} (action) : {noise} : ajoute un cri, un ordre ou une réaction d'un personnage "
                 f"présent ({', '.join(p.characters[:3])})"
             )
+    problems += page_problems(panels, rules)
     stats = dialogue_stats(panels, rules)
-    capacity = sum(panel_target(p, rules) for p in panels)
-    required = min(rules.min_per_panel * stats.panels, capacity)
-    if stats.replies + 1e-9 < required:
-        short = [p.label for p in panels if len(p.replies) < panel_target(p, rules)]
-        more = f" et {len(short) - MAX_LISTED} autre(s)" if len(short) > MAX_LISTED else ""
-        listed = ", ".join(short[:MAX_LISTED]) + more
-        problems.append(
-            f"trop peu de répliques : {stats.replies} pour {stats.panels} cases "
-            f"({_fr(stats.per_panel)} par case, au moins {_fr(required / stats.panels)} visées) ; "
-            f"vise {rules.target_per_panel} répliques courtes dans chaque case où un personnage présent peut "
-            f"parler, sans les allonger (cases en dessous : {listed})"
-        )
     if stats.replies and stats.mean_words > rules.max_mean_words + 1e-9:
         problems.append(
             f"répliques trop longues : {_fr(stats.mean_words, 1)} mots en moyenne "
@@ -189,6 +180,43 @@ def check_dialogues(panels: Sequence[DialoguePanel], rules: DialogueRules | None
     return problems
 
 
+def page_problems(panels: Sequence[DialoguePanel], rules: DialogueRules) -> list[str]:
+    """Dialogue compté par planche : de `min_per_page` (borné par la place) à `max_per_page` répliques, et des
+    cases muettes (sans réplique ; une onomatopée seule ne fait pas parler la case)."""
+    problems: list[str] = []
+    by_page: dict[int, list[DialoguePanel]] = {}
+    for p in panels:
+        by_page.setdefault(p.page, []).append(p)
+    for number, page in by_page.items():
+        replies = sum(len(p.replies) for p in page)
+        silent = sum(1 for p in page if not p.replies)
+        # Une case d'action reste parlée (`action_needs_voice`) : la case muette se prend parmi les autres.
+        quiet = [p for p in page if not (rules.action_needs_voice and p.characters and is_action(p, rules))]
+        wanted = min(rules.min_silent_panels_per_page, len(quiet)) if len(page) >= rules.silent_min_panels else 0
+        # Place de la planche, sans les cases qui doivent rester muettes.
+        spared = sum(sorted(panel_target(p, rules) for p in quiet)[:wanted])
+        need = min(rules.min_per_page, sum(panel_target(p, rules) for p in page) - spared)
+        if replies < need:
+            short = [str(p.index) for p in page if p.characters and len(p.replies) < panel_target(p, rules)]
+            where = f" (cases en dessous : {', '.join(short)})" if short else ""
+            problems.append(
+                f"page {number} : {replies} réplique{'s' if replies > 1 else ''} (au moins {need} par planche, "
+                f"onomatopées à part) : ajoute des répliques courtes là où un personnage présent peut parler{where}"
+            )
+        if replies > rules.max_per_page:
+            problems.append(
+                f"page {number} : {replies} répliques ({rules.max_per_page} au plus par planche) : garde les plus "
+                "fortes, laisse respirer la planche"
+            )
+        if wanted and silent < wanted:
+            problems.append(
+                f"page {number} : {silent or 'aucune'} case{'s' if silent > 1 else ''} muette{'s' if silent > 1 else ''} "
+                f"(au moins {wanted} case{'s' if wanted > 1 else ''} sans aucune réplique par planche) : laisse le "
+                "silence à une réaction, un regard ou un décor (pas une case d'action)"
+            )
+    return problems
+
+
 KIND_LABELS = {"speech": "parole", "shout": "cri", "thought": "pensée", "off": "voix off", "narration": "narration"}
 
 
@@ -196,10 +224,18 @@ def dialogue_text(rules: DialogueRules | None) -> str:
     """Règles de dialogue en clair, pour le prompt du scénariste ($dialogue_rules)."""
     if rules is None:
         return "(aucune règle imposée)"
+    silent = rules.min_silent_panels_per_page
     lines = [
-        f"- vise {rules.target_per_panel} répliques dans chaque case où un personnage présent peut parler "
-        f"(au moins {_fr(rules.min_per_panel, 1)} par case en moyenne sur le chapitre) : échanges, réactions, "
-        "apartés ; une case muette reste possible quand le silence porte la scène ;",
+        f"- vise {rules.target_per_panel} répliques dans chaque case où un personnage présent peut parler : échanges, "
+        "réactions, apartés ;",
+        f"- compte par planche : {rules.min_per_page} à {rules.max_per_page} répliques par planche (onomatopées à "
+        "part)"
+        + (
+            f", et au moins {silent} case{'s' if silent > 1 else ''} sans aucune réplique par planche (dès "
+            f"{rules.silent_min_panels} cases) : le silence d'une réaction, d'un regard, d'un décor ;"
+            if silent
+            else " ;"
+        ),
         f"- répliques courtes : {rules.max_words} mots au plus, {_fr(rules.max_mean_words, 1)} en moyenne ; "
         "plusieurs bulles courtes plutôt qu'une longue ;",
     ]
