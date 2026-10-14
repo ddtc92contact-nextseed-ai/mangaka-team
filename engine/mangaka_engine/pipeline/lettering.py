@@ -942,6 +942,36 @@ class Letterer:
                 best, hi = f, mid
         return best
 
+    def manual_fit(self, b: BubbleSpec) -> tuple[_Fit, bool]:
+        """Texte d'une bulle au cadre ajusté à la main : taille saisie, sinon remplissage du cadre ; faute de
+        place, tout le texte à la plus petite taille (second élément : True, il déborde)."""
+        assert b.manual_box is not None
+        text = self._text(b)
+        if b.size_pt is not None:
+            fit = self.fit(b.kind, text, b.size_pt, b.manual_box.w + 1, b.manual_box.h + 1)
+        else:
+            fit = self.fill_box(b.kind, text, b.manual_box)
+        if fit is None:
+            return self.fit_any(b.kind, text, self.bubble_sizes(b)[-1], b.manual_box.w), True
+        return fit, False
+
+    def fit_preview(self, b: BubbleSpec) -> dict[str, Any]:
+        """Aperçu du redimensionnement (écran Lettrage) : taille et lignes du texte dans le cadre `manual_box`,
+        exactement comme au lettrage de la page — sans rien enregistrer."""
+        assert b.manual_box is not None
+        fit, overflow = self.manual_fit(b)
+        box = Box(_r(b.manual_box.x1), _r(b.manual_box.y1), _r(b.manual_box.x2), _r(b.manual_box.y2))
+        return {
+            "id": b.id,
+            "box": box.as_xywh(),
+            "size_pt": fit.size_pt,
+            "size_px": round(fit.block.size_px, 2),
+            "overflow": overflow,
+            "lines": [
+                {"text": ln.text, "x": round(ln.x, 1), "y": round(ln.y, 1)} for ln in self.lines(b.kind, fit.block, box)
+            ],
+        }
+
     def fit_any(self, kind: str, text: str, size_pt: float, max_w: float) -> _Fit:
         """Repli sans contrainte de hauteur (texte trop long) : tout le texte, rien de coupé."""
         inner_w, _ = self.inner_size(kind, max_w, max_w)
@@ -1130,15 +1160,7 @@ class Letterer:
         auto = [b for b in panel.bubbles if b.manual_box is None]
         for b in manual:
             assert b.manual_box is not None
-            text = self._text(b)
-            sizes = self.bubble_sizes(b)
-            if b.size_pt is not None:
-                fit = self.fit(b.kind, text, b.size_pt, b.manual_box.w + 1, b.manual_box.h + 1)
-            else:
-                fit = self.fill_box(b.kind, text, b.manual_box)
-            overflow = fit is None
-            if fit is None:
-                fit = self.fit_any(b.kind, text, sizes[-1], b.manual_box.w)
+            fit, overflow = self.manual_fit(b)
             out[b.id] = self._layout(b, panel, b.manual_box, fit, direction, overflow=overflow)
             if overflow:
                 warnings.append(self._overflow(label, b, panel))

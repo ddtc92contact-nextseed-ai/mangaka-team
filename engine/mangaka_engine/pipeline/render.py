@@ -197,6 +197,26 @@ def _manual_size(position: dict[str, Any] | None) -> float | None:
     return size if size and size > 0 else None
 
 
+def bubble_fit_preview(
+    presets: PresetRegistry, fonts: FontBook, page: Page, bubble: Bubble, box: dict[str, float]
+) -> dict[str, Any]:
+    """Taille et lignes du texte de `bubble` si son cadre devenait `box` ({x, y, w, h}, px de la page) :
+    aperçu du redimensionnement, même calcul qu'au lettrage, rien n'est enregistré."""
+    if page.layout is None:
+        raise LetteringError(f"page {page.number} pas encore mise en page : calcule la mise en page d'abord")
+    fmt = presets.page_format(page.layout.get("page_format") or page.chapter.project.page_format)
+    spec = BubbleSpec(
+        id=bubble.id,
+        kind=bubble.kind.value,
+        text=bubble.text,
+        speaker=bubble.speaker_name,
+        order=bubble.order,
+        manual_box=Box(box["x"], box["y"], box["x"] + box["w"], box["y"] + box["h"]),
+        size_pt=_manual_size(bubble.position),
+    )
+    return Letterer(fonts, presets.lettering, fmt.dpi).fit_preview(spec)
+
+
 def _num(value: Any) -> float | None:
     try:
         v = float(value)

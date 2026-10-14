@@ -1574,6 +1574,16 @@ export interface LetteredBubble {
   shape: { path: string; fill: string; stroke: string; stroke_px: number; miter_limit: number };
 }
 
+/** Aperçu du redimensionnement d'une bulle : son texte dans le cadre `box`, calculé comme au lâcher. */
+export interface BubbleFit {
+  id: number;
+  box: BubbleBox;
+  size_pt: number;
+  size_px: number;
+  overflow: boolean;
+  lines: { text: string; x: number; y: number }[];
+}
+
 export interface LetteringWarning {
   code: "text_overflow" | "faces_covered" | "missing_image" | "layout_stale" | "no_layout" | string;
   message: string;
@@ -2634,6 +2644,7 @@ export const api = {
   getLettering: (pageId: number) => request<PageLettering>(`/pages/${pageId}/lettering`),
   resetLettering: (pageId: number) => request<PageLettering>(`/pages/${pageId}/lettering/reset`, { method: "POST" }),
   updateBubble: (id: number, body: BubbleUpdate) => request<PageLettering>(`/bubbles/${id}`, json("PATCH", body)),
+  fitBubble: (id: number, box: BubbleBox) => request<BubbleFit>(`/bubbles/${id}/fit`, json("POST", box)),
   addSfx: (panelId: number, body: { text: string; intensity?: Intensity; x?: number; y?: number }) =>
     request<PageLettering>(`/panels/${panelId}/sfx`, json("POST", body)),
   deleteSfx: (id: number) => request<PageLettering>(`/bubbles/${id}`, { method: "DELETE" }),

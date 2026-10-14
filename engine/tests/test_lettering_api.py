@@ -260,3 +260,27 @@ def test_resized_bubble_text_fills_its_frame_in_screen_and_render(client: TestCl
     assert client.patch(f"/bubbles/{bubble['id']}", json={"size_pt": 200}).status_code == 422
     sfx = _ok(client.post(f"/panels/{bubble['panel_id']}/sfx", json={"text": "BAM"}), 201)["sfx"][0]
     assert client.patch(f"/bubbles/{sfx['id']}", json={"size_pt": 20}).status_code == 422
+
+
+def test_resize_preview_endpoint_matches_the_size_after_release(client: TestClient) -> None:
+    """Aperçu du glissé (#157) : même taille et mêmes lignes qu'au lâcher, rien d'enregistré entre-temps."""
+    data = _setup(client)
+    page = data["page"]
+    bubble = _ok(client.get(f"/pages/{page['id']}/lettering"))["bubbles"][0]
+    box, size = bubble["box"], bubble["font"]["size_pt"]
+    for kw, kh in ((2, 2), (3, 3), (2.4, 2.7), (0.8, 0.8)):
+        big = {"x": box["x"], "y": box["y"], "w": round(box["w"] * kw), "h": round(box["h"] * kh)}
+        preview = _ok(client.post(f"/bubbles/{bubble['id']}/fit", json=big))
+        unchanged = _ok(client.get(f"/pages/{page['id']}/lettering"))["bubbles"][0]
+        assert unchanged["box"] == box and unchanged["font"]["size_pt"] == size
+        res = _ok(client.patch(f"/bubbles/{bubble['id']}", json={"position": big}))
+        after = next(x for x in res["bubbles"] if x["id"] == bubble["id"])
+        assert preview["size_pt"] == after["font"]["size_pt"] and preview["lines"] == after["lines"], (kw, kh)
+        assert preview["box"] == after["box"] and preview["overflow"] == after["overflow"]
+        _ok(client.patch(f"/bubbles/{bubble['id']}", json={"position": None}))
+    # ×2 : le texte double (plus bloqué à l'ancien plafond).
+    double = {"x": box["x"], "y": box["y"], "w": box["w"] * 2, "h": box["h"] * 2}
+    assert abs(_ok(client.post(f"/bubbles/{bubble['id']}/fit", json=double))["size_pt"] - 2 * size) <= 0.5
+    assert client.post("/bubbles/99999/fit", json=double).status_code == 404
+    sfx = _ok(client.post(f"/panels/{bubble['panel_id']}/sfx", json={"text": "BAM"}), 201)["sfx"][0]
+    assert client.post(f"/bubbles/{sfx['id']}/fit", json=double).status_code == 422

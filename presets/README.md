@@ -1468,7 +1468,9 @@ Le texte n'est **jamais** dessiné par le modèle d'image : il est posé au lett
   taille qui remplit ce cadre, **en proportion** (les marges grandissent avec le texte : cadre ×2 → texte
   ×2, même retour à la ligne), entre `min_size_pt` et `max_size_pt` (absent : `size_pt` ; garde-fou
   livré ≈ ×5 la taille normale, au plus 72 pt) ; une taille
-  saisie dans le panneau de la bulle l'emporte jusqu'au retour en « auto ».
+  saisie dans le panneau de la bulle l'emporte jusqu'au retour en « auto ». Pendant le glissé de la
+  poignée, l'écran demande au moteur le texte exact du cadre (`POST /bubbles/{id}/fit`, rien
+  d'enregistré) : la taille ne saute pas au lâcher, même quand le texte se remet à la ligne.
 - `lettering.yaml` : marges intérieures par type, forme de la parole (ellipse / rectangle arrondi),
   nuage, pointes du cri, queue (longueur, base, direction par défaut sans visage détecté), écarts
   bulle ↔ bulle / bord de case / visage, couleurs, bordure des cases, repères de coupe.
