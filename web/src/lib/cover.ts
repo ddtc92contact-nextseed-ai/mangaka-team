@@ -86,3 +86,31 @@ export function orderedChapterIds(selected: Iterable<number>, chapters: { id: nu
   const set = new Set(selected);
   return [...chapters].filter((c) => set.has(c.id)).sort((a, b) => a.number - b.number).map((c) => c.id);
 }
+
+// --- Composition de la couverture (1re, 4e, dos) ---
+
+/** Signes espaces compris, comme le moteur : espaces et sauts de paragraphe comptent pour une espace. */
+export function signCount(text: string): number {
+  return text.split(/\s+/).filter(Boolean).join(" ").length;
+}
+
+/** Longueur du résumé de 4e par rapport aux bornes du preset (« 742 signes · 600 à 900 »). */
+export function summaryLength(text: string, min: number, max: number): { count: number; state: "short" | "ok" | "long"; label: string } {
+  const count = signCount(text);
+  const state = count < min ? "short" : count > max ? "long" : "ok";
+  const hint = state === "short" ? " — un peu court" : state === "long" ? " — plus long que visé" : "";
+  return { count, state, label: `${count} signe${count > 1 ? "s" : ""} · visé ${min} à ${max}${hint}` };
+}
+
+const FACE_NAMES = { front: "1re", spine: "dos", back: "4e" } as const;
+
+/** Ordre de la couverture à plat, en mots (« 1re · dos · 4e — sens de lecture manga »). */
+export function flatOrderLabel(order: (keyof typeof FACE_NAMES)[], direction: "ltr" | "rtl"): string {
+  const faces = order.map((k) => FACE_NAMES[k]).join(" · ");
+  return `${faces} — ${direction === "rtl" ? "sens de lecture manga (rtl) : la 1re est à gauche du dos" : "sens de lecture occidental (ltr) : la 1re est à droite du dos"}`;
+}
+
+/** Millimètres lisibles en français (« 12,1 mm »). */
+export function mmLabel(mm: number): string {
+  return `${String(Math.round(mm * 10) / 10).replace(".", ",")} mm`;
+}

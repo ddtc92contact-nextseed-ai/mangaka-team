@@ -1283,12 +1283,88 @@ export interface Character {
   aliases?: string[];
 }
 
-/** Rattachement d'un nom écrit par le scénario à une fiche (ou mise à l'écart : `character_id` null). */
+/** Rattachement d'un nom écrit par le scénario à une fiche (`character_id` null : foule anonyme marquée
+ * « foule sans fiche » ; refusé pour un intervenant nommé). */
 export interface CharacterLink {
   name: string;
   character_id: number | null;
   panels: number;
   alias_added: boolean;
+}
+
+/** Distribution du chapitre (moteur : pipeline/cast.py) : chaque intervenant cité, même secondaire. */
+export type CastReferences = "aucune" | "portrait" | "planche";
+export type CastRole = "principal" | "secondaire";
+
+export interface CastAppearance {
+  panel_id: number;
+  page_number: number;
+  /** 0-based. */
+  panel_index: number;
+  /** « case 2 de la page 3 ». */
+  label: string;
+  /** image | hors cadre | bulle | description | mise en scène */
+  sources: string[];
+}
+
+export interface CrowdMark {
+  id: number;
+  name: string;
+  author: string;
+  at: string;
+}
+
+export interface CastMember {
+  key: string;
+  name: string;
+  character_id: number | null;
+  /** Noms tels qu'écrits par le scénario. */
+  written: string[];
+  appearances: CastAppearance[];
+  panel_count: number;
+  images: number;
+  references: CastReferences;
+  role: CastRole;
+  /** Références conseillées : portrait (secondaire) ou planche (principal). */
+  needs: "portrait" | "planche";
+  /** Foule anonyme : peut être marquée « foule sans fiche ». */
+  crowd: boolean;
+  mark: CrowdMark | null;
+  /** Ce qui bloque la génération. */
+  fault: "sans fiche" | "sans image" | null;
+  /** Conseil non bloquant (« planche conseillée… »). */
+  advice: string | null;
+}
+
+export interface ChapterCast {
+  chapter_id: number;
+  project_id: number;
+  members: CastMember[];
+  /** Intervenants comptés par la garde (foules marquées exclues). */
+  total: number;
+  faults: number;
+  without_card: string[];
+  without_image: string[];
+  marks: CrowdMark[];
+}
+
+/** Fiche préremplie par le LLM (rien n'est enregistré avant « Créer la fiche »). */
+export interface CharacterDraft {
+  name: string;
+  written: string;
+  visual_description: string;
+  prompt_keywords: string[];
+  age: string;
+  silhouette: string;
+  tenue: string;
+  signe_distinctif: string;
+  panel_count: number;
+}
+
+export interface CastBatch {
+  items: { name: string; character_id: number | null; created: boolean; queued: boolean; message: string }[];
+  jobs: Job[];
+  cast: ChapterCast;
 }
 
 /** Sortes de fiches de la bibliothèque d'une série. */
@@ -2183,6 +2259,125 @@ export interface CoverStudio {
   upscaler_name: string | null;
 }
 
+// --- Composition de la couverture (1re, 4e, dos, export) ---------------------
+
+/** Rectangle en fraction de l'image complète (fond perdu compris). */
+export interface RelRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** Placement du logo sur la 1re : centre en fraction du format rogné, taille relative à sa zone. */
+export interface LogoPlacement {
+  cx: number;
+  cy: number;
+  scale: number;
+}
+
+export interface CompositionLogo {
+  present: boolean;
+  placement: LogoPlacement | null;
+  rect: RelRect | null;
+  zone: RelRect | null;
+  safe: RelRect;
+  scale_min: number;
+  scale_max: number;
+  default_scale: number;
+}
+
+export interface BackImageChoice {
+  source: "panel" | "generated";
+  id: number;
+}
+
+export interface PanelChoice {
+  image_id: number;
+  url: string;
+  chapter_number: number;
+  page_number: number;
+  panel_number: number;
+}
+
+export interface BackVersion {
+  id: number;
+  url: string;
+  width: number;
+  height: number;
+  seed: Seed | null;
+  prompt: string;
+  selected: boolean;
+  created_at: string;
+}
+
+export interface CompositionNotice {
+  code: string;
+  message: string;
+  part: "front" | "back" | "spine";
+}
+
+export type CoverPart = "front" | "back" | "spine" | "flat";
+
+/** Composition de la couverture d'un tome (écran « Couverture »). */
+export interface CoverComposition {
+  volume_id: number;
+  project_id: number;
+  number: number;
+  series_title: string;
+  direction: "ltr" | "rtl";
+  format: CoverFormat | null;
+  /** Composition indisponible (presets). */
+  problem: string | null;
+  /** Change dès que la composition change : clé des aperçus. */
+  revision: string;
+  author: string;
+  series_author: string;
+  summary: string;
+  tagline: string;
+  summary_source: "ai" | "manual" | null;
+  summary_notes: string;
+  summary_chars: number;
+  summary_min: number;
+  summary_max: number;
+  tagline_max: number;
+  summary_size_pt: number | null;
+  back_layout: string | null;
+  back_layouts: { id: string; name: string; description: string }[];
+  back_image: BackImageChoice | null;
+  back_image_url: string | null;
+  back_prompt: string;
+  back_aspect: [number, number];
+  back_versions: BackVersion[];
+  back_jobs: Job[];
+  panel_choices: PanelChoice[];
+  logo: CompositionLogo | null;
+  has_front_image: boolean;
+  palette_name: string | null;
+  spine_mm: number | null;
+  pages: number;
+  /** Faces de la couverture à plat, de gauche à droite. */
+  order: ("front" | "spine" | "back")[];
+  warnings: CompositionNotice[];
+  /** Bloquants : l'export est refusé tant qu'il en reste. */
+  problems: CompositionNotice[];
+  export_jobs: Job[];
+  last_export: { job_id: number; filename: string; url: string; finished_at: string | null } | null;
+}
+
+export interface CompositionPatch {
+  summary?: string;
+  tagline?: string;
+  back_layout?: string;
+  author?: string;
+  series_author?: string;
+  logo?: LogoPlacement;
+  reset_logo?: boolean;
+  back_image?: BackImageChoice;
+  clear_back_image?: boolean;
+  back_prompt?: string;
+}
+
 // --- Savoir-faire et bible ---------------------------------------------------
 export interface KnowledgeCollection {
   id: number;
@@ -2275,8 +2470,8 @@ export interface Passage {
   score: number | null;
   vector_score: number | null;
   keyword_score: number | null;
-  /** framing : fiche du plan ou de l'angle de la case (une seule par famille). */
-  mode: "retrieved" | "whole" | "framing";
+  /** framing : fiche du plan ou de l'angle de la case (une seule par famille) ; genre : courbe de tension du genre de la série. */
+  mode: "retrieved" | "whole" | "framing" | "genre";
   /** Passage d'une fiche de pack livré. */
   pack?: string | null;
   /** Recherche par page (direction artistique) : pages pour lesquelles le passage a été retenu. */
@@ -2622,7 +2817,7 @@ export interface ChapterStage {
   examples: string[];
   /** Ce qu'il faut faire (« Applique-la »). */
   fix: string;
-  /** Onglet du chapitre qui règle l'étape ; `personnages` : fiches de la série. */
+  /** Onglet du chapitre qui règle l'étape (`direction` pour les références : panneau Distribution). */
   screen: string;
   /** Actions bloquées en ce moment (« générer », « lettrer »…). */
   blocks: string[];
@@ -2766,6 +2961,15 @@ export const api = {
     request<Job>(`/volumes/${volumeId}/cover/generate`, json("POST", body)),
   selectCover: (coverId: number) => request<CoverStudio>(`/volume-covers/${coverId}/select`, { method: "POST" }),
   deleteCover: (coverId: number) => request<void>(`/volume-covers/${coverId}`, { method: "DELETE" }),
+  coverComposition: (volumeId: number) => request<CoverComposition>(`/volumes/${volumeId}/composition`),
+  updateComposition: (volumeId: number, body: CompositionPatch) =>
+    request<CoverComposition>(`/volumes/${volumeId}/composition`, json("PATCH", body)),
+  writeBackSummary: (volumeId: number, body: { rewrite?: boolean } = {}) =>
+    request<CoverComposition>(`/volumes/${volumeId}/back/summary`, json("POST", body)),
+  generateBackIllustration: (volumeId: number, body: { prompt?: string; seed?: Seed | null } = {}) =>
+    request<Job>(`/volumes/${volumeId}/back/generate`, json("POST", body)),
+  exportCover: (volumeId: number, body: ExportOptions) =>
+    request<Job>(`/volumes/${volumeId}/cover/export`, json("POST", body)),
   upcomingChapters: (days = 7) => request<Chapter[]>(`/chapters/upcoming?days=${days}`),
   getChapter: (id: number) => request<Chapter>(`/chapters/${id}`),
   createChapter: (projectId: number, body: Partial<ChapterInput>) =>
@@ -2786,6 +2990,15 @@ export const api = {
       `/chapters/${chapterId}/character-links`,
       json("POST", { name, character_id: characterId }),
     ),
+  chapterCast: (chapterId: number) => request<ChapterCast>(`/chapters/${chapterId}/cast`),
+  draftCastCard: (chapterId: number, name: string) =>
+    request<CharacterDraft>(`/chapters/${chapterId}/cast/draft`, json("POST", { name })),
+  markCrowd: (chapterId: number, name: string, author = "") =>
+    request<ChapterCast>(`/chapters/${chapterId}/cast/crowds`, json("POST", { name, author })),
+  revokeCrowd: (chapterId: number, markId: number, author = "") =>
+    request<ChapterCast>(`/chapters/${chapterId}/cast/crowds/${markId}`, json("DELETE", { author })),
+  createSecondaries: (chapterId: number) =>
+    request<CastBatch>(`/chapters/${chapterId}/cast/secondaries`, { method: "POST" }),
   chapterJobs: (chapterId: number, step?: string) =>
     request<Job[]>(`/chapters/${chapterId}/jobs${step ? `?step=${encodeURIComponent(step)}` : ""}`),
   getJob: (id: number) => request<Job>(`/jobs/${id}`),
@@ -3024,6 +3237,9 @@ export function parseTags(value: string): string[] {
 
 /** Lien de téléchargement du ZIP d'un export de chapitre terminé. */
 export const exportFileUrl = (jobId: number) => engineUrl(`/exports/${jobId}/file`);
+/** Aperçu PNG d'une face de la couverture (rendu de l'export, réduit) ; `revision` : clé de cache. */
+export const compositionPreviewUrl = (volumeId: number, part: CoverPart, revision: string, width = 640) =>
+  engineUrl(`/volumes/${volumeId}/composition/${part}.png?width=${width}&v=${revision}`);
 
 export interface BenchScope {
   project_id?: number | null;

@@ -301,12 +301,14 @@ class Passage:
     vector_score: float | None = None
     keyword_score: float | None = None
     # retrieved | whole (petite collection injectée entière) | framing (fiche du plan ou de l'angle de la case)
+    # | genre (courbe de tension du genre de la série, `genre_passages`)
     mode: str = "retrieved"
     pack: str | None = None  # pack de savoir-faire livré de la collection (presets/knowledge_packs/)
     pages: list[int] = field(default_factory=list)  # recherche par page : pages pour lesquelles il a été retenu
     dropped: str | None = None  # écarté comme redondant (raison, en français) ; None : servi
     # Fiche d'un pack (meta) : type (« shot_scale », « camera_angle »…) et terme de l'appli dont elle est la
-    # fiche de référence (« plan moyen », « en plongée »…). Internes : pas dans `as_dict`.
+    # fiche de référence (« plan moyen », « en plongée »… ; pour une courbe de tension, le genre « shonen »…).
+    # Internes : pas dans `as_dict`.
     fiche_type: str | None = None
     framing: str | None = None
 
@@ -430,7 +432,13 @@ def rank(
                 keyword_score=k if query.strip() else None,
                 pack=pack,
                 fiche_type=fiche_type,
-                framing=meta.get(FRAMING_KEYS.get(fiche_type or ""), None) if fiche_type in FRAMING_KEYS else None,
+                framing=(
+                    meta.get(FRAMING_KEYS[fiche_type])
+                    if fiche_type in FRAMING_KEYS
+                    else meta.get("genre")
+                    if fiche_type == GENRE_TYPE
+                    else None
+                ),
             )
         )
     if query.strip():
@@ -466,19 +474,50 @@ def select_passages(
     *,
     top_k: int,
     budget_tokens: int,
+    searched: Iterable[int] = (),
+    genre: str | None = None,
+    genre_curves: bool = False,
 ) -> Selection:
-    """Petites collections entières d'abord, puis les meilleurs passages des autres, dans le budget."""
+    """Petites collections entières d'abord, puis les meilleurs passages des autres, dans le budget.
+    `searched` : collections toujours cherchées, jamais injectées entières, même petites.
+    `genre_curves` : une seule courbe de tension, celle du genre `genre` de la série (`genre_passages`)."""
     ids = list(dict.fromkeys(collection_ids))
     sizes = collection_tokens(session, ids)
-    whole = [cid for cid in ids if 0 < sizes[cid] <= settings.small_collection_tokens]
+    never_whole = set(searched)
+    whole = [cid for cid in ids if cid not in never_whole and 0 < sizes[cid] <= settings.small_collection_tokens]
     ranking = rank(session, query, ids, embedder, settings)
-    chosen, used = choose_passages(ranking.passages, whole, settings, top_k=top_k, budget_tokens=budget_tokens)
-    return Selection(chosen, used, ranking.passages, whole, ranking.warning)
+    ranked = genre_passages(ranking.passages, genre) if genre_curves else list(ranking.passages)
+    chosen, used = choose_passages(ranked, whole, settings, top_k=top_k, budget_tokens=budget_tokens)
+    return Selection(chosen, used, ranked, whole, ranking.warning)
+
+
+def genre_passages(ranked: Sequence[Passage], genre: str | None) -> list[Passage]:
+    """Au plus UNE courbe de tension (fiche d'un pack de type « genre ») : celle du genre de la série (meta
+    « genre » = identifiant du pack de genre, `style_genres/*.yaml`), mise en tête (mode « genre »), même si son
+    score est bas. Genre inconnu ou sans fiche : la mieux classée seulement. Les autres sont marquées `dropped`
+    (jamais servies) : leur place dans le top-k va à d'autres fiches."""
+    curves = [p for p in ranked if p.pack and p.fiche_type == GENRE_TYPE]
+    if not curves:
+        return list(ranked)
+    best = next((p for p in curves if genre and p.framing == genre), None)
+    keep = (best or curves[0]).document_id
+    others = {p.document_id for p in curves} - {keep}
+    why = f"autre genre que « {genre} »" if best else "une seule courbe de genre"
+    pinned = [replace(p, mode="genre") for p in ranked if best and p.document_id == keep]
+    out = [
+        replace(p, dropped=f"{why} : une seule courbe de tension par chapitre") if p.document_id in others else p
+        for p in ranked
+        if not (best and p.document_id == keep)
+    ]
+    return [*pinned, *out]
 
 
 # Type de fiche de pack (meta « type ») → clé du meta qui porte le terme de l'appli dont elle est la référence
 # (cf. knowledge_packs.PackVocabulary.reference_terms).
 FRAMING_KEYS = {"shot_scale": "plan_appli", "camera_angle": "angle_appli"}
+PINNED_MODES = ("framing", "genre")  # fiche mise en tête : servie même sous min_score
+# Courbe de tension d'un genre (pack structure) : meta « genre » = identifiant du pack de genre de la série.
+GENRE_TYPE = "genre"
 FRAMING_LABELS = {"shot_scale": ("plan", "de plan"), "camera_angle": ("angle", "d'angle")}
 DUPLICATE = "doublon : cette fiche est déjà dans le savoir-faire reçu"
 
@@ -548,7 +587,7 @@ def choose_passages(
             continue
         if retrieved >= top_k:
             break
-        if p.mode != "framing" and (p.score or 0.0) < settings.retrieval.min_score:
+        if p.mode not in PINNED_MODES and (p.score or 0.0) < settings.retrieval.min_score:
             if p.dropped is None:
                 break
             continue
@@ -879,9 +918,18 @@ class KnowledgeBase:
         return profile if profile is not None else agent.main_budget_tokens
 
     def for_agent(
-        self, session: Session, role: str, project_id: int | None, query: str, *, include_bible: bool = True
+        self,
+        session: Session,
+        role: str,
+        project_id: int | None,
+        query: str,
+        *,
+        include_bible: bool = True,
+        genre: str | None = None,
     ) -> AgentKnowledge:
         agent = self.settings.agent(role)
+        if agent.query_hint.strip():
+            query = "\n".join(q for q in (query.strip(), agent.query_hint.strip()) if q)
         profile = self.profile_lookup(session, role, project_id) if self.profile_lookup else None
         collections = agent_collections(session, agent, project_id, profile=profile)
         selection = select_passages(
@@ -892,6 +940,11 @@ class KnowledgeBase:
             self.settings,
             top_k=self.top_k(session, role, project_id),
             budget_tokens=self.budget_tokens(session, role, project_id),
+            # Comme `for_pages` : une petite collection d'un pack (fins de chapitre, rythme d'un arc…) est
+            # cherchée, jamais injectée entière — plusieurs mangeraient tout le budget de l'agent.
+            searched=[c.id for c in collections if c.pack],
+            genre=genre,
+            genre_curves=True,
         )
         bible = None
         if include_bible and agent.bible and project_id is not None:

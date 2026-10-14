@@ -319,7 +319,7 @@ def build_panel_prompt(
     return build_prompt(
         description=panel.description,
         setting=panel.setting,
-        staging=panel.staging,
+        staging=panel_staging(panel, characters),
         shot_type=panel.shot_type,
         plan=da.get("plan"),
         angle=da.get("angle"),
@@ -336,6 +336,13 @@ def build_panel_prompt(
         settings=presets.image_prompt,
         framing=panel_framing_sentence(presets, panel),
     )
+
+
+def panel_staging(panel: Panel, characters: Sequence[Character] = ()) -> str:
+    """Mise en scène envoyée au prompt image : aucune pour une case sans personnage à l'image (ni nom présent,
+    ni fiche dessinée `characters`) (#167). Écrite pour des personnages devenus absents (« Seku et Angus
+    agenouillés »), elle ferait dessiner quelqu'un ; le texte reste dans la case, l'écran le signale."""
+    return (panel.staging or "") if panel.character_names or characters else ""
 
 
 def panel_framing_sentence(presets: PresetRegistry, panel: Panel) -> str:
@@ -857,7 +864,7 @@ def panel_brief(
     return PromptBrief.build(
         description=panel.description,
         setting=panel.setting,
-        staging=panel.staging,
+        staging=panel_staging(panel, cast.characters),
         shot_type=panel.shot_type,
         plan=da.get("plan"),
         angle=da.get("angle"),

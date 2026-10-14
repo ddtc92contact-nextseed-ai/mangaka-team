@@ -26,7 +26,7 @@ Après modification d'un preset, redémarre le moteur (`npm run dev`).
 | `style_loras.yaml` | Catalogue des LoRA de style : mots déclencheurs et poids conseillé |
 | `pre_direction.yaml` | ADN de la série : charte chiffrée (cases, formes de planche, plans, présence, dialogue, rythme), défauts des 7 genres |
 | `camera_loras.yaml` | LoRA Multiple-Angles (« Nouvel angle », « Changer l'angle ») et Cohérence anime, vocabulaire de caméra |
-| `prompts/*.yaml` | Prompts des étapes LLM (`script` : découpage d'un chapitre ; `direction-artistique` ; `redacteur-image` : prompt image de chaque case rédigé en un paragraphe ; `redacteur-image-dialogue` : dialogue sur une case dans l'atelier) |
+| `prompts/*.yaml` | Prompts des étapes LLM (`script` : découpage d'un chapitre ; `direction-artistique` ; `redacteur-image` : prompt image de chaque case rédigé en un paragraphe ; `redacteur-image-dialogue` : dialogue sur une case dans l'atelier ; `fiche-intervenant` : fiche préremplie d'un intervenant de la distribution) |
 | `image_prompt.yaml` | Construction du prompt final des cases (étape 3) et termes « pas de texte » du prompt négatif |
 | `qc.yaml` | Contrôle qualité des cases (étape 4) : poids, seuils de verdict, règles des détecteurs, seuil CCIP, zone de doute de la vision, nouveaux essais automatiques |
 | `qc_tonality.yaml` | Mesures de tonalité de chaque image générée (% sombre, % noir, % blanc, saturation, densité de trait) et cible (planche de référence) |
@@ -40,6 +40,7 @@ Après modification d'un preset, redémarre le moteur (`npm run dev`).
 | `agents/*.yaml` | Agents du pipeline (écran « L'équipe ») : nom, rôle, étape et réglages éditables depuis l'UI |
 | `reference_sheets/*.yaml` | Types de fiches de référence de « Créer des références » (portrait, turnaround, expressions, vue 3/4, plan large, autre angle) : gabarit de prompt, taille, workflow facultatif |
 
+| `cover_composition.yaml` + `back_layouts/*.yaml` | Composition de la couverture d'un tome : résumé de 4e par l'IA (longueurs), petite illustration de 4e (ratio, taille), dos (épaisseur du papier), placement du logo, styles de texte, palette de repli ; gabarits de 4e — voir « Composition de la couverture » |
 | `identity.yaml` + `logo_styles/*.yaml` | Identité visuelle de la série (fiche série) : palettes proposées par l'IA (nombre, couleurs, rôles), logo du titre (polices permises, tailles, contraste minimal, bornes des réglages) et effets du logo — voir « Identité visuelle » |
 | `knowledge.yaml` | Savoir-faire (RAG local) : découpage des documents, recherche hybride, seuil « petite collection », budget de la bible, collections lues par chaque agent |
 | `knowledge_packs/*.yaml` + `*.md` | Packs de savoir-faire livrés (fiches de mise en scène manga) : importés au démarrage dans des collections « pack » en lecture seule |
@@ -81,6 +82,32 @@ sinon celui de defaults.yaml) l'amène au DPI réel, et le moteur la recadre au 
 par le LLM du Dessinateur (`prompts/redacteur-couverture.yaml`) d'après la bible, les personnages choisis et
 l'intention de l'auteur ; il est toujours en couleur (`rendering`, un rendu non N&B) et reçoit toujours les
 `rules` (zone `clear` dégagée, aucun texte).
+
+## Composition de la couverture (`cover_composition.yaml`, `back_layouts/`)
+
+Écran « Couverture » d'un tome, sous l'illustration. Aucun texte n'est dessiné par le modèle d'image : titre,
+logo, numéro de tome, auteur, accroche et résumé sont posés en vectoriel (polices de `fonts.yaml`, couleurs de
+la palette retenue de la série ; sans palette, `fallback_palette`).
+
+- **1re** : illustration retenue à fond perdu ; logo de la série (dernière version) dans la zone `clear` du
+  format, taille `front.logo_scale` × la plus grande qui tient dans la zone, centre déplaçable, toujours dans la
+  marge de sécurité ; sans logo, titre en `texts.fallback_title` et avertissement ; badge du numéro (zone
+  `tome`) ; nom d'auteur (zone `auteur` ; celui du tome, sinon celui de la série).
+- **4e** : gabarit de `back_layouts/` (boîtes en fraction de la zone de sécurité, rôles de palette du fond, de
+  l'encart du résumé et de l'accroche). Le résumé est réduit par pas de `step_pt` jusqu'à `min_size_pt` pour
+  tenir dans son cadre, jamais coupé : au-delà, erreur lisible et export refusé.
+- **Résumé** (`prompts/resume-quatrieme.yaml`, LLM du Scénariste) : `summary.min_chars` à `max_chars` signes,
+  accroche de `tagline_max_chars` signes au plus, d'après les résumés des chapitres du tome et la bible ; une
+  réponse qui reprend `spoiler_words` mots d'affilée de la fin du dernier chapitre est refusée (pas de
+  révélation) ; 2 nouveaux essais au plus, puis erreur lisible. « Réécrire » montre le texte actuel à l'agent.
+- **Petite illustration de 4e** : une case retenue du tome, ou une génération par le flux de `cover.yaml` au
+  ratio `back_illustration.aspect`, agrandie à `width_mm` au DPI du format, règles « aucun texte ».
+- **Dos** : `ceil(pages / 2) × spine.sheet_thickness_mm + spine.cover_mm` (au moins `min_width_mm`) ; pages des
+  chapitres du tome (à défaut, leur nombre de pages visé). Titre vertical si le dos fait au moins
+  `title_min_width_mm`.
+- **Export** (job) : ZIP avec `1re-de-couverture`, `4e-de-couverture`, `couverture-a-plat` en PNG (DPI du format)
+  + SVG, et le texte de la 4e. À plat : 4e + dos + 1re en ltr, 1re + dos + 4e en rtl (manga). Options fond perdu
+  et repères de coupe (plus les repères de pli du dos), comme l'export d'un chapitre.
 
 ## Gabarits de planche (`layouts/*.yaml`)
 
@@ -1562,6 +1589,18 @@ jusqu'à « Reconstruire le prompt » (qui accepte aussi une consigne : même ga
 Variables : celles de `redacteur-image.yaml`, plus `$instruction`, `$current_prompt`,
 `$current_direction`, `$plans`, `$angles`, `$camera_terms`, `$reference_options`, `$history`.
 
+### Fiche d'un intervenant (`prompts/fiche-intervenant.yaml`)
+
+Panneau « Distribution » de la direction artistique (engine/mangaka_engine/pipeline/cast.py) : chaque intervenant
+du chapitre, même secondaire (« le garde », « la serveuse »), doit avoir sa fiche et une image de référence avant
+la génération (étape `references` de la garde d'étapes). « Créer la fiche » envoie au LLM du Directeur artistique
+les cases où l'intervenant apparaît (description, mise en scène, lieu, ses répliques) ; il rend un JSON `age`,
+`silhouette`, `tenue`, `signe_distinctif`, `description`, `mots_cles`, validé (`max_retries`, puis erreur
+lisible). Rien n'est enregistré : l'auteur relit la fiche préremplie avant de la créer. « Tout créer pour les
+secondaires » crée ces fiches d'un coup puis met en file un portrait (`personnage-portrait`) par fiche sans image,
+gardé d'office comme référence. Variables : `$name`, `$role`, `$series_title`, `$style`, `$panels`,
+`$context_json` ; relance : `$error`.
+
 ## Lettrage (étape 5)
 
 Le texte n'est **jamais** dessiné par le modèle d'image : il est posé au lettrage, en vectoriel.
@@ -1759,7 +1798,15 @@ une série, documents `.md` / `.txt` / `.pdf` (texte extrait par pypdf) ou texte
   `budget_tokens` de l'agent. Une collection de moins de `small_collection_tokens` jetons est
   injectée **entière**, sans recherche — sauf si l'agent la cite dans `searched_collections` : elle est
   alors cherchée comme une grande (le rédacteur de prompt y met « Rendu · Valeurs et masses », ≈ 680 jetons,
-  qui avec Pont ComfyUI mangerait sinon tout son budget de 1 200 jetons).
+  qui avec Pont ComfyUI mangerait sinon tout son budget de 1 200 jetons). Chez le scénariste (`for_agent`), une
+  petite collection d'un **pack** n'est jamais injectée entière non plus : ses fiches sont cherchées.
+- **Indice de requête** (`query_hint`) : ajouté à la requête de l'agent. Le scénariste cherche avec le titre, le
+  synopsis et les packs de style du chapitre, plus « Déroulé, accroche, pic, fin » : un synopsis ne parle jamais
+  du déroulé d'un chapitre ni de sa fin.
+- **Une seule courbe de tension** (scénariste) : parmi les fiches de type `genre` d'un pack, seule celle du genre
+  de la série (meta `genre` = identifiant de `style_genres/*.yaml`) est servie, en tête (mode `genre`), même si
+  son score est bas ; les six autres sont écartées et ne prennent pas de place dans le top-k. Série sans genre ou
+  genre sans fiche : la mieux classée seulement.
 - **Agents** (`agents`) : `script` (étape 1, variable `$savoir_faire` de `prompts/script.yaml`),
   `art_direction` (`prompts/direction-artistique.yaml`) et `image_prompt` (étape 3, voir ci-dessous).
   Collections par nom (casse ignorée) ; `series_collections: true` ajoute celles de la série du
@@ -1806,10 +1853,14 @@ une série, documents `.md` / `.txt` / `.pdf` (texte extrait par pypdf) ou texte
 ### Packs de savoir-faire (`knowledge_packs/`)
 
 Un pack est un gros fichier Markdown de fiches livré avec l'appli, et un manifeste YAML qui le range en
-collections. Deux packs livrés : `manga_visual_knowledge` (cadrages, angles, corps et gestes, action,
+collections. Trois packs livrés : `manga_visual_knowledge` (cadrages, angles, corps et gestes, action,
 composition, découpage, émotions, anti-répétition, exemples analysés), qui donne 13 collections
 « Mise en scène · … » et environ 70 documents, et `manga_rendering_knowledge` (13/10/2026 : encrage, trames,
-papier et impression, finitions, valeurs et masses), qui donne 5 collections « Rendu · … » et 17 fiches.
+papier et impression, finitions, valeurs et masses), qui donne 5 collections « Rendu · … » et 17 fiches, et
+`manga_story_structure` (14/10/2026 : déroulé d'un chapitre en huit temps avec positions en %, courbes de tension
+des 7 genres sur 15 pages, plans selon le moment, fins de chapitre, rythme d'un arc, silence et densité de
+dialogue), qui donne 6 collections « Structure · … » et 19 fiches. Ses repères chiffrés suivent les presets
+(cases par page des genres, `dialogue_rules`, `variety_rules` et `page_rules`) : un test les recoupe.
 Un pack ne recopie jamais un preset (pas de collection « Pont presets ») : les mots-clés d'une finition
 vivent dans `style_options.yaml`, une copie dériverait.
 
@@ -1879,6 +1930,9 @@ Corps et gestes, Action, Composition, Émotions, Pont ComfyUI (≈ 420 jetons, e
 Pack rendu, branchement étroit (le budget du rédacteur est déjà plein) : DA + Rendu · Valeurs et masses et
 Rendu · Encrage ; rédacteur + Rendu · Valeurs et masses **seulement** ; scénariste : rien. Trames, Papier et
 impression, Finitions : cherchables dans Savoir-faire, lues par aucun agent.
+Pack structure : scénariste seulement (les 6 collections « Structure · … », même budget de 2 500 jetons et top-k
+de 6) ; le futur agent de création de série les recevra aussi. DA et rédacteur de prompt : rien (ils reçoivent
+le rythme déjà décidé).
 
 ### Embeddings : mode réel
 

@@ -1,0 +1,14 @@
+# Gabarit de 4e de couverture : accroche en tête, petite illustration, résumé sur un encart, titre en pied.
+# Boîtes en fraction de la zone de sécurité (format rogné moins la marge de sécurité de cover_formats/) :
+# la même disposition sert au 13 × 18 et à l'A4. Couleurs : rôles de la palette de la série (par préférence).
+id: illustration-haut
+name: Illustration en haut
+description: Accroche, illustration au centre, résumé sur un encart clair, titre et tome en pied.
+order: 10
+background: [dominante, secondaire]
+summary_panel: [fond, texte-clair]
+tagline_color: [accent, texte-clair]
+tagline: { x: 0, y: 0, width: 1, height: 0.1, align: center }
+illustration: { x: 0.08, y: 0.115, width: 0.84, height: 0.37, align: center }
+summary: { x: 0, y: 0.505, width: 1, height: 0.405, align: left }
+title: { x: 0, y: 0.925, width: 1, height: 0.075, align: center }

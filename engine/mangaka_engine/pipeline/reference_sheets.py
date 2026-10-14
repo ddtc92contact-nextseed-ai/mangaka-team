@@ -326,11 +326,14 @@ def enqueue_sheet(
     parent: ReferenceVariant | None = None,
     instruction: str = "",
     start: ReferenceImage | None = None,
+    auto_keep: bool = False,
 ) -> list[Job]:
     """Crée `count` jobs `reference` en attente (sans commit).
 
     `parent` : « Affiner » depuis cette variante ; `start` : image de départ (une image de référence de la
-    fiche). Sans l'un ni l'autre, la fiche part de zéro (texte → image).
+    fiche). Sans l'un ni l'autre, la fiche part de zéro (texte → image). `auto_keep` (« Tout créer pour les
+    secondaires » de la distribution, pipeline/cast.py) : la variante est gardée comme référence d'office si la
+    fiche n'en a encore aucune ; l'auteur peut la remplacer ensuite.
     """
     if not 1 <= count <= MAX_VARIANTS:
         raise GenerationError(f"entre 1 et {MAX_VARIANTS} variantes par demande")
@@ -391,6 +394,7 @@ def enqueue_sheet(
                 "start_image_id": start.id if start is not None else None,
                 "instruction": instruction,
                 "style_asset_id": style.id if style is not None else None,
+                **({"auto_keep": True} if auto_keep else {}),
             },
         )
         session.add(job)
@@ -913,6 +917,13 @@ class ReferenceExecutor:
             session.add(variant)
             session.flush()
             job.params = {**params, "variant_id": variant.id}
+            kept = ""
+            if params.get("auto_keep") and not entry.reference_images:
+                try:
+                    keep_variant(session, self.files, entry, variant)
+                    kept = " — gardée comme référence"
+                except GenerationError as exc:
+                    kept = f" — non gardée : {exc}"
             journal.set(project_id=variant.project_id, image_kind=REFERENCE_VARIANT, image_id=variant.id).add(session)
             pruned: list[str] = []
             if self.variants_kept is not None:
@@ -931,4 +942,4 @@ class ReferenceExecutor:
         warning = f" — {PEOPLE_WARNING}" if check is not None and check["detected"] else ""
         if params.get("mode") == "angle":
             return f"{params.get('sheet_name')} — {stored.width}×{stored.height}, seed {built.params['seed']} — {ANGLE_PENDING}{warning}"
-        return f"Variante {params.get('variant', 1)}/{params.get('count', 1)} — {stored.width}×{stored.height}, seed {built.params['seed']} ({n} dans l'historique){warning}"
+        return f"Variante {params.get('variant', 1)}/{params.get('count', 1)} — {stored.width}×{stored.height}, seed {built.params['seed']} ({n} dans l'historique){kept}{warning}"

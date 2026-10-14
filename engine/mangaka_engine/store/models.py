@@ -184,6 +184,8 @@ class Project(TimestampMixin, Base):
     palette: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
     palette_proposals: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list, server_default="[]")
     logo_proposals: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list, server_default="[]")
+    # Nom d'auteur imprimé sur la couverture des tomes (un tome peut le remplacer : `Volume.author`).
+    author: Mapped[str] = mapped_column(String(200), default="", server_default="")
     # ADN de la série (presets/pre_direction.yaml) : seules les valeurs ajustées par l'auteur, par chemin
     # ({"shots.wide.min": 0.2}) ; tout le reste est hérité du genre (pipeline/pre_direction.py `series_dna`).
     pre_direction: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, server_default="{}")
@@ -385,6 +387,19 @@ class Volume(TimestampMixin, Base):
     cover_prompt_source: Mapped[str | None] = mapped_column(String(20), default=None)
     cover_prompt_notes: Mapped[str] = mapped_column(Text, default="")
     selected_cover_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    # Composition de la couverture (pipeline/cover_composition.py). Nom d'auteur du tome (vide : celui de la série).
+    author: Mapped[str] = mapped_column(String(200), default="", server_default="")
+    # 1re de couverture : placement du logo {"logo": {"cx", "cy" (centre, fraction du format rogné), "scale"}}.
+    cover_layout: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, server_default="{}")
+    # 4e de couverture : résumé et accroche (rédigés par l'IA ou à la main), gabarit (presets/back_layouts/),
+    # petite illustration {"source": "panel" | "generated", "id": id de la version}, prompt de sa génération.
+    back_summary: Mapped[str] = mapped_column(Text, default="", server_default="")
+    back_tagline: Mapped[str] = mapped_column(String(300), default="", server_default="")
+    back_summary_source: Mapped[str | None] = mapped_column(String(20), default=None)  # ai | manual | None
+    back_summary_notes: Mapped[str] = mapped_column(Text, default="", server_default="")
+    back_layout: Mapped[str | None] = mapped_column(String(100), default=None)
+    back_image: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
+    back_prompt: Mapped[str] = mapped_column(Text, default="", server_default="")
 
     project: Mapped[Project] = relationship(back_populates="volumes")
     chapter_links: Mapped[list[VolumeChapter]] = relationship(
@@ -410,7 +425,8 @@ class VolumeChapter(Base):
 
 
 class VolumeCover(Base):
-    """Version générée de l'illustration de 1re de couverture d'un tome (fond perdu compris, au DPI du format)."""
+    """Version générée d'une illustration de couverture d'un tome : `front` (1re de couverture, fond perdu compris,
+    au DPI du format) ou `back` (petite illustration de 4e, ratio et taille de cover_composition.yaml)."""
 
     __tablename__ = "volume_covers"
     __table_args__ = NEVER_REUSED
@@ -424,6 +440,7 @@ class VolumeCover(Base):
     height: Mapped[int] = mapped_column(Integer)
     seed: Mapped[int | None] = mapped_column(Integer, default=None)
     cover_format: Mapped[str] = mapped_column(String(100))
+    kind: Mapped[str] = mapped_column(String(10), default="front", server_default="front")
     # Workflow, agrandisseur, prompts, références envoyées, taille générée, durée…
     params: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
@@ -960,6 +977,25 @@ class ChapterStageDecision(Base):
     # Éléments en faute au moment de la décision (un passer-outre garde ce qu'il a laissé passer).
     faults: Mapped[int] = mapped_column(Integer, default=0)
     total: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class ChapterCrowdMark(Base):
+    """« Foule sans fiche » : une foule anonyme citée par le scénario (« des passants », « la foule ») que l'auteur
+    dispense de fiche dans ce chapitre (voir pipeline/cast.py). Seule sortie de la distribution : tracée (qui,
+    quand) et réversible — lever la marque remplit `revoked_at` / `revoked_by`, la ligne reste. Table ajoutée
+    sans migration de données (créée vide au démarrage)."""
+
+    __tablename__ = "chapter_crowd_marks"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    project_id: Mapped[int | None] = mapped_column(Integer, default=None, index=True)
+    chapter_id: Mapped[int] = mapped_column(ForeignKey("chapters.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(120))  # tel qu'écrit par le scénario
+    name_key: Mapped[str] = mapped_column(String(120))  # pipeline/names.py : name_key
+    author: Mapped[str] = mapped_column(String(120), default="")
+    revoked_at: Mapped[datetime | None] = mapped_column(default=None)
+    revoked_by: Mapped[str] = mapped_column(String(120), default="")
 
 
 class SeriesLogo(Base):

@@ -361,7 +361,9 @@ def build_context(
             "synopsis": chapter.synopsis,
             "target_pages": chapter.target_page_count,
         },
-        knowledge=knowledge.for_agent(session, AGENT, series.id, knowledge_query(presets, chapter))
+        knowledge=knowledge.for_agent(
+            session, AGENT, series.id, knowledge_query(presets, chapter), genre=series.style_genre
+        )
         if knowledge
         else None,
         library=SeriesLibrary.load(session, series.id),

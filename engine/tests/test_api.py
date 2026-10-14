@@ -71,11 +71,13 @@ def test_presets_endpoint(client: TestClient) -> None:
     assert any(t["panel_count"] == 6 for t in data["layout_templates"])
     assert data["prompts"] == [
         "direction-artistique",
+        "fiche-intervenant",
         "logo",
         "palette",
         "redacteur-couverture",
         "redacteur-image",
         "redacteur-image-dialogue",
+        "resume-quatrieme",
         "script",
     ]
     assert data["workflows"][0]["id"] == "qwen-image-base"

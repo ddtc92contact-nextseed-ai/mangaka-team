@@ -112,11 +112,11 @@ export const HELP = {
   "scenario.setting":
     "Où et quand se passe la case : lieu, moment (heure, météo) et éléments visibles du décor. Il devient « Lieu : … » dans le prompt image, même sans décor récurrent : sans lui, le modèle dessine souvent un fond blanc.",
   "scenario.staging":
-    "Qui fait quoi et où dans le cadre : premier plan, arrière-plan, gauche, droite, regards et gestes entre personnages. Il devient « Mise en scène : … » dans le prompt image.",
+    "Qui fait quoi et où dans le cadre : premier plan, arrière-plan, gauche, droite, regards et gestes entre personnages. Il devient « Mise en scène : … » dans le prompt image, sauf sur une case sans personnage où il n'est pas utilisé.",
   "scenario.characters":
     "Tous les personnages visibles dans la case, séparés par des virgules. Chaque nom est rapproché d'une fiche (majuscules, accents et alias ignorés, « le vieux maître Kaï » → Kaï) : ses références, sa description et son LoRA servent à la génération.",
   "scenario.unmatched":
-    "Ces noms ne correspondent à aucune fiche personnage : la case serait générée sans leurs références ni leur description. Rattache chaque nom à la bonne fiche (il devient un alias, reconnu partout dans la série) ou écarte-le si c'est un figurant.",
+    "Ces noms n'ont aucune fiche : ils seraient dessinés sans référence ni description, et la génération est refusée tant qu'il en manque. Rattache le nom à une fiche (il devient un alias) ou crée sa fiche, même secondaire (Direction artistique › Distribution). Seule une foule anonyme (« des passants ») peut rester sans fiche.",
 
   // --- chapitre : mise en page, croquis, atelier, lettrage, production, QC --------------------------------------
   // lettrage
@@ -183,6 +183,8 @@ export const HELP = {
     "Trie sans souris : V ou Entrée valide et passe à la suivante, R re-croque (nouvelle graine), E modifie la description, U retire la validation, ← et → changent de case, C croque toute la page.",
   "croquis.denoise":
     "La part du croquis redessinée au passage au propre : bas, le résultat colle au croquis ; haut, le modèle corrige davantage. Vide : la valeur de la série.",
+  "direction.distribution":
+    "Tous les intervenants du chapitre, même pour une case : présents, hors cadre, locuteurs, fiches citées. Chacun doit avoir sa fiche et une image avant la génération. « Créer la fiche » la fait préremplir par l'IA depuis ses cases, à relire. Un secondaire se contente d'un portrait, un principal demande la planche. Seules les foules anonymes peuvent rester sans fiche (tracé, annulable).",
   "direction.lancer":
     "Le directeur artistique (LLM) propose un rythme par page et, pour chaque case, intensité, plan, angle, cadre, ambiance, action et onomatopées. C'est lui qui compose les cases, pas le scénario. Sa proposition s'applique quand tu valides la page, et d'office au lancement de la génération, sauf si tu la rejettes.",
   "direction.appliquer":

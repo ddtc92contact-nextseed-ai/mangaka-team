@@ -12,6 +12,7 @@ import { Alert, Button, ButtonLink, Card } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { useChapter } from "./chapter-context";
 import { blockedReason } from "@/lib/stages";
+import { CastSummary } from "./cast-panel";
 import { StageChecklist } from "./stages";
 
 export default function ChapterInfoPage() {
@@ -97,6 +98,7 @@ export default function ChapterInfoPage() {
       </Card>
       <div className="space-y-6">
         <StageChecklist />
+        <CastSummary />
         <Card>
           <h2 className="mb-2 flex items-center gap-1.5 font-semibold text-zinc-100">
             Résumé pour la continuité
