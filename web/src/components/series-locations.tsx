@@ -7,6 +7,7 @@ import { useToast } from "@/components/toast";
 import { Alert, Button, ButtonLink, Card, EmptyState, Field, Input, Loading, Select, Textarea } from "@/components/ui";
 import {
   api,
+  engineUrl,
   fullErrorMessage,
   type LibraryEntry,
   type LocationGroup,
@@ -136,7 +137,7 @@ function LocationRow({
         <div className="flex aspect-square items-center justify-center overflow-hidden rounded-md bg-zinc-900 text-center text-xs text-zinc-500">
           {location.decor_image_url ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={location.decor_image_url} alt={`Décor de ${location.name}`} className="size-full object-cover" />
+            <img src={engineUrl(location.decor_image_url)} alt={`Décor de ${location.name}`} className="size-full object-cover" />
           ) : location.decor !== null ? (
             "Décor sans image"
           ) : (
@@ -225,6 +226,24 @@ function NewLocation({ projectId, decors, onCreated }: { projectId: number; deco
   );
 }
 
+const nameKey = (name: string) =>
+  name
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}']+/gu, " ")
+    .trim();
+
+/** Nom d'un nouveau lieu qui ne se confond avec aucun groupe ni lieu existant (le moteur fusionnerait deux lieux de
+ * même nom) : « Crique » → « Crique (2) ». */
+function uniqueName(base: string, groups: LocationGroup[], locations: SeriesLocation[]): string {
+  const taken = new Set([...groups.map((g) => nameKey(g.name)), ...locations.map((l) => nameKey(l.name))]);
+  const root = base || "Nouveau lieu";
+  let name = root;
+  for (let n = 2; taken.has(nameKey(name)); n++) name = `${root} (${n})`;
+  return name;
+}
+
 /** Regroupement des cases d'avant : le LLM propose des lieux, l'auteur les relit (renomme, déplace une variante,
  * choisit le décor) puis valide. */
 function Regroup({
@@ -266,7 +285,7 @@ function Regroup({
   function move(text: string, from: number, to: number) {
     setGroups((gs) => {
       const next = gs.map((g, k) => (k === from ? { ...g, settings: g.settings.filter((t) => t !== text) } : g));
-      if (to === -1) next.push({ name: text.split(",")[0].trim(), description: "", existing: null, decor: null, settings: [text] });
+      if (to === -1) next.push({ name: uniqueName(text.split(",")[0].trim(), next, locations), description: "", existing: null, decor: null, settings: [text] });
       else next[to] = { ...next[to], settings: [...next[to].settings, text] };
       return next.filter((g) => g.settings.length > 0);
     });

@@ -775,7 +775,7 @@ function PanelEditor({
             {library.lieux.map((l) => (
               <option key={l.id} value={l.id}>
                 {l.name}
-                {l.decor === null ? " (sans décor)" : ""}
+                {l.decor === null ? " (sans décor)" : !l.decor_image_url ? " (décor sans image)" : ""}
               </option>
             ))}
           </Select>
