@@ -105,6 +105,7 @@ def test_cast_lists_every_speaker_present_offscreen_and_named(client: TestClient
         ("case 2 de la page 1", ["description"]),
         ("case 1 de la page 2", ["image", "description"]),
     ]
+    assert aiko["written"] == ["Aiko"]  # « la rousse » lu dans le texte : une source, pas un nom déclaré
     assert aiko["role"] == "principal" and aiko["fault"] is None and aiko["advice"].startswith("planche conseillée")
     garde = members["le garde"]
     assert garde["character_id"] is None and garde["fault"] == "sans fiche" and garde["role"] == "secondaire"

@@ -281,7 +281,7 @@ def chapter_cast(
         for source, text in (("description", panel.description), ("mise en scène", panel.staging)):
             for r in matcher.resolve_all(matcher.read_names(text), [known, *context]):
                 for cid in r.ids:
-                    card(cid)._seen(panel, page, source, r.name)
+                    card(cid)._seen(panel, page, source, "")  # un mot du texte, pas un nom déclaré
 
     out = list(members.values())
     _references(session, [m for m in out if m.character_id is not None])

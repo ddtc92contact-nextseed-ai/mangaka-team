@@ -105,7 +105,7 @@ export function LibraryEntryPage({ kind, id }: { kind: LibraryKind; id: number }
           />
         </Card>
       </div>
-      <Card className="mt-6">
+      <Card className="mt-6 scroll-mt-4" id="references">
         <h2 className="mb-1 font-semibold text-zinc-100">Créer des références</h2>
         <ReferenceStudio kind={kind} entry={e} onEntryChange={entry.setData} />
       </Card>

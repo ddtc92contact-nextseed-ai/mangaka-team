@@ -27,6 +27,8 @@ export const ACTION_LABEL: Record<string, string> = {
   refine: "affinée",
   choose_style: "essai de style retenu",
   stage_override: "étape du chapitre forcée",
+  crowd_mark: "foule marquée sans fiche",
+  crowd_unmark: "marque « foule sans fiche » levée",
 };
 
 export const AB_MODE_LABEL: Record<string, string> = {
