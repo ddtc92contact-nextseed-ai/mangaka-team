@@ -2315,3 +2315,124 @@ class JournalSettings(_Strict):
             if b.max_words is None or words <= b.max_words:
                 return b.label
         return None
+
+
+# --- identité visuelle de la série (identity.yaml, logo_styles/) -----------------------------------------------
+HEX_COLOR = r"^#[0-9a-fA-F]{6}$"
+
+
+class CountRange(_Strict):
+    min: int = Field(ge=1, le=20)
+    max: int = Field(ge=1, le=20)
+
+    @model_validator(mode="after")
+    def _check(self) -> CountRange:
+        if self.min > self.max:
+            raise ValueError("min doit être ≤ max")
+        return self
+
+
+class FloatRange(_Strict):
+    min: float
+    max: float
+
+    @model_validator(mode="after")
+    def _check(self) -> FloatRange:
+        if self.min > self.max:
+            raise ValueError("min doit être ≤ max")
+        return self
+
+
+class PaletteSettings(_Strict):
+    """Palettes proposées par l'IA : nombre, couleurs par palette, rôles possibles et obligatoires."""
+
+    count: CountRange = Field(default_factory=lambda: CountRange(min=3, max=5))
+    colors: CountRange = Field(default_factory=lambda: CountRange(min=5, max=7))
+    roles: dict[str, str] = Field(min_length=1)
+    required_roles: list[str] = Field(default_factory=list)
+    reference_colors: int = Field(default=6, ge=0, le=16)
+
+    @model_validator(mode="after")
+    def _check(self) -> PaletteSettings:
+        unknown = [r for r in self.required_roles if r not in self.roles]
+        if unknown:
+            raise ValueError(f"required_roles : rôle inconnu ({', '.join(unknown)})")
+        if len(self.required_roles) > self.colors.min:
+            raise ValueError("required_roles : plus de rôles obligatoires que de couleurs par palette")
+        return self
+
+
+class LogoSettings(_Strict):
+    """Logo du titre : polices permises (clés de fonts.yaml), tailles de rendu, contraste, bornes des réglages."""
+
+    count: CountRange = Field(default_factory=lambda: CountRange(min=4, max=6))
+    fonts: list[str] = Field(min_length=1)
+    size_px: float = Field(default=160, gt=8, le=2000)
+    png_scale: float = Field(default=4, gt=0, le=16)
+    line_gap: float = Field(default=0.06, ge=0, le=2)
+    subtitle_scale: float = Field(default=0.26, gt=0.05, le=1)
+    subtitle_gap: float = Field(default=0.12, ge=0, le=2)
+    padding: float = Field(default=0.12, ge=0, le=2)
+    min_contrast: float = Field(default=3.0, ge=1, le=21)
+    slant_max_deg: float = Field(default=12, ge=0, le=30)
+    letter_spacing: FloatRange = Field(default_factory=lambda: FloatRange(min=-0.05, max=0.4))
+    word_scale: FloatRange = Field(default_factory=lambda: FloatRange(min=0.35, max=1.0))
+    outline_scale: FloatRange = Field(default_factory=lambda: FloatRange(min=0.0, max=2.5))
+    max_lines: int = Field(default=2, ge=1, le=4)
+    preview_backgrounds: dict[Literal["light", "dark"], str] = Field(
+        default_factory=lambda: {"light": "#f4f4f5", "dark": "#18181b"}
+    )
+
+
+class IdentitySettings(_Strict):
+    """`presets/identity.yaml` : identité visuelle de la série (palette et logo)."""
+
+    palette: PaletteSettings
+    logo: LogoSettings
+
+
+class LogoShadow(_Strict):
+    dx_em: float = Field(ge=-1, le=1)
+    dy_em: float = Field(ge=-1, le=1)
+
+
+LOGO_COLOR_SLOTS = ("fill", "fill_end", "outline", "outer", "shadow", "subtitle")
+
+
+class LogoStyle(_Strict):
+    """Effet de logo (`presets/logo_styles/*.yaml`) : contours, ombre, dégradé ; couleurs par défaut en rôles
+    de la palette (par ordre de préférence)."""
+
+    id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
+    name: str
+    description: str = ""
+    outline_em: float = Field(default=0, ge=0, le=0.5)
+    outer_outline_em: float = Field(default=0, ge=0, le=0.5)
+    shadow: LogoShadow | None = None
+    gradient: bool = False
+    colors: dict[Literal["fill", "fill_end", "outline", "outer", "shadow", "subtitle"], list[str]] = Field(
+        default_factory=dict
+    )
+
+    @model_validator(mode="after")
+    def _check(self) -> LogoStyle:
+        if "fill" not in self.colors:
+            raise ValueError("colors.fill : couleur des lettres obligatoire")
+        for slot in self.slots():
+            if slot != "fill" and slot not in self.colors:
+                raise ValueError(f"colors.{slot} : couleur par défaut obligatoire pour cet effet")
+        return self
+
+    def slots(self) -> list[str]:
+        """Couleurs utilisées par l'effet, dans l'ordre du dessin (dessous → dessus)."""
+        out = ["fill"]
+        if self.gradient:
+            out.append("fill_end")
+        if self.outline_em > 0:
+            out.append("outline")
+        if self.outer_outline_em > 0:
+            out.append("outer")
+        if self.shadow is not None:
+            out.append("shadow")
+        out.append("subtitle")
+        return out

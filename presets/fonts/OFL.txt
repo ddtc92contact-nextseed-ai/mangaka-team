@@ -10,7 +10,14 @@ LilitaOne.ttf  Copyright (c) 2011 Juan Montoreano (juan@remolacha.biz), with Res
 ComicNeue-*.ttf  Copyright 2014 The Comic Neue Project Authors (https://github.com/crozynski/comicneue)
                (Regular, Bold, Italic, BoldItalic ; licence d'origine aussi dans OFL-ComicNeue.txt)
 
-Les sous-ensembles embarqués dans les SVG exportés sont renommés (« mk-speech », « mk-shout »…) :
+Polices d'affichage des logos de titre (licence d'origine aussi dans OFL-<Police>.txt) :
+Bangers.ttf    Copyright 2010 The Bangers Project Authors (https://github.com/googlefonts/bangers)
+Bungee.ttf     Copyright 2023 The Bungee Project Authors (https://github.com/djrrb/Bungee)
+Righteous.ttf  Copyright (c) 2011 by Brian J. Bonislawsky DBA Astigmatic (AOETI), with Reserved Font Names
+               "Righteous"
+RussoOne.ttf   Copyright (c) 2011-2012, Jovanny Lemonad (jovanny.ru), with Reserved Font Name "Russo"
+
+Les sous-ensembles embarqués dans les SVG exportés (planches et logos) sont renommés (« mk-speech », « mk-shout »…) :
 une version modifiée ne doit pas porter un nom de police réservé (clause 3).
 
 -----------------------------------------------------------------------------------------------

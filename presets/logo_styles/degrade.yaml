@@ -1,0 +1,13 @@
+id: degrade
+name: Dégradé
+description: Lettres en dégradé vertical de la dominante vers l'accent, contour sombre et liseré clair.
+outline_em: 0.05
+outer_outline_em: 0.035
+shadow: null
+gradient: true
+colors:
+  fill: [dominante, accent]
+  fill_end: [accent, secondaire]
+  outline: [texte-sombre, ombre]
+  outer: [texte-clair, fond]
+  subtitle: [texte-clair, fond]

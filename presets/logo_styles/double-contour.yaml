@@ -1,0 +1,12 @@
+id: double-contour
+name: Double contour
+description: "Contour sombre puis second contour clair autour : le titre se détache des fonds sombres comme clairs."
+outline_em: 0.05
+outer_outline_em: 0.05
+shadow: null
+gradient: false
+colors:
+  fill: [accent, dominante]
+  outline: [texte-sombre, ombre]
+  outer: [texte-clair, fond]
+  subtitle: [texte-clair, fond]

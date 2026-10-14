@@ -1,0 +1,12 @@
+id: ombre-portee
+name: Ombre portée
+description: Contour fin et ombre portée décalée en bas à droite, effet de relief des titres d'action.
+outline_em: 0.04
+outer_outline_em: 0
+shadow: { dx_em: 0.07, dy_em: 0.07 }
+gradient: false
+colors:
+  fill: [dominante, accent]
+  outline: [texte-sombre, ombre]
+  shadow: [ombre, texte-sombre]
+  subtitle: [texte-clair, fond]

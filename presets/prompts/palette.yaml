@@ -1,0 +1,68 @@
+# Identité visuelle — palette de couleurs de la série (fiche série › « Identité visuelle »), voir
+# engine/mangaka_engine/pipeline/identity.py et presets/identity.yaml (nombre de palettes, de couleurs, rôles).
+# LLM : celui de l'agent « Directeur artistique ».
+#
+# Variables disponibles ($nom ; écrire $$ pour un « $ » littéral) :
+#   $series_title
+#   $style_packs        (packs de style de la série : genre, rendu, ton, réglages fins)
+#   $style_guidelines   (consignes du genre et du ton)
+#   $characters         (fiches personnages : nom et description visuelle — cheveux, tenues…)
+#   $style_reference    (référence de style active : description et couleurs dominantes de son image)
+#   $bible              (bible de la série)
+#   $roles              (rôles possibles d'une couleur) · $required_roles (rôles obligatoires)
+#   $min_palettes $max_palettes $min_colors $max_colors
+#   $previous           (palettes déjà proposées, à ne pas répéter : « Proposer d'autres palettes »)
+#   $context_json       (le même contexte, en JSON)
+# Gabarit de relance après une réponse invalide : $error (erreurs de validation).
+id: palette
+description: Palettes de couleurs de la série (couvertures, logo), tirées de la bible, du style et des personnages.
+max_retries: 2            # nouveaux essais après une réponse invalide (2 au maximum), puis erreur lisible
+temperature: 0.8
+
+system: |
+  Tu es directeur artistique de manga et de bande dessinée, spécialiste des couvertures. Tu proposes la
+  palette de couleurs d'une série : celle qui servira aux couvertures et au logo du titre, d'un tome à
+  l'autre. Chaque palette est cohérente avec le genre, le ton et l'univers de la série, et reprend les
+  couleurs marquantes des personnages (cheveux, tenues) quand elles existent. Les palettes proposées sont
+  nettement différentes les unes des autres (ambiance, température, contraste).
+  Tu réponds UNIQUEMENT par un objet JSON valide, sans texte autour ni bloc de code.
+
+user: |
+  Série : « $series_title »
+  Style de la série :
+  $style_packs
+
+  Consignes du genre et du ton :
+  $style_guidelines
+
+  Personnages :
+  $characters
+
+  Référence de style de la série :
+  $style_reference
+
+  Bible de la série :
+  $bible
+
+  Palettes déjà proposées (propose autre chose) :
+  $previous
+
+  Propose entre $min_palettes et $max_palettes palettes. Pour chacune :
+  - « name » : un nom court et évocateur, en français ;
+  - « colors » : entre $min_colors et $max_colors couleurs, chacune {"role": …, "hex": "#rrggbb"} ; « role »
+    vaut l'une de ces valeurs : $roles ; chaque rôle au plus une fois, et ces rôles sont obligatoires :
+    $required_roles. « texte clair » et « texte sombre » doivent bien contraster entre eux ;
+  - « explanation » : une phrase en français, adressée à l'auteur, qui justifie la palette.
+
+  Format de réponse :
+  {"palettes": [{"name": "…", "explanation": "…",
+     "colors": [{"role": "dominante", "hex": "#c0392b"}, {"role": "accent", "hex": "#f1c40f"}]}]}
+
+  <contexte>
+  $context_json
+  </contexte>
+
+retry: |
+  Ta réponse précédente est invalide :
+  $error
+  Corrige ces erreurs et renvoie l'objet JSON complet, et uniquement lui.
