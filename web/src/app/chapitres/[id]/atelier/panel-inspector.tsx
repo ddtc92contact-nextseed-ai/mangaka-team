@@ -344,7 +344,6 @@ export function PanelInspector({
             )}
             <UnmatchedNames
               chapterId={d.chapter_id}
-              projectId={d.project_id}
               names={d.unmatched_characters}
               characters={characters.data ?? []}
               onLinked={() => {

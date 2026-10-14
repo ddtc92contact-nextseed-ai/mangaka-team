@@ -959,6 +959,25 @@ class ChapterStageDecision(Base):
     total: Mapped[int] = mapped_column(Integer, default=0)
 
 
+class ChapterCrowdMark(Base):
+    """« Foule sans fiche » : une foule anonyme citée par le scénario (« des passants », « la foule ») que l'auteur
+    dispense de fiche dans ce chapitre (voir pipeline/cast.py). Seule sortie de la distribution : tracée (qui,
+    quand) et réversible — lever la marque remplit `revoked_at` / `revoked_by`, la ligne reste. Table ajoutée
+    sans migration de données (créée vide au démarrage)."""
+
+    __tablename__ = "chapter_crowd_marks"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    project_id: Mapped[int | None] = mapped_column(Integer, default=None, index=True)
+    chapter_id: Mapped[int] = mapped_column(ForeignKey("chapters.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(120))  # tel qu'écrit par le scénario
+    name_key: Mapped[str] = mapped_column(String(120))  # pipeline/names.py : name_key
+    author: Mapped[str] = mapped_column(String(120), default="")
+    revoked_at: Mapped[datetime | None] = mapped_column(default=None)
+    revoked_by: Mapped[str] = mapped_column(String(120), default="")
+
+
 class SeriesLogo(Base):
     """Une version enregistrée du logo du titre de la série (pipeline/logo.py) : réglages complets du logo
     (police, lignes, effet, couleurs…), rendus à la demande en SVG et PNG. Jamais réécrite : le logo de la

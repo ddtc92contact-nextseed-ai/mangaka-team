@@ -257,7 +257,6 @@ export default function ScenarioPage() {
             {dialogues.data && dialogues.data.stats.panels > 0 && <DialogueCheck report={dialogues.data} />}
             <UnmatchedNames
               chapterId={chapter.id}
-              projectId={chapter.project_id}
               names={unmatched}
               characters={characters.data ?? []}
               onLinked={() => {

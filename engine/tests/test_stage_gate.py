@@ -150,7 +150,7 @@ def test_references_and_script_refusals_name_what_is_missing(client: TestClient)
     _ok(client.post(f"/chapters/{chapter_id}/layout"))
     _apply_direction(client, chapter_id)
     message = _refused(client.post(f"/chapters/{chapter_id}/generate"), "stage.references")
-    assert "Références manquantes : 1 personnage sans image de référence sur 2 (Kenji)" in message
+    assert "Références manquantes : 1 fiche sans image (Kenji) sur 2 intervenants" in message
     # Génération d'une page : la garde ne regarde que la page.
     _ok(client.post(f"/pages/{data['pages'][1]['id']}/generate"), 202)
     _refused(client.post(f"/pages/{data['pages'][0]['id']}/generate"), "stage.references")

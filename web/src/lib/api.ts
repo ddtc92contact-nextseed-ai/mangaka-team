@@ -1283,12 +1283,88 @@ export interface Character {
   aliases?: string[];
 }
 
-/** Rattachement d'un nom écrit par le scénario à une fiche (ou mise à l'écart : `character_id` null). */
+/** Rattachement d'un nom écrit par le scénario à une fiche (`character_id` null : foule anonyme marquée
+ * « foule sans fiche » ; refusé pour un intervenant nommé). */
 export interface CharacterLink {
   name: string;
   character_id: number | null;
   panels: number;
   alias_added: boolean;
+}
+
+/** Distribution du chapitre (moteur : pipeline/cast.py) : chaque intervenant cité, même secondaire. */
+export type CastReferences = "aucune" | "portrait" | "planche";
+export type CastRole = "principal" | "secondaire";
+
+export interface CastAppearance {
+  panel_id: number;
+  page_number: number;
+  /** 0-based. */
+  panel_index: number;
+  /** « case 2 de la page 3 ». */
+  label: string;
+  /** image | hors cadre | bulle | description | mise en scène */
+  sources: string[];
+}
+
+export interface CrowdMark {
+  id: number;
+  name: string;
+  author: string;
+  at: string;
+}
+
+export interface CastMember {
+  key: string;
+  name: string;
+  character_id: number | null;
+  /** Noms tels qu'écrits par le scénario. */
+  written: string[];
+  appearances: CastAppearance[];
+  panel_count: number;
+  images: number;
+  references: CastReferences;
+  role: CastRole;
+  /** Références conseillées : portrait (secondaire) ou planche (principal). */
+  needs: "portrait" | "planche";
+  /** Foule anonyme : peut être marquée « foule sans fiche ». */
+  crowd: boolean;
+  mark: CrowdMark | null;
+  /** Ce qui bloque la génération. */
+  fault: "sans fiche" | "sans image" | null;
+  /** Conseil non bloquant (« planche conseillée… »). */
+  advice: string | null;
+}
+
+export interface ChapterCast {
+  chapter_id: number;
+  project_id: number;
+  members: CastMember[];
+  /** Intervenants comptés par la garde (foules marquées exclues). */
+  total: number;
+  faults: number;
+  without_card: string[];
+  without_image: string[];
+  marks: CrowdMark[];
+}
+
+/** Fiche préremplie par le LLM (rien n'est enregistré avant « Créer la fiche »). */
+export interface CharacterDraft {
+  name: string;
+  written: string;
+  visual_description: string;
+  prompt_keywords: string[];
+  age: string;
+  silhouette: string;
+  tenue: string;
+  signe_distinctif: string;
+  panel_count: number;
+}
+
+export interface CastBatch {
+  items: { name: string; character_id: number | null; created: boolean; queued: boolean; message: string }[];
+  jobs: Job[];
+  cast: ChapterCast;
 }
 
 /** Sortes de fiches de la bibliothèque d'une série. */
@@ -2586,7 +2662,7 @@ export interface ChapterStage {
   examples: string[];
   /** Ce qu'il faut faire (« Applique-la »). */
   fix: string;
-  /** Onglet du chapitre qui règle l'étape ; `personnages` : fiches de la série. */
+  /** Onglet du chapitre qui règle l'étape (`direction` pour les références : panneau Distribution). */
   screen: string;
   /** Actions bloquées en ce moment (« générer », « lettrer »…). */
   blocks: string[];
@@ -2750,6 +2826,15 @@ export const api = {
       `/chapters/${chapterId}/character-links`,
       json("POST", { name, character_id: characterId }),
     ),
+  chapterCast: (chapterId: number) => request<ChapterCast>(`/chapters/${chapterId}/cast`),
+  draftCastCard: (chapterId: number, name: string) =>
+    request<CharacterDraft>(`/chapters/${chapterId}/cast/draft`, json("POST", { name })),
+  markCrowd: (chapterId: number, name: string, author = "") =>
+    request<ChapterCast>(`/chapters/${chapterId}/cast/crowds`, json("POST", { name, author })),
+  revokeCrowd: (chapterId: number, markId: number, author = "") =>
+    request<ChapterCast>(`/chapters/${chapterId}/cast/crowds/${markId}`, json("DELETE", { author })),
+  createSecondaries: (chapterId: number) =>
+    request<CastBatch>(`/chapters/${chapterId}/cast/secondaries`, { method: "POST" }),
   chapterJobs: (chapterId: number, step?: string) =>
     request<Job[]>(`/chapters/${chapterId}/jobs${step ? `?step=${encodeURIComponent(step)}` : ""}`),
   getJob: (id: number) => request<Job>(`/jobs/${id}`),

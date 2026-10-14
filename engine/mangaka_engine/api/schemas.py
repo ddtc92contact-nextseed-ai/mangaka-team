@@ -1966,3 +1966,88 @@ class StageOverrideRowOut(BaseModel):
     note: str
     faults: int
     total: int
+
+
+# --- Distribution du chapitre (pipeline/cast.py) -----------------------------------------------------------
+class CastAppearanceOut(BaseModel):
+    panel_id: int
+    page_number: int
+    panel_index: int  # 0-based
+    label: str  # « case 2 de la page 3 »
+    sources: list[str]  # image | hors cadre | bulle | description | mise en scène
+
+
+class CrowdMarkOut(BaseModel):
+    id: int
+    name: str
+    author: str
+    at: datetime
+
+
+class CastMemberOut(BaseModel):
+    key: str
+    name: str
+    character_id: int | None
+    written: list[str]
+    appearances: list[CastAppearanceOut]
+    panel_count: int
+    images: int
+    references: Literal["aucune", "portrait", "planche"]
+    role: Literal["principal", "secondaire"]
+    needs: Literal["portrait", "planche"]
+    crowd: bool  # foule anonyme : peut être marquée « foule sans fiche »
+    mark: CrowdMarkOut | None
+    fault: Literal["sans fiche", "sans image"] | None
+    advice: str | None
+
+
+class ChapterCastOut(BaseModel):
+    chapter_id: int
+    project_id: int
+    members: list[CastMemberOut]
+    total: int  # intervenants comptés par la garde (foules marquées exclues)
+    faults: int
+    without_card: list[str]
+    without_image: list[str]
+    marks: list[CrowdMarkOut]
+
+
+class CastNameIn(_In):
+    name: Name
+
+
+class CrowdMarkIn(_In):
+    name: Name
+    author: Annotated[str, StringConstraints(strip_whitespace=True, max_length=120)] = ""
+
+
+class CrowdRevokeIn(_In):
+    author: Annotated[str, StringConstraints(strip_whitespace=True, max_length=120)] = ""
+
+
+class CharacterDraftOut(BaseModel):
+    """Fiche préremplie d'un intervenant (rien n'est enregistré : l'auteur la relit puis la crée)."""
+
+    name: str  # nom de fiche proposé (« Le garde »)
+    written: str  # nom tel qu'écrit par le scénario
+    visual_description: str
+    prompt_keywords: list[str]
+    age: str
+    silhouette: str
+    tenue: str
+    signe_distinctif: str
+    panel_count: int  # cases lues
+
+
+class CastBatchItemOut(BaseModel):
+    name: str
+    character_id: int | None = None
+    created: bool = False  # fiche créée par ce passage
+    queued: bool = False  # portrait mis en file
+    message: str = ""  # erreur lisible, ou pourquoi rien n'a été fait
+
+
+class CastBatchOut(BaseModel):
+    items: list[CastBatchItemOut]
+    jobs: list[JobOut]
+    cast: ChapterCastOut

@@ -18,6 +18,7 @@ from .api import (
     agents,
     art_direction,
     assets,
+    cast,
     chapters,
     characters,
     comfyui,
@@ -288,6 +289,7 @@ def create_app(settings: Settings | None = None, providers: Providers | None = N
     app.include_router(chapters.router)
     app.include_router(volumes.router)
     app.include_router(stages.router)
+    app.include_router(cast.router)
     app.include_router(art_direction.router)
     app.include_router(jobs.router)
     app.include_router(generation.router)

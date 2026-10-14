@@ -24,6 +24,10 @@ qui en a une, pour un plan large une image « pied » ou « turnaround » ; puis
 avec la nouvelle caméra (`mock_dialog`). `[mock:dialogue-invalide:N]` dans la consigne : les N premiers
 essais sont invalides (plan hors liste, puis JSON illisible).
 
+Pour la fiche d'un intervenant (`"task": "character_draft"`, pipeline/cast.py), il rend âge, silhouette, tenue
+et signe distinctif choisis d'après le nom, plus la première description de ses cases (`mock_character_draft`) ;
+`[mock:fiche-invalide:N]` dans la description d'une de ses cases : les N premiers essais sont invalides.
+
 Identité visuelle (`"task": "palette"` / `"logo"`) : palettes déterministes tirées du titre (teintes réparties,
 décalées à chaque « Proposer d'autres palettes ») et concepts de logo qui parcourent les polices et les effets
 permis, le titre en une ou deux lignes (`mock_palettes`, `mock_logos`). `[mock:identite-invalide:N]` dans le
@@ -62,10 +66,20 @@ _SPARSE_MARK = re.compile(r"\[mock:dialogues-maigres:(\d+)\]")
 _PROMPT_INVALID_MARK = re.compile(r"\[mock:prompt-invalide:(\d+)\]")
 _PROMPT_INTRUDER_MARK = re.compile(r"\[mock:prompt-intrus:(\d+)\]")
 _DIALOG_INVALID_MARK = re.compile(r"\[mock:dialogue-invalide:(\d+)\]")
+_DRAFT_INVALID_MARK = re.compile(r"\[mock:fiche-invalide:(\d+)\]")
 _IDENTITY_INVALID_MARK = re.compile(r"\[mock:identite-invalide:(\d+)\]")
 _ANY_MARK = re.compile(r"\s*\[mock:[a-z-]+:\d+\]\s*")
 UNKNOWN_ID = 999_999  # id de décor cité par `[mock:id-invalide:N]` (absent de toute bibliothèque)
-TASKS = ("script", "art_direction", "image_prompt", "image_prompt_dialog", "cover_prompt", "palette", "logo")
+TASKS = (
+    "script",
+    "art_direction",
+    "image_prompt",
+    "image_prompt_dialog",
+    "character_draft",
+    "cover_prompt",
+    "palette",
+    "logo",
+)
 
 _PANELS_PER_PAGE = [5, 4, 6, 3, 5, 4]
 _KINDS = ["speech", "speech", "thought", "speech", "shout"]
@@ -472,6 +486,8 @@ class MockLLMProvider:
             return LLMResult(text=json.dumps(mock_cover_prompt(ctx), ensure_ascii=False), model="mock")
         if ctx is not None and ctx.get("task") == "image_prompt":
             return LLMResult(text=self._image_prompt_answer(messages, ctx), model="mock")
+        if ctx is not None and ctx.get("task") == "character_draft":
+            return LLMResult(text=self._draft_answer(messages, ctx), model="mock")
         if ctx is not None and ctx.get("task") in ("palette", "logo"):
             return LLMResult(text=self._identity_answer(messages, ctx), model="mock")
         if ctx is not None and ctx.get("task") == "art_direction":
@@ -527,6 +543,17 @@ class MockLLMProvider:
                 return json.dumps(out, ensure_ascii=False)
             return "Voici le nouveau prompt : plus serré…"
         return json.dumps(mock_dialog(ctx), ensure_ascii=False)
+
+    def _draft_answer(self, messages: list[ChatMessage], ctx: dict[str, Any]) -> str:
+        attempt = 1 + sum(1 for m in messages if m.role == "assistant")
+        texts = " ".join(str(p.get("description") or "") for p in ctx.get("panels") or [])
+        mark = _DRAFT_INVALID_MARK.search(texts)
+        invalid = int(mark.group(1)) if mark else self.invalid_attempts
+        if attempt <= invalid:
+            if attempt % 2:
+                return "Voici la fiche : un garde assez grand…"
+            return json.dumps({"age": "trentaine", "description": ""})
+        return json.dumps(mock_character_draft(ctx), ensure_ascii=False)
 
     def _identity_answer(self, messages: list[ChatMessage], ctx: dict[str, Any]) -> str:
         attempt = 1 + sum(1 for m in messages if m.role == "assistant")
@@ -587,6 +614,43 @@ _LOOKS = [
     "eyes narrowed and fixed on something out of frame, jaw clenched",
     "glancing back over the shoulder, eyebrows raised in surprise",
 ]
+
+
+_AGES = ["la vingtaine", "la trentaine", "la quarantaine", "la cinquantaine"]
+_BUILDS = ["grand et sec", "trapu, épaules larges", "mince, dos voûté", "taille moyenne, carrure solide"]
+_OUTFITS = [
+    "manteau long sombre, bottes",
+    "uniforme gris boutonné, casquette",
+    "tablier clair sur une robe",
+    "veste de cuir usée",
+]
+_MARKS = ["cicatrice sur la joue", "moustache épaisse", "lunettes rondes", "foulard rouge"]
+
+
+def mock_character_draft(ctx: dict[str, Any]) -> dict[str, Any]:
+    """Fiche factice et déterministe d'un intervenant (`"task": "character_draft"`) : traits choisis d'après le
+    nom, plus la première description de ses cases (preuve que les cases ont été lues)."""
+    name = str(ctx.get("name") or "l'intervenant")
+    i = _seed(name)
+    panels = ctx.get("panels") or []
+    seen = _ANY_MARK.sub(" ", str(panels[0].get("description") or "")).strip() if panels else ""
+    age, build, outfit, mark = (
+        _AGES[i % len(_AGES)],
+        _BUILDS[i % len(_BUILDS)],
+        _OUTFITS[i % len(_OUTFITS)],
+        _MARKS[i % len(_MARKS)],
+    )
+    description = f"{name[:1].upper()}{name[1:]}, {age}, {build}, {outfit}, {mark}."
+    if seen:
+        description += f" Vu dans la case : {_short(seen)}"
+    return {
+        "age": age,
+        "silhouette": build,
+        "tenue": outfit,
+        "signe_distinctif": mark,
+        "description": description,
+        "mots_cles": [w for w in (build.split(",")[0], outfit.split(",")[0], mark) if w],
+    }
 
 
 def _seed(text: str) -> int:

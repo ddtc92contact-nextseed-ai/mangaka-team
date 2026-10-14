@@ -180,13 +180,18 @@ def test_link_errors_ignore_and_card_created_afterwards(client: TestClient) -> N
     assert bad.status_code == 422 and "inconnu" in bad.text
     clash = client.post(url, json={"name": "Kaël", "character_id": d["urus"]["id"]})
     assert clash.status_code == 422 and "déjà le nom de la fiche Kaël" in clash.text
-    # Figurant : écarté des personnages de la case (la description ne change pas).
-    _ok(client.post(url, json={"name": "un passant", "character_id": None}))
+    # Plus d'« écarter comme figurant » : un intervenant nommé, même secondaire, demande une fiche (#162).
+    refused = client.post(url, json={"name": "un passant", "character_id": None})
+    assert refused.status_code == 422 and "foules anonymes" in refused.text
     # Fiche créée après le découpage : la case la retrouve.
     mira = _ok(client.post(f"/projects/{d['series']['id']}/characters", json={"name": "Mira"}), 201)
     detail = _ok(client.get(f"/panels/{panel['id']}"))
-    assert detail["characters"] == ["Mira"] and detail["unmatched_characters"] == []
+    assert detail["characters"] == ["un passant", "Mira"] and detail["unmatched_characters"] == ["un passant"]
     assert detail["character_ids"] == [mira["id"]] and detail["description"] == "Foule."
+    # Une foule anonyme, elle, se marque « foule sans fiche » (tracé, voir test_cast.py).
+    _ok(client.patch(f"/panels/{panel['id']}", json={"characters": ["des passants", "Mira"]}))
+    _ok(client.post(url, json={"name": "des passants", "character_id": None}))
+    assert _ok(client.get(f"/panels/{panel['id']}"))["unmatched_characters"] == []
 
 
 def test_aliases_are_cleaned_and_editable(client: TestClient) -> None:

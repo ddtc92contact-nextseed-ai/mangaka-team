@@ -1,0 +1,44 @@
+# « Créer la fiche » d'un intervenant du chapitre (panneau « Distribution » de la direction artistique) :
+# le LLM tire une description visuelle des cases où l'intervenant apparaît. Rien n'est enregistré : l'auteur
+# relit la fiche avant de la créer. Voir engine/mangaka_engine/pipeline/cast.py.
+#
+# Variables disponibles ($nom ; écrire $$ pour un « $ » littéral) :
+#   $name          (nom tel qu'écrit par le scénario : « le garde », « Mina »)
+#   $role          (principal ou secondaire, d'après le nombre de cases)
+#   $series_title $style
+#   $panels        (cases où il apparaît : description, mise en scène, lieu, ses répliques)
+#   $context_json  (le même contexte, en JSON)
+# Gabarit de relance après une réponse invalide : $error (erreurs de validation).
+id: fiche-intervenant
+description: Fiche personnage préremplie (âge, silhouette, tenue, signe distinctif) depuis les cases d'un intervenant.
+max_retries: 2            # nouveaux essais après une réponse invalide (2 au maximum)
+temperature: 0.4
+
+system: |
+  Tu es le directeur artistique d'un studio de manga. Tu prépares la fiche de référence visuelle d'un
+  intervenant du chapitre, même secondaire, pour qu'il soit dessiné de la même façon dans chaque case.
+  Tu t'appuies sur ce que disent les cases ; quand elles ne disent rien, tu proposes des choix simples,
+  plausibles et cohérents avec le rôle et le lieu, sans inventer d'histoire. Tu réponds uniquement par un
+  objet JSON, sans texte autour.
+
+user: |
+  Série : $series_title (style : $style).
+  Intervenant : « $name » ($role).
+
+  Cases où il apparaît :
+  $panels
+
+  Rends un objet JSON avec exactement ces clés, en français :
+  - "age" : tranche d'âge apparente (ex. « la quarantaine ») ;
+  - "silhouette" : carrure, taille, posture ;
+  - "tenue" : vêtements, couleurs ou valeurs de gris, accessoires ;
+  - "signe_distinctif" : un trait qui le rend reconnaissable d'une case à l'autre ;
+  - "description" : 2 à 4 phrases visuelles qui reprennent ces traits (visage, coiffure, silhouette, tenue) ;
+  - "mots_cles" : 4 à 8 mots-clés courts pour le prompt image.
+
+  <contexte>$context_json</contexte>
+
+retry: |
+  Ta réponse n'est pas valide : $error
+  Renvoie uniquement l'objet JSON demandé, avec les clés age, silhouette, tenue, signe_distinctif,
+  description (au moins une phrase) et mots_cles (liste).

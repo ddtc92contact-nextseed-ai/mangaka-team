@@ -6,15 +6,17 @@ import { InfoTip } from "@/components/info-tip";
 import { useToast } from "@/components/toast";
 import { Button, Select } from "@/components/ui";
 import { api, errorMessage, type Character } from "@/lib/api";
+import { useEngineData } from "@/lib/hooks";
 
 /**
- * Noms de personnages écrits par le scénario qui ne désignent aucune fiche (moteur : pipeline/names.py).
- * Chaque nom se rattache en un clic à une fiche (il en devient un alias, pour tout le chapitre et la série)
- * ou s'écarte comme figurant. `disabled` : découpage modifié non enregistré (le rattachement relit les cases).
+ * Noms de personnages écrits par le scénario qui ne désignent aucune fiche (moteur : pipeline/names.py), lus dans
+ * la même distribution que le panneau « Distribution » (pipeline/cast.py). Chaque nom se rattache en un clic à
+ * une fiche (il en devient un alias, pour tout le chapitre et la série) ou reçoit la sienne (préremplie dans la
+ * direction artistique). Plus d'« écarter comme figurant » : seule une foule anonyme se marque « foule sans
+ * fiche » (tracé, annulable). `disabled` : découpage modifié non enregistré (le rattachement relit les cases).
  */
 export function UnmatchedNames({
   chapterId,
-  projectId,
   names,
   characters,
   onLinked,
@@ -22,13 +24,18 @@ export function UnmatchedNames({
   disabledReason,
 }: {
   chapterId: number;
-  projectId: number;
   names: string[];
   characters: Character[];
   onLinked: () => void;
   disabled?: boolean;
   disabledReason?: string;
 }) {
+  // Foules anonymes de la distribution : les seules qui peuvent se passer de fiche.
+  const cast = useEngineData(
+    () => (names.length ? api.chapterCast(chapterId) : Promise.resolve(null)),
+    [chapterId, names.join("|")],
+  );
+  const crowds = new Set((cast.data?.members ?? []).filter((m) => m.crowd).flatMap((m) => m.written));
   if (names.length === 0) return null;
   return (
     <div
@@ -49,11 +56,11 @@ export function UnmatchedNames({
           <UnmatchedRow
             key={name}
             chapterId={chapterId}
-            projectId={projectId}
             name={name}
             characters={characters}
             onLinked={onLinked}
             disabled={disabled}
+            crowd={crowds.has(name)}
           />
         ))}
       </ul>
@@ -63,18 +70,18 @@ export function UnmatchedNames({
 
 function UnmatchedRow({
   chapterId,
-  projectId,
   name,
   characters,
   onLinked,
   disabled,
+  crowd,
 }: {
   chapterId: number;
-  projectId: number;
   name: string;
   characters: Character[];
   onLinked: () => void;
   disabled: boolean;
+  crowd: boolean;
 }) {
   const [choice, setChoice] = useState<string>(characters.length === 1 ? String(characters[0].id) : "");
   const [busy, setBusy] = useState(false);
@@ -90,7 +97,7 @@ function UnmatchedRow({
       toast(
         card
           ? `« ${name} » rattaché à ${card.name}${done.alias_added ? " (nouvel alias)" : ""}`
-          : `« ${name} » écarté (figurant sans fiche)`,
+          : `« ${name} » : foule sans fiche (marque tracée, annulable dans la Distribution)`,
       );
       onLinked();
     } catch (err) {
@@ -131,20 +138,25 @@ function UnmatchedRow({
             Rattacher
           </Button>
         </>
-      ) : (
-        <Link href={`/projets/${projectId}/personnages/nouveau`} className="text-xs text-amber-200 underline">
-          Créer la fiche
-        </Link>
-      )}
-      <Button
-        variant="ghost"
-        className="!px-2 !py-1 text-xs"
-        onClick={() => link(null)}
-        disabled={disabled || busy}
-        title="Figurant sans fiche : retiré des personnages des cases (la description ne change pas)"
+      ) : null}
+      <Link
+        href={`/chapitres/${chapterId}/direction#distribution`}
+        className="text-xs text-amber-200 underline"
+        title={`Fiche préremplie depuis les cases de « ${name} » (Direction artistique › Distribution)`}
       >
-        Écarter (figurant)
-      </Button>
+        Créer la fiche
+      </Link>
+      {crowd && (
+        <Button
+          variant="ghost"
+          className="!px-2 !py-1 text-xs"
+          onClick={() => link(null)}
+          disabled={disabled || busy}
+          title="Foule anonyme : dessinée sans fiche ni référence. Décision tracée, annulable dans la Distribution."
+        >
+          Foule sans fiche
+        </Button>
+      )}
       {error && <span className="text-xs text-red-300">{error}</span>}
     </li>
   );

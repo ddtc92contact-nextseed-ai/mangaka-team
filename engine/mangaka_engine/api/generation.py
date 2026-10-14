@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from ..pipeline.art_direction import applied_panel_direction, is_out_of_date, is_pending
+from ..pipeline.cast import active_marks, panel_unmatched
 from ..pipeline.comfy_trial import STEP as TRIAL_STEP
 from ..pipeline.composition import SOURCE_LABELS, control_settings, drop_lock_on_delete, lock_preset_id, type_problem
 from ..pipeline.composition import STEP as CONTROL_MAP_STEP
@@ -232,7 +233,7 @@ def panel_detail(session: Session, ctx: AppContext, panel: Panel) -> PanelDetail
         staging=panel.staging or "",
         characters=list(panel.character_names or []),
         character_ids=list(panel.character_ids or []),
-        unmatched_characters=matcher.unmatched(panel.character_names or []),
+        unmatched_characters=panel_unmatched(matcher, panel, active_marks(session, page.chapter_id)),
         name_notes=name_notes_out(matcher, panel),
         offscreen_characters=list(panel.offscreen_names or []),
         viewpoint=viewpoint_out(panel),
