@@ -304,6 +304,25 @@ def test_front_without_logo_falls_back_to_a_composed_title(tmp_path: Path) -> No
     assert "d’Ébène" in svg or "d'Ébène" in svg or "d&apos;Ébène" in svg
 
 
+@pytest.mark.parametrize("title", ["Le Sceau d'Ébène", "Le Sceau d'Ébène. À Œil Ça Écrit"])
+def test_fallback_title_accents_never_touch_the_previous_line(tmp_path: Path, title: str) -> None:
+    """Titre de repli sur plusieurs lignes : la boîte d'encre d'une ligne (accents et contour compris) ne
+    chevauche pas celle de la ligne du dessus (PNG et SVG partagent ces positions de lignes)."""
+    comp = compose(REG, _inputs(tmp_path, logo=None, title=title))
+    [item] = [i for i in comp.front.items if isinstance(i, Text) and i.name == "titre"]
+    assert len(item.lines) >= 2
+    fonts = FontBook(REG)
+    font = fonts.pil(item.style, item.size)
+    sw = round(item.stroke_width)
+    boxes = [
+        (ln.y + b[1], ln.y + b[3])
+        for ln in item.lines
+        for b in [font.getbbox(fonts.drawable(item.style, ln.text), anchor="ms", stroke_width=sw)]
+    ]
+    for (_, above_bottom), (below_top, _) in zip(boxes, boxes[1:], strict=False):
+        assert below_top > above_bottom, (title, boxes)
+
+
 def _font_chars(svg: str) -> set[str]:
     out: set[str] = set()
     for data in re.findall(r"base64,([A-Za-z0-9+/=]+)\) format", svg):

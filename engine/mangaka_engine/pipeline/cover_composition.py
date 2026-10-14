@@ -60,6 +60,7 @@ log = logging.getLogger("mangaka_engine")
 
 STEP = "cover_export"
 MM_PER_INCH = 25.4
+LINE_CLEARANCE = 0.06  # écart minimal entre l'encre de deux lignes (× taille du texte)
 PartKind = Literal["front", "back", "spine"]
 PART_IDS = {"front": "premiere", "back": "quatrieme", "spine": "dos"}
 PART_LABELS = {"front": "1re de couverture", "back": "4e de couverture", "spine": "Dos"}
@@ -276,9 +277,13 @@ def fit_text(
     wrap: bool = True,
     start_pt: float | None = None,
     paragraph_gap: float = 0.55,
+    stroke: float = 0.0,
 ) -> Fit | None:
     """Plus grande taille (de `start_pt` ou `size_pt` à `min_size_pt`, par `step_pt`) à laquelle tout le texte
-    tient dans `width` × `height` ; None s'il ne tient pas même au minimum (jamais de texte coupé)."""
+    tient dans `width` × `height` ; None s'il ne tient pas même au minimum (jamais de texte coupé).
+
+    L'interligne vaut au moins `line_height` × taille, et s'élargit si besoin pour que la boîte réelle des glyphes
+    d'une ligne (capitales accentuées É, À, Ç… et contour `stroke` compris) ne touche jamais la ligne précédente."""
     text = prepare_text(text, style)
     if not text:
         return None
@@ -289,19 +294,28 @@ def fit_text(
         def measure(s: str, font: Any = font) -> float:
             return float(font.getlength(fonts.drawable(style, s)))
 
+        def ink(s: str, font: Any = font) -> tuple[float, float]:
+            """(haut, bas) de l'encre de la ligne, relatifs à sa ligne de base (haut négatif), contour compris."""
+            box = font.getbbox(fonts.drawable(style, s), anchor="ls")
+            return box[1] - stroke, box[3] + stroke
+
         ascent, descent = font.getmetrics()
         step = size * style.line_height
+        gap = LINE_CLEARANCE * size
         lines: list[tuple[str, float]] = []
-        y = float(ascent)
-        for i, paragraph in enumerate(text.split("\n\n")):
+        y = 0.0
+        prev_bottom = 0.0
+        for paragraph in text.split("\n\n"):
             rows = wrap_text(paragraph, measure, width) if wrap else [paragraph]
-            if i > 0:
-                y += step * (1 + paragraph_gap)
             for j, row in enumerate(rows):
-                if j > 0:
-                    y += step
+                top, bottom = ink(row)
+                if not lines:
+                    y = max(float(ascent), -top)
+                else:
+                    y = max(y + (step * (1 + paragraph_gap) if j == 0 else step), y + prev_bottom - top + gap)
                 lines.append((row, y))
-        total = y + descent
+                prev_bottom = bottom
+        total = y + max(float(descent), prev_bottom)
         widest = max(measure(t) for t, _ in lines)
         if widest <= width + 0.5 and total <= height + 0.5:
             return Fit(pt, size, lines, total, widest)
@@ -432,14 +446,15 @@ def compose_front(presets: PresetRegistry, fonts: FontBook, inp: CoverInputs) ->
     else:
         zone = zone_rect(fmt, "logo") or Rect(*_band(safe_rect(fmt)))
         style = s.texts.fallback_title
-        fit = fit_text(fonts, style, inp.title, zone.w, zone.h, dpi)
+        stroke = outline * 1.5
+        fit = fit_text(fonts, style, inp.title, zone.w, zone.h, dpi, stroke=stroke)
         if fit is None:
             part.fail(
                 "title_overflow",
                 f"Le titre « {inp.title} » ne tient pas dans la zone du logo, même en {style.min_size_pt:g} pt.",
             )
         else:
-            part.items.append(place(fit, zone, style, light, stroke=dark, stroke_width=outline * 1.5, name="titre"))
+            part.items.append(place(fit, zone, style, light, stroke=dark, stroke_width=stroke, name="titre"))
         reason = f" ({inp.logo_note})" if inp.logo_note else ""
         part.warn(
             "no_logo",
