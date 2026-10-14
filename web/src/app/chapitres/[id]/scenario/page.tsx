@@ -644,6 +644,8 @@ function PanelEditor({
 }) {
   const id = `p${pageIndex}-c${index}`;
   const missing = unmatchedNames(panel);
+  // Case sans personnage à l'image : la mise en scène n'est pas envoyée à la génération (#167).
+  const stagingUnused = !!panel.staging.trim() && !panel.charactersText.split(",").some((c) => c.trim());
   const set = <K extends keyof DraftPanel>(k: K, v: DraftPanel[K]) => onChange({ ...panel, [k]: v });
   const setDialogues = (update: (d: DraftDialogue[]) => DraftDialogue[]) =>
     onChange({ ...panel, dialogues: update(panel.dialogues) });
@@ -701,13 +703,20 @@ function PanelEditor({
           </div>
           <Textarea
             id={`${id}-staging`}
-            className="min-h-12 text-sm"
+            className={`min-h-12 text-sm${stagingUnused ? " text-zinc-500 line-through" : ""}`}
             value={panel.staging}
             onChange={(e) => set("staging", e.target.value)}
             placeholder="Kaï lève son bâton, la mâchoire serrée ; Lina se fige, le souffle coupé"
             maxLength={1500}
             disabled={disabled}
+            aria-describedby={stagingUnused ? `${id}-staging-unused` : undefined}
           />
+          {stagingUnused && (
+            <p id={`${id}-staging-unused`} className="text-xs text-amber-300" data-testid="staging-unused">
+              ⚠ Case sans personnage : cette mise en scène n&apos;est pas utilisée (ni prompt image, ni direction
+              artistique). Vide-la ou ajoute les personnages présents.
+            </p>
+          )}
         </div>
         <div className="grid gap-2">
           <div className="space-y-1">
