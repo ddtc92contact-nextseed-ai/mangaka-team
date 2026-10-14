@@ -64,16 +64,20 @@ export function SeriesFiles({ project }: { project: Project }) {
         </code>{" "}
         — la bibliothèque lisible de la série : <code>references/</code> (un dossier par personnage, objet ou décor,
         un sous-dossier par type de fiche, ex. <code>personnages/lucius/portrait/lucius-portrait.png</code>),{" "}
-        <code>chapitre-01/page-01/</code> (croquis validés, versions choisies <code>case-01.png</code>, planches
-        rendues dans <code>chapitre-01/planches/</code>) et <code>trash/</code> (variantes non gardées, versions non
-        choisies, croquis non validés, rangés de la même façon). Les sorties brutes de ComfyUI passent par{" "}
-        <code>_transit/</code> et en sont effacées dès qu&apos;elles sont enregistrées.
+        <code>chapitre-01/page-01/</code> (croquis retenu <code>case-01-croquis.png</code> — le validé, sinon celui
+        de la version choisie, sinon le plus récent —, versions choisies <code>case-01.png</code>, planches rendues
+        dans <code>chapitre-01/planches/</code>) et <code>trash/</code> (variantes non gardées, versions non choisies,
+        autres croquis, rangés de la même façon). Aucun dossier vide : un dossier n&apos;apparaît qu&apos;avec son
+        premier fichier. Les sorties brutes de ComfyUI passent par <code>_transit/</code> et en sont effacées dès
+        qu&apos;elles sont enregistrées.
       </p>
       {storage?.warning && (
         <div className="mt-3">
           <Alert>
-            Fichiers de ComfyUI non nettoyés et bibliothèque non écrite : {storage.warning}. Renseigne COMFYUI_DIR dans .env (dossier
-            d&apos;installation de ComfyUI), puis relance le moteur.
+            Fichiers de ComfyUI non nettoyés et bibliothèque non écrite : {storage.warning}.{" "}
+            {storage.mock
+              ? "En mode mock, pointe COMFYUI_DIR vers un dossier d'essai (avec input/ et output/), jamais vers ton vrai ComfyUI, puis relance le moteur."
+              : "Renseigne COMFYUI_DIR dans .env (dossier d'installation de ComfyUI), puis relance le moteur."}
           </Alert>
         </div>
       )}

@@ -16,26 +16,30 @@ sans être retenu — data/ reste le stockage de l'appli.
         creatures/<nom>/       portrait/, turnaround/, angles/, imports/
         style/                 planche-de-style.png (+ planche-de-style-2.png… : autres images de la référence active)
       chapitre-01/
-        page-01/               case-01-croquis.png (croquis validé), case-01.png (version choisie, finie si agrandie)
+        page-01/               case-01-croquis.png (croquis retenu), case-01.png (version choisie, finie si agrandie)
         planches/              page-01.png + page-01.svg (dernier rendu ou export de la page)
       trash/                   tout ce qui a été généré sans être retenu, rangé comme ci-dessus :
         personnages/<nom>/portrait/<nom>-portrait-v3.png        (variante non gardée)
         style/essai-v2.png, style/planche-de-style-<nom>.png    (essai non choisi, ancienne référence de style)
-        chapitre-01/page-01/case-01-v2.png, case-01-croquis-v1.png  (version non choisie, croquis non validé)
+        chapitre-01/page-01/case-01-v2.png, case-01-croquis-v1.png  (version non choisie, autre croquis)
       _transit/                sorties brutes de ComfyUI, effacées dès leur copie dans data/ (store/comfy_folders.py)
 
 Sous-dossiers d'une fiche : un par type de fiche de presets/reference_sheets/ de sa sorte (`folder` du preset,
-sinon l'id sans la sorte : `objet-trois-quarts` → `trois-quarts`) — un nouveau preset = un nouveau sous-dossier,
-créé avec la fiche —, plus `angles/` (vues de « Nouvel angle » ou étiquetées par leur angle ; créé d'avance pour
-un personnage) et `imports/` (images sans variante d'origine). Une image gardée porte le nom de son sous-dossier
+sinon l'id sans la sorte : `objet-trois-quarts` → `trois-quarts`), plus `angles/` (vues de « Nouvel angle » ou
+étiquetées par leur angle) et `imports/` (images sans variante d'origine). Aucun dossier n'est créé d'avance : un
+dossier n'existe que s'il contient un fichier (les dossiers vidés de la série sont retirés à chaque `sync`). Une image gardée porte le nom de son sous-dossier
 (`-2`, `-3`… si plusieurs) ; une variante non gardée part dans la corbeille avec son numéro `-vN` (rang parmi
 les variantes de la fiche et du même sous-dossier, gardées comprises), une version de case avec son numéro de
 version. Garder une variante ou choisir une version la sort de la corbeille ; l'inverse l'y remet. Rien dans
 la corbeille n'est relu par l'appli : l'effacer à la main ne casse rien (la reconstruction la refait).
 
+Croquis d'une case : `case-NN-croquis.png` est le croquis retenu (`retained_sketch` : le croquis validé, sinon celui
+dont est issue la version choisie, sinon le plus récent) — une case passée en finition sans validation explicite
+garde ainsi son croquis visible ; les autres croquis vont dans la corbeille.
+
 `sync` recalcule l'arborescence voulue depuis la base et data/, puis met le disque d'accord : écrit ce qui manque
 ou a changé (copie dans un fichier temporaire puis renommage), retire les fichiers qui ne sont plus retenus et les
-dossiers vidés. Rejouer ne duplique rien ; l'ancienne disposition à plat (`personnages/<nom>/<nom>-portrait.png`)
+dossiers vides de la série (`ComfyFolders.prune_empty`, jamais `old/`). Rejouer ne duplique rien ; l'ancienne disposition à plat (`personnages/<nom>/<nom>-portrait.png`)
 est ainsi convertie (anciens fichiers retirés une fois les nouveaux écrits). Elle est lancée après chaque commit
 qui touche une série (`watch` : séries, fiches, images de référence, variantes, chapitres, pages, cases,
 versions), après le rendu ou l'export d'une page, et par « Reconstruire la bibliothèque » (POST
@@ -97,8 +101,6 @@ FILE_NAME = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.(?:" + "|".join(EXTEN
 CHAPTER_DIR = re.compile(r"^chapitre-\d+$")
 SHEET_KIND_PREFIX = re.compile(r"^(?:personnage|objet|decor|vehicule|creature|style)-")
 ANGLE_SHEET = "nouvel-angle"  # comme pipeline/reference_sheets.py (variantes de « Nouvel angle »)
-# Sortes dont `angles/` est créé d'avance : un sujet qu'on fait tourner (« Nouvel angle »).
-ANGLE_KINDS = ("character", "vehicle", "creature")
 # Champs dont le changement modifie la bibliothèque (objets modifiés : les ajouts et suppressions comptent tous).
 WATCHED: dict[type, tuple[str, ...]] = {
     Project: ("slug",),
@@ -118,19 +120,20 @@ RENAMED = "comfy_library_renamed"
 
 @dataclass
 class LibraryReport:
-    """Ce que `sync` a fait (`written` / `removed` : chemins relatifs à `output/mangaka/<série>/`) ou pourquoi rien."""
+    """Ce que `sync` a fait (`written` / `removed` : chemins relatifs à `output/mangaka/<série>/`, `removed_dirs` :
+    dossiers vides retirés) ou pourquoi rien."""
 
     folder: str | None = None  # output/mangaka/<série> (relatif à ComfyUI)
     written: list[str] = field(default_factory=list)
     removed: list[str] = field(default_factory=list)
+    removed_dirs: int = 0
     warning: str | None = None
 
 
 @dataclass
 class LibraryPlan:
-    """Arborescence voulue, relative au dossier de la série : dossiers, et fichier → source dans data/."""
+    """Arborescence voulue, relative au dossier de la série : fichier → source dans data/ (les dossiers suivent)."""
 
-    dirs: set[tuple[str, ...]] = field(default_factory=set)
     files: dict[tuple[str, ...], Path] = field(default_factory=dict)
 
 
@@ -148,16 +151,19 @@ def sheet_folder(sheet: str, presets: PresetRegistry | None = None) -> str:
     return slugify(SHEET_KIND_PREFIX.sub("", sheet), "fiche")
 
 
-def sheet_folders(kind: str, presets: PresetRegistry | None) -> list[str]:
-    """Sous-dossiers créés d'avance pour une fiche de cette sorte (character, object, decor, vehicle, creature),
-    dans l'ordre des presets : un par type de fiche, `angles/` pour un personnage, un véhicule ou une créature
-    (vues tournées autour du sujet), `imports/`."""
-    sheets = presets.reference_sheets.values() if presets is not None else ()
-    out = [sheet_folder(sheet.id, presets) for sheet in sheets if kind in sheet.kinds]
-    if kind in ANGLE_KINDS:
-        out.append(ANGLES)
-    out.append(IMPORTS)
-    return list(dict.fromkeys(out))
+def retained_sketch(panel: Panel) -> PanelImage | None:
+    """Croquis montré à côté de la case : le croquis validé, sinon celui dont est issue la version choisie, sinon
+    le plus récent (None sans croquis)."""
+    sketches = {i.id: i for i in panel.images if i.kind == ImageKind.croquis}
+    if not sketches:
+        return None
+    if panel.sketch_image_id in sketches:
+        return sketches[panel.sketch_image_id]
+    selected = next((i for i in panel.images if i.selected and i.kind != ImageKind.croquis), None)
+    source = (selected.params or {}).get("sketch_image_id") if selected is not None else None
+    if source in sketches:
+        return sketches[source]
+    return max(sketches.values(), key=lambda i: (i.version, i.id))
 
 
 def _angle_slug(angle: str | None) -> str | None:
@@ -221,8 +227,6 @@ class ComfyLibrary:
     # --- arborescence voulue ---------------------------------------------------------------
     def plan(self, session: Session, project: Project) -> LibraryPlan:
         plan = LibraryPlan()
-        plan.dirs |= {(REFERENCES,), (TRASH,)}
-        plan.dirs |= {(REFERENCES, folder) for folder in KIND_FOLDERS.values()}
         variants = self._variants(session, project.id)
 
         entries: list[Character | SeriesAsset] = sorted(project.characters, key=lambda e: e.id)
@@ -235,10 +239,8 @@ class ComfyLibrary:
 
         for chapter in sorted(project.chapters, key=lambda c: c.number):
             ch = chapter_name(chapter)
-            plan.dirs |= {(ch,), (ch, PLATES)}
             for page in chapter.pages:
                 pg = page_name(page)
-                plan.dirs.add((ch, pg))
                 for panel in page.panels:
                     self._plan_panel(plan, (ch, pg), panel)
                 self._add_plates(plan, (ch, PLATES), page)
@@ -264,8 +266,6 @@ class ComfyLibrary:
         kind_folder = KIND_FOLDERS[kind]
         slug = entry.slug
         base = (REFERENCES, kind_folder, slug)
-        plan.dirs.add(base)
-        plan.dirs |= {(*base, sub) for sub in sheet_folders(kind, self.presets)}
 
         images = sorted(entry.reference_images, key=lambda i: (i.position, i.id))
         current = {image.id for image in images}
@@ -299,10 +299,12 @@ class ComfyLibrary:
                 self._add(plan, (TRASH, KIND_FOLDERS["style"]), f"{STYLE_TRIAL}-v{rank}", trial.path)
 
     def _plan_panel(self, plan: LibraryPlan, page: tuple[str, ...], panel: Panel) -> None:
-        """Croquis validé et version choisie → `chapitre-XX/page-YY/` ; le reste → `trash/chapitre-XX/page-YY/`."""
+        """Croquis retenu (`retained_sketch`) et version choisie → `chapitre-XX/page-YY/` ; le reste →
+        `trash/chapitre-XX/page-YY/`."""
+        sketch = retained_sketch(panel)
         for image in sorted(panel.images, key=lambda i: i.version):
             if image.kind == ImageKind.croquis:
-                if image.id == panel.sketch_image_id:
+                if sketch is not None and image.id == sketch.id:
                     self._add(plan, page, panel_name(panel, "croquis"), image.path)
                 else:
                     self._add(plan, (TRASH, *page), panel_name(panel, f"croquis-v{image.version}"), image.path)
@@ -351,16 +353,11 @@ class ComfyLibrary:
         report = LibraryReport(folder=f"output/mangaka/{series}")
         with self._lock:
             plan = self.plan(session, project)
-            for folder in sorted(plan.dirs):
-                path = self.folders.target("output", [series, *folder])
-                if path is None:
-                    report.warning = "chemin refusé"
-                    continue
-                path.mkdir(parents=True, exist_ok=True)
             for key, source in sorted(plan.files.items()):
                 if self._write(series, key, source):
                     report.written.append("/".join(key))
             report.removed = self._prune(base, plan, purge=purge)
+            report.removed_dirs = self.folders.prune_empty(series)
         return report
 
     def _write(self, series: str, key: tuple[str, ...], source: Path) -> bool:
@@ -389,7 +386,7 @@ class ComfyLibrary:
         return True
 
     def _prune(self, base: Path, plan: LibraryPlan, *, purge: bool) -> list[str]:
-        """Retire les fichiers de la bibliothèque qui ne sont plus retenus, puis les dossiers vidés non voulus."""
+        """Retire les fichiers de la bibliothèque qui ne sont plus retenus (les dossiers vidés : `prune_empty`)."""
         removed: list[str] = []
         if not base.is_dir() or base.is_symlink():
             return removed
@@ -406,8 +403,6 @@ class ComfyLibrary:
                     if purge or FILE_NAME.match(name) or (name.startswith(".") and name.endswith(".tmp")):
                         path.unlink(missing_ok=True)
                         removed.append("/".join((*rel, name)))
-                if rel not in plan.dirs and not current.is_symlink() and not any(current.iterdir()):
-                    current.rmdir()
         return removed
 
     # --- déclencheurs -----------------------------------------------------------------------

@@ -9,11 +9,16 @@ fiche supprime son dossier, strictement confiné à `mangaka/<série>/` (store/c
 Bibliothèque lisible (`output/mangaka/<série>/references/…`, `chapitre-01/…`, pipeline/comfy_library.py) : tenue à
 jour après chaque commit ; « Reconstruire la bibliothèque » (POST /projects/{id}/library, ou POST /library pour toutes
 les séries depuis les Réglages) la régénère en entier et convertit l'ancienne disposition à plat.
+
+« Ranger le dossier ComfyUI » (Réglages : GET /comfyui/orphans puis POST /comfyui/tidy) déplace dans
+`mangaka/old/orphelins-<date>/` les dossiers de `output/mangaka/` et `input/mangaka/` qui ne sont à aucune série de
+la base — jamais de suppression, une série connue n'est jamais déplacée — et retire les dossiers vides restants.
 """
 
 from __future__ import annotations
 
 import logging
+from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -21,11 +26,11 @@ from sqlalchemy.orm import Session
 
 from ..pipeline.comfy_library import LibraryReport
 from ..pipeline.reference_sheets import unkept_variants
-from ..store.comfy_folders import KIND_FOLDERS, CleanupReport, chapter_name, page_name
+from ..store.comfy_folders import ARCHIVE, KIND_FOLDERS, ORPHANS, CleanupReport, chapter_name, page_name, series_name
 from ..store.models import Chapter, Character, Job, JobStatus, Project, SeriesAsset
 from ..store.slugs import entry_kind_of, entry_slug, series_slug
 from .deps import AppContext, get_ctx, get_session
-from .schemas import CleanupOut, LibraryOut
+from .schemas import CleanupOut, LibraryOut, OrphanFolderOut, OrphansOut, TidyIn, TidyOut
 
 log = logging.getLogger("mangaka_engine")
 router = APIRouter(tags=["rangement"])
@@ -109,6 +114,7 @@ def rebuild_library(
         path=str(ctx.folders.root / report.folder) if ctx.folders.root and report.folder else None,
         written=len(report.written),
         removed=len(report.removed),
+        removed_dirs=report.removed_dirs,
         warning=warning,
     )
 
@@ -121,12 +127,13 @@ def rebuild_all_libraries(session: Session = Depends(get_session), ctx: AppConte
     if not enabled:
         warning = ctx.folders.warning() or "dossier ComfyUI inconnu : bibliothèque non écrite (COMFYUI_DIR)"
         return LibraryOut(enabled=False, warning=warning)
-    written = removed = 0
+    written = removed = removed_dirs = 0
     warnings: list[str] = []
     for project in list(session.scalars(select(Project).order_by(Project.id))):
         report = sync_library(ctx, session, project)
         written += len(report.written)
         removed += len(report.removed)
+        removed_dirs += report.removed_dirs
         if report.warning:
             warnings.append(f"{project.title} : {report.warning}")
     folder = "output/mangaka"
@@ -136,8 +143,46 @@ def rebuild_all_libraries(session: Session = Depends(get_session), ctx: AppConte
         path=str(ctx.folders.root / folder) if ctx.folders.root else None,
         written=written,
         removed=removed,
+        removed_dirs=removed_dirs,
         warning=" ; ".join(warnings) or None,
     )
+
+
+# --- « Ranger le dossier ComfyUI » ---------------------------------------------------------------
+def _known_series(session: Session) -> set[str]:
+    return {series_name(project) for project in session.scalars(select(Project))}
+
+
+def _folders_warning(ctx: AppContext) -> str:
+    return ctx.folders.warning() or ctx.folders.problem or "dossier ComfyUI inconnu (COMFYUI_DIR) : rien n'est rangé"
+
+
+@router.get("/comfyui/orphans", response_model=OrphansOut)
+def comfyui_orphans(session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)) -> OrphansOut:
+    """Aperçu : dossiers de `output/mangaka/` et `input/mangaka/` qui ne sont à aucune série (hors `old/`)."""
+    if not ctx.folders.enabled:
+        return OrphansOut(enabled=False, warning=_folders_warning(ctx))
+    orphans = ctx.folders.orphans(_known_series(session))
+    return OrphansOut(
+        enabled=True,
+        path=str(ctx.folders.root),
+        archive=f"{ARCHIVE}/{ORPHANS}-{date.today().isoformat()}",
+        orphans=[OrphanFolderOut(area=o.area, name=o.name, files=o.files) for o in orphans],  # type: ignore[arg-type]
+    )
+
+
+@router.post("/comfyui/tidy", response_model=TidyOut)
+def comfyui_tidy(
+    payload: TidyIn, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
+) -> TidyOut:
+    """Déplace les dossiers confirmés (encore orphelins) dans `mangaka/old/orphelins-<date>/`, puis retire les
+    dossiers vides des séries connues. Jamais de suppression."""
+    if not ctx.folders.enabled:
+        return TidyOut(enabled=False, warning=_folders_warning(ctx))
+    report = ctx.folders.tidy(_known_series(session), [(f.area, f.name) for f in payload.folders])
+    if report.moved:
+        log.info("ComfyUI : %s dossier(s) orphelin(s) rangé(s) dans old/", len(report.moved))
+    return TidyOut(enabled=True, moved=report.moved, removed_empty=report.removed_empty, warning=report.warning)
 
 
 # --- suppressions --------------------------------------------------------------------------

@@ -12,11 +12,17 @@ Le reste de `output/mangaka/<série>/` est la **bibliothèque lisible** (copie r
 `pipeline/comfy_library.py`) : `references/{personnages,objets,decors,vehicules,creatures,style}/…` (un sous-dossier par type de fiche),
 `chapitre-01/page-01/…`, et sa corbeille `trash/…` (ce qui est généré sans être retenu).
 
+Aucun dossier n'est créé d'avance : un dossier naît quand un fichier y est écrit, et les dossiers vidés d'une série
+sont retirés après une suppression, un renommage ou une mise à jour de la bibliothèque (`prune_empty`, jamais `old/`).
+« Ranger le dossier ComfyUI » (`orphans`, `tidy`) déplace dans `mangaka/old/orphelins-<date>/` les dossiers qui ne
+sont à aucune série de la base (tests, démos, séries d'une autre base) — jamais de suppression.
+
 Disque (`ComfyFolders`) : ComfyUI n'a pas d'API pour effacer un fichier, le moteur agit donc directement
 dans le dossier de ComfyUI (`COMFYUI_DIR`). Sans dossier valide, rien n'est jamais supprimé ni déplacé
 (`problem` dit pourquoi, affiché dans l'interface) — aucun chemin n'est deviné. Toute opération est
 confinée à `mangaka/<série>/…` : segments validés (slugs), jamais `old/`, jamais un lien symbolique au
-niveau de la série ou en dessous, chemin résolu vérifié.
+niveau de la série ou en dessous, chemin résolu vérifié. En mode mock, un `COMFYUI_DIR` qui est une vraie
+installation (présence de `main.py`) est refusé : essais, QA et tests n'écrivent jamais dans le vrai ComfyUI.
 
 La sortie brute de ComfyUI est une zone de transit (`_transit/`) : dès qu'un résultat est copié dans data/,
 sa copie dans `output/` est effacée (`discard_output`). Les anciennes sorties (avant `_transit/`, directement
@@ -28,8 +34,9 @@ from __future__ import annotations
 import logging
 import os
 import shutil
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 
 from ..providers.comfyui.base import ImageRef
@@ -44,6 +51,9 @@ TRANSIT = "_transit"  # sorties brutes de ComfyUI : output/mangaka/<série>/_tra
 REFERENCES = "references"  # bibliothèque lisible : output/mangaka/<série>/references/<sorte>/<nom>/
 AREAS = ("output", "input")
 DEFAULT_DIR = "~/ComfyUI"
+ARCHIVE = "old"  # archives gardées à la main : mangaka/old/ (jamais touché, sauf pour y ranger des orphelins)
+ORPHANS = "orphelins"  # « Ranger le dossier ComfyUI » : mangaka/old/orphelins-<date>/
+INSTALL_MARKER = "main.py"  # présent dans une vraie installation de ComfyUI (refusée en mode mock)
 
 
 # --- noms -------------------------------------------------------------------------------
@@ -114,6 +124,47 @@ class CleanupReport:
     warning: str | None = None
 
 
+@dataclass
+class Orphan:
+    """Dossier de `<area>/mangaka/` qui n'est à aucune série de la base (`files` : nombre de fichiers dedans)."""
+
+    area: str
+    name: str
+    files: int
+
+
+@dataclass
+class TidyReport:
+    """Ce que « Ranger le dossier ComfyUI » a fait (`moved` : chemins d'arrivée relatifs à ComfyUI)."""
+
+    moved: list[str] = field(default_factory=list)
+    removed_empty: int = 0
+    warning: str | None = None
+
+
+def _count_files(path: Path) -> int:
+    return sum(len(files) for _dir, _dirs, files in os.walk(path, followlinks=False))
+
+
+def _prune_tree(base: Path) -> int:
+    """Retire les dossiers vides sous `base` (compris), des plus profonds aux moins profonds : jamais un lien
+    symbolique, ni `old/` ou ce qu'il contient. Renvoie le nombre de dossiers retirés."""
+    if not base.is_dir() or base.is_symlink():
+        return 0
+    removed = 0
+    for dirpath, _dirnames, _files in os.walk(base, topdown=False, followlinks=False):
+        current = Path(dirpath)
+        if ARCHIVE in current.relative_to(base).parts or current.is_symlink():
+            continue
+        try:
+            if not any(current.iterdir()):
+                current.rmdir()
+                removed += 1
+        except OSError:
+            continue
+    return removed
+
+
 class ComfyFolders:
     def __init__(self, root: Path | None, *, problem: str | None = None, mock: bool = False) -> None:
         self.root = root
@@ -147,6 +198,13 @@ class ComfyFolders:
                 None,
                 problem=f"{path} ne ressemble pas à ComfyUI (pas de dossier {', '.join(missing)}) — COMFYUI_DIR à corriger",
                 mock=mock,
+            )
+        if mock and (path / INSTALL_MARKER).exists():
+            # Les essais en mode mock (tests, QA, démos) ne doivent jamais remplir le vrai ComfyUI de l'auteur.
+            return cls(
+                None,
+                problem=f"mode mock : {path} est une vraie installation de ComfyUI ({INSTALL_MARKER}), rien n'y est écrit",
+                mock=True,
             )
         return cls(path, mock=mock)
 
@@ -240,6 +298,8 @@ class ComfyFolders:
             elif path.is_file():
                 path.unlink(missing_ok=True)
                 removed.append(f"{area}/{ROOT}/{'/'.join(segs)}")
+        if len(segments) > 1:
+            self.prune_empty(segments[0])
         return CleanupReport(removed)
 
     def clear_transit(self, series: str) -> CleanupReport:
@@ -279,7 +339,66 @@ class ComfyFolders:
             dst.parent.mkdir(parents=True, exist_ok=True)
             src.rename(dst)
             moved.append(f"{area}/{ROOT}/{'/'.join(dst_segs)}")
+        for series in dict.fromkeys((source[0], target[0])):
+            self.prune_empty(series)
         return CleanupReport(moved)
+
+    def prune_empty(self, series: str) -> int:
+        """Retire les dossiers vides de la série (`output/` et `input/`, dossier de la série compris) : un dossier
+        n'existe que s'il contient un fichier. Jamais `old/` ni un lien symbolique. Renvoie le nombre retiré."""
+        removed = 0
+        for area in AREAS:
+            base = self._target(area, [series])
+            if base is not None:
+                removed += _prune_tree(base)
+        return removed
+
+    # --- « Ranger le dossier ComfyUI » ---------------------------------------------------------
+    def orphans(self, known: Iterable[str]) -> list[Orphan]:
+        """Dossiers de `output/mangaka/` et `input/mangaka/` qui ne sont à aucune série connue (hors `old/` et
+        liens symboliques), avec leur nombre de fichiers."""
+        if self.root is None:
+            return []
+        keep = set(known) | {ARCHIVE}
+        out: list[Orphan] = []
+        for area in AREAS:
+            folder = self.root / area / ROOT
+            if not folder.is_dir() or folder.is_symlink():
+                continue
+            for path in sorted(folder.iterdir(), key=lambda p: p.name):
+                if path.name in keep or path.is_symlink() or not path.is_dir():
+                    continue
+                out.append(Orphan(area, path.name, _count_files(path)))
+        return out
+
+    def tidy(self, known: Iterable[str], chosen: Iterable[tuple[str, str]], *, day: date | None = None) -> TidyReport:
+        """Déplace les orphelins choisis (`(area, nom)`, encore orphelins) dans `<area>/mangaka/old/orphelins-<date>/`
+        — jamais de suppression, une série connue n'est jamais déplacée —, puis retire les dossiers vides des
+        séries connues."""
+        if self.root is None:
+            return TidyReport(warning=self.warning() or "dossier ComfyUI inconnu (COMFYUI_DIR)")
+        known = set(known)
+        current = {(o.area, o.name) for o in self.orphans(known)}
+        stamp = f"{ORPHANS}-{(day or date.today()).isoformat()}"
+        report = TidyReport()
+        for area, name in dict.fromkeys(chosen):
+            if (area, name) not in current:
+                continue
+            source = self.root / area / ROOT / name
+            archive = self.root / area / ROOT / ARCHIVE / stamp
+            target, n = archive / name, 2
+            while target.exists() or target.is_symlink():  # même jour, même nom : rien n'est écrasé
+                target, n = archive / f"{name}-{n}", n + 1
+            try:
+                archive.mkdir(parents=True, exist_ok=True)
+                source.rename(target)
+            except OSError as exc:
+                log.warning("ComfyUI : %s non rangé (%s)", source, exc)
+                continue
+            report.moved.append(str(target.relative_to(self.root)))
+        for series in sorted(known):
+            report.removed_empty += self.prune_empty(series)
+        return report
 
     def discard_output(self, ref: ImageRef) -> bool:
         """Efface la copie d'un résultat dans `output/` une fois enregistré dans data/ (zone de transit).
