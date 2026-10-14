@@ -4,6 +4,8 @@ Série (`Project`) → Character (+ images de référence)
 Série → SeriesAsset : objets et décors récurrents de la bibliothèque (+ images de référence), et
 références de style de la planche de style (`kind = style` : une seule active, les autres en historique)
 Série → ReferenceVariant : images générées par « Créer des références » d'une fiche, gardées ou non
+Série → Volume (tome : chapitres inclus dans l'ordre via `VolumeChapter`, format et versions de couverture
+`VolumeCover`)
 Série → Chapter → Page → Panel (+ versions d'image → annotation humaine) → Bubble · Job.
 Banc d'essai du QC : `QCBenchRun` (historique des mesures du QC sur les cases annotées).
 Savoir-faire : `KnowledgeCollection` (globale ou d'une série) → `KnowledgeDocument` → `KnowledgeChunk`
@@ -186,6 +188,9 @@ class Project(TimestampMixin, Base):
     assets: Mapped[list[SeriesAsset]] = relationship(
         back_populates="project", cascade="all, delete-orphan", order_by="SeriesAsset.name"
     )
+    volumes: Mapped[list[Volume]] = relationship(
+        back_populates="project", cascade="all, delete-orphan", order_by="Volume.number"
+    )
 
 
 class Character(TimestampMixin, Base):
@@ -344,6 +349,74 @@ class Chapter(TimestampMixin, Base):
     pages: Mapped[list[Page]] = relationship(
         back_populates="chapter", cascade="all, delete-orphan", order_by="Page.number"
     )
+
+
+class Volume(TimestampMixin, Base):
+    """Tome d'une série : numéro unique dans la série, chapitres inclus (dans l'ordre, un chapitre dans un seul
+    tome) et couverture (format, personnages, intention, prompt, versions générées, version retenue)."""
+
+    __tablename__ = "volumes"
+    __table_args__ = (UniqueConstraint("project_id", "number"), NEVER_REUSED)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    number: Mapped[int] = mapped_column(Integer)
+    title: Mapped[str] = mapped_column(String(200), default="")
+    # Format de couverture (presets/cover_formats/).
+    cover_format: Mapped[str] = mapped_column(String(100))
+    # Couverture : personnages choisis (ids, dans l'ordre des images de référence), intention de l'auteur
+    # (français), prompt image (rédigé par l'IA ou à la main), version retenue.
+    cover_character_ids: Mapped[list[int]] = mapped_column(JSON, default=list)
+    cover_intent: Mapped[str] = mapped_column(Text, default="")
+    cover_prompt: Mapped[str] = mapped_column(Text, default="")
+    # `ai` (rédigé par l'IA, non retouché) | `manual` (saisi ou retouché) | None (pas encore de prompt).
+    cover_prompt_source: Mapped[str | None] = mapped_column(String(20), default=None)
+    cover_prompt_notes: Mapped[str] = mapped_column(Text, default="")
+    selected_cover_id: Mapped[int | None] = mapped_column(Integer, default=None)
+
+    project: Mapped[Project] = relationship(back_populates="volumes")
+    chapter_links: Mapped[list[VolumeChapter]] = relationship(
+        back_populates="volume", cascade="all, delete-orphan", order_by="VolumeChapter.position"
+    )
+    covers: Mapped[list[VolumeCover]] = relationship(
+        back_populates="volume", cascade="all, delete-orphan", order_by="VolumeCover.id"
+    )
+
+
+class VolumeChapter(Base):
+    """Chapitre inclus dans un tome, à sa place (`position`) ; `chapter_id` unique : un chapitre, un seul tome."""
+
+    __tablename__ = "volume_chapters"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    volume_id: Mapped[int] = mapped_column(ForeignKey("volumes.id", ondelete="CASCADE"), index=True)
+    chapter_id: Mapped[int] = mapped_column(ForeignKey("chapters.id", ondelete="CASCADE"), unique=True)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+
+    volume: Mapped[Volume] = relationship(back_populates="chapter_links")
+    chapter: Mapped[Chapter] = relationship()
+
+
+class VolumeCover(Base):
+    """Version générée de l'illustration de 1re de couverture d'un tome (fond perdu compris, au DPI du format)."""
+
+    __tablename__ = "volume_covers"
+    __table_args__ = NEVER_REUSED
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    volume_id: Mapped[int] = mapped_column(ForeignKey("volumes.id", ondelete="CASCADE"), index=True)
+    job_id: Mapped[int | None] = mapped_column(ForeignKey("jobs.id", ondelete="SET NULL"), default=None)
+    path: Mapped[str] = mapped_column(String(500))  # relatif à data/
+    content_type: Mapped[str] = mapped_column(String(50))
+    width: Mapped[int] = mapped_column(Integer)
+    height: Mapped[int] = mapped_column(Integer)
+    seed: Mapped[int | None] = mapped_column(Integer, default=None)
+    cover_format: Mapped[str] = mapped_column(String(100))
+    # Workflow, agrandisseur, prompts, références envoyées, taille générée, durée…
+    params: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+    volume: Mapped[Volume] = relationship(back_populates="covers")
 
 
 class Page(TimestampMixin, Base):
