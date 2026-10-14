@@ -5,6 +5,7 @@ factices, aucun appel réseau."""
 
 from __future__ import annotations
 
+import re
 import shutil
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -56,6 +57,15 @@ RENDERING_COLLECTIONS = [
     "Rendu · Finitions",
     "Rendu · Valeurs et masses",
 ]
+STRUCTURE_COLLECTIONS = [
+    "Structure · Déroulé du chapitre",
+    "Structure · Courbes par genre",
+    "Structure · Plans selon le moment",
+    "Structure · Fins de chapitre",
+    "Structure · Rythme d'un arc",
+    "Structure · Silence et dialogue",
+]
+SHIPPED_COLLECTIONS = [*PACK_COLLECTIONS, *RENDERING_COLLECTIONS, *STRUCTURE_COLLECTIONS]
 
 
 @pytest.fixture
@@ -212,7 +222,7 @@ def pack_client(make_settings: Callable[..., Settings]) -> Iterator[TestClient]:
 def test_startup_imports_the_shipped_pack_in_13_collections(pack_client: TestClient) -> None:
     c = pack_client
     every = {col["name"]: col for col in _ok(c.get("/knowledge/collections"))}
-    assert set(every) == set(PACK_COLLECTIONS) | set(RENDERING_COLLECTIONS)
+    assert set(every) == set(SHIPPED_COLLECTIONS)
     cols = {name: col for name, col in every.items() if col["pack"] == "manga_visual_knowledge"}
     assert set(cols) == set(PACK_COLLECTIONS)
     raw = (PRESETS_DIR / "knowledge_packs" / "manga_visual_knowledge.md").read_text()
@@ -268,7 +278,7 @@ def test_rendering_pack_imports_its_5_collections_idempotently(pack_client: Test
         assert (update["created"], update["updated"], update["deleted"]) == (0, 0, 0)
         assert update["unchanged"] == fiches
     names = [col["name"] for col in _ok(c.get("/knowledge/collections"))]
-    assert len(names) == len(set(names)) == len(PACK_COLLECTIONS) + len(RENDERING_COLLECTIONS)
+    assert len(names) == len(set(names)) == len(SHIPPED_COLLECTIONS)
     # aucune fiche ne recopie les mots-clés d'une finition (style_options.yaml › finition)
     finition = PresetRegistry.load(PRESETS_DIR).style_options.options["finition"]
     copied = {k for ch in finition.choices.values() for k in [*ch.prompt_keywords, *ch.negative_keywords]}
@@ -483,7 +493,7 @@ def test_shipped_pack_gives_one_passage_per_fiche_and_reindexes_old_chunks(db: D
         assert len(annexe.chunks) == 1
         # import suivant : rien à refaire
         again = update_packs(session, PRESETS_DIR, MockEmbeddingProvider(), settings)
-        assert [r.updated for r in again] == [0, 0]
+        assert [r.updated for r in again] == [0, 0, 0]
 
 
 def test_oversized_fiche_keeps_its_prompt_fragment_with_the_title() -> None:
@@ -556,3 +566,106 @@ def test_low_angle_shot_of_the_script_picks_the_low_angle_fiche(pack_client: Tes
     seen = _ok(c.get(f"/panels/{pages[0]['panels'][0]['id']}/knowledge"))
     angles = [p for p in seen["writer"]["passages"] if p["document_title"].startswith("ANG_")]
     assert [(p["document_title"], p["mode"]) for p in angles] == [("ANG_LOW_001 — Contre-plongée", "framing")]
+
+
+# --- pack structure et rythme -------------------------------------------------------------
+STRUCTURE_MD = PRESETS_DIR / "knowledge_packs" / "manga_story_structure.md"
+
+
+def _fiches(raw: str) -> dict[str, str]:
+    """Fiches par identifiant, espaces normalisés (un repère peut tomber sur deux lignes)."""
+    return {part.split(" — ")[0]: " ".join(part.split()) for part in raw.split("\n### ")[1:]}
+
+
+def test_structure_pack_imports_its_6_collections_idempotently(pack_client: TestClient) -> None:
+    c = pack_client
+    cols = {col["name"]: col for col in _ok(c.get("/knowledge/collections")) if col["pack"] == "manga_story_structure"}
+    assert set(cols) == set(STRUCTURE_COLLECTIONS)
+    fiches = sum(1 for line in STRUCTURE_MD.read_text().splitlines() if line.startswith("### "))
+    assert fiches == 19 and sum(col["document_count"] for col in cols.values()) == fiches
+    report = next(r for r in _ok(c.get("/knowledge/status"))["packs"] if r["pack"] == "manga_story_structure")
+    assert report["created"] == fiches and report["warnings"] == [] and report["error"] is None
+    update = next(r for r in _ok(c.post("/knowledge/packs/update")) if r["pack"] == "manga_story_structure")
+    assert (update["created"], update["updated"], update["deleted"], update["unchanged"]) == (0, 0, 0, fiches)
+    genres = cols["Structure · Courbes par genre"]
+    titles = [d["title"] for d in _ok(c.get(f"/knowledge/collections/{genres['id']}/documents"))]
+    assert "STR_GEN_001 — Courbe de tension : Shōnen" in titles and len(titles) == 7
+
+
+def test_structure_wiring_is_the_scriptwriter_only() -> None:
+    agents = PresetRegistry.load(PRESETS_DIR).knowledge.agents
+    assert set(STRUCTURE_COLLECTIONS) <= set(agents["script"].collections)
+    for role in ("art_direction", "image_prompt"):
+        assert not [c for c in agents[role].collections if c.startswith("Structure")], role
+    assert agents["script"].query_hint
+
+
+def test_structure_fiches_agree_with_the_presets() -> None:
+    """Repères chiffrés des fiches = règles chiffrées des presets (genres, dialogues, règles par planche)."""
+    reg = PresetRegistry.load(PRESETS_DIR)
+    raw = STRUCTURE_MD.read_text()
+    fiches = _fiches(raw)
+    # une courbe par genre livré, dont le meta « genre » est l'identifiant du pack de genre
+    curves = {k: v for k, v in fiches.items() if k.startswith("STR_GEN_")}
+    by_genre = {f.split('"genre":"')[1].split('"')[0]: f for f in curves.values()}
+    assert set(by_genre) == set(reg.style_genres)
+    for genre_id, fiche in by_genre.items():
+        genre = reg.style_genres[genre_id]
+        assert f"Courbe de tension : {genre.name}" in fiche
+        # cases par page : celles des consignes du genre
+        [cases] = re.findall(r"\d+ à \d+ cases", genre.llm_guidelines)
+        assert cases in fiche, genre_id
+        # la courbe sur 15 pages couvre chaque page une fois et une seule
+        curve = fiche.split("**Courbe sur 15 pages**")[1].split("\n\n")[0]
+        pages: list[int] = []
+        for first, last in re.findall(r"p\. (\d+)(?:–(\d+))?", curve):
+            pages += range(int(first), int(last or first) + 1)
+        assert pages == list(range(1, 16)), genre_id
+    # dialogues : les chiffres de prompts/script.yaml
+    rules = reg.prompt("script").dialogue_rules
+    assert rules is not None
+    silence = fiches["STR_SIL_001"] + fiches["STR_SIL_002"]
+    assert f"{rules.max_words} mots au plus, {rules.max_mean_words:g} en moyenne" in silence
+    assert f"{str(rules.min_per_panel).replace('.', ',')} réplique par case" in silence
+    assert f"la cible est {rules.target_per_panel} répliques" in silence
+    # règles par planche de la direction artistique
+    page_rules = reg.prompt("direction-artistique").page_rules
+    assert page_rules is not None
+    assert f"Au plus {page_rules.max_choc_in_a_row} cases « choc » d'affilée" in fiches["STR_CH_002"]
+    variety = reg.prompt("direction-artistique").variety_rules
+    assert variety is not None and variety.max_wide_in_a_row == 1 and variety.max_wide_medium_share == 0.5
+    assert "deux plans larges qui se suivent" in fiches["STR_PLAN_001"]
+    assert "plans larges et moyens à la moitié des cases" in fiches["STR_PLAN_001"]
+    assert page_rules.min_close_per_page == 1 and page_rules.close_min_panels == 3
+    assert (
+        "Au moins une case serrée (gros plan, très gros plan ou insert) par page dès 3 cases" in fiches["STR_PLAN_002"]
+    )
+
+
+def test_scriptwriter_gets_the_chapter_outline_and_its_genre_curve(pack_client: TestClient) -> None:
+    c = pack_client
+    s = _ok(c.post("/projects", json={**STYLE, "title": "Les Lames"}), 201)
+    ch = _ok(
+        c.post(
+            f"/projects/{s['id']}/chapters",
+            json={"title": "Pluie", "synopsis": "Aiko affronte son rival sur le toit.", "target_page_count": 2},
+        ),
+        201,
+    )
+    job = _ok(c.post(f"/chapters/{ch['id']}/script"), 202)
+    c.app.state.ctx.jobs.wait(job["id"])  # type: ignore[attr-defined]
+    assert _ok(c.get(f"/jobs/{job['id']}"))["status"] == "succeeded"
+    sources = _ok(c.get(f"/chapters/{ch['id']}/sources"))
+    titles = [p["document_title"] for p in sources["passages"]]
+    agent = PresetRegistry.load(PRESETS_DIR).knowledge.agent("script")
+    assert len(titles) <= (agent.top_k or 0) and sum(p["tokens"] for p in sources["passages"]) <= agent.budget_tokens
+    # la courbe du genre de la série (shōnen), en tête, et aucune autre ; le déroulé du chapitre
+    assert titles[0] == "STR_GEN_001 — Courbe de tension : Shōnen" and sources["passages"][0]["mode"] == "genre"
+    assert [t for t in titles if t.startswith("STR_GEN_")] == [titles[0]]
+    assert "STR_CH_001 — Le déroulé d'un chapitre en huit temps" in titles
+    # aucune petite collection d'un pack injectée entière
+    assert all(p["mode"] != "whole" for p in sources["passages"])
+    # dans le prompt envoyé au scénariste (LLM factice)
+    user = c.app.state.ctx.providers.llm.calls[-1][1].content  # type: ignore[attr-defined]
+    assert "Courbe de tension : Shōnen" in user and "Ouverture** (0–7 %" in user
+    assert "Courbe de tension : Seinen" not in user

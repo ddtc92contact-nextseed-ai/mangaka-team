@@ -1716,7 +1716,15 @@ une série, documents `.md` / `.txt` / `.pdf` (texte extrait par pypdf) ou texte
   `budget_tokens` de l'agent. Une collection de moins de `small_collection_tokens` jetons est
   injectée **entière**, sans recherche — sauf si l'agent la cite dans `searched_collections` : elle est
   alors cherchée comme une grande (le rédacteur de prompt y met « Rendu · Valeurs et masses », ≈ 680 jetons,
-  qui avec Pont ComfyUI mangerait sinon tout son budget de 1 200 jetons).
+  qui avec Pont ComfyUI mangerait sinon tout son budget de 1 200 jetons). Chez le scénariste (`for_agent`), une
+  petite collection d'un **pack** n'est jamais injectée entière non plus : ses fiches sont cherchées.
+- **Indice de requête** (`query_hint`) : ajouté à la requête de l'agent. Le scénariste cherche avec le titre, le
+  synopsis et les packs de style du chapitre, plus « Déroulé, accroche, pic, fin » : un synopsis ne parle jamais
+  du déroulé d'un chapitre ni de sa fin.
+- **Une seule courbe de tension** (scénariste) : parmi les fiches de type `genre` d'un pack, seule celle du genre
+  de la série (meta `genre` = identifiant de `style_genres/*.yaml`) est servie, en tête (mode `genre`), même si
+  son score est bas ; les six autres sont écartées et ne prennent pas de place dans le top-k. Série sans genre ou
+  genre sans fiche : la mieux classée seulement.
 - **Agents** (`agents`) : `script` (étape 1, variable `$savoir_faire` de `prompts/script.yaml`),
   `art_direction` (`prompts/direction-artistique.yaml`) et `image_prompt` (étape 3, voir ci-dessous).
   Collections par nom (casse ignorée) ; `series_collections: true` ajoute celles de la série du
@@ -1763,10 +1771,14 @@ une série, documents `.md` / `.txt` / `.pdf` (texte extrait par pypdf) ou texte
 ### Packs de savoir-faire (`knowledge_packs/`)
 
 Un pack est un gros fichier Markdown de fiches livré avec l'appli, et un manifeste YAML qui le range en
-collections. Deux packs livrés : `manga_visual_knowledge` (cadrages, angles, corps et gestes, action,
+collections. Trois packs livrés : `manga_visual_knowledge` (cadrages, angles, corps et gestes, action,
 composition, découpage, émotions, anti-répétition, exemples analysés), qui donne 13 collections
 « Mise en scène · … » et environ 70 documents, et `manga_rendering_knowledge` (13/10/2026 : encrage, trames,
-papier et impression, finitions, valeurs et masses), qui donne 5 collections « Rendu · … » et 17 fiches.
+papier et impression, finitions, valeurs et masses), qui donne 5 collections « Rendu · … » et 17 fiches, et
+`manga_story_structure` (14/10/2026 : déroulé d'un chapitre en huit temps avec positions en %, courbes de tension
+des 7 genres sur 15 pages, plans selon le moment, fins de chapitre, rythme d'un arc, silence et densité de
+dialogue), qui donne 6 collections « Structure · … » et 19 fiches. Ses repères chiffrés suivent les presets
+(cases par page des genres, `dialogue_rules`, `variety_rules` et `page_rules`) : un test les recoupe.
 Un pack ne recopie jamais un preset (pas de collection « Pont presets ») : les mots-clés d'une finition
 vivent dans `style_options.yaml`, une copie dériverait.
 
@@ -1836,6 +1848,9 @@ Corps et gestes, Action, Composition, Émotions, Pont ComfyUI (≈ 420 jetons, e
 Pack rendu, branchement étroit (le budget du rédacteur est déjà plein) : DA + Rendu · Valeurs et masses et
 Rendu · Encrage ; rédacteur + Rendu · Valeurs et masses **seulement** ; scénariste : rien. Trames, Papier et
 impression, Finitions : cherchables dans Savoir-faire, lues par aucun agent.
+Pack structure : scénariste seulement (les 6 collections « Structure · … », même budget de 2 500 jetons et top-k
+de 6) ; le futur agent de création de série les recevra aussi. DA et rédacteur de prompt : rien (ils reçoivent
+le rythme déjà décidé).
 
 ### Embeddings : mode réel
 
