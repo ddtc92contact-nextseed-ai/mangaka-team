@@ -384,7 +384,7 @@ export function LetteringCanvas({
         const kind = BUBBLE_KINDS[b.kind];
         // Redimensionnement en cours : le texte suit déjà le cadre (aperçu ; le moteur recalcule au lâcher).
         const resized = active?.mode === "resize" ? applyDelta(b, "resize", active.dx, active.dy).position : undefined;
-        const grow = resized ? previewSizePt(b.font, b.box, resized) / b.font.size_pt : 1;
+        const grow = resized ? previewSizePt(b.font, b.box, resized, b.manual) / b.font.size_pt : 1;
         const around = (scale: string) =>
           resized
             ? `translate(${resized.x + resized.w / 2} ${resized.y + resized.h / 2}) scale(${scale}) translate(${-(b.box.x + b.box.w / 2)} ${-(b.box.y + b.box.h / 2)})`

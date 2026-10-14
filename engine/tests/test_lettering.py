@@ -383,7 +383,8 @@ def _assert_text_inside(letterer: Letterer, b: BubbleLayout, text: str = LINE) -
     cap, desc = -font.getbbox("H", anchor="ls")[1], font.getbbox("gjpq", anchor="ls")[3]
     box = b.box
     for ln in b.lines:
-        corners = [(ln.x + sx * ln.width / 2, ln.y + dy) for sx in (-1, 1) for dy in (-cap, desc)]
+        width = max(ln.width, font.getlength(ln.text))  # largeur réellement dessinée
+        corners = [(ln.x + sx * width / 2, ln.y + dy) for sx in (-1, 1) for dy in (-cap, desc)]
         for x, y in corners:
             if b.kind == "narration":
                 assert box.x1 <= x <= box.x2 and box.y1 <= y <= box.y2, (ln.text, x, y)
@@ -479,3 +480,86 @@ def test_auto_frame_kept_as_manual_keeps_its_text_size(letterer: Letterer) -> No
         xywh = auto.box.as_xywh()
         box = Box(xywh["x"], xywh["y"], xywh["x"] + xywh["w"], xywh["y"] + xywh["h"])
         assert _in_box(letterer, kind, box).size_pt >= auto.size_pt
+
+
+# --- le texte grandit en proportion du cadre (marges proportionnelles) ---------------------------
+def _preview_pt(font: dict, src: Box, dst: Box, *, filled: bool) -> float:
+    """Même calcul que l'aperçu de l'écran Lettrage (web/src/lib/bubble-size.ts, `previewSizePt`)."""
+    base, size = font["style_size_pt"], font["size_pt"]
+    scale = size / base if filled else 1.0
+
+    def side(f: float, t: float, margin: float) -> float:
+        return t / (max(1.0, f - margin * scale) / size + margin / base)
+
+    m = font["margin_px"]
+    pt = min(side(src.w, dst.w, m["w"]), side(src.h, dst.h, m["h"]))
+    lo, hi = min(font["min_size_pt"], size), max(font["max_size_pt"], size)
+    return math.floor(min(hi, max(lo, pt)) * 2 + 0.5) / 2
+
+
+def _rounded(box: Box, k: float) -> Box:
+    """Cadre agrandi ×k depuis son coin, arrondi au pixel (comme l'enregistre l'écran Lettrage)."""
+    xywh = box.as_xywh()
+    return Box(xywh["x"], xywh["y"], xywh["x"] + round(xywh["w"] * k), xywh["y"] + round(xywh["h"] * k))
+
+
+@pytest.mark.parametrize("kind", ["speech", "thought", "shout", "narration", "off"])
+def test_enlarged_manual_box_grows_the_text_in_proportion(letterer: Letterer, kind: str) -> None:
+    auto = _auto_box(letterer, kind)
+    double = _in_box(letterer, kind, _rounded(auto.box, 2))
+    triple = _in_box(letterer, kind, _rounded(auto.box, 3))
+    assert not double.overflow and not triple.overflow
+    assert abs(double.size_pt - 2 * auto.size_pt) <= 0.5, (double.size_pt, auto.size_pt)
+    assert abs(triple.size_pt - 3 * auto.size_pt) <= 0.5, (triple.size_pt, auto.size_pt)
+    assert triple.size_pt > double.size_pt
+    _assert_text_inside(letterer, double)
+    _assert_text_inside(letterer, triple)
+    # Le bloc de texte occupe la bulle comme dans la bulle automatique (même retour à la ligne).
+    assert [ln.text for ln in double.lines] == [ln.text for ln in auto.lines]
+
+
+def test_speech_text_is_no_longer_stuck_at_the_old_cap(letterer: Letterer) -> None:
+    auto = _auto_box(letterer, "speech")
+    assert auto.size_pt == 9
+    assert _in_box(letterer, "speech", _rounded(auto.box, 2)).size_pt >= 17.5  # ancien plafond : 14 pt
+
+
+@pytest.mark.parametrize("kind", ["speech", "thought", "shout", "narration", "off"])
+@pytest.mark.parametrize("k", [0.75, 0.9, 1.25, 1.5, 2, 2.5, 3])
+def test_resize_preview_matches_the_engine(letterer: Letterer, kind: str, k: float) -> None:
+    """L'aperçu pendant le glissé et la taille calculée au lâcher : à 0,5 pt près, depuis une bulle placée
+    automatiquement comme depuis un cadre déjà ajusté à la main."""
+    auto = _auto_box(letterer, kind)
+    dst = _rounded(auto.box, k)
+    after = _in_box(letterer, kind, dst)
+    if not after.overflow:
+        assert abs(_preview_pt(auto.to_json()["font"], auto.box, dst, filled=False) - after.size_pt) <= 0.5
+    manual = _in_box(letterer, kind, _rounded(auto.box, 1.5))
+    dst = _rounded(manual.box, k)
+    after = _in_box(letterer, kind, dst)
+    if not after.overflow:
+        assert abs(_preview_pt(manual.to_json()["font"], manual.box, dst, filled=True) - after.size_pt) <= 0.5
+
+
+@pytest.mark.parametrize("size", [7.0, 8.0])
+def test_preview_matches_the_engine_for_a_bubble_shrunk_by_auto_placement(letterer: Letterer, size: float) -> None:
+    """Bulle réduite par le placement automatique (case chargée) : ses marges sont celles de la taille
+    normale ; l'aperçu le sait et suit encore le moteur."""
+    fit = letterer.fit("speech", LINE, size, 2000, 2000)
+    assert fit is not None
+    src = Box(100, 100, 100 + fit.outer[0], 100 + fit.outer[1])
+    font = {**_auto_box(letterer, "speech").to_json()["font"], "size_pt": size}
+    for k in (1, 1.5, 2, 3):
+        dst = _rounded(src, k)
+        after = _in_box(letterer, "speech", dst)
+        assert abs(_preview_pt(font, src, dst, filled=False) - after.size_pt) <= 0.5, (k, after.size_pt)
+
+
+def test_enlarging_auto_placed_bubbles_only_changes_resized_ones(letterer: Letterer) -> None:
+    """Le remplissage proportionnel ne touche que les cadres ajustés à la main."""
+    a, b = BubbleSpec(1, "speech", LINE, "Aiko", 0), BubbleSpec(2, "speech", "Oui.", "Aiko", 1)
+    before = letterer.letter_panel(_panel([a, b], box=Box(0, 0, 2400, 2400), zone=None), "ltr").bubbles
+    big = _rounded(before[0].box, 2)
+    a2 = BubbleSpec(1, "speech", LINE, "Aiko", 0, manual_box=big, manual_tail=(big.cx, big.y2 + 80))
+    after = letterer.letter_panel(_panel([a2, b], box=Box(0, 0, 2400, 2400), zone=None), "ltr").bubbles
+    assert after[0].size_pt == 18 and after[1].size_pt == before[1].size_pt == 9

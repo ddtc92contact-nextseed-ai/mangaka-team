@@ -234,6 +234,8 @@ def test_resized_bubble_text_fills_its_frame_in_screen_and_render(client: TestCl
     res = _ok(client.patch(f"/bubbles/{bubble['id']}", json={"position": big}))
     grown = next(x for x in res["bubbles"] if x["id"] == bubble["id"])
     assert grown["manual"] and size < grown["font"]["size_pt"] <= grown["font"]["max_size_pt"]
+    assert abs(grown["font"]["size_pt"] - 1.5 * size) <= 0.5  # en proportion du cadre (#157)
+    assert grown["font"]["style_size_pt"] > 0 and grown["font"]["margin_px"]["w"] > 0
     # Le rendu (SVG et PNG) utilise la même taille que l'écran.
     force_stages(client, data["chapter"]["id"])
     info = _ok(client.post(f"/pages/{page['id']}/render"))

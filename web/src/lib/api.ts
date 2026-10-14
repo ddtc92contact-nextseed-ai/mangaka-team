@@ -1556,7 +1556,8 @@ export interface LetteredBubble {
   manual_tail: boolean;
   overflow: boolean;
   // min / max : bornes du style ; un cadre ajusté à la main est rempli entre les deux, sauf taille saisie
-  // à la main (`manual_size`).
+  // à la main (`manual_size`). style_size_pt / margin_px : taille normale du style et marges de la bulle à
+  // cette taille (le remplissage les fait grandir avec le texte) — pour l'aperçu du redimensionnement.
   font: {
     family: string;
     size_pt: number;
@@ -1565,6 +1566,8 @@ export interface LetteredBubble {
     min_size_pt: number;
     max_size_pt: number;
     manual_size: boolean;
+    style_size_pt: number;
+    margin_px: { w: number; h: number };
   };
   lines: { text: string; x: number; y: number }[];
   // miter_limit : joints en onglet (pointes vives des queues et des cris), jamais biseautés.

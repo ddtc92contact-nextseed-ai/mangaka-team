@@ -1465,7 +1465,9 @@ Le texte n'est **jamais** dessiné par le modèle d'image : il est posé au lett
   (`max_size_pt`), pas de réduction, interligne, capitales. `hyphenation` règle la césure française
   (pyphen). Faute de place à la taille minimale, la bulle garde tout son texte et la case affiche un
   avertissement. Une bulle dont le cadre est ajusté à la main (écran Lettrage) prend la plus grande
-  taille qui remplit ce cadre, entre `min_size_pt` et `max_size_pt` (absent : `size_pt`) ; une taille
+  taille qui remplit ce cadre, **en proportion** (les marges grandissent avec le texte : cadre ×2 → texte
+  ×2, même retour à la ligne), entre `min_size_pt` et `max_size_pt` (absent : `size_pt` ; garde-fou
+  livré ≈ ×5 la taille normale, au plus 72 pt) ; une taille
   saisie dans le panneau de la bulle l'emporte jusqu'au retour en « auto ».
 - `lettering.yaml` : marges intérieures par type, forme de la parole (ellipse / rectangle arrondi),
   nuage, pointes du cri, queue (longueur, base, direction par défaut sans visage détecté), écarts

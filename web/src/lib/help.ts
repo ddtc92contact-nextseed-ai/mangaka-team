@@ -129,7 +129,7 @@ export const HELP = {
   "lettrage.bubble_auto":
     "Oublie la position, la taille du cadre et la queue réglées à la main : la bulle reprend la place calculée automatiquement. Une taille de texte fixée à la main reste (bouton « Auto » de la taille pour l'oublier).",
   "lettrage.bubble_size":
-    "Quand tu agrandis ou rétrécis une bulle à la poignée, son texte grandit ou diminue pour remplir le cadre, sans passer sous la taille minimale ni au-dessus du plafond du style (réglages du Lettreur, écran « L'équipe »). Saisis une taille et « Fixer » pour l'imposer ; « Auto » rend la main au calcul.",
+    "Quand tu agrandis ou rétrécis une bulle à la poignée, son texte grandit ou diminue en proportion pour remplir le cadre (bulle deux fois plus grande, texte deux fois plus grand), sans passer sous la taille minimale ni au-dessus du plafond du style (réglages du Lettreur, écran « L'équipe »). Saisis une taille et « Fixer » pour l'imposer ; « Auto » rend la main au calcul.",
   "lettrage.sfx":
     "Les onomatopées sont lettrées par-dessus l'image, hors bulle, et peuvent déborder de la case. Elles ne sont jamais dessinées par le modèle d'image : ajoute-les ici.",
   "lettrage.sfx_intensity":
