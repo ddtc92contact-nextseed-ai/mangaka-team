@@ -2332,6 +2332,9 @@ class KnowledgeAgent(_Strict):
     # Collections toujours cherchées (meilleures fiches dans le budget), jamais injectées entières même si elles
     # sont petites (`small_collection_tokens`) : une petite collection entière mangerait le budget du rédacteur.
     searched_collections: list[str] = Field(default_factory=list)
+    # Ajouté à la requête de recherche de l'agent (`for_agent`) : ce qu'il cherche toujours, quel que soit le
+    # chapitre (le scénariste : le déroulé d'un chapitre et sa fin, que le synopsis ne nomme jamais).
+    query_hint: str = Field(default="", max_length=500)
 
     @property
     def main_budget_tokens(self) -> int:

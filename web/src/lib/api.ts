@@ -2275,8 +2275,8 @@ export interface Passage {
   score: number | null;
   vector_score: number | null;
   keyword_score: number | null;
-  /** framing : fiche du plan ou de l'angle de la case (une seule par famille). */
-  mode: "retrieved" | "whole" | "framing";
+  /** framing : fiche du plan ou de l'angle de la case (une seule par famille) ; genre : courbe de tension du genre de la série. */
+  mode: "retrieved" | "whole" | "framing" | "genre";
   /** Passage d'une fiche de pack livré. */
   pack?: string | null;
   /** Recherche par page (direction artistique) : pages pour lesquelles le passage a été retenu. */
