@@ -161,6 +161,43 @@ class LibraryOut(BaseModel):
     path: str | None = None  # chemin complet sur le disque
     written: int = 0  # fichiers écrits ou remplacés
     removed: int = 0  # fichiers retirés (plus retenus)
+    removed_dirs: int = 0  # dossiers vides retirés
+    warning: str | None = None
+
+
+class OrphanFolderRef(BaseModel):
+    area: Literal["output", "input"]
+    name: str = Field(min_length=1, max_length=255)
+
+
+class OrphanFolderOut(OrphanFolderRef):
+    """Dossier de ComfyUI/<area>/mangaka/ qui n'est à aucune série de la base."""
+
+    files: int  # nombre de fichiers dedans (0 : dossier vide)
+
+
+class OrphansOut(BaseModel):
+    """Aperçu de « Ranger le dossier ComfyUI » : dossiers à déplacer dans mangaka/old/orphelins-<date>/."""
+
+    enabled: bool  # False : COMFYUI_DIR invalide ou refusé (voir `warning`), rangement désactivé
+    path: str | None = None  # dossier de ComfyUI
+    archive: str | None = None  # old/orphelins-<date> (sous output/mangaka/ et input/mangaka/)
+    orphans: list[OrphanFolderOut] = []
+    warning: str | None = None
+
+
+class TidyIn(BaseModel):
+    """Dossiers confirmés (ceux de l'aperçu) ; un dossier devenu une série entre-temps n'est pas déplacé."""
+
+    folders: list[OrphanFolderRef] = Field(default_factory=list, max_length=10000)
+
+
+class TidyOut(BaseModel):
+    """Résultat de « Ranger le dossier ComfyUI »."""
+
+    enabled: bool
+    moved: list[str] = []  # chemins d'arrivée, relatifs au dossier de ComfyUI
+    removed_empty: int = 0  # dossiers vides retirés des séries connues
     warning: str | None = None
 
 

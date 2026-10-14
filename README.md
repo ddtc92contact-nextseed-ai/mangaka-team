@@ -177,7 +177,7 @@ configuration incomplète (ex. clé absente) y apparaît en rouge sans empêcher
 | `COMFYUI_TIMEOUT_S` | `5` | Délai d'une requête HTTP vers ComfyUI (la durée max d'une génération est `timeout_s` du preset de workflow) |
 | `COMFYUI_POLL_S` | `1` | Intervalle de sondage de `/history` pendant une génération |
 | `MOCK_COMFYUI_SECONDS` | `4` | Mode mock : durée simulée d'une génération (progression factice) |
-| `COMFYUI_DIR` | `~/ComfyUI` (vrai ComfyUI) | Dossier d'installation de ComfyUI, transmis par le lanceur : rangement et nettoyage des fichiers de la série, bibliothèque lisible (voir « Où sont mes fichiers ? ») ; vide ou introuvable = rien n'est supprimé hors de `data/` (avertissement sur la fiche série) |
+| `COMFYUI_DIR` | `~/ComfyUI` (vrai ComfyUI) | Dossier d'installation de ComfyUI, transmis par le lanceur : rangement et nettoyage des fichiers de la série, bibliothèque lisible (voir « Où sont mes fichiers ? ») ; vide ou introuvable = rien n'est supprimé hors de `data/` (avertissement sur la fiche série) ; en mode mock, une vraie installation (avec `main.py`) est refusée |
 | `REFERENCE_VARIANTS_KEPT` | `4` | Variantes non gardées de « Créer des références » conservées par fiche et type de fiche |
 | `MANGAKA_DATA_DIR` | `./data` | Dossier de la base et des images |
 | `MAX_UPLOAD_MB` | `20` | Taille max d'une image de référence |
@@ -202,20 +202,24 @@ mangaka/lucius-et-stan/
     decors/la-foret/         plan-large/la-foret-plan-large.png, autre-angle/…, imports/…
     style/                   planche-de-style.png (+ planche-de-style-2.png… : autres images de la référence active)
   chapitre-01/
-    page-01/                 case-01-croquis.png (croquis validé), case-01.png (version choisie)
+    page-01/                 case-01-croquis.png (croquis retenu), case-01.png (version choisie)
     planches/                page-01.png + page-01.svg (page rendue ou chapitre exporté)
   trash/                     tout ce qui n'est pas retenu, rangé de la même façon :
     personnages/lucius/portrait/lucius-portrait-v3.png     (variante non gardée)
     style/essai-v2.png, style/planche-de-style-<nom>.png   (essai non choisi, ancienne référence de style)
-    chapitre-01/page-01/case-01-v2.png, case-01-croquis-v1.png  (version non choisie, croquis non validé)
+    chapitre-01/page-01/case-01-v2.png, case-01-croquis-v1.png  (version non choisie, autre croquis)
   _transit/                  sorties brutes de ComfyUI, effacées dès leur enregistrement : à ignorer
 ```
 
-- L'arborescence est créée **dès la création** : `references/{personnages,objets,decors,style}/` et `trash/`
-  avec la série ; le dossier d'un personnage, objet ou décor avec **un sous-dossier par type de fiche** de
-  `presets/reference_sheets/` (champ `folder` du preset, sinon l'id sans la sorte : un nouveau preset = un
-  nouveau sous-dossier), plus `angles/` (personnages) et `imports/` ; un dossier par chapitre et par page à
-  leur création. Les dossiers vides sont normaux.
+- **Aucun dossier vide** : rien n'est créé d'avance. Un dossier apparaît quand un premier fichier y est écrit
+  (le dossier d'un personnage, objet ou décor a **un sous-dossier par type de fiche** de
+  `presets/reference_sheets/` — champ `folder` du preset, sinon l'id sans la sorte —, plus `angles/` et
+  `imports/`, dès qu'ils contiennent une image). Après une suppression, un renommage, un changement de version ou
+  une reconstruction, les dossiers vidés de la série sont retirés (jamais `old/`).
+- **Croquis toujours visible** : pour chaque case qui a au moins un croquis, `chapitre-XX/page-YY/case-NN-croquis.png`
+  est le croquis retenu — le croquis validé, sinon celui dont est issue la version choisie, sinon le plus récent.
+  Une case passée en finition sans valider son croquis le garde donc à côté d'elle ; les autres croquis vont dans
+  `trash/`.
 - Dans les sous-dossiers, **seulement les images gardées**, nommées `<nom>-<type>.png` (`-2`, `-3`… s'il y en a
   plusieurs). `case-01.png` est la version choisie de la case (sa version finalisée si elle a été agrandie).
 - **Corbeille** : une variante non gardée y est numérotée `-vN` (rang parmi les variantes de la fiche et du même
@@ -230,11 +234,20 @@ mangaka/lucius-et-stan/
   série » ; ou `POST /library`, `POST /projects/{id}/library`) régénère toute l'arborescence depuis `data/` : utile
   pour une série créée avant cette bibliothèque, ou après avoir déplacé ou effacé des fichiers à la main. Elle
   convertit l'ancienne disposition à plat (`personnages/lucius/lucius-portrait.png` : retiré une fois la nouvelle
-  copie écrite). Rejouer ne duplique rien.
+  copie écrite), applique la règle du croquis retenu et retire les dossiers vides des séries existantes. Rejouer
+  ne duplique rien.
+- **Ranger le dossier ComfyUI** (Réglages ; `GET /comfyui/orphans` puis `POST /comfyui/tidy`) liste les dossiers
+  de `output/mangaka/` et `input/mangaka/` qui ne correspondent à **aucune série de l'atelier** (restes de tests,
+  de démos, d'une autre base), avec leur nombre de fichiers. Après confirmation, il les **déplace** (jamais de
+  suppression) dans `output/mangaka/old/orphelins-<date>/` (ou `input/mangaka/old/orphelins-<date>/`), puis retire
+  les dossiers vides restants. Une série de l'atelier n'est jamais déplacée ; `old/` existant reste intact.
 - C'est une copie : `data/` reste le stockage de l'application. Ne range pas tes propres fichiers dans ces
   dossiers (un fichier au nom de la bibliothèque, `case-03.png`, `lucius-portrait.png`…, qui n'est plus
   retenu en est retiré).
-- Sans `COMFYUI_DIR` valide, rien n'est écrit et la fiche série dit pourquoi.
+- Sans `COMFYUI_DIR` valide, rien n'est écrit et la fiche série dit pourquoi. **En mode mock**
+  (`COMFYUI_PROVIDER=mock`), un `COMFYUI_DIR` qui est une vraie installation de ComfyUI (il contient `main.py`) est
+  refusé : rien n'y est écrit, la raison s'affiche sur la fiche série et le rangement est désactivé. Pour essayer
+  ou tester en mode mock, pointe `COMFYUI_DIR` vers un dossier d'essai contenant seulement `input/` et `output/`.
 
 ### Rangement des fichiers
 
@@ -324,6 +337,7 @@ Documentation interactive : `http://127.0.0.1:8765/docs` quand le moteur tourne.
 - `GET /health` — état du moteur, de ComfyUI et des fournisseurs (`storage` : dossiers de ComfyUI gérés)
 - `POST /projects/{id}/cleanup` — « Nettoyer les variantes non retenues » de la série
 - `POST /projects/{id}/library` — « Reconstruire la bibliothèque » : copie lisible de la série dans `COMFYUI_DIR/output/mangaka/<série>/` (voir « Où sont mes fichiers ? »)
+- `GET /comfyui/orphans`, `POST /comfyui/tidy` — « Ranger le dossier ComfyUI » : aperçu des dossiers de `mangaka/` sans série, puis déplacement des dossiers confirmés dans `mangaka/old/orphelins-<date>/` (voir « Où sont mes fichiers ? »)
 - `GET /presets` — formats de page, workflows, erreurs de presets
 - `GET|POST /projects`, `GET|PATCH|DELETE /projects/{id}`
 - `GET|POST /projects/{id}/characters`, `GET|PATCH|DELETE /characters/{id}`

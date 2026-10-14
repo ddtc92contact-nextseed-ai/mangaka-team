@@ -2,9 +2,10 @@
 
 import { useState } from "react";
 import { Alert, Button, Card, PageHeader } from "@/components/ui";
-import { api, fullErrorMessage, type LibraryResult, type ResetResult } from "@/lib/api";
+import { api, fullErrorMessage, type LibraryResult, type OrphansPreview, type ResetResult, type TidyResult } from "@/lib/api";
+import { useEngineData } from "@/lib/hooks";
 import { RESET_WORD, isResetConfirmed, resetSummary } from "@/lib/reset";
-import { librarySummary } from "@/lib/storage";
+import { librarySummary, orphanLabel, orphansSummary, tidySummary } from "@/lib/storage";
 
 export default function SettingsPage() {
   return (
@@ -12,6 +13,7 @@ export default function SettingsPage() {
       <PageHeader title="Réglages" subtitle="Réglages de l'atelier." />
       <div className="space-y-6">
         <LibraryCard />
+        <TidyCard />
         <ResetCard />
       </div>
     </>
@@ -47,21 +49,126 @@ function LibraryCard() {
       </div>
       <div className="space-y-2 text-sm text-zinc-400">
         <p>
-          Chaque série a son dossier dans ComfyUI, <code>output/mangaka/&lt;série&gt;/</code>, créé avec elle :{" "}
+          Chaque série a son dossier dans ComfyUI, <code>output/mangaka/&lt;série&gt;/</code> :{" "}
           <code>references/</code> (un dossier par personnage, objet ou décor, avec un sous-dossier par type de fiche :{" "}
           <code>portrait/</code>, <code>plein-pied/</code>, <code>expressions/</code>, <code>angles/</code>,{" "}
-          <code>imports/</code>…), <code>chapitre-01/page-01/</code> (croquis validés, versions choisies) et{" "}
-          <code>trash/</code> (tout ce qui a été généré sans être retenu, rangé de la même façon).
+          <code>imports/</code>…), <code>chapitre-01/page-01/</code> (croquis retenu de chaque case, versions choisies)
+          et <code>trash/</code> (tout ce qui a été généré sans être retenu, rangé de la même façon). Un dossier
+          n&apos;existe que s&apos;il contient un fichier : aucun dossier vide.
         </p>
         <p>
           C&apos;est une copie : l&apos;atelier ne relit jamais ces fichiers. Reconstruire refait l&apos;arborescence de toutes
-          les séries depuis data/ (utile après avoir effacé ou déplacé des fichiers à la main) et convertit
-          l&apos;ancienne disposition à plat. Rejouer ne duplique rien.
+          les séries depuis data/ (utile après avoir effacé ou déplacé des fichiers à la main), convertit
+          l&apos;ancienne disposition à plat et retire les dossiers vides. Rejouer ne duplique rien.
         </p>
       </div>
       {result && (
         <div className="mt-4 space-y-2" data-testid="library-result">
           <Alert tone="info">{librarySummary(result)}</Alert>
+          {result.warning && <Alert>{result.warning}</Alert>}
+        </div>
+      )}
+      {error && (
+        <div className="mt-4">
+          <Alert>{error}</Alert>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+/** « Ranger le dossier ComfyUI » : aperçu des dossiers de mangaka/ sans série, puis déplacement dans old/ après
+ * confirmation (jamais de suppression). Désactivé sans COMFYUI_DIR valide, avec la raison. */
+function TidyCard() {
+  const health = useEngineData(() => api.health(), []);
+  const storage = health.data?.storage;
+  const disabled = storage ? !storage.enabled : false;
+  const [busy, setBusy] = useState(false);
+  const [preview, setPreview] = useState<OrphansPreview | null>(null);
+  const [result, setResult] = useState<TidyResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function look() {
+    setBusy(true);
+    setError(null);
+    setResult(null);
+    try {
+      setPreview(await api.comfyuiOrphans());
+    } catch (err) {
+      setError(fullErrorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function tidy() {
+    if (!preview) return;
+    setBusy(true);
+    setError(null);
+    try {
+      setResult(await api.tidyComfyui(preview.orphans.map(({ area, name }) => ({ area, name }))));
+      setPreview(null);
+    } catch (err) {
+      setError(fullErrorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const reason = storage?.warning ?? storage?.problem ?? preview?.warning ?? null;
+  return (
+    <Card data-testid="tidy-card">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="font-semibold text-zinc-100">Dossier ComfyUI</h2>
+        <Button variant="secondary" onClick={look} disabled={busy || disabled} data-testid="tidy-look">
+          {busy && !preview ? "Recherche…" : "Ranger le dossier ComfyUI"}
+        </Button>
+      </div>
+      <p className="text-sm text-zinc-400">
+        Liste les dossiers de <code>output/mangaka/</code> et <code>input/mangaka/</code> qui ne correspondent à
+        aucune série de l&apos;atelier (restes de tests, de démos ou d&apos;une autre base), puis, après confirmation,
+        les <strong className="text-zinc-200">déplace</strong> dans <code>old/orphelins-&lt;date&gt;/</code> — rien
+        n&apos;est supprimé, une série de l&apos;atelier n&apos;est jamais déplacée, <code>old/</code> reste intact.
+        Retire aussi les dossiers vides restants.
+      </p>
+      {disabled && reason && (
+        <div className="mt-3" data-testid="tidy-disabled">
+          <Alert>Rangement désactivé : {reason}.</Alert>
+        </div>
+      )}
+      {preview && (
+        <div className="mt-4 space-y-3" data-testid="tidy-preview">
+          {preview.enabled ? (
+            <>
+              <p className="text-sm text-zinc-300">{orphansSummary(preview)}</p>
+              {preview.orphans.length > 0 && (
+                <ul className="max-h-64 overflow-y-auto rounded-md border border-zinc-800 bg-zinc-950 p-2 text-xs text-zinc-300">
+                  {preview.orphans.map((o) => (
+                    <li key={`${o.area}/${o.name}`} className="break-all py-0.5 font-mono">
+                      {orphanLabel(o)}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div className="flex flex-wrap gap-2">
+                {preview.orphans.length > 0 && (
+                  <Button onClick={tidy} disabled={busy} data-testid="tidy-confirm">
+                    {busy ? "Rangement…" : `Déplacer ${preview.orphans.length > 1 ? "ces dossiers" : "ce dossier"} dans old/`}
+                  </Button>
+                )}
+                <Button variant="secondary" onClick={() => setPreview(null)} disabled={busy}>
+                  {preview.orphans.length > 0 ? "Annuler" : "Fermer"}
+                </Button>
+              </div>
+            </>
+          ) : (
+            <Alert>Rangement désactivé : {preview.warning}.</Alert>
+          )}
+        </div>
+      )}
+      {result && (
+        <div className="mt-4 space-y-2" data-testid="tidy-result">
+          <Alert tone="info">{tidySummary(result)}</Alert>
           {result.warning && <Alert>{result.warning}</Alert>}
         </div>
       )}

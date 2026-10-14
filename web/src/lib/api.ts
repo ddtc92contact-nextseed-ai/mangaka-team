@@ -137,6 +137,36 @@ export interface LibraryResult {
   path: string | null;
   written: number;
   removed: number;
+  /** Dossiers vides retirés. */
+  removed_dirs?: number;
+  warning: string | null;
+}
+
+/** Dossier de ComfyUI/<area>/mangaka/ qui n'est à aucune série de la base. */
+export interface OrphanFolder {
+  area: "output" | "input";
+  name: string;
+  /** Nombre de fichiers dedans (0 : dossier vide). */
+  files: number;
+}
+
+/** Aperçu de « Ranger le dossier ComfyUI ». */
+export interface OrphansPreview {
+  /** Faux : COMFYUI_DIR invalide ou refusé (voir `warning`), rangement désactivé. */
+  enabled: boolean;
+  path: string | null;
+  /** old/orphelins-<date> (sous output/mangaka/ et input/mangaka/). */
+  archive: string | null;
+  orphans: OrphanFolder[];
+  warning: string | null;
+}
+
+/** Résultat de « Ranger le dossier ComfyUI ». */
+export interface TidyResult {
+  enabled: boolean;
+  /** Chemins d'arrivée, relatifs au dossier de ComfyUI. */
+  moved: string[];
+  removed_empty: number;
   warning: string | null;
 }
 
@@ -3103,6 +3133,9 @@ export const api = {
   cleanupProject: (id: number) => request<CleanupResult>(`/projects/${id}/cleanup`, { method: "POST" }),
   rebuildLibrary: (id: number) => request<LibraryResult>(`/projects/${id}/library`, { method: "POST" }),
   rebuildAllLibraries: () => request<LibraryResult>("/library", { method: "POST" }),
+  comfyuiOrphans: () => request<OrphansPreview>("/comfyui/orphans"),
+  tidyComfyui: (folders: Pick<OrphanFolder, "area" | "name">[]) =>
+    request<TidyResult>("/comfyui/tidy", json("POST", { folders })),
   resetWorkshop: (confirm: string, all: boolean) => request<ResetResult>("/reset", json("POST", { confirm, all })),
 
   listLibrary: <T extends LibraryEntry = LibraryEntry>(kind: LibraryKind, projectId: number) =>
