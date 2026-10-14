@@ -110,7 +110,7 @@ export const HELP = {
   "scenario.setting":
     "Où et quand se passe la case : lieu, moment (heure, météo) et éléments visibles du décor. Il devient « Lieu : … » dans le prompt image, même sans décor récurrent : sans lui, le modèle dessine souvent un fond blanc.",
   "scenario.staging":
-    "Qui fait quoi et où dans le cadre : premier plan, arrière-plan, gauche, droite, regards et gestes entre personnages. Il devient « Mise en scène : … » dans le prompt image.",
+    "Qui fait quoi et où dans le cadre : premier plan, arrière-plan, gauche, droite, regards et gestes entre personnages. Il devient « Mise en scène : … » dans le prompt image, sauf sur une case sans personnage où il n'est pas utilisé.",
   "scenario.characters":
     "Tous les personnages visibles dans la case, séparés par des virgules. Chaque nom est rapproché d'une fiche (majuscules, accents et alias ignorés, « le vieux maître Kaï » → Kaï) : ses références, sa description et son LoRA servent à la génération.",
   "scenario.unmatched":

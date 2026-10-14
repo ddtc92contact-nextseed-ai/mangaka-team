@@ -334,12 +334,21 @@ export function PanelInspector({
                     <dd className="inline text-zinc-300">{d.setting}</dd>
                   </div>
                 )}
-                {d.staging && (
-                  <div>
-                    <dt className="inline text-zinc-500">Mise en scène : </dt>
-                    <dd className="inline text-zinc-300">{d.staging}</dd>
-                  </div>
-                )}
+                {d.staging &&
+                  (d.characters.length ? (
+                    <div>
+                      <dt className="inline text-zinc-500">Mise en scène : </dt>
+                      <dd className="inline text-zinc-300">{d.staging}</dd>
+                    </div>
+                  ) : (
+                    <div data-testid="staging-unused">
+                      <dt className="inline text-zinc-500">Mise en scène : </dt>
+                      <dd className="inline">
+                        <span className="text-amber-300">non utilisée, case sans personnage</span>{" "}
+                        <span className="text-zinc-500 line-through">{d.staging}</span>
+                      </dd>
+                    </div>
+                  ))}
               </dl>
             )}
             <UnmatchedNames

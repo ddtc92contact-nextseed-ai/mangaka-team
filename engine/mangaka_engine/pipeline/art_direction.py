@@ -60,6 +60,7 @@ import copy
 import json
 import math
 import re
+import unicodedata
 from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -387,7 +388,7 @@ def _panel_brief(panel: Panel, aliases: Aliases | None = None) -> dict[str, Any]
     return {
         "panel_id": panel.id,
         "description": panel.description,
-        "staging": panel.staging or "",
+        "staging": (panel.staging or "") if present else "",  # case sans personnage : non utilisée (#167)
         "characters": present,
         "offscreen": offscreen,
         "spectators": viewers,
@@ -1810,21 +1811,42 @@ def _apply_library(panel: Panel, choice: dict[str, Any], before: dict[str, Any],
         panel.object_ids = [i for i in objets if i in known]
 
 
+_SFX_REPEATS = re.compile(r"(.)\1+")
+
+
+def sfx_key(text: str) -> str:
+    """Clé de comparaison d'une onomatopée : sans casse, accents, ponctuation ni espaces, lettres répétées
+    réduites à une (« GRAAA ! », « Graaaa », « graa » → « gra » ; « Bam… » → « bam »)."""
+    decomposed = unicodedata.normalize("NFKD", text.casefold())
+    letters = "".join(ch for ch in decomposed if ch.isalnum())
+    return _SFX_REPEATS.sub(r"\1", letters) or text.strip().casefold()
+
+
 def _apply_sfx(panel: Panel, sfx: Sequence[dict[str, Any]]) -> None:
     """Onomatopées de la DA : celles de l'application précédente (non retouchées) sont remplacées ;
-    celles du scénario ou ajoutées à la main restent, et un texte déjà présent n'est pas doublé."""
+    celles du scénario ou ajoutées à la main restent, et une onomatopée déjà présente n'est pas doublée
+    (comparaison `sfx_key` : « GRAAA ! » = « GRAAA »). Une quasi-doublure d'une onomatopée du scénario la
+    remplace (texte et intensité de la DA, même place) ; une onomatopée placée à la main n'est jamais touchée."""
     for b in list(panel.bubbles):
         params = b.sfx or {}
         if b.kind == BubbleKind.sfx and params.get("source") == DA_SOURCE and not (b.position or {}).get("manual"):
             panel.bubbles.remove(b)
-    present = {b.text.casefold() for b in panel.bubbles if b.kind == BubbleKind.sfx}
+    present = {sfx_key(b.text): b for b in panel.bubbles if b.kind == BubbleKind.sfx}
+    proposed: set[str] = set()
     order = max((b.order for b in panel.bubbles), default=-1) + 1
     for item in sfx:
         text = str(item.get("text") or "").strip()
-        if not text or text.casefold() in present:
+        key = sfx_key(text) if text else ""
+        if not key or key in proposed:
             continue
-        present.add(text.casefold())
+        proposed.add(key)
         intensity = SFX_TO_INTENSITY.get(str(item.get("intensity") or "moyen"), "normal")
+        existing = present.get(key)
+        if existing is not None:
+            if not (existing.position or {}).get("manual"):
+                existing.text = text
+                existing.sfx = {**(existing.sfx or {}), "intensity": intensity}
+            continue
         panel.bubbles.append(
             Bubble(order=order, text=text, kind=BubbleKind.sfx, sfx={"intensity": intensity, "source": DA_SOURCE})
         )
