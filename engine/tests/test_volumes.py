@@ -382,7 +382,7 @@ def test_fresh_database_has_the_volume_tables(tmp_path: Path) -> None:
     assert {"volume_id", "chapter_id", "position"} <= cols["volume_chapters"]
     assert {"volume_id", "path", "width", "height", "seed", "params"} <= cols["volume_covers"]
     con = sqlite3.connect(path)
-    assert con.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 32
+    assert con.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION >= 32
     con.close()
 
 

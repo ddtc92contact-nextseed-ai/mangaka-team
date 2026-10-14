@@ -13,6 +13,11 @@ fonts:
   bowlby-one: { file: fonts/BowlbyOne.ttf, name: Bowlby One }
   titan-one: { file: fonts/TitanOne.ttf, name: Titan One }
   lilita-one: { file: fonts/LilitaOne.ttf, name: Lilita One }
+  # Polices d'affichage pour les logos de titre (identity.yaml › logo.fonts) ; licence : fonts/OFL-<Police>.txt.
+  bangers: { file: fonts/Bangers.ttf, name: Bangers }
+  bungee: { file: fonts/Bungee.ttf, name: Bungee }
+  righteous: { file: fonts/Righteous.ttf, name: Righteous }
+  russo-one: { file: fonts/RussoOne.ttf, name: Russo One }
   # Famille statique : `weight` ≥ 600 → fichier gras, `italic: true` → fichier italique.
   # Licence : fonts/OFL-ComicNeue.txt. Pour l'utiliser : voir « Changer la police d'un style » (README).
   comic-neue:

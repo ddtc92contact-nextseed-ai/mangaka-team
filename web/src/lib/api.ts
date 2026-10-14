@@ -1415,6 +1415,95 @@ export interface StyleBoard {
   active_jobs: Job[];
 }
 
+// --- Identité visuelle de la série (palette, logo du titre) -------------------------------------
+export interface PaletteColor {
+  /** Rôle (presets/identity.yaml) : dominante, accent, fond, texte-clair, texte-sombre… */
+  role: string;
+  /** « #rrggbb ». */
+  hex: string;
+}
+
+export interface Palette {
+  name: string;
+  explanation: string;
+  colors: PaletteColor[];
+}
+
+export type LogoColorSlot = "fill" | "fill_end" | "outline" | "outer" | "shadow" | "subtitle";
+
+/** Réglages complets d'un logo du titre (concept de l'IA ou logo enregistré). */
+export interface LogoSpec {
+  name: string;
+  explanation: string;
+  font: string;
+  style: string;
+  /** Une ou deux lignes ; `scale` : taille relative (1 = ligne mise en avant). */
+  lines: { text: string; scale: number }[];
+  subtitle: string | null;
+  /** Inclinaison en degrés (positif : penche vers la droite). */
+  slant: number;
+  /** Interlettrage, en em. */
+  letter_spacing: number;
+  /** Épaisseur des contours, relative à l'effet. */
+  outline_scale: number;
+  colors: Record<LogoColorSlot, string | null> & { fill: string };
+}
+
+export interface RenderedLogo {
+  spec: LogoSpec;
+  /** SVG autonome (police embarquée). */
+  svg: string;
+  /** Plus faible contraste texte / contour (null : pas de contour). */
+  contrast: number | null;
+  contrast_ok: boolean;
+  /** Corrections faites par le moteur (contour trop peu contrasté…). */
+  notes: string[];
+}
+
+export interface LogoVersion extends RenderedLogo {
+  id: number;
+  version: number;
+  created_at: string;
+  svg_url: string;
+  png_url: string;
+}
+
+export interface Bounds {
+  min: number;
+  max: number;
+}
+
+export interface SeriesIdentity {
+  palette: Palette | null;
+  palette_proposals: Palette[];
+  /** Logo de la série : sa dernière version. */
+  logo: LogoVersion | null;
+  /** Plus récentes d'abord. */
+  logo_versions: LogoVersion[];
+  logo_proposals: RenderedLogo[];
+  roles: Record<string, string>;
+  required_roles: string[];
+  palette_colors: Bounds;
+  fonts: { id: string; name: string }[];
+  styles: { id: string; name: string; description: string; slots: LogoColorSlot[] }[];
+  limits: {
+    max_lines: number;
+    slant_max_deg: number;
+    letter_spacing: Bounds;
+    word_scale: Bounds;
+    outline_scale: Bounds;
+    min_contrast: number;
+    backgrounds: Record<string, string>;
+  };
+}
+
+export interface LogoPreview {
+  svg: string;
+  contrast: number | null;
+  contrast_ok: boolean;
+  problems: string[];
+}
+
 export interface ReferenceGenerateInput {
   sheet: string;
   count?: number;
@@ -2608,6 +2697,18 @@ export const api = {
   deleteReferenceVariant: (variantId: number) =>
     request<void>(`/reference-variants/${variantId}`, { method: "DELETE" }),
   styleBoard: (projectId: number) => request<StyleBoard>(`/projects/${projectId}/style-board`),
+  // Identité visuelle (fiche série)
+  identity: (projectId: number) => request<SeriesIdentity>(`/projects/${projectId}/identity`),
+  proposePalettes: (projectId: number, more = false) =>
+    request<SeriesIdentity>(`/projects/${projectId}/identity/palettes`, json("POST", { more })),
+  savePalette: (projectId: number, palette: Palette) =>
+    request<SeriesIdentity>(`/projects/${projectId}/identity/palette`, json("PUT", palette)),
+  proposeLogos: (projectId: number, more = false) =>
+    request<SeriesIdentity>(`/projects/${projectId}/identity/logos`, json("POST", { more })),
+  previewLogo: (projectId: number, spec: LogoSpec) =>
+    request<LogoPreview>(`/projects/${projectId}/identity/logo/preview`, json("POST", spec)),
+  saveLogo: (projectId: number, spec: LogoSpec) =>
+    request<SeriesIdentity>(`/projects/${projectId}/identity/logo`, json("POST", spec)),
   generateStyleTrials: (projectId: number) =>
     request<Job[]>(`/projects/${projectId}/style-board/trials`, { method: "POST" }),
   chooseStyleTrial: (trialId: number) => request<Job>(`/style-trials/${trialId}/choose`, { method: "POST" }),

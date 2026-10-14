@@ -24,6 +24,11 @@ qui en a une, pour un plan large une image « pied » ou « turnaround » ; puis
 avec la nouvelle caméra (`mock_dialog`). `[mock:dialogue-invalide:N]` dans la consigne : les N premiers
 essais sont invalides (plan hors liste, puis JSON illisible).
 
+Identité visuelle (`"task": "palette"` / `"logo"`) : palettes déterministes tirées du titre (teintes réparties,
+décalées à chaque « Proposer d'autres palettes ») et concepts de logo qui parcourent les polices et les effets
+permis, le titre en une ou deux lignes (`mock_palettes`, `mock_logos`). `[mock:identite-invalide:N]` dans le
+titre de la série : les N premiers essais sont invalides (JSON illisible, puis mauvais schéma).
+
 Pour tester les relances sans vrai LLM, les `invalid_attempts` premiers essais d'une conversation
 renvoient une réponse invalide (variable MOCK_LLM_INVALID_ATTEMPTS, ou `[mock:invalide:N]` dans le
 synopsis du chapitre ; `[mock:da-invalide:N]` pour la seule direction artistique ;
@@ -39,6 +44,7 @@ narration en ouverture et des pensées.
 
 from __future__ import annotations
 
+import colorsys
 import json
 import re
 from collections.abc import Callable
@@ -56,9 +62,10 @@ _SPARSE_MARK = re.compile(r"\[mock:dialogues-maigres:(\d+)\]")
 _PROMPT_INVALID_MARK = re.compile(r"\[mock:prompt-invalide:(\d+)\]")
 _PROMPT_INTRUDER_MARK = re.compile(r"\[mock:prompt-intrus:(\d+)\]")
 _DIALOG_INVALID_MARK = re.compile(r"\[mock:dialogue-invalide:(\d+)\]")
+_IDENTITY_INVALID_MARK = re.compile(r"\[mock:identite-invalide:(\d+)\]")
 _ANY_MARK = re.compile(r"\s*\[mock:[a-z-]+:\d+\]\s*")
 UNKNOWN_ID = 999_999  # id de décor cité par `[mock:id-invalide:N]` (absent de toute bibliothèque)
-TASKS = ("script", "art_direction", "image_prompt", "image_prompt_dialog", "cover_prompt")
+TASKS = ("script", "art_direction", "image_prompt", "image_prompt_dialog", "cover_prompt", "palette", "logo")
 
 _PANELS_PER_PAGE = [5, 4, 6, 3, 5, 4]
 _KINDS = ["speech", "speech", "thought", "speech", "shout"]
@@ -465,6 +472,8 @@ class MockLLMProvider:
             return LLMResult(text=json.dumps(mock_cover_prompt(ctx), ensure_ascii=False), model="mock")
         if ctx is not None and ctx.get("task") == "image_prompt":
             return LLMResult(text=self._image_prompt_answer(messages, ctx), model="mock")
+        if ctx is not None and ctx.get("task") in ("palette", "logo"):
+            return LLMResult(text=self._identity_answer(messages, ctx), model="mock")
         if ctx is not None and ctx.get("task") == "art_direction":
             return LLMResult(text=self._direction_answer(messages, ctx), model="mock")
         if ctx is not None:
@@ -518,6 +527,18 @@ class MockLLMProvider:
                 return json.dumps(out, ensure_ascii=False)
             return "Voici le nouveau prompt : plus serré…"
         return json.dumps(mock_dialog(ctx), ensure_ascii=False)
+
+    def _identity_answer(self, messages: list[ChatMessage], ctx: dict[str, Any]) -> str:
+        attempt = 1 + sum(1 for m in messages if m.role == "assistant")
+        mark = _IDENTITY_INVALID_MARK.search(str(ctx.get("title") or ""))
+        invalid = int(mark.group(1)) if mark else self.invalid_attempts
+        if attempt <= invalid:
+            if attempt % 2:
+                return "Voici quelques idées de couleurs : du rouge, du bleu…"
+            key = "palettes" if ctx["task"] == "palette" else "concepts"
+            return json.dumps({key: [{"name": "Trop court", "colors": [{"role": "dominante", "hex": "rouge"}]}]})
+        out = mock_palettes(ctx) if ctx["task"] == "palette" else mock_logos(ctx)
+        return json.dumps(out, ensure_ascii=False)
 
     def _direction_answer(self, messages: list[ChatMessage], ctx: dict[str, Any]) -> str:
         attempt = 1 + sum(1 for m in messages if m.role == "assistant")
@@ -769,3 +790,77 @@ def mock_dialog(ctx: dict[str, Any]) -> dict[str, Any]:
         if said
         else "J'ai réécrit le prompt selon la consigne.",
     }
+
+
+# --- identité visuelle -----------------------------------------------------------------------------------
+_PALETTE_NAMES = ["Aube", "Braise", "Lagon", "Forêt", "Crépuscule", "Néon", "Sable", "Givre"]
+# Rôle → (décalage de teinte, saturation, luminosité) autour de la teinte de la palette.
+_ROLE_TONES = {
+    "dominante": (0, 0.70, 0.50),
+    "secondaire": (40, 0.55, 0.45),
+    "accent": (180, 0.85, 0.55),
+    "fond": (0, 0.30, 0.92),
+    "texte-clair": (0, 0.20, 0.97),
+    "texte-sombre": (0, 0.35, 0.12),
+    "ombre": (0, 0.40, 0.25),
+}
+
+
+def _hsl(h: float, s: float, light: float) -> str:
+    r, g, b = colorsys.hls_to_rgb((h % 360) / 360, light, s)
+    return f"#{round(r * 255):02x}{round(g * 255):02x}{round(b * 255):02x}"
+
+
+def mock_palettes(ctx: dict[str, Any]) -> dict[str, Any]:
+    """Palettes factices : teintes réparties à partir du titre, décalées par les palettes déjà proposées."""
+    roles = [r for r in ctx["roles"] if r in _ROLE_TONES]
+    required = list(ctx["required_roles"])
+    extra = [r for r in roles if r not in required]
+    n_colors = max(ctx["colors"]["min"], len(required))
+    chosen = (required + extra)[: min(n_colors + 1, ctx["colors"]["max"])]
+    count = min(4, ctx["count"]["max"])
+    shift = len(ctx.get("previous") or [])
+    base = _seed(str(ctx["title"])) % 360
+    out = []
+    for i in range(max(count, ctx["count"]["min"])):
+        k = i + shift
+        hue = base + k * 67
+        name = f"{_PALETTE_NAMES[k % len(_PALETTE_NAMES)]}" + (
+            f" {k // len(_PALETTE_NAMES) + 1}" if k >= len(_PALETTE_NAMES) else ""
+        )
+        colors = [{"role": r, "hex": _hsl(hue + _ROLE_TONES[r][0], *_ROLE_TONES[r][1:])} for r in chosen]
+        out.append(
+            {"name": name, "colors": colors, "explanation": f"Palette « {name} » autour d'une teinte de {hue % 360}°."}
+        )
+    return {"palettes": out}
+
+
+def mock_logos(ctx: dict[str, Any]) -> dict[str, Any]:
+    """Concepts factices : polices et effets permis à tour de rôle, titre en une ou deux lignes."""
+    title = str(ctx["title"])
+    words = title.split()
+    fonts, styles = list(ctx["fonts"]), list(ctx["styles"])
+    shift = len(ctx.get("previous") or [])
+    count = min(5, ctx["count"]["max"])
+    out = []
+    for i in range(max(count, ctx["count"]["min"])):
+        k = i + shift
+        if len(words) >= 2 and ctx.get("max_lines", 2) >= 2 and k % 2 == 0:
+            cut = max(1, len(words) // 2)
+            lines = [{"text": " ".join(words[:cut]), "scale": 0.6}, {"text": " ".join(words[cut:]), "scale": 1}]
+        else:
+            lines = [{"text": title, "scale": 1}]
+        concept: dict[str, Any] = {
+            "name": f"Concept {k + 1}",
+            "explanation": "Titre lisible en petit, effet tiré de la palette de la série.",
+            "font": fonts[k % len(fonts)],
+            "style": styles[k % len(styles)],
+            "lines": lines,
+            "subtitle": None,
+            "slant": [-6, 0, 4, -3, 8][k % 5],
+            "letter_spacing": [0.02, 0.06, 0.0, 0.1, 0.04][k % 5],
+        }
+        if k % 3 == 1 and "accent" in ctx["roles"]:
+            concept["colors"] = {"fill": "accent"}
+        out.append(concept)
+    return {"concepts": out}

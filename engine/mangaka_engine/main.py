@@ -24,6 +24,7 @@ from .api import (
     composition,
     finishing,
     generation,
+    identity,
     jobs,
     journal,
     knowledge,
@@ -282,6 +283,7 @@ def create_app(settings: Settings | None = None, providers: Providers | None = N
     app.include_router(assets.router)
     app.include_router(reference_sheets.router)
     app.include_router(style_board.router)
+    app.include_router(identity.router)
     app.include_router(comfyui.router)
     app.include_router(chapters.router)
     app.include_router(volumes.router)

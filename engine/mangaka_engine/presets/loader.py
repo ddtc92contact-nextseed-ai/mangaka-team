@@ -13,6 +13,8 @@ Arborescence attendue :
       qc_tonality.yaml         # mesures de tonalité de chaque image générée et cible (journal)
       journal.yaml             # journal des générations : raisons d'un rejet, page Statistiques
       knowledge.yaml           # savoir-faire : découpage, recherche hybride, collections par agent
+      identity.yaml            # identité visuelle de la série : palettes proposées, logo du titre
+      logo_styles/*.yaml       # effets du logo du titre (contours, ombre, dégradé, couleurs par défaut)
       page_formats/*.yaml      # formats de page
       cover_formats/*.yaml     # formats de couverture d'un tome (13 × 18, A4) et zones réservées
       cover.yaml               # couverture d'un tome : flux ComfyUI dédié, rendu couleur, prompt
@@ -51,6 +53,7 @@ from .schemas import (
     CoverSettings,
     Defaults,
     FontsPreset,
+    IdentitySettings,
     ImagePromptSettings,
     JournalSettings,
     KnowledgeSettings,
@@ -59,6 +62,7 @@ from .schemas import (
     LayoutTemplate,
     LayoutTemplateFile,
     LetteringSettings,
+    LogoStyle,
     PageFormat,
     PromptPreset,
     ProvidersPreset,
@@ -137,6 +141,8 @@ class PresetRegistry:
     style_options: StyleOptions = field(default_factory=StyleOptions)
     style_loras: StyleLoraCatalog = field(default_factory=StyleLoraCatalog)
     camera_loras: CameraLoraCatalog = field(default_factory=CameraLoraCatalog)
+    identity: IdentitySettings | None = None
+    logo_styles: dict[str, LogoStyle] = field(default_factory=dict)
     issues: list[PresetIssue] = field(default_factory=list)
 
     # --- accès -----------------------------------------------------------
@@ -456,6 +462,7 @@ class PresetRegistry:
         reg.reference_sheets = dict(sorted(reg.reference_sheets.items(), key=lambda kv: (kv[1].order, kv[1].name)))
         reg._load_styles()
         reg._load_covers()
+        reg._load_identity()
         return reg
 
     def _load_covers(self) -> None:
@@ -512,6 +519,42 @@ class PresetRegistry:
             self.issues.append(PresetIssue(self._rel(path), " ; ".join(problems)))
         else:
             self.cover = cover
+
+    def _load_identity(self) -> None:
+        """Identité visuelle (identity.yaml + logo_styles/) : chargée après les polices, qu'elle référence."""
+        for path in sorted((self.root / "logo_styles").glob("*.y*ml")):
+            style = self._parse(path, LogoStyle)
+            if style is not None:
+                self._register(self.logo_styles, style.id, style, path)
+        path = self.root / "identity.yaml"
+        if not path.exists():
+            return
+        identity = self._parse(path, IdentitySettings)
+        if identity is None:
+            return
+        known = self.fonts.fonts if self.fonts else {}
+        unknown = [f for f in identity.logo.fonts if f not in known]
+        if unknown:
+            self.issues.append(PresetIssue(self._rel(path), f"logo.fonts : police inconnue ({', '.join(unknown)})"))
+            fonts = [f for f in identity.logo.fonts if f in known]
+            if not fonts:
+                return
+            identity = identity.model_copy(update={"logo": identity.logo.model_copy(update={"fonts": fonts})})
+        roles = identity.palette.roles
+        for style in self.logo_styles.values():
+            bad = sorted({r for chain in style.colors.values() for r in chain if r not in roles})
+            if bad:
+                self.issues.append(
+                    PresetIssue(f"logo_styles/{style.id}", f"rôle de palette inconnu : {', '.join(bad)}")
+                )
+        self.identity = identity
+
+    def require_identity(self) -> IdentitySettings:
+        if self.identity is None:
+            raise PresetError("presets/identity.yaml absent ou invalide : identité visuelle indisponible")
+        if not self.logo_styles:
+            raise PresetError("presets/logo_styles/ vide ou invalide : logo indisponible")
+        return self.identity
 
     def _load_styles(self) -> None:
         """Packs de style. Un pack invalide (schéma, ou référence inconnue) est écarté avec un message clair."""

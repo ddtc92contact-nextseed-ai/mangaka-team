@@ -1,0 +1,77 @@
+# Identité visuelle — concepts de logo du titre (fiche série › « Identité visuelle »), voir
+# engine/mangaka_engine/pipeline/identity.py, pipeline/logo.py (rendu SVG + PNG) et presets/identity.yaml.
+# Le logo est typographique : l'agent choisit une police et un effet parmi les presets, jamais d'image.
+# LLM : celui de l'agent « Directeur artistique ».
+#
+# Variables disponibles ($nom ; écrire $$ pour un « $ » littéral) :
+#   $series_title
+#   $style_packs $style_guidelines $bible
+#   $palette            (palette retenue : rôle → couleur)
+#   $roles              (rôles de la palette retenue, utilisables comme couleurs)
+#   $fonts              (polices permises : identifiant et nom)
+#   $styles             (effets permis : identifiant, nom, description, couleurs utilisées)
+#   $min_concepts $max_concepts $max_lines $slant_max $min_spacing $max_spacing $min_scale $max_scale
+#   $previous           (concepts déjà proposés, à ne pas répéter)
+#   $context_json       (le même contexte, en JSON)
+# Gabarit de relance après une réponse invalide : $error (erreurs de validation).
+id: logo
+description: Concepts de logo du titre de la série (police, disposition, effets, couleurs de la palette).
+max_retries: 2            # nouveaux essais après une réponse invalide (2 au maximum), puis erreur lisible
+temperature: 0.8
+
+system: |
+  Tu es graphiste spécialiste des logos de titres de manga et de bande dessinée. Tu proposes des concepts
+  de logo purement typographiques : une police, une disposition du titre, un effet et des couleurs tirées
+  de la palette de la série. Tu ne modifies jamais le texte du titre (ni mot ajouté, ni mot retiré, accents
+  et apostrophes compris) ; seule la casse peut changer. Les concepts sont variés (polices, effets,
+  dispositions) et toujours lisibles en petit.
+  Tu réponds UNIQUEMENT par un objet JSON valide, sans texte autour ni bloc de code.
+
+user: |
+  Titre de la série : « $series_title »
+  Style de la série :
+  $style_packs
+
+  Consignes du genre et du ton :
+  $style_guidelines
+
+  Bible de la série :
+  $bible
+
+  Palette retenue (rôle : couleur) :
+  $palette
+
+  Polices permises :
+  $fonts
+
+  Effets permis :
+  $styles
+
+  Concepts déjà proposés (propose autre chose) :
+  $previous
+
+  Propose entre $min_concepts et $max_concepts concepts. Pour chacun :
+  - « name » : un nom court ; « explanation » : une phrase en français pour l'auteur ;
+  - « font » : l'identifiant d'une police permise ; « style » : l'identifiant d'un effet permis ;
+  - « lines » : 1 à $max_lines lignes {"text": …, "scale": …} qui, mises bout à bout, redonnent exactement
+    le titre ; « scale » entre $min_scale et $max_scale (1 = la ligne mise en avant, la plus grande) ;
+  - « subtitle » : null, ou un court sous-titre écrit en petit sous le titre ;
+  - « slant » : inclinaison en degrés, entre -$slant_max et $slant_max (0 = droit) ;
+  - « letter_spacing » : interlettrage en em, entre $min_spacing et $max_spacing ;
+  - « colors » (facultatif) : couleurs de l'effet, chacune un rôle de la palette ($roles) ou "#rrggbb" ;
+    clés possibles : fill, fill_end, outline, outer, shadow, subtitle. Une clé absente prend la couleur
+    par défaut de l'effet. Le texte doit bien contraster avec son contour.
+
+  Format de réponse :
+  {"concepts": [{"name": "…", "explanation": "…", "font": "bangers", "style": "contour-epais",
+     "lines": [{"text": "…", "scale": 1}], "subtitle": null, "slant": -4, "letter_spacing": 0.02,
+     "colors": {"fill": "dominante", "outline": "texte-sombre"}}]}
+
+  <contexte>
+  $context_json
+  </contexte>
+
+retry: |
+  Ta réponse précédente est invalide :
+  $error
+  Corrige ces erreurs et renvoie l'objet JSON complet, et uniquement lui.

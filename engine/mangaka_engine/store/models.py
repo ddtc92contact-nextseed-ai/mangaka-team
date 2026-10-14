@@ -16,6 +16,7 @@ l'auteur, version appliquée à la mise en page et aux prompts).
 Traçabilité : `GenerationLog` (une ligne par génération ComfyUI, jamais réécrite) → `GenerationEvent`
 (verdicts de l'auteur : gardée, rejetée, régénérée, retouchée).
 Garde d'étapes : `ChapterStageDecision` (validation d'une étape vitale du chapitre, passer-outre, levée).
+Identité visuelle : palette retenue et propositions (colonnes de `Project`) · `SeriesLogo` (versions du logo).
 Les fichiers binaires (images) vivent dans `data/`, la base ne stocke que leurs chemins relatifs.
 """
 
@@ -178,6 +179,11 @@ class Project(TimestampMixin, Base):
     # « Cohérence anime » : LoRA d'identité (presets/camera_loras.yaml) ajouté aux générations de la série
     # dont le palier le permet (Qualité) ; désactivé par défaut.
     anime_consistency: Mapped[bool] = mapped_column(default=False)
+    # Identité visuelle (pipeline/identity.py) : palette retenue {"name", "explanation", "colors": [{"role", "hex"}]}
+    # (None = pas encore choisie), dernières palettes et derniers concepts de logo proposés par l'IA.
+    palette: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
+    palette_proposals: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list, server_default="[]")
+    logo_proposals: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list, server_default="[]")
 
     characters: Mapped[list[Character]] = relationship(
         back_populates="project", cascade="all, delete-orphan", order_by="Character.name"
@@ -190,6 +196,9 @@ class Project(TimestampMixin, Base):
     )
     volumes: Mapped[list[Volume]] = relationship(
         back_populates="project", cascade="all, delete-orphan", order_by="Volume.number"
+    )
+    logos: Mapped[list[SeriesLogo]] = relationship(
+        back_populates="project", cascade="all, delete-orphan", order_by="SeriesLogo.version"
     )
 
 
@@ -948,3 +957,20 @@ class ChapterStageDecision(Base):
     # Éléments en faute au moment de la décision (un passer-outre garde ce qu'il a laissé passer).
     faults: Mapped[int] = mapped_column(Integer, default=0)
     total: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class SeriesLogo(Base):
+    """Une version enregistrée du logo du titre de la série (pipeline/logo.py) : réglages complets du logo
+    (police, lignes, effet, couleurs…), rendus à la demande en SVG et PNG. Jamais réécrite : le logo de la
+    série est la dernière version ; reprendre une ancienne version en crée une nouvelle."""
+
+    __tablename__ = "series_logos"
+    __table_args__ = NEVER_REUSED
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    spec: Mapped[dict[str, Any]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+    project: Mapped[Project] = relationship(back_populates="logos")

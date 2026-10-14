@@ -59,6 +59,9 @@
 - 32 : tomes (`volumes` : numéro, titre, format et couverture ; `volume_chapters` : chapitres inclus, dans
   l'ordre, un chapitre dans un seul tome ; `volume_covers` : versions de l'illustration de couverture). Tables
   nouvelles et vides : aucun chapitre n'est rangé dans un tome, les chapitres ne changent pas.
+- 33 : identité visuelle de la série : palette retenue et dernières propositions (`projects.palette`,
+  `palette_proposals`, `logo_proposals`) et versions du logo du titre (`series_logos`). Les séries existantes
+  n'ont ni palette ni logo.
 
 Une base neuve est créée directement à la dernière version. Chaque migration tourne dans une
 transaction unique, clés étrangères désactivées (recette « 12 étapes » de SQLite pour reconstruire
@@ -101,6 +104,7 @@ from .models import (
     SeriesAsset,
     SeriesAssetImage,
     SeriesBible,
+    SeriesLogo,
     Volume,
     VolumeChapter,
     VolumeCover,
@@ -109,7 +113,7 @@ from .slugs import RESERVED_ENTRIES, RESERVED_SERIES, slugify, unique_slug
 
 log = logging.getLogger("mangaka_engine")
 
-SCHEMA_VERSION = 32
+SCHEMA_VERSION = 33
 
 
 class MigrationError(RuntimeError):
@@ -501,6 +505,19 @@ def _v31_to_v32(cur: sqlite3.Cursor) -> None:
                 cur.execute(stmt)
 
 
+def _v32_to_v33(cur: sqlite3.Cursor) -> None:
+    existing = {row[1] for row in cur.execute("PRAGMA table_info(projects)")}
+    if "palette" not in existing:
+        cur.execute("ALTER TABLE projects ADD COLUMN palette JSON")
+    for column in ("palette_proposals", "logo_proposals"):
+        if column not in existing:
+            cur.execute(f"ALTER TABLE projects ADD COLUMN {column} JSON NOT NULL DEFAULT '[]'")
+    tables = {row[0] for row in cur.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if SeriesLogo.__tablename__ not in tables:
+        for stmt in _ddl(SeriesLogo.__table__):
+            cur.execute(stmt)
+
+
 MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     # version de départ → (version d'arrivée, fonction)
     0: (2, _v0_to_v2),
@@ -535,6 +552,7 @@ MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     29: (30, _v29_to_v30),
     30: (31, _v30_to_v31),
     31: (32, _v31_to_v32),
+    32: (33, _v32_to_v33),
 }
 
 

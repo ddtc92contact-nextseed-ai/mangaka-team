@@ -1,0 +1,47 @@
+# Identité visuelle de la série (fiche série › « Identité visuelle ») : palette de couleurs proposée par
+# l'IA, logo du titre typographique et vectoriel. Palette et logo appartiennent à la série (ils restent les
+# mêmes d'un tome à l'autre). Voir engine/mangaka_engine/pipeline/identity.py (agents) et logo.py (rendu).
+#
+# Le modèle d'image ne dessine jamais de texte : le logo est posé ici, en SVG (police embarquée) et en PNG
+# transparent, comme le lettrage. Effets du logo : presets/logo_styles/*.yaml. Prompts : prompts/palette.yaml
+# et prompts/logo.yaml.
+
+palette:
+  count: { min: 3, max: 5 }       # palettes par proposition
+  colors: { min: 5, max: 7 }      # couleurs par palette
+  # Rôles possibles d'une couleur (clé → libellé affiché). Une palette a au plus une couleur par rôle.
+  roles:
+    dominante: Dominante
+    secondaire: Secondaire
+    accent: Accent
+    fond: Fond
+    texte-clair: Texte clair
+    texte-sombre: Texte sombre
+    ombre: Ombre
+  required_roles: [dominante, accent, fond, texte-clair, texte-sombre]
+  # Couleurs dominantes lues dans l'image de la référence de style active (si elle existe), données à l'agent.
+  reference_colors: 6
+
+logo:
+  count: { min: 4, max: 6 }       # concepts par proposition
+  # Polices proposées pour les logos (clés de fonts.yaml) : polices d'affichage, toutes sous licence SIL OFL 1.1
+  # (fonts/OFL.txt). Bangers, Bungee, Righteous et Russo One ont été ajoutées pour les titres.
+  fonts: [bangers, bungee, righteous, russo-one, bowlby-one, titan-one, lilita-one]
+  # Texte de la ligne principale (échelle 1) : taille en px du SVG. Le PNG est rendu `png_scale` fois plus grand.
+  size_px: 160
+  png_scale: 4
+  line_gap: 0.06                  # espace entre deux lignes du titre (encre des glyphes, accents compris), en taille de la ligne principale
+  subtitle_scale: 0.26            # taille du sous-titre, relative à la ligne principale
+  subtitle_gap: 0.12              # espace au-dessus du sous-titre, en taille de la ligne principale
+  padding: 0.12                   # marge autour du logo (contours et ombre compris), en taille de la ligne principale
+  # Contraste minimal (WCAG) entre le texte et son contour : en dessous, le contour d'un concept de l'IA prend la
+  # couleur de la palette la plus contrastée (sinon noir ou blanc), et un réglage à la main est signalé.
+  min_contrast: 3.0
+  # Bornes des réglages (concept de l'IA et réglage à la main).
+  slant_max_deg: 12               # inclinaison légère : ± 12°
+  letter_spacing: { min: -0.05, max: 0.4 }   # interlettrage, en em
+  word_scale: { min: 0.35, max: 1.0 }        # taille relative d'une ligne (1 = ligne mise en avant)
+  outline_scale: { min: 0.0, max: 2.5 }      # épaisseur des contours, relative au style
+  max_lines: 2
+  # Fonds d'aperçu des concepts (côte à côte sur fond clair et sur fond sombre).
+  preview_backgrounds: { light: "#f4f4f5", dark: "#18181b" }

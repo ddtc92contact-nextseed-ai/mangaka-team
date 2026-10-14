@@ -71,6 +71,8 @@ def test_presets_endpoint(client: TestClient) -> None:
     assert any(t["panel_count"] == 6 for t in data["layout_templates"])
     assert data["prompts"] == [
         "direction-artistique",
+        "logo",
+        "palette",
         "redacteur-couverture",
         "redacteur-image",
         "redacteur-image-dialogue",

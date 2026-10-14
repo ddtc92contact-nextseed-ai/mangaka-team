@@ -39,6 +39,7 @@ Après modification d'un preset, redémarre le moteur (`npm run dev`).
 | `agents/*.yaml` | Agents du pipeline (écran « L'équipe ») : nom, rôle, étape et réglages éditables depuis l'UI |
 | `reference_sheets/*.yaml` | Types de fiches de référence de « Créer des références » (portrait, turnaround, expressions, vue 3/4, plan large, autre angle) : gabarit de prompt, taille, workflow facultatif |
 
+| `identity.yaml` + `logo_styles/*.yaml` | Identité visuelle de la série (fiche série) : palettes proposées par l'IA (nombre, couleurs, rôles), logo du titre (polices permises, tailles, contraste minimal, bornes des réglages) et effets du logo — voir « Identité visuelle » |
 | `knowledge.yaml` | Savoir-faire (RAG local) : découpage des documents, recherche hybride, seuil « petite collection », budget de la bible, collections lues par chaque agent |
 | `knowledge_packs/*.yaml` + `*.md` | Packs de savoir-faire livrés (fiches de mise en scène manga) : importés au démarrage dans des collections « pack » en lecture seule |
 
@@ -565,6 +566,44 @@ style_board:
 L'ancien texte « Style graphique » est conservé en lecture seule (`legacy_style`) et affiché sur la
 fiche série sous le bandeau « Style à choisir dans les listes ». Tant qu'aucun pack n'est choisi, il
 tient lieu de genre dans `$style` (avec le rendu par défaut) ; il est ignoré dès qu'un pack est choisi.
+
+## Identité visuelle (`identity.yaml`, `logo_styles/`)
+
+Section « Identité visuelle » de la fiche série. Palette et logo appartiennent à la **série** : ils restent
+les mêmes d'un tome à l'autre. Les deux agents utilisent le LLM du « Directeur artistique ».
+
+- **Palette** (`prompts/palette.yaml`) : à partir de la bible, des packs de style (genre, ton), des fiches
+  personnages et de la référence de style active (description + couleurs dominantes de son image), l'IA
+  propose `palette.count` palettes de `palette.colors` couleurs `#rrggbb`, chacune avec un rôle de
+  `palette.roles` (rôles obligatoires : `required_roles`). L'auteur en retient une et peut retoucher chaque
+  couleur ; « Proposer d'autres palettes » montre à l'agent les précédentes pour qu'il varie.
+- **Logo** (`prompts/logo.yaml`) : typographique et vectoriel, jamais dessiné par le modèle d'image. L'IA
+  propose `logo.count` concepts : une police de `logo.fonts`, un effet de `logo_styles/`, le titre en une ou
+  deux lignes (taille relative), inclinaison, interlettrage, couleurs (rôles de la palette retenue), sous-titre.
+  Rendu SVG (police embarquée, renommée `mk-<police>`) et PNG transparent (`png_scale` × la taille du SVG).
+  Contour trop proche du texte (contraste WCAG < `min_contrast`) : corrigé sur un concept de l'IA, signalé
+  sur un réglage à la main. Chaque « Enregistrer » crée une nouvelle version (les anciennes restent).
+
+Un effet de logo :
+
+```yaml
+id: double-contour
+name: Double contour
+description: Contour sombre puis second contour clair.
+outline_em: 0.05           # contour autour des lettres, en em (0 = aucun)
+outer_outline_em: 0.05     # second contour, autour du premier
+shadow: null               # ombre portée { dx_em, dy_em }
+gradient: false            # lettres en dégradé vertical fill → fill_end
+colors:                    # couleurs par défaut : rôles de la palette, par ordre de préférence
+  fill: [accent, dominante]
+  outline: [texte-sombre, ombre]
+  outer: [texte-clair, fond]
+  subtitle: [texte-sombre, dominante]
+```
+
+Ajouter une police de titre : déposer le TTF (licence OFL) dans `fonts/`, la déclarer dans `fonts.yaml`, noter
+sa licence dans `fonts/OFL.txt`, puis l'ajouter à `logo.fonts`. Les accents français (é, è, à, ç, œ) doivent y
+être : un concept dont la police n'a pas un caractère du titre est refusé.
 
 ## Prompts (`prompts/*.yaml`)
 
