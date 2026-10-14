@@ -54,6 +54,7 @@ SERIES_TABLES = (
     "generation_logs",
     # Décisions de la garde d'étapes (validée, forcée) : chapitres des séries effacées.
     "chapter_stage_decisions",
+    "chapter_crowd_marks",
     "panel_image_annotations",
     "qc_bench_runs",
     "llm_runs",

@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, object_session, selectinload
 
 from ..pipeline.art_direction import keep_author_plan
+from ..pipeline.cast import active_marks, is_crowd, panel_unmatched
 from ..pipeline.crop import PanelCrop, bounded
 from ..pipeline.dialogues import chapter_report
 from ..pipeline.finishing import panel_print_info
@@ -48,6 +49,7 @@ from ..store.models import (
     PageKind,
     Panel,
 )
+from .cast import add_crowd_mark
 from .deps import AppContext, get_ctx, get_session
 from .errors import FieldError
 from .jobs import job_out
@@ -174,6 +176,8 @@ def page_out(
             if session is not None
             else CharacterMatcher([])
         )
+    # Foules marquées « foule sans fiche » dans le chapitre : plus signalées (pipeline/cast.py).
+    marked = active_marks(session, page.chapter_id) if session is not None else {}
     chosen = {p.id: next((i for i in p.images if i.selected), None) for p in page.panels}
     # Marge extérieure inviolable : une mise en page stockée avant le garde-fou est affichée coupée.
     layout = clamp_to_live(page.layout) if page.layout else None
@@ -198,7 +202,7 @@ def page_out(
                 setting=p.setting or "",
                 staging=p.staging or "",
                 characters=list(p.character_names or []),
-                unmatched_characters=matcher.unmatched(p.character_names or []),
+                unmatched_characters=panel_unmatched(matcher, p, marked),
                 name_notes=name_notes_out(matcher, p),
                 offscreen_characters=list(p.offscreen_names or []),
                 viewpoint=viewpoint_out(p),
@@ -392,8 +396,9 @@ def link_character_name(
     chapter_id: int, body: CharacterLinkIn, session: Session = Depends(get_session)
 ) -> CharacterLinkOut:
     """Nom de personnage sans fiche (« le petit dragon ») : le rattache à une fiche — il devient un de ses
-    alias, reconnu dans toute la série et aux prochains découpages — ou l'écarte (`character_id` null :
-    figurant sans fiche, retiré des personnages des cases du chapitre ; la description ne change pas)."""
+    alias, reconnu dans toute la série et aux prochains découpages. `character_id` null ne fait plus sortir un
+    intervenant en silence : seule une foule anonyme (« des passants ») est marquée « foule sans fiche » (tracée,
+    réversible, voir pipeline/cast.py) ; un intervenant nommé est refusé, il lui faut une fiche."""
     chapter = get_chapter_or_404(session, chapter_id)
     key = name_key(body.name)
     panels = [
@@ -404,22 +409,27 @@ def link_character_name(
     ]
     alias_added = False
     if body.character_id is None:
-        for pa in panels:
-            pa.character_names = [n for n in pa.character_names or [] if name_key(n) != key]
-            pa.offscreen_names = [n for n in pa.offscreen_names or [] if name_key(n) != key]
-    else:
-        character = session.get(Character, body.character_id)
-        if character is None or character.project_id != chapter.project_id:
-            raise FieldError("character_id", "personnage inconnu dans cette série")
-        others = session.scalars(
-            select(Character).where(Character.project_id == chapter.project_id, Character.id != character.id)
-        )
-        clash = next((o for o in others if name_key(o.name) == key), None)
-        if clash is not None:
-            raise FieldError("name", f"« {body.name} » est déjà le nom de la fiche {clash.name}")
-        if key not in {name_key(n) for n in (character.name, *(character.aliases or []))}:
-            character.aliases = [*(character.aliases or []), body.name]
-            alias_added = True
+        if not is_crowd(body.name):
+            raise FieldError(
+                "character_id",
+                f"« {body.name} » est un intervenant du chapitre : relie-le à une fiche ou crée la sienne, même "
+                "secondaire. Seules les foules anonymes (« des passants », « la foule ») peuvent se passer de fiche.",
+            )
+        add_crowd_mark(session, chapter, body.name)
+        session.commit()
+        return CharacterLinkOut(name=body.name, character_id=None, panels=len(panels), alias_added=False)
+    character = session.get(Character, body.character_id)
+    if character is None or character.project_id != chapter.project_id:
+        raise FieldError("character_id", "personnage inconnu dans cette série")
+    others = session.scalars(
+        select(Character).where(Character.project_id == chapter.project_id, Character.id != character.id)
+    )
+    clash = next((o for o in others if name_key(o.name) == key), None)
+    if clash is not None:
+        raise FieldError("name", f"« {body.name} » est déjà le nom de la fiche {clash.name}")
+    if key not in {name_key(n) for n in (character.name, *(character.aliases or []))}:
+        character.aliases = [*(character.aliases or []), body.name]
+        alias_added = True
     session.flush()
     relink_project(session, chapter.project_id)
     session.commit()

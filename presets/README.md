@@ -23,7 +23,7 @@ Après modification d'un preset, redémarre le moteur (`npm run dev`).
 | `style_options.yaml` | Réglages fins bornés du style : trait, trames (N&B seulement), détail des décors, finition (propre, croquis, pinceau nerveux, scan) |
 | `style_loras.yaml` | Catalogue des LoRA de style : mots déclencheurs et poids conseillé |
 | `camera_loras.yaml` | LoRA Multiple-Angles (« Nouvel angle », « Changer l'angle ») et Cohérence anime, vocabulaire de caméra |
-| `prompts/*.yaml` | Prompts des étapes LLM (`script` : découpage d'un chapitre ; `direction-artistique` ; `redacteur-image` : prompt image de chaque case rédigé en un paragraphe ; `redacteur-image-dialogue` : dialogue sur une case dans l'atelier) |
+| `prompts/*.yaml` | Prompts des étapes LLM (`script` : découpage d'un chapitre ; `direction-artistique` ; `redacteur-image` : prompt image de chaque case rédigé en un paragraphe ; `redacteur-image-dialogue` : dialogue sur une case dans l'atelier ; `fiche-intervenant` : fiche préremplie d'un intervenant de la distribution) |
 | `image_prompt.yaml` | Construction du prompt final des cases (étape 3) et termes « pas de texte » du prompt négatif |
 | `qc.yaml` | Contrôle qualité des cases (étape 4) : poids, seuils de verdict, règles des détecteurs, seuil CCIP, zone de doute de la vision, nouveaux essais automatiques |
 | `qc_tonality.yaml` | Mesures de tonalité de chaque image générée (% sombre, % noir, % blanc, saturation, densité de trait) et cible (planche de référence) |
@@ -1454,6 +1454,18 @@ prompt est gardé comme une édition à la main et la direction / la référence
 jusqu'à « Reconstruire le prompt » (qui accepte aussi une consigne : même gabarit, sans historique).
 Variables : celles de `redacteur-image.yaml`, plus `$instruction`, `$current_prompt`,
 `$current_direction`, `$plans`, `$angles`, `$camera_terms`, `$reference_options`, `$history`.
+
+### Fiche d'un intervenant (`prompts/fiche-intervenant.yaml`)
+
+Panneau « Distribution » de la direction artistique (engine/mangaka_engine/pipeline/cast.py) : chaque intervenant
+du chapitre, même secondaire (« le garde », « la serveuse »), doit avoir sa fiche et une image de référence avant
+la génération (étape `references` de la garde d'étapes). « Créer la fiche » envoie au LLM du Directeur artistique
+les cases où l'intervenant apparaît (description, mise en scène, lieu, ses répliques) ; il rend un JSON `age`,
+`silhouette`, `tenue`, `signe_distinctif`, `description`, `mots_cles`, validé (`max_retries`, puis erreur
+lisible). Rien n'est enregistré : l'auteur relit la fiche préremplie avant de la créer. « Tout créer pour les
+secondaires » crée ces fiches d'un coup puis met en file un portrait (`personnage-portrait`) par fiche sans image,
+gardé d'office comme référence. Variables : `$name`, `$role`, `$series_title`, `$style`, `$panels`,
+`$context_json` ; relance : `$error`.
 
 ## Lettrage (étape 5)
 
