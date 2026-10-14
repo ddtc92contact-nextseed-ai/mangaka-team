@@ -1556,8 +1556,9 @@ class PassageOut(BaseModel):
     score: float | None
     vector_score: float | None
     keyword_score: float | None
-    # framing : fiche du plan ou de l'angle de la case (une seule par famille), servie en premier
-    mode: Literal["retrieved", "whole", "framing"]
+    # framing : fiche du plan ou de l'angle de la case (une seule par famille), servie en premier ; genre : courbe
+    # de tension du genre de la série (scénariste, une seule), servie en premier
+    mode: Literal["retrieved", "whole", "framing", "genre"]
     pack: str | None = None
     pages: list[int] = Field(default_factory=list)  # recherche par page (direction artistique)
     dropped: str | None = None  # écarté comme redondant : raison (en français)

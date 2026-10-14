@@ -39,6 +39,11 @@ bible_max_tokens: 2500
 # déjà plein sur chaque case. Directeur artistique : Valeurs et masses + Encrage ; rédacteur de prompt : Valeurs
 # et masses SEULEMENT ; scénariste : rien. Trames, Papier et impression, Finitions : cherchables dans
 # Savoir-faire, lues par aucun agent (la finition se règle sur la fiche de la série, style_options.yaml).
+#
+# Les collections « Structure · … » viennent du pack presets/knowledge_packs/manga_story_structure (14/10/2026 :
+# déroulé d'un chapitre, courbes de tension par genre, plans selon le moment, fins de chapitre, rythme d'un arc,
+# silence et dialogue). Lues par le scénariste seulement (le futur agent de création de série les recevra aussi) ;
+# petites, elles sont cherchées et jamais injectées entières (comme toute collection d'un pack chez le scénariste).
 agents:
   script:
     label: Scénariste (étape 1)
@@ -49,9 +54,17 @@ agents:
       - Mise en scène · Fondamentaux
       - Mise en scène · Émotions
       - Mise en scène · Exemples
+      - Structure · Déroulé du chapitre
+      - Structure · Courbes par genre
+      - Structure · Plans selon le moment
+      - Structure · Fins de chapitre
+      - Structure · Rythme d'un arc
+      - Structure · Silence et dialogue
     series_collections: true
     budget_tokens: 2500
     top_k: 6
+    # Ajouté à la requête (titre, synopsis, packs de style) : le synopsis ne parle jamais de déroulé ni de fin.
+    query_hint: Déroulé, accroche, pic, fin
   # Savoir-faire cherché page par page (requête : le scénario de la page), dans ce budget total, sans doublon ;
   # top_k : fiches au plus par page. Une petite collection d'un pack n'est jamais injectée entière ici.
   art_direction:

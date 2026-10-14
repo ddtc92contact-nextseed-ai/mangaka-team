@@ -1,0 +1,31 @@
+# Pack de savoir-faire « structure et rythme » : déroulé d'un chapitre, courbes de tension par genre, plans
+# selon le moment, fins de chapitre, rythme d'un arc, silence et densité de dialogue.
+# Jumeau des packs de mise en scène et de rendu : même format et mêmes règles (presets/README.md › Packs de
+# savoir-faire). Importé au démarrage du moteur, et par « Mettre à jour les packs » dans Savoir-faire.
+#
+# Les deux autres packs parlent du dessin ; celui-ci parle de la construction d'un chapitre et d'une série.
+# Lu par le scénariste (knowledge.yaml › agents.script) ; le futur agent de création de série le recevra aussi.
+# Les règles chiffrées vivent dans les presets, jamais ici : les fiches s'y conforment (cases par page du genre,
+# dialogue_rules de prompts/script.yaml, variety_rules et page_rules de prompts/direction-artistique.yaml).
+id: manga_story_structure
+file: manga_story_structure.md
+
+# Sections `##` → collection. Une section qui contient des fiches `###` donne un document par fiche.
+collections:
+  - name: Structure · Déroulé du chapitre
+    sections: ["20_deroule_du_chapitre"]
+  - name: Structure · Courbes par genre
+    sections: ["21_courbes_par_genre"]
+  - name: Structure · Plans selon le moment
+    sections: ["22_plans_selon_le_moment"]
+  - name: Structure · Fins de chapitre
+    sections: ["23_fins_de_chapitre"]
+  - name: Structure · Rythme d'un arc
+    sections: ["24_rythme_d_un_arc"]
+  - name: Structure · Silence et dialogue
+    sections: ["25_silence_et_dialogue"]
+
+# Non importé : mode d'emploi de l'indexation.
+skip: ["0.A"]
+
+# Pas de pont de vocabulaire : ce pack ne porte pas de codes de cadrage.
