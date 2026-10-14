@@ -40,7 +40,7 @@ from ..presets.schemas import (
 )
 from ..store.models import Project
 from .framing import REACTION, SUBJECTIVE, plain, viewpoint_key
-from .layout import _leaf_shares, choose_template
+from .layout import _leaf_shares
 
 log = logging.getLogger("mangaka_engine")
 
@@ -103,6 +103,11 @@ LABELS: dict[str, tuple[str, str]] = {
         "Nombre de planches de fin où placer un pic (0 = libre).",
     ),
 }
+
+
+def _de(label: str) -> str:
+    """« de plans moyens », « d'inserts »."""
+    return f"d'{label}" if label[:1] in "aeiouyéèh" else f"de {label}"
 
 
 def _pct(value: float) -> str:
@@ -324,7 +329,7 @@ def shot_problems(plans: Sequence[Any], charter: Charter | None, pages: int) -> 
                 )
             else:
                 fix = f"passe davantage de cases en {names}"
-            out.append(f"trop peu de {SHOT_LABELS[cls]} : {n} sur {total} (au moins {need}, {_pct(r.min)}) : {fix}")
+            out.append(f"trop peu {_de(SHOT_LABELS[cls])} : {n} sur {total} (au moins {need}, {_pct(r.min)}) : {fix}")
         allowed = _allowed(r.max, total)
         if n > allowed:
             fix = (
@@ -332,7 +337,7 @@ def shot_problems(plans: Sequence[Any], charter: Charter | None, pages: int) -> 
                 if cls in ("wide", "medium")
                 else "élargis ou varie le cadrage"
             )
-            out.append(f"trop de {SHOT_LABELS[cls]} : {n} sur {total} ({allowed} au plus, {_pct(r.max)}) : {fix}")
+            out.append(f"trop {_de(SHOT_LABELS[cls])} : {n} sur {total} ({allowed} au plus, {_pct(r.max)}) : {fix}")
     tight = sum(counts.get(c, 0) for c in TIGHT_CLASSES)
     allowed = _allowed(shots.tight_max, total)
     if tight > allowed:
@@ -375,25 +380,18 @@ class Shape:
 
 
 def page_shape(view: PageView, charter: Charter) -> Shape:
-    """Forme d'une planche : page choc, sinon gabarit choisi (ou celui que la mise en page tirerait de
-    l'importance des cases), et si elle a une grande case."""
+    """Forme d'une planche : page choc, sinon gabarit choisi, sinon nombre de cases et de grandes cases (importance
+    du scénario) — « 3 cases dont 1 grande » — et si elle a une grande case."""
     if view.page_choc:
         return Shape(f"choc:{_key(view.page_choc)}", f"page choc ({view.page_choc})", True)
     n = len(view.panels)
-    importances = [int(pa.get("importance") or 2) for pa in view.panels]
-    templates = {t.id: t for t in charter.templates}
-    tpl = templates.get(view.template or "")
-    if tpl is not None and tpl.panel_count == n:
-        tid, tree = tpl.id, tpl.tree
-    elif n:
-        tid, tree = choose_template(list(charter.templates), importances)
-    else:
-        return Shape("vide", "page sans case", False)
-    shares = _leaf_shares(tree)
-    big = n > 1 and max(shares) >= charter.settings.big_area_ratio / n - EPS
-    big = big or (tid.startswith("auto-") and any(i >= charter.settings.big_importance for i in importances))
-    name = templates[tid].name if tid in templates else f"grille de {n} cases"
-    return Shape(f"tpl:{tid}", f"« {name} »", big or n == 1)
+    tpl = next((t for t in charter.templates if t.id == view.template and t.panel_count == n), None)
+    if tpl is not None:
+        big = n == 1 or max(_leaf_shares(tpl.tree)) >= charter.settings.big_area_ratio / n - EPS
+        return Shape(f"tpl:{tpl.id}", f"« {tpl.name} »", big)
+    k = sum(1 for pa in view.panels if int(pa.get("importance") or 2) >= charter.settings.big_importance)
+    label = f"{n} case{'s' if n > 1 else ''}" + (f" dont {k} grande{'s' if k > 1 else ''}" if k and n > 1 else "")
+    return Shape(f"auto:{n}:{k if n > 1 else 0}", label, n == 1 or k > 0)
 
 
 def _span(pages: Sequence[int]) -> str:

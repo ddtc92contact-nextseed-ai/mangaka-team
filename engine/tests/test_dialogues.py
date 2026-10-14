@@ -125,12 +125,12 @@ def _panel(replies: int, *, panels_on_page: int = 4, sfx: list[str] | None = Non
 def test_thresholds_come_from_the_preset() -> None:
     assert (RULES.target_per_panel, RULES.max_mean_words) == (2, 7)
     assert (RULES.min_per_page, RULES.max_per_page, RULES.min_silent_panels_per_page) == (4, 8, 1)
-    panels = [_panel(1), _panel(1)]
+    panels = [_panel(1), _panel(1), _panel(1)]
     problems = check_dialogues(panels, RULES)
-    assert any("page 1 : 2 répliques (au moins 4 par planche" in p for p in problems)
+    assert any("page 1 : 3 répliques (au moins 4 par planche" in p for p in problems)
     assert any("page 1 : aucune case muette" in p for p in problems)
     lenient = RULES.model_copy(
-        update={"min_per_page": 2, "min_silent_panels_per_page": 0, "require_inner_voice": False}
+        update={"min_per_page": 3, "min_silent_panels_per_page": 0, "require_inner_voice": False}
     )
     assert check_dialogues(panels, lenient) == []
     assert check_dialogues(panels, None) == []
@@ -383,7 +383,9 @@ def test_dense_chapter_3_letters_inside_its_bubble_zones(client: TestClient) -> 
     bulles de sa case, sans texte trop long, et les accents français sont rendus tels quels."""
     ch = _series(client, "Vulcano")
     # Planche 1 de trois cases : la série l'admet dans son ADN (shōnen : 4 à 6 cases par planche).
-    _ok(client.put(f"/projects/{ch['project_id']}/pre-direction", json={"overrides": {"panels.min_per_page": 3}}))
+    # Planche 3 : huit répliques de combat, la série les admet aussi (shōnen : 7 au plus).
+    overrides = {"panels.min_per_page": 3, "dialogue.max_per_page": 8}
+    _ok(client.put(f"/projects/{ch['project_id']}/pre-direction", json={"overrides": overrides}))
     pages = _ok(client.put(f"/chapters/{ch['id']}/pages", json=vulcano.breakdown(dense=True)))
     report = _ok(client.get(f"/chapters/{ch['id']}/dialogues"))
     assert report["warnings"] == [], report["warnings"]

@@ -24,6 +24,7 @@ Après modification d'un preset, redémarre le moteur (`npm run dev`).
 | `style_tones/*.yaml` | Packs de style : **ton** (lumineux, neutre par défaut, dark, humour) |
 | `style_options.yaml` | Réglages fins bornés du style : trait, trames (N&B seulement), détail des décors, finition (propre, croquis, pinceau nerveux, scan) |
 | `style_loras.yaml` | Catalogue des LoRA de style : mots déclencheurs et poids conseillé |
+| `pre_direction.yaml` | ADN de la série : charte chiffrée (cases, formes de planche, plans, présence, dialogue, rythme), défauts des 7 genres |
 | `camera_loras.yaml` | LoRA Multiple-Angles (« Nouvel angle », « Changer l'angle ») et Cohérence anime, vocabulaire de caméra |
 | `prompts/*.yaml` | Prompts des étapes LLM (`script` : découpage d'un chapitre ; `direction-artistique` ; `redacteur-image` : prompt image de chaque case rédigé en un paragraphe ; `redacteur-image-dialogue` : dialogue sur une case dans l'atelier) |
 | `image_prompt.yaml` | Construction du prompt final des cases (étape 3) et termes « pas de texte » du prompt négatif |
@@ -628,10 +629,12 @@ synopsis fait citer un décor inexistant aux N premiers essais.
 aucune pensée, voix off ni narration. Chaque réponse valide du scénariste est vérifiée
 (`pipeline/dialogues.py`, onomatopées jamais comptées comme répliques) :
 
-- `target_per_panel` répliques visées dans chaque case où un personnage présent peut parler, et au moins
-  `min_per_panel` par case sur le chapitre — bornées par la place : `room` donne, selon le nombre de
-  cases de la page, les répliques au plus par case (`big_panel_bonus` de plus pour une case
-  d'importance 3) ;
+- `target_per_panel` répliques visées dans chaque case où un personnage présent peut parler ; compté **par
+  planche**, de `min_per_page` à `max_per_page` répliques (4 à 8 par défaut, le minimum borné par la place)
+  et au moins `min_silent_panels_per_page` case sans réplique dès `silent_min_panels` cases (jamais une case
+  d'action, qui reste parlée). Ces trois valeurs viennent de l'ADN de la série (ci-dessous). `room` donne,
+  selon le nombre de cases de la page, les répliques au plus par case (`big_panel_bonus` de plus pour une
+  case d'importance 3) ;
 - `max_words` mots au plus par réplique, `max_mean_words` en moyenne (on ajoute des bulles, on ne les
   allonge pas) ;
 - `action_needs_voice` : une case « choc » (`action_intensities`) ou avec onomatopée porte au moins un
@@ -652,6 +655,46 @@ premiers découpages maigres (comme le chapitre 3).
 La zone de bulles de `layout.yaml` a, en plus de sa fraction de case, un plancher absolu : `bubble_mm2`
 par bulle et `char_mm2` par caractère (taille réelle du lettrage, toujours bornée à `max_fraction`) —
 sans lui, deux répliques courtes débordaient déjà d'une case d'une planche à 6 cases.
+
+## ADN de la série (`pre_direction.yaml`)
+
+Les règles qui décident (variété, règles par planche, dialogue) étaient une seule copie pour les 7 genres ;
+mesures de « la petite île » (13/10) : 63 % de plans serrés, 11 planches sur 13 de même forme, et
+« vulcano » enchaînait 3 climax dès 40 %. L'ADN chiffre, **série par série**, ce que la prose des genres
+(`llm_guidelines`) disait sans le vérifier. Uniquement des nombres bornés et des booléens (Pydantic,
+`PreDirection`), en six familles :
+
+| Famille | Valeurs | Vérifiée par |
+| --- | --- | --- |
+| `panels` | cases par planche, au moins / au plus (une pleine page reste permise) | scénariste (`panel_count_problems`) |
+| `shapes` | part de planches à grande case, planches de même forme d'affilée, part d'une même forme | DA (`check_page_rules`) |
+| `shots` | part min / max de gros plans, plans rapprochés, moyens, larges, inserts ; plafond des plans serrés | DA (`check_variety`) |
+| `presence` | part de cases en vue subjective, de cases sans personnage | DA (`check_page_rules`) |
+| `dialogue` | répliques par planche, cases muettes par planche | scénariste (`check_dialogues`) |
+| `rhythm` | fenêtre du premier pic, respiration après un pic, pics d'affilée, pic final | DA (`check_page_rules`) |
+
+`defaults` est le défaut ultime ; `genres` donne, pour chacun des 7 genres, les seules valeurs qui changent.
+La série hérite de son genre et ajuste ce qu'elle veut dans la carte « ADN de la série » de sa fiche
+(`GET`/`PUT /projects/{id}/pre-direction` ; seules les valeurs différentes du genre sont stockées dans
+`projects.pre_direction`, le reste suit le genre). Les séries d'avant la v34 n'ajustent rien : elles reçoivent
+les défauts de leur genre.
+
+**Contrôles.** Le plancher des plans larges et le plafond des plans serrés font dire « élargis » à la relance,
+symétriques de `max_wide_medium_share` (« resserre »). Forme d'une planche : page choc, sinon gabarit choisi,
+sinon nombre de cases et de grandes cases (importance 3) ; une case de gabarit `big_area_ratio` fois plus
+grande qu'une part égale est une grande case. Formes, rythme, présence et échelle des plans se vérifient
+sur au moins `min_pages` pages dirigées ensemble. **La charte avertit, elle ne bloque pas** : l'échelle des
+plans relance complètement la DA, les règles par planche passent par la relance ciblée — sur les champs de la
+page (rythme, gabarit, page choc, `page_retry` de `page_rules`) quand la règle porte sur la page entière —
+puis tout ce qui reste devient un avertissement « chapitre : … » (écran Direction artistique). Côté
+scénariste, même relance, puis avertissements dans l'écran Scénario. La charte est distincte de la garde
+d'étapes (`stage_gate.py`).
+
+**Prompts.** `$pre_direction` (en clair) chez le scénariste (cases, dialogue, courbe) et chez le directeur
+artistique (échelle des plans, présence, formes, courbe — c'est lui qui fixe le rythme des pages) ;
+`$style_guidelines` reste. L'écran Scénario montre les deux textes (« Charte de la série envoyée aux
+agents », `GET /chapters/{id}/script-brief`) et avertit, sans bloquer, quand la bible de la série est vide ou
+qu'un personnage cité par le synopsis n'y a pas de note. Le LLM factice tient la charte des 7 genres.
 
 ## Workflow ComfyUI
 

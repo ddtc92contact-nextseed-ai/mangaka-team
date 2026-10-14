@@ -21,7 +21,7 @@ const SECTIONS = [
 export function SeriesBible({ projectId }: { projectId: number }) {
   const bible = useEngineData(() => api.getBible(projectId), [projectId]);
   return (
-    <Card data-testid="series-bible">
+    <Card id="bible" className="scroll-mt-6" data-testid="series-bible">
       <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="flex items-center gap-1.5 font-semibold text-zinc-100">
           Bible de la série

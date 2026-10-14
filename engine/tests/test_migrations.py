@@ -927,3 +927,29 @@ def test_v32_database_gets_the_series_identity_with_no_palette_nor_logo(
     fresh = settings.database_path.parent / "fresh.db"
     create_db_engine(fresh).dispose()
     assert _columns(settings.database_path) == _columns(fresh)
+
+
+def test_v33_database_gets_the_series_dna_from_their_genre(make_settings: Callable[..., Settings]) -> None:
+    """v33 → v34 : ADN de la série ; les séries existantes n'ajustent rien et reçoivent les défauts de leur genre."""
+    settings = make_settings()
+    with TestClient(create_app(settings)) as c:
+        shonen = c.post("/projects", json={**STYLE, "title": "Ancienne"}).json()
+        shojo = c.post("/projects", json={**STYLE, "style_genre": "shojo", "title": "Romance"}).json()
+    con = sqlite3.connect(settings.database_path)
+    con.execute("ALTER TABLE projects DROP COLUMN pre_direction")
+    con.execute("PRAGMA user_version = 33")
+    con.commit()
+    con.close()
+
+    with TestClient(create_app(settings)) as c:
+        presets = c.app.state.ctx.presets  # type: ignore[attr-defined]
+        for project, genre in ((shonen, "shonen"), (shojo, "shojo")):
+            dna = c.get(f"/projects/{project['id']}/pre-direction").json()
+            assert dna["genre"] == genre and dna["overrides"] == {}
+            assert dna["effective"] == dna["inherited"]
+            assert dna["effective"]["panels.min_per_page"] == presets.genre_dna(genre).panels.min_per_page
+        assert c.get(f"/projects/{shonen['id']}").json()["title"] == "Ancienne"
+    assert _version(settings.database_path) == SCHEMA_VERSION
+    fresh = settings.database_path.parent / "fresh.db"
+    create_db_engine(fresh).dispose()
+    assert _columns(settings.database_path) == _columns(fresh)

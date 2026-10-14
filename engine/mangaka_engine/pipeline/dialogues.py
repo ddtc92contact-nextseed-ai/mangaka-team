@@ -189,7 +189,13 @@ def page_problems(panels: Sequence[DialoguePanel], rules: DialogueRules) -> list
         by_page.setdefault(p.page, []).append(p)
     for number, page in by_page.items():
         replies = sum(len(p.replies) for p in page)
-        need = min(rules.min_per_page, sum(panel_target(p, rules) for p in page))
+        silent = sum(1 for p in page if not p.replies)
+        # Une case d'action reste parlée (`action_needs_voice`) : la case muette se prend parmi les autres.
+        quiet = [p for p in page if not (rules.action_needs_voice and p.characters and is_action(p, rules))]
+        wanted = min(rules.min_silent_panels_per_page, len(quiet)) if len(page) >= rules.silent_min_panels else 0
+        # Place de la planche, sans les cases qui doivent rester muettes.
+        spared = sum(sorted(panel_target(p, rules) for p in quiet)[:wanted])
+        need = min(rules.min_per_page, sum(panel_target(p, rules) for p in page) - spared)
         if replies < need:
             short = [str(p.index) for p in page if p.characters and len(p.replies) < panel_target(p, rules)]
             where = f" (cases en dessous : {', '.join(short)})" if short else ""
@@ -202,11 +208,7 @@ def page_problems(panels: Sequence[DialoguePanel], rules: DialogueRules) -> list
                 f"page {number} : {replies} répliques ({rules.max_per_page} au plus par planche) : garde les plus "
                 "fortes, laisse respirer la planche"
             )
-        silent = sum(1 for p in page if not p.replies)
-        # Une case d'action reste parlée (`action_needs_voice`) : la case muette se prend parmi les autres.
-        quiet = sum(1 for p in page if not (rules.action_needs_voice and p.characters and is_action(p, rules)))
-        wanted = min(rules.min_silent_panels_per_page, quiet)
-        if wanted and len(page) >= rules.silent_min_panels and silent < wanted:
+        if wanted and silent < wanted:
             problems.append(
                 f"page {number} : {silent or 'aucune'} case{'s' if silent > 1 else ''} muette{'s' if silent > 1 else ''} "
                 f"(au moins {wanted} case{'s' if wanted > 1 else ''} sans aucune réplique par planche) : laisse le "

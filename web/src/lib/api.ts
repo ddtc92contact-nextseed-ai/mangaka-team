@@ -2335,6 +2335,42 @@ export interface Bible {
   updated_at: string | null;
 }
 
+/** Valeur réglable de l'ADN de la série (presets/pre_direction.yaml) : part (0 à 1), entier ou oui/non. */
+export interface DnaField {
+  path: string;
+  group: string;
+  label: string;
+  help: string;
+  kind: "share" | "int" | "bool";
+  min: number | null;
+  max: number | null;
+  step: number | null;
+}
+
+export type DnaValue = number | boolean;
+
+/** ADN de la série : valeurs héritées du genre, ajustées par la série, effectives (chemin → valeur). */
+export interface PreDirection {
+  project_id: number;
+  genre: string | null;
+  genre_name: string | null;
+  available: boolean;
+  groups: Record<string, string>;
+  fields: DnaField[];
+  inherited: Record<string, DnaValue>;
+  overrides: Record<string, DnaValue>;
+  effective: Record<string, DnaValue>;
+}
+
+/** Ce que « Découper » enverra : charte de la série en clair et ce qui manque à la bible. */
+export interface ScriptBrief {
+  project_id: number;
+  pre_direction: string;
+  art_pre_direction: string;
+  bible_empty: boolean;
+  characters_without_note: { id: number; name: string }[];
+}
+
 export type BibleInput = Partial<Pick<Bible, "world" | "tone" | "rules" | "motifs" | "chapter_summaries">> & {
   character_notes?: Record<number, string>;
 };
@@ -2969,6 +3005,10 @@ export const api = {
   getBible: (projectId: number) => request<Bible>(`/projects/${projectId}/bible`),
   saveBible: (projectId: number, body: BibleInput) => request<Bible>(`/projects/${projectId}/bible`, json("PUT", body)),
   chapterDialogues: (chapterId: number) => request<DialogueReport>(`/chapters/${chapterId}/dialogues`),
+  getPreDirection: (projectId: number) => request<PreDirection>(`/projects/${projectId}/pre-direction`),
+  savePreDirection: (projectId: number, overrides: Record<string, DnaValue>) =>
+    request<PreDirection>(`/projects/${projectId}/pre-direction`, json("PUT", { overrides })),
+  scriptBrief: (chapterId: number) => request<ScriptBrief>(`/chapters/${chapterId}/script-brief`),
   chapterSources: (chapterId: number, agent = "script") =>
     request<ScriptSources | null>(`/chapters/${chapterId}/sources?agent=${encodeURIComponent(agent)}`),
 };
