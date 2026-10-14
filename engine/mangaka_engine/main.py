@@ -23,6 +23,7 @@ from .api import (
     characters,
     comfyui,
     composition,
+    cover_charter,
     cover_composition,
     finishing,
     generation,
@@ -247,6 +248,7 @@ def build_context(settings: Settings, providers: Providers | None = None) -> App
         poll_s=settings.comfyui_poll_s,
         presets_for=agents_service.presets_for,
         folders=folders,
+        providers=providers,
     )
     queue.add_step(COVER_STEP, QueueStep(execute=covers, describe_error=describe_error, interrupt=covers.interrupt))
     queue.start()
@@ -292,6 +294,7 @@ def create_app(settings: Settings | None = None, providers: Providers | None = N
     app.include_router(chapters.router)
     app.include_router(volumes.router)
     app.include_router(cover_composition.router)
+    app.include_router(cover_charter.router)
     app.include_router(stages.router)
     app.include_router(cast.router)
     app.include_router(art_direction.router)

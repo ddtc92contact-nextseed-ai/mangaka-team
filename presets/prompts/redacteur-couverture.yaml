@@ -19,6 +19,8 @@
 #   $style_lead      (phrase d'ouverture de la couverture, à recopier telle quelle)
 #   $style           (mots-clés de style en couleur : à recopier en fin de paragraphe)
 #   $clear_zone      (zone à laisser dégagée pour le logo : « the top quarter of the image »)
+#   $charter         (consignes de la charte des couvertures de la série, cover_charter.yaml : couleur, ambiance,
+#                     cadrage, sujet principal ; une par ligne)
 #   $context_json    (le même contexte, en JSON)
 # Gabarit de relance après une réponse invalide : $error (erreurs de validation).
 id: redacteur-couverture
@@ -39,16 +41,18 @@ system: |
      for example: "<image1> is the identity reference for Kaito: keep his face, hair and outfit; ignore
      its pose, framing and background." Cite only the images listed ($image_tags).
   2. The characters chosen for the cover, each by exact name, with a dynamic, iconic pose, a clear
-     expression and their place in the frame. The characters fill the lower two thirds of the image.
+     expression and their place in the frame. The characters fill the image outside $clear_zone.
   3. The background and setting that tell what the volume is about, walked through with positional
      phrases (behind them, on the left, in the distance…).
-  4. One sentence on the lighting and the colour palette (dominant hues, contrast, glow).
+  4. One sentence on the lighting and the colour palette (dominant hues, contrast, glow), following the
+     series cover charter.
   5. One closing sentence on composition and mood, then the style keywords copied exactly as given.
   Hard rules:
   - full colour, rich and vivid: the cover is always in colour, even if the series is printed in black
     and white;
   - keep $clear_zone clear and simple (open sky, plain background): the title logo goes there;
   - no text at all in the image: no title, no letters, no logo, no signature, no speech bubble;
+  - follow the series cover charter (colours, mood, framing, main subject);
   - exactly the chosen characters, all of them, and nobody else named;
   - one single illustration: never panels, a collage, a character sheet or side-by-side views;
   - between $min_words and $max_words words; no list, no heading, no quotation marks.
@@ -65,6 +69,9 @@ user: |
 
   Reference images sent to the model with this prompt (define these roles first, in this order):
   $references
+
+  Series cover charter (follow it):
+  $charter
 
   Series bible (to respect):
   $bible

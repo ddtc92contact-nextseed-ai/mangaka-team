@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useConfirm } from "@/components/confirm";
+import { IdentityBadge } from "@/components/cover-identity";
 import { useToast } from "@/components/toast";
 import { Alert, Button, Card, Field, Input, ProgressBar, Select, Textarea } from "@/components/ui";
 import {
@@ -492,6 +493,9 @@ function BackCard({
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img src={engineUrl(x.url)} alt="" className="w-full object-cover" style={{ aspectRatio: `${x.width} / ${x.height}` }} />
                         </button>
+                        <div className="mt-1">
+                          <IdentityBadge identity={x.identity} compact />
+                        </div>
                       </li>
                     ))}
                   </ul>

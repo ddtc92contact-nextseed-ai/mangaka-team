@@ -15,8 +15,13 @@
   compris) → nouvelle `VolumeCover`, retenue d'office si le tome n'en a pas encore.
 
 Petite illustration de 4e (`kind = "back"`, #161) : même flux, même agrandisseur, mais ratio et taille de
-`cover_composition.yaml › back_illustration`, prompt du tome (`back_prompt`), règles de la 4e (aucun texte),
-sans personnage de référence ; retenue d'office comme illustration de 4e si le tome n'en a pas.
+`cover_composition.yaml › back_illustration`, prompt du tome (`back_prompt`), règles de la 4e (aucun texte) ;
+retenue d'office comme illustration de 4e si le tome n'en a pas.
+
+Charte des couvertures de la série (pipeline/cover_charter.py, #171) : la 1re et la 4e la lisent. Les références
+d'identité des personnages présents partent à chaque génération (avec la phrase de leur rôle), les consignes de
+couleur, d'ambiance, de cadrage et de sujet sont ajoutées au prompt, la zone du logo suit la charte ; après la
+génération, le contrôle d'identité compare chaque personnage à sa fiche (avertissement, jamais de blocage).
 
 Aucun nom de modèle, de workflow ni de nœud ici : tout vient des presets.
 """
@@ -49,6 +54,7 @@ from ..presets import (
     PresetError,
     PresetRegistry,
     PromptPreset,
+    QCSettings,
     build_upscale_workflow,
     build_workflow,
 )
@@ -61,6 +67,15 @@ from ..store.db import Database
 from ..store.files import FileStore
 from ..store.models import Character, Job, JobStatus, Project, Volume, VolumeCover
 from ..validation import format_errors
+from .cover_charter import (
+    Charter,
+    charter_format,
+    charter_lines,
+    check_identity,
+    identity_lines,
+    present_characters,
+    series_charter,
+)
 from .finishing import finish_plan
 from .generation import GenerationError, split_trigger_words
 from .jobs import JobReporter
@@ -169,29 +184,55 @@ def cover_rules(cover: CoverSettings, fmt: CoverFormat) -> list[str]:
     return [_render(rule, values, "rules").strip() for rule in cover.rules if rule.strip()]
 
 
-def finish_cover_prompt(text: str, style: CoverStyle, rules: list[str]) -> str:
-    """Prompt envoyé : phrase d'ouverture en tête, puis le texte, puis les règles (zone du logo, aucun texte)
-    qui manquent. Aucun filtre de couleur, même pour une série en noir et blanc."""
+def finish_cover_prompt(
+    text: str,
+    style: CoverStyle,
+    rules: list[str],
+    *,
+    charter: list[str] | None = None,
+    identity: list[tuple[str, str]] | None = None,
+) -> str:
+    """Prompt envoyé : phrase d'ouverture en tête, puis le rôle des images de référence qui n'est pas déjà donné,
+    puis le texte, puis les consignes de la charte et les règles (zone du logo, aucun texte) qui manquent. Aucun
+    filtre de couleur, même pour une série en noir et blanc."""
     out = with_lead(clean_paragraph(text), style.lead)
-    for rule in rules:
+    # Rôle des images de référence (`(tag, phrase)`) : ajouté après la phrase d'ouverture si l'image n'est pas citée.
+    missing = [line for tag, line in identity or [] if tag not in out]
+    if missing:
+        lead = style.lead.strip()
+        if lead and out.startswith(lead):
+            out = " ".join([lead, *missing, out[len(lead) :].strip()])
+        else:
+            out = " ".join([*missing, out])
+    for rule in [*(charter or []), *rules]:
         if rule.casefold() not in out.casefold():
             out = f"{out.rstrip()}{'' if out.rstrip().endswith(('.', '!', '?', '…')) else '.'} {rule}"
     return out.strip()
 
 
 # --- personnages ---------------------------------------------------------------------------
-def cover_characters(session: Session, volume: Volume) -> list[Character]:
-    """Personnages choisis pour la couverture, dans l'ordre choisi (fiches disparues ou d'une autre série écartées)."""
-    ids = [int(i) for i in volume.cover_character_ids or []]
+def cover_characters(session: Session, volume: Volume, charter: Charter | None = None) -> list[Character]:
+    """Personnages présents sur la couverture, dans l'ordre choisi (fiches disparues ou d'une autre série
+    écartées) : choix du tome restreint à la charte de la série, sinon les personnages de la charte."""
+    return present_characters(session, volume, charter)
+
+
+def characters_by_id(session: Session, series_id: int, ids: list[int]) -> list[Character]:
+    """Fiches de la série, dans l'ordre des `ids` (disparues écartées)."""
     if not ids:
         return []
     rows = session.scalars(
         select(Character)
-        .where(Character.project_id == volume.project_id, Character.id.in_(ids))
+        .where(Character.project_id == series_id, Character.id.in_(ids))
         .options(selectinload(Character.reference_images))
     )
     by_id = {c.id: c for c in rows}
     return [by_id[i] for i in dict.fromkeys(ids) if i in by_id]
+
+
+def volume_format(presets: PresetRegistry, volume: Volume, charter: Charter | None) -> CoverFormat:
+    """Format de couverture du tome, zone du logo selon la charte de la série."""
+    return charter_format(presets.cover_format(volume.cover_format), charter)
 
 
 def referenced(characters: list[Character], slots: int) -> list[Character]:
@@ -210,6 +251,7 @@ class CoverBrief:
     bible: str
     style: CoverStyle
     clear_zone: str
+    charter: list[str] = field(default_factory=list)  # consignes de la charte des couvertures
     language: str = "en"
     min_words: int = 90
     max_words: int = 260
@@ -226,6 +268,7 @@ class CoverBrief:
             "style_lead": self.style.lead,
             "style": self.style.style,
             "clear_zone": self.clear_zone,
+            "charter": self.charter,
             "language": self.language,
             "min_words": self.min_words,
             "max_words": self.max_words,
@@ -245,10 +288,11 @@ def _details(c: Character) -> str:
 
 def cover_brief(session: Session, presets: PresetRegistry, volume: Volume, series: Project) -> CoverBrief:
     cover = presets.require_cover()
-    fmt = presets.cover_format(volume.cover_format)
+    charter = series_charter(presets, series)
+    fmt = volume_format(presets, volume, charter)
     prompt = presets.prompt(cover.prompt)
     loaded = presets.workflow(cover.workflow)
-    chars = cover_characters(session, volume)
+    chars = cover_characters(session, volume, charter)[: cover.max_characters]
     refs = referenced(chars, len(loaded.preset.reference_images))
     bible = render_bible(session, series.id, max_tokens=presets.knowledge.bible_max_tokens)
     return CoverBrief(
@@ -260,6 +304,7 @@ def cover_brief(session: Session, presets: PresetRegistry, volume: Volume, serie
         bible=bible.text if bible is not None else "",
         style=cover_style(presets, series, cover),
         clear_zone=clear_zone_text(fmt),
+        charter=charter_lines(charter, series, kind="front", names=[c.name for c in chars]) if charter else [],
         language=prompt.language or "en",
         min_words=prompt.min_words or 90,
         max_words=prompt.max_words or 260,
@@ -289,6 +334,7 @@ def cover_messages(prompt: PromptPreset, brief: CoverBrief) -> list[ChatMessage]
         "style_lead": brief.style.lead or "(none)",
         "style": brief.style.style or "(none)",
         "clear_zone": brief.clear_zone,
+        "charter": "\n".join(f"- {line}" for line in brief.charter) or "(no cover charter)",
         "context_json": json.dumps(brief.as_json(), ensure_ascii=False, indent=2),
     }
     return [
@@ -401,11 +447,12 @@ def enqueue_cover(
     """Met en file la génération de la couverture du tome (sans commit). `prompt` : celui du tome par défaut.
     `kind = "back"` : petite illustration de 4e (ratio, taille et règles de cover_composition.yaml)."""
     cover = presets.require_cover()
-    fmt = presets.cover_format(volume.cover_format)
     loaded = presets.workflow(cover.workflow)
     series = session.get(Project, volume.project_id)
     if series is None:
         raise CoverError("série introuvable")
+    charter = series_charter(presets, series)
+    fmt = volume_format(presets, volume, charter)
     back = kind == "back"
     default = volume.back_prompt if back else volume.cover_prompt
     text = (prompt if prompt is not None else default or "").strip()
@@ -416,19 +463,23 @@ def enqueue_cover(
     if active_cover_jobs(session, volume.id, kind):
         what = "de l'illustration de 4e" if back else "de couverture"
         raise CoverError(f"une génération {what} est déjà en cours pour ce tome : attends sa fin")
+    # Personnages présents (charte de la série) : leurs références partent à chaque génération, 1re comme 4e.
+    chars = cover_characters(session, volume, charter)[: cover.max_characters]
+    refs = referenced(chars, len(loaded.preset.reference_images))
+    tags = [(image_tag(i), c.name) for i, c in enumerate(refs, start=1)]
+    identity = list(zip([t for t, _ in tags], identity_lines(charter, tags), strict=False))
+    lines = charter_lines(charter, series, kind=kind, names=[c.name for c in chars]) if charter else []
     if back:
         settings = presets.require_composition().back_illustration
         style = back_style(presets, series, cover)
         rules = [_render(rule, {}, "rules").strip() for rule in settings.rules if rule.strip()]
-        final = finish_cover_prompt(text, style, rules)
+        final = finish_cover_prompt(text, style, rules, charter=lines, identity=identity)
         width, height = aspect_size(settings.aspect, settings.long_side, cover.multiple)
-        chars: list[Character] = []
         full_w, full_h = back_size(presets, fmt)
     else:
         style = cover_style(presets, series, cover)
-        final = finish_cover_prompt(text, style, cover_rules(cover, fmt))
+        final = finish_cover_prompt(text, style, cover_rules(cover, fmt), charter=lines, identity=identity)
         width, height = generation_size(fmt, cover.long_side, cover.multiple)
-        chars = cover_characters(session, volume)
         full_w, full_h = fmt.full_px
     job = Job(
         project_id=series.id,
@@ -450,6 +501,7 @@ def enqueue_cover(
             "full_height": full_h,
             "dpi": fmt.dpi,
             "character_ids": [c.id for c in chars],
+            "charter": {"values": charter.values, "lines": lines, "saved": charter.saved} if charter else None,
         },
     )
     session.add(job)
@@ -489,6 +541,11 @@ class _Plan:
     dpi: int
     keep: int | None
     kind: str = "front"
+    # Contrôle d'identité après la génération (personnage → images de référence ; sans image ; activé).
+    qc: QCSettings | None = None
+    identity_refs: dict[str, list[bytes]] = field(default_factory=dict)
+    without_references: list[str] = field(default_factory=list)
+    check: bool = True
 
 
 def resolve_cover_upscaler(presets: PresetRegistry, cover: CoverSettings, series: Project) -> LoadedUpscaler | None:
@@ -513,8 +570,11 @@ class CoverExecutor:
         poll_s: float = 1.0,
         presets_for: Callable[[int | None], PresetRegistry] | None = None,
         folders: ComfyFolders | None = None,
+        providers: Any = None,
     ) -> None:
         self.db = db
+        # Fournisseurs du QC (couches détecteurs et identité) : contrôle d'identité des couvertures générées.
+        self.providers = providers
         self.files = files
         self.comfyui = comfyui
         self.comfyui_error = comfyui_error
@@ -542,8 +602,21 @@ class CoverExecutor:
             fmt = presets.cover_format(str(params.get("cover_format") or volume.cover_format))
             loaded = presets.workflow(str(params.get("preset") or cover.workflow))
             ids = [int(i) for i in params.get("character_ids") or []]
-            by_id = {c.id: c for c in cover_characters(session, volume)}
-            chars = [by_id[i] for i in ids if i in by_id]
+            chars = characters_by_id(session, series.id, ids)
+            qc = presets.qc
+            identity_refs: dict[str, list[bytes]] = {}
+            without: list[str] = []
+            for c in chars:
+                limit = qc.identity.max_references if qc else 1
+                data = [
+                    self.files.absolute(img.path).read_bytes()
+                    for img in c.reference_images[:limit]
+                    if self.files.absolute(img.path).is_file()
+                ]
+                if data:
+                    identity_refs[c.name] = data
+                else:
+                    without.append(c.name)
             references: list[dict[str, Any]] = []
             reference_data: list[bytes] = []
             for slot, character in enumerate(referenced(chars, len(loaded.preset.reference_images)), start=1):
@@ -607,6 +680,10 @@ class CoverExecutor:
                 dpi=fmt.dpi,
                 keep=cover.versions_kept,
                 kind=kind,
+                qc=qc,
+                identity_refs=identity_refs,
+                without_references=without,
+                check=bool(presets.cover_charter is None or presets.cover_charter.identity_check),
             )
 
     def _wait(
@@ -712,6 +789,12 @@ class CoverExecutor:
                 upscaler_info = {"upscaler": up.preset.id, "upscaler_name": up.preset.name}
         report(94, "Recadrage au format (fond perdu compris)…")
         final = fit_exact(upscaled, full_w, full_h, plan.dpi)
+        identity: dict[str, Any] | None = None
+        if plan.check:
+            report(96, "Contrôle d'identité des personnages…")
+            identity = check_identity(
+                self.providers, plan.qc, final, plan.identity_refs, without_references=plan.without_references
+            )
         stored = self.files.save_image(final, plan.folder)
         duration_ms = int((time.monotonic() - t0) * 1000)
 
@@ -750,6 +833,8 @@ class CoverExecutor:
                         for r, n in zip(plan.references, uploaded, strict=True)
                     ],
                     "removed_nodes": built.removed_nodes,
+                    "identity": identity,
+                    "charter": params.get("charter"),
                     "duration_ms": duration_ms,
                     "comfyui": comfy.name,
                 },

@@ -19,6 +19,7 @@ Arborescence attendue :
       cover_formats/*.yaml     # formats de couverture d'un tome (13 × 18, A4) et zones réservées
       cover.yaml               # couverture d'un tome : flux ComfyUI dédié, rendu couleur, prompt
       cover_composition.yaml   # composition de la couverture : résumé de 4e, dos, textes, logo, export
+      cover_charter.yaml       # charte des couvertures d'une série : couleur, personnages, cadrage, accroche
       back_layouts/*.yaml      # gabarits de 4e de couverture (accroche, résumé, illustration, titre)
       layouts/*.yaml           # gabarits de planche
       layout_styles/*.yaml     # grammaires de mise en page par série (biais, gouttières, gabarits favoris)
@@ -53,6 +54,7 @@ from .schemas import (
     AgentPreset,
     BackLayout,
     CameraLoraCatalog,
+    CoverCharterSettings,
     CoverCompositionSettings,
     CoverFormat,
     CoverSettings,
@@ -153,6 +155,8 @@ class PresetRegistry:
     # Composition de la couverture (cover_composition.yaml) ; None : absente ou invalide.
     composition: CoverCompositionSettings | None = None
     back_layouts: dict[str, BackLayout] = field(default_factory=dict)
+    # Charte des couvertures (cover_charter.yaml) ; None : absente ou invalide (couvertures sans charte).
+    cover_charter: CoverCharterSettings | None = None
     # ADN de la série (pre_direction.yaml) ; None : absent ou invalide (aucune charte vérifiée).
     pre_direction: PreDirectionSettings | None = None
     issues: list[PresetIssue] = field(default_factory=list)
@@ -477,6 +481,7 @@ class PresetRegistry:
         reg._load_covers()
         reg._load_identity()
         reg._load_composition()
+        reg._load_cover_charter()
         return reg
 
     def _load_pre_direction(self) -> None:
@@ -616,6 +621,23 @@ class PresetRegistry:
             self.issues.append(PresetIssue(self._rel(path), " ; ".join(problems)))
         else:
             self.composition = settings
+
+    def _load_cover_charter(self) -> None:
+        """Charte des couvertures (cover_charter.yaml) : après l'identité visuelle, dont elle cite les rôles."""
+        path = self.root / "cover_charter.yaml"
+        if not path.exists():
+            return
+        charter = self._parse(path, CoverCharterSettings)
+        if charter is None:
+            return
+        roles = set(self.identity.palette.roles) if self.identity else None
+        bad = sorted(r for r in charter.palette_roles if roles is not None and r not in roles)
+        if bad:
+            self.issues.append(
+                PresetIssue(self._rel(path), f"palette_roles : rôle de palette inconnu : {', '.join(bad)}")
+            )
+            return
+        self.cover_charter = charter
 
     def require_composition(self) -> CoverCompositionSettings:
         if self.composition is None:

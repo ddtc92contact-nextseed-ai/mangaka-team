@@ -49,6 +49,7 @@ from ..store.files import FileStore
 from ..store.models import Job, PanelImage, Volume, VolumeCover
 from .assembly import Canvas, cover_crop, crop_mark_lines, png_bytes
 from .back_cover import clean_summary, clean_tagline, sign_count
+from .cover_charter import charter_format, series_charter
 from .finishing import finished_art
 from .fonts import FontBook, pt_to_px
 from .jobs import JobReporter
@@ -1062,8 +1063,9 @@ def back_image(session: Session, files: FileStore, volume: Volume) -> tuple[Path
 
 def composition_inputs(session: Session, presets: PresetRegistry, files: FileStore, volume: Volume) -> CoverInputs:
     settings = presets.require_composition()
-    fmt = presets.cover_format(volume.cover_format)
     series = volume.project
+    # Zone du logo selon la charte des couvertures de la série (position du logo par défaut).
+    fmt = charter_format(presets.cover_format(volume.cover_format), series_charter(presets, series))
     palette, palette_name = series_palette(series, settings)
     logo, logo_note = series_logo(presets, series)
     front = next((c for c in volume.covers if c.id == volume.selected_cover_id and c.kind == "front"), None)
