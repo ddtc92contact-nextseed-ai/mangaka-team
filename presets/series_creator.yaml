@@ -1,0 +1,117 @@
+# Créateur de série : l'échange guidé avec l'auteur, à la création d'une série (ou relancé sur une série
+# existante), qui propose l'ADN de la série et rédige sa bible. Voir presets/README.md (« Créateur de série »),
+# engine/mangaka_engine/pipeline/series_creator.py et l'agent presets/agents/createur-serie.yaml.
+#
+# Une courte série de questions FERMÉES, en français : l'auteur clique un choix et peut ajouter une réponse
+# libre facultative (`max_free_chars` signes au plus). Jamais un formulaire technique : aucun chiffre ici n'est
+# montré à l'auteur.
+#
+# Pistes d'ADN de chaque choix, données à l'agent (jamais appliquées seules), par chemin de
+# presets/pre_direction.yaml : `shift` → écart à ajouter à la valeur du genre (une part va de 0 à 1), `set` →
+# valeur à prendre (nombre ou booléen ; `rhythm.final_peak_last_pages: 0` = fin libre). Le genre reste verrouillé : l'agent écrit les nuances de la série par-dessus, avec une
+# phrase d'explication par écart, et l'auteur corrige avant d'enregistrer.
+prompt: createur-serie        # presets/prompts/createur-serie.yaml
+max_chapter_summaries: 12     # série existante : résumés des derniers chapitres validés envoyés à l'agent
+max_section_chars: 1500       # bible : signes au plus par section (univers, ton, règles, gags et motifs)
+max_note_chars: 800           # bible : signes au plus par note de personnage
+max_free_chars: 500           # réponse libre facultative de chaque question
+
+questions:
+  - id: rythme
+    label: Quel rythme veux-tu pour la série ?
+    help: L'allure des chapitres, page après page.
+    choices:
+      - id: pose
+        label: Posé, on prend le temps
+        shift: { panels.max_per_page: -1, rhythm.first_peak.min: 0.05, rhythm.first_peak.max: 0.05 }
+      - id: genre
+        label: Celui du genre
+      - id: soutenu
+        label: Soutenu, ça avance vite
+        shift: { panels.max_per_page: 1, rhythm.first_peak.min: -0.05, rhythm.first_peak.max: -0.05 }
+
+  - id: dialogue
+    label: Les personnages parlent-ils beaucoup ?
+    help: La densité de dialogue par planche.
+    choices:
+      - id: peu
+        label: Peu, les images racontent
+        shift: { dialogue.min_per_page: -2, dialogue.max_per_page: -2, dialogue.min_silent_panels: 1 }
+        set: { rhythm.breath_after_peak: true }
+      - id: equilibre
+        label: Juste ce qu'il faut
+      - id: bavard
+        label: Beaucoup, ça discute, ça se chamaille
+        shift: { dialogue.min_per_page: 1, dialogue.max_per_page: 2 }
+
+  - id: monde
+    label: Le monde de la série est-il dur ?
+    help: Ce que les personnages risquent, ce que le lecteur peut voir.
+    choices:
+      - id: doux
+        label: Doux et rassurant
+      - id: nuance
+        label: Nuancé, des ombres et des éclaircies
+      - id: dur
+        label: Dur, rien n'est gratuit
+        shift: { presence.empty.max: 0.05 }
+
+  - id: humour
+    label: Quelle place pour l'humour ?
+    choices:
+      - id: aucun
+        label: Aucune, on reste sérieux
+      - id: touches
+        label: Des touches qui font respirer
+      - id: partout
+        label: Partout, c'est le moteur de la série
+
+  - id: plans
+    label: Quels plans préfères-tu ?
+    help: Ce que la caméra regarde le plus souvent.
+    choices:
+      - id: visages
+        label: Près des visages, les émotions d'abord
+        shift: { shots.close_up.min: 0.05, shots.close_up.max: 0.1, shots.wide.min: -0.05 }
+      - id: equilibres
+        label: Un peu de tout
+      - id: decors
+        label: Larges, le décor raconte
+        shift: { shots.wide.min: 0.05, shots.wide.max: 0.1, shots.close_up.max: -0.1, shots.tight_max: -0.1 }
+
+  - id: nervosite
+    label: Quelle mise en page ?
+    help: La forme des planches.
+    choices:
+      - id: sage
+        label: Sage, des cases régulières
+        shift: { shapes.big_panel_share.max: -0.15 }
+      - id: genre
+        label: Celle du genre
+      - id: nerveuse
+        label: Nerveuse, des grandes cases et des ruptures
+        shift: { shapes.big_panel_share.min: 0.1, shapes.max_same_in_a_row: -1 }
+
+  - id: voix
+    label: Pensées et récit off ?
+    help: Ce qu'on entend sans que personne ne parle à voix haute.
+    choices:
+      - id: rares
+        label: Rares, tout passe par l'action
+      - id: utiles
+        label: Quand c'est utile
+      - id: frequents
+        label: Fréquents, on vit dans la tête du héros
+        shift: { presence.subjective.max: 0.05 }
+
+  - id: fin
+    label: Comment finit un chapitre ?
+    choices:
+      - id: cliffhanger
+        label: Sur un suspense, il faut lire la suite
+        set: { rhythm.final_peak_last_pages: 1 }
+      - id: chute
+        label: Sur une chute ou un gag
+      - id: apaisee
+        label: Sur une note calme, une page qui se referme
+        set: { rhythm.final_peak_last_pages: 0 }

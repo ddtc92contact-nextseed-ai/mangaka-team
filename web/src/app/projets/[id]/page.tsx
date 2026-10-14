@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useRef, useState } from "react";
 import { useConfirm } from "@/components/confirm";
 import { AgentOverrides } from "@/components/agent-overrides";
@@ -12,6 +12,7 @@ import { EstimateLabel } from "@/components/estimate";
 import { LayoutStyleNotices } from "@/components/layout-style-notice";
 import { ProjectForm } from "@/components/project-form";
 import { SeriesBible } from "@/components/series-bible";
+import { SeriesCreatorCard } from "@/components/series-creator";
 import { SeriesDnaCard } from "@/components/series-dna";
 import { SeriesFiles } from "@/components/series-files";
 import { SeriesIdentityCard } from "@/components/series-identity";
@@ -37,6 +38,10 @@ export default function ProjectPage() {
   const [relayoutOffer, setRelayoutOffer] = useState(false);
   const noticesRef = useRef<HTMLDivElement>(null);
   const confirm = useConfirm();
+  // Créateur de série : ouvert d'office juste après la création (« ?createur=1 ») ; après l'enregistrement, les cartes
+  // « ADN de la série » et « Bible de la série » sont relues.
+  const creatorOpen = useSearchParams().get("createur") === "1";
+  const [charterVersion, setCharterVersion] = useState(0);
 
   function onProject(p: Project, styleChanged: boolean) {
     project.setData(p);
@@ -102,6 +107,13 @@ export default function ProjectPage() {
         />
       </div>
       <div className="mb-6">
+        <SeriesCreatorCard
+          projectId={id}
+          autoOpen={creatorOpen}
+          onApplied={() => setCharterVersion((v) => v + 1)}
+        />
+      </div>
+      <div className="mb-6">
         <ChapterList projectId={id} />
       </div>
       <div className="mb-6">
@@ -161,10 +173,10 @@ export default function ProjectPage() {
         <SeriesLocationsCard projectId={id} />
       </div>
       <div className="mt-6">
-        <SeriesDnaCard projectId={id} genreKey={project.data.style_genre} />
+        <SeriesDnaCard key={charterVersion} projectId={id} genreKey={project.data.style_genre} />
       </div>
       <div className="mt-6">
-        <SeriesBible projectId={id} />
+        <SeriesBible key={charterVersion} projectId={id} />
       </div>
       <div className="mt-6">
         <SeriesFiles project={project.data} />

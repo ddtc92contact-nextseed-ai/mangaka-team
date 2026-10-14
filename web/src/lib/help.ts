@@ -49,6 +49,8 @@ export const HELP = {
     "Le modèle qui agrandit chaque case jusqu'au dpi d'impression avant l'assemblage de la page (« Finaliser la page »). Les modèles marqués « lent » sont plus fidèles.",
   "serie.adn":
     "La charte chiffrée de la série : cases par planche, formes de planche, échelle des plans, présence, dialogue et courbe de rythme. Le genre donne les valeurs ; ajuste celles qui ne collent pas à ta série. Le scénariste et le directeur artistique la reçoivent en clair ; une règle enfreinte les relance, puis s'affiche en avertissement (jamais un blocage).",
+  "serie.createur":
+    "Quelques questions sur ta série (rythme, dialogue, dureté du monde, humour, plans, fins de chapitre…). Le créateur de série propose alors l'ADN (seulement les écarts au genre, chacun expliqué) et rédige la bible avec une note par personnage. Tu corriges tout avant d'enregistrer ; relancé sur une série existante, il montre ce qui changerait et ne remplace jamais ce que tu as écrit sans ton accord.",
   "serie.bible":
     "Univers, ton, règles et notes de personnages transmis à tous les agents de cette série (scénariste, prompts image) pour garder la cohérence d'un chapitre à l'autre.",
   "chapitre_infos.target_pages":

@@ -35,6 +35,7 @@ Arborescence attendue :
       style_loras.yaml         # catalogue des LoRA de style (mots déclencheurs, poids conseillé)
       camera_loras.yaml        # LoRA Multiple-Angles et Cohérence anime, vocabulaire de caméra
       pre_direction.yaml       # ADN de la série : charte chiffrée, défaut ultime et défauts des 7 genres
+      series_creator.yaml      # créateur de série : questions fermées de l'échange avec l'auteur (ADN et bible)
 
 Un preset invalide n'empêche pas le moteur de démarrer : il est écarté et
 l'erreur est exposée via `GET /presets` et `GET /health`.
@@ -77,6 +78,7 @@ from .schemas import (
     ProvidersPreset,
     QCSettings,
     ReferenceSheet,
+    SeriesCreatorSettings,
     StyleGenre,
     StyleLoraCatalog,
     StyleOptions,
@@ -159,6 +161,8 @@ class PresetRegistry:
     cover_charter: CoverCharterSettings | None = None
     # ADN de la série (pre_direction.yaml) ; None : absent ou invalide (aucune charte vérifiée).
     pre_direction: PreDirectionSettings | None = None
+    # Créateur de série (series_creator.yaml) ; None : absent ou invalide (échange indisponible).
+    series_creator: SeriesCreatorSettings | None = None
     issues: list[PresetIssue] = field(default_factory=list)
 
     # --- accès -----------------------------------------------------------
@@ -478,6 +482,7 @@ class PresetRegistry:
         reg.reference_sheets = dict(sorted(reg.reference_sheets.items(), key=lambda kv: (kv[1].order, kv[1].name)))
         reg._load_styles()
         reg._load_pre_direction()
+        reg._load_series_creator()
         reg._load_covers()
         reg._load_identity()
         reg._load_composition()
@@ -496,6 +501,23 @@ class PresetRegistry:
         if unknown:
             self.issues.append(PresetIssue(self._rel(path), f"genres : genre inconnu « {unknown[0]} » (style_genres/)"))
         self.pre_direction = settings
+
+    def _load_series_creator(self) -> None:
+        """Questions du créateur de série : leurs pistes d'ADN visent des valeurs connues de pre_direction.yaml."""
+        path = self.root / "series_creator.yaml"
+        if not path.exists():
+            return
+        settings = self._parse(path, SeriesCreatorSettings)
+        if settings is None:
+            return
+        known = set(self.pre_direction.defaults.model_dump()) if self.pre_direction else set()
+        bad = sorted(
+            {p for q in settings.questions for c in q.choices for p in c.hints() if p.split(".")[0] not in known}
+        )
+        if known and bad:
+            self.issues.append(PresetIssue(self._rel(path), f"hints : valeur d'ADN inconnue « {bad[0]} »"))
+            return
+        self.series_creator = settings
 
     def genre_dna(self, genre_id: str | None) -> PreDirection | None:
         """ADN par défaut d'un genre (celui de `defaults` sans valeurs propres) ; None sans pre_direction.yaml."""

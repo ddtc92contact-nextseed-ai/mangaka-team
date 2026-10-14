@@ -25,6 +25,7 @@ Après modification d'un preset, redémarre le moteur (`npm run dev`).
 | `style_options.yaml` | Réglages fins bornés du style : trait, trames (N&B seulement), détail des décors, finition (propre, croquis, pinceau nerveux, scan) |
 | `style_loras.yaml` | Catalogue des LoRA de style : mots déclencheurs et poids conseillé |
 | `pre_direction.yaml` | ADN de la série : charte chiffrée (cases, formes de planche, plans, présence, dialogue, rythme), défauts des 7 genres |
+| `series_creator.yaml` | Créateur de série : questions fermées de l'échange avec l'auteur et pistes d'ADN de chaque réponse |
 | `camera_loras.yaml` | LoRA Multiple-Angles (« Nouvel angle », « Changer l'angle ») et Cohérence anime, vocabulaire de caméra |
 | `prompts/*.yaml` | Prompts des étapes LLM (`script` : découpage d'un chapitre ; `direction-artistique` ; `redacteur-image` : prompt image de chaque case rédigé en un paragraphe ; `redacteur-image-dialogue` : dialogue sur une case dans l'atelier ; `fiche-intervenant` : fiche préremplie d'un intervenant de la distribution) |
 | `image_prompt.yaml` | Construction du prompt final des cases (étape 3) et termes « pas de texte » du prompt négatif |
@@ -745,6 +746,27 @@ artistique (échelle des plans, présence, formes, courbe — c'est lui qui fixe
 `$style_guidelines` reste. L'écran Scénario montre les deux textes (« Charte de la série envoyée aux
 agents », `GET /chapters/{id}/script-brief`) et avertit, sans bloquer, quand la bible de la série est vide ou
 qu'un personnage cité par le synopsis n'y a pas de note. Le LLM factice tient la charte des 7 genres.
+
+## Créateur de série (`series_creator.yaml`, `agents/createur-serie.yaml`, `prompts/createur-serie.yaml`)
+
+Septième agent, le seul qui intervient **avant** le premier synopsis : à la création d'une série (la fiche s'ouvre
+sur l'échange, `?createur=1`), ou relancé sur une série existante (carte « Créateur de série » de la fiche série).
+
+- **Échange borné** : les questions fermées de `series_creator.yaml` (rythme, dialogue, dureté du monde, humour,
+  plans, mise en page, pensées et récit off, fin de chapitre), un choix à cliquer et une précision libre
+  facultative, plus l'idée de la série en quelques phrases. Chaque choix porte des pistes d'ADN (`shift` : écart
+  à la valeur du genre, `set` : valeur prise), combinées bornées et valides, données à l'agent comme point de
+  départ — jamais appliquées seules.
+- **Contexte** : réponses, ADN du genre (chemins, valeurs et bornes), personnages, synopsis des chapitres et
+  résumés des chapitres validés (`max_chapter_summaries`), bible actuelle et savoir-faire du rôle
+  `series_creation` de `knowledge.yaml` (collections « Structure · … », écriture, humour).
+- **Proposition** validée (Pydantic puis `apply_overrides`) : écarts au genre avec une phrase d'explication
+  chacun (une valeur égale au genre est ignorée), bible en quatre sections (`max_section_chars`) et une note par
+  personnage (`max_note_chars`, noms exacts). Réponse invalide : relance avec l'erreur (`max_retries`, 2 au
+  plus), puis erreur lisible dans la carte. Mock : `[mock:createur-invalide:N]` dans l'idée de la série.
+- **Différentiel** : la proposition s'affiche à côté de ce qui est déjà écrit ; l'auteur corrige et coche ce
+  qu'il garde. Ce qu'il avait écrit (section, note, valeur d'ADN ajustée) n'est remplacé qu'après confirmation
+  (`overwrite` de `POST /projects/{id}/series-creator/apply`, sinon 409 et rien n'est écrit).
 
 ## Workflow ComfyUI
 

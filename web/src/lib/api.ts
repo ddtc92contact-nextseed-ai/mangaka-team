@@ -2690,6 +2690,65 @@ export interface PreDirection {
   effective: Record<string, DnaValue>;
 }
 
+/** Créateur de série : questions fermées de l'échange et ce que la série a déjà (une relance propose un différentiel). */
+export interface SeriesCreator {
+  project_id: number;
+  available: boolean;
+  reason: string | null;
+  agent_name: string;
+  genre_name: string | null;
+  questions: { id: string; label: string; help: string; choices: { id: string; label: string }[] }[];
+  max_free_chars: number;
+  max_pitch_chars: number;
+  bible_filled: string[];
+  notes_filled: number;
+  characters: number;
+  dna_adjusted: number;
+}
+
+export interface CreatorAnswer {
+  choice: string | null;
+  note: string;
+}
+
+/** Proposition du créateur de série : ce qui est écrit à côté de ce qui est proposé (rien n'est encore enregistré). */
+export interface CreatorProposal {
+  project_id: number;
+  genre_name: string | null;
+  attempts: number;
+  notes: string;
+  dna: {
+    path: string;
+    label: string;
+    group: string;
+    kind: string;
+    min: number | null;
+    max: number | null;
+    genre_value: DnaValue;
+    current_value: DnaValue;
+    adjusted: boolean;
+    proposed: DnaValue;
+    why: string;
+    conflict: boolean;
+  }[];
+  bible: { key: string; label: string; current: string; proposed: string; conflict: boolean }[];
+  characters: { id: number; name: string; current: string; proposed: string; conflict: boolean }[];
+}
+
+export interface CreatorApply {
+  dna: Record<string, DnaValue>;
+  bible: Record<string, string>;
+  character_notes: Record<number, string>;
+  /** Clés confirmées par l'auteur : « bible.world », « character.12 », « dna.shots.wide.min ». */
+  overwrite: string[];
+}
+
+export interface CreatorApplied {
+  pre_direction: PreDirection;
+  bible: Bible;
+  written: string[];
+}
+
 /** Ce que « Découper » enverra : charte de la série en clair et ce qui manque à la bible. */
 export interface ScriptBrief {
   project_id: number;
@@ -3374,6 +3433,11 @@ export const api = {
   getPreDirection: (projectId: number) => request<PreDirection>(`/projects/${projectId}/pre-direction`),
   savePreDirection: (projectId: number, overrides: Record<string, DnaValue>) =>
     request<PreDirection>(`/projects/${projectId}/pre-direction`, json("PUT", { overrides })),
+  getSeriesCreator: (projectId: number) => request<SeriesCreator>(`/projects/${projectId}/series-creator`),
+  proposeSeries: (projectId: number, body: { pitch: string; answers: Record<string, CreatorAnswer> }) =>
+    request<CreatorProposal>(`/projects/${projectId}/series-creator/proposal`, json("POST", body)),
+  applySeriesProposal: (projectId: number, body: CreatorApply) =>
+    request<CreatorApplied>(`/projects/${projectId}/series-creator/apply`, json("POST", body)),
   scriptBrief: (chapterId: number) => request<ScriptBrief>(`/chapters/${chapterId}/script-brief`),
   chapterSources: (chapterId: number, agent = "script") =>
     request<ScriptSources | null>(`/chapters/${chapterId}/sources?agent=${encodeURIComponent(agent)}`),
