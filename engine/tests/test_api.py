@@ -73,6 +73,7 @@ def test_presets_endpoint(client: TestClient) -> None:
         "createur-serie",
         "direction-artistique",
         "fiche-intervenant",
+        "lieux",
         "logo",
         "palette",
         "redacteur-couverture",

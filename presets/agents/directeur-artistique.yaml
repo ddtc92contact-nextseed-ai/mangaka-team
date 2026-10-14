@@ -180,6 +180,7 @@ settings:
       - characters
       - decors
       - objets
+      - lieux
       - chapter_number
       - chapter_title
       - synopsis

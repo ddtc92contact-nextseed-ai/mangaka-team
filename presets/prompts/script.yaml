@@ -7,6 +7,7 @@
 #   $style_guidelines (consignes du genre et du ton : rythme, cases par page, vocabulaire adapté à l'âge)
 #   ($series_style : ancien nom de $style_packs, gardé pour les prompts personnalisés)
 #   $decors $objets (bibliothèque de la série : « - id N · nom : description courte », un par ligne)
+#   $lieux          (lieux de la série, unité de lieu des cases : « - id N · nom : description (décor : …) »)
 #   $chapter_number $chapter_title $synopsis $target_pages $bubble_kinds
 #   ($shot_types : liste des plans, plus utilisée — la direction artistique cadre les cases ; gardée pour
 #    les prompts personnalisés)
@@ -77,6 +78,9 @@ user: |
   Objets récurrents de la série (bibliothèque) :
   $objets
 
+  Lieux de la série (déjà installés dans les chapitres précédents) :
+  $lieux
+
   Résumé des chapitres précédents :
   $previous_chapters
 
@@ -119,9 +123,13 @@ user: |
   - pour un personnage qui a une fiche, recopie EXACTEMENT le nom de sa fiche, parmi : $character_names
     (jamais « le vieux maître » ni « Maître Kaï » : seulement « Kaï ») ; « offscreen » et « speaker »
     suivent la même règle ; un figurant sans fiche garde un nom simple ;
-  - « setting » : le lieu de la case, toujours rempli, même sans décor récurrent — lieu, moment
-    (heure, météo, saison) et éléments visibles du décor (« clairière au bord d'un lac, fin d'après-midi,
-    herbes hautes, rochers moussus, montagnes au loin ») ;
+  - « lieu » : le lieu de la case, toujours rempli — l'id (nombre) d'un lieu de la série ci-dessus,
+    ou, pour un lieu nouveau, son nom court (« La clairière », « La crique ») ; toutes les cases qui se
+    passent au même endroit portent le MÊME lieu (même id, ou exactement le même nom) : un lieu est un
+    endroit, pas une rédaction (« clairière » et « clairière au centre de l'île » sont le même lieu) ;
+  - « setting » : la précision de cadrage du lieu pour cette case — moment (heure, météo, saison),
+    coin du lieu et éléments visibles du décor (« bord du lac, fin d'après-midi, herbes hautes,
+    rochers moussus, montagnes au loin ») ;
   - « staging » : ce que fait chaque personnage PRÉSENT (jamais un personnage hors cadre) — geste,
     posture, regard, réaction, interaction avec les autres — sans dire où il se trouve dans l'image ;
   - « description » raconte l'action de la case ; « setting » et « staging » la complètent sans la répéter ;
@@ -141,7 +149,7 @@ user: |
 
   Format de réponse :
   {"pages": [{"rythme": "normal", "panels": [{"description": "…", "setting": "…", "staging": "…",
-     "characters": ["…"], "offscreen": [], "decor": null, "objets": [],
+     "characters": ["…"], "offscreen": [], "lieu": "La clairière", "decor": null, "objets": [],
      "importance": 2, "intensity": "normal",
      "dialogues": [{"speaker": "…", "text": "…", "kind": "speech"}, {"speaker": "…", "text": "…", "kind": "shout"}],
      "sfx": [{"text": "VROUM !", "intensity": "choc"}]}]}],

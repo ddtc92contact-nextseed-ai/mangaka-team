@@ -2,7 +2,7 @@
 
 Même forme d'API que les personnages (`characters.py`), une famille de routes par sorte :
 `/projects/{id}/objects`, `/objects/{id}`, `/objects/{id}/images`… et de même pour `/decors`.
-Supprimer un objet ou un décor le retire des cases qui le citaient.
+Supprimer un objet ou un décor le retire des cases qui le citaient (et un décor, des lieux qu'il illustrait).
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from ..pipeline.reference_sheets import delete_entry_variants, entry_folder, next_position
 from ..store.files import StoredImage, cache_headers, versioned_url
-from ..store.models import AssetKind, Chapter, Page, Panel, SeriesAsset, SeriesAssetImage
+from ..store.models import AssetKind, Chapter, Page, Panel, SeriesAsset, SeriesAssetImage, SeriesLocation
 from .characters import apply_changes, check_room, read_uploads, reference_image_out, store_uploads
 from .deps import AppContext, get_ctx, get_session
 from .projects import get_project_or_404
@@ -58,7 +58,15 @@ def get_asset_or_404(session: Session, kind: AssetKind, asset_id: int) -> Series
 
 
 def unlink_asset(session: Session, asset: SeriesAsset) -> int:
-    """Retire un objet ou un décor des cases de sa série ; renvoie le nombre de cases modifiées."""
+    """Retire un objet ou un décor des cases (et un décor des lieux) de sa série ; renvoie le nombre de cases
+    modifiées."""
+    if asset.kind == AssetKind.decor:
+        for loc in session.scalars(
+            select(SeriesLocation).where(
+                SeriesLocation.project_id == asset.project_id, SeriesLocation.decor_id == asset.id
+            )
+        ):
+            loc.decor_id = None
     panels = session.scalars(
         select(Panel)
         .join(Page, Page.id == Panel.page_id)

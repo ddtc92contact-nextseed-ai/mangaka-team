@@ -16,6 +16,7 @@ import {
   type Intensity,
   type Job,
   type LibraryEntry,
+  type SeriesLocation,
   type Rythme,
   type ScriptBrief,
   type ScriptSources,
@@ -52,7 +53,13 @@ export default function ScenarioPage() {
   const characters = useEngineData(() => api.listCharacters(chapter.project_id), [chapter.project_id]);
   const decors = useEngineData(() => api.listLibrary("decor", chapter.project_id), [chapter.project_id]);
   const objets = useEngineData(() => api.listLibrary("object", chapter.project_id), [chapter.project_id]);
-  const library: SceneLibrary = { decors: decors.data ?? [], objets: objets.data ?? [], projectId: chapter.project_id };
+  const places = useEngineData(() => api.listLocations(chapter.project_id), [chapter.project_id]);
+  const library: SceneLibrary = {
+    decors: decors.data ?? [],
+    objets: objets.data ?? [],
+    lieux: places.data ?? [],
+    projectId: chapter.project_id,
+  };
   const lastJob = useEngineData(() => api.chapterJobs(chapter.id, "script").then((j) => j[0] ?? null), [chapter.id]);
   const sources = useEngineData(() => api.chapterSources(chapter.id), [chapter.id]);
   const dialogues = useEngineData(() => api.chapterDialogues(chapter.id), [chapter.id]);
@@ -84,6 +91,7 @@ export default function ScenarioPage() {
       toast("Découpage enregistré automatiquement");
       setEdited(null);
       pages.reload();
+      places.reload(); // lieux créés par le scénariste
       dialogues.reload();
       reloadChapter();
     }
@@ -577,10 +585,11 @@ function SmallButton(props: ComponentProps<typeof Button>) {
   return <Button variant="ghost" className="px-2 py-1 text-xs" {...props} />;
 }
 
-/** Décors et objets récurrents de la série, proposés dans chaque case. */
+/** Décors, objets et lieux de la série, proposés dans chaque case. */
 interface SceneLibrary {
   decors: LibraryEntry[];
   objets: LibraryEntry[];
+  lieux: SeriesLocation[];
   projectId: number;
 }
 
@@ -746,17 +755,42 @@ function PanelEditor({
             disabled={disabled}
           />
           <div className="flex items-center gap-1.5 pt-1">
-            <label htmlFor={`${id}-setting`} className="text-xs text-zinc-400">
+            <label htmlFor={`${id}-location`} className="text-xs text-zinc-400">
               Lieu
             </label>
-            <InfoTip help="scenario.setting" label="Lieu" />
+            <InfoTip help="scenario.location" label="Lieu" />
+            <Link href={`/projets/${library.projectId}/lieux`} className="ml-auto text-xs text-zinc-500 hover:text-zinc-300">
+              Gérer les lieux
+            </Link>
+          </div>
+          <Select
+            id={`${id}-location`}
+            className="py-1.5"
+            value={panel.location ?? ""}
+            onChange={(e) => set("location", e.target.value ? Number(e.target.value) : null)}
+            disabled={disabled}
+            data-testid="panel-location"
+          >
+            <option value="">— sans lieu —</option>
+            {library.lieux.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.name}
+                {l.decor === null ? " (sans décor)" : !l.decor_image_url ? " (décor sans image)" : ""}
+              </option>
+            ))}
+          </Select>
+          <div className="flex items-center gap-1.5 pt-1">
+            <label htmlFor={`${id}-setting`} className="text-xs text-zinc-400">
+              Précision de cadrage du lieu
+            </label>
+            <InfoTip help="scenario.setting" label="Précision de cadrage du lieu" />
           </div>
           <Textarea
             id={`${id}-setting`}
             className="min-h-12 text-sm"
             value={panel.setting}
             onChange={(e) => set("setting", e.target.value)}
-            placeholder="Clairière au bord d'un lac, fin d'après-midi, herbes hautes, montagnes au loin"
+            placeholder="Bord du lac, fin d'après-midi, herbes hautes, montagnes au loin"
             maxLength={1500}
             disabled={disabled}
           />

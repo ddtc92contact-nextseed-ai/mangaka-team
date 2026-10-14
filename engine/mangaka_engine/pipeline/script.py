@@ -14,6 +14,8 @@
    fois la page mise en page ; et la charte de la série (ADN, `pipeline/pre_direction.py`) : cases par
    planche, dialogue compté par planche ; enfreintes → même relance, puis le découpage est gardé avec des
    avertissements (écran Scénario). La charte arrive en clair dans le prompt (`$pre_direction`) ;
+   Lieu de chaque case (`lieu`) : un lieu de la série par son id, ou un nouveau lieu par son nom (créé à
+   l'enregistrement, `pipeline/locations.py`) ; `setting` n'est plus que la précision de cadrage ;
 4. personnages de chaque case : « characters » = présents à l'image, « offscreen » = cités mais hors cadre ;
    un présent que la description ne cite pas passe hors cadre (`framing.settle_cast`) ;
 5. enregistrement en Pages + Panels + Bubbles (remplace les pages « story » du chapitre) et
@@ -62,6 +64,7 @@ from .framing import aliases_from, settle_cast, split_cast
 from .knowledge import AgentKnowledge, KnowledgeBase
 from .layout import LayoutError
 from .library import SeriesLibrary
+from .locations import resolve_location
 from .names import CharacterMatcher, link_speakers, panel_ids
 from .pages import layout_pages
 from .pre_direction import Charter, dialogue_rules_for, panel_count_problems, script_text, series_charter
@@ -178,6 +181,8 @@ class ScriptPanel(_LLMModel):
     # Bibliothèque de la série : id du décor (ou null) et ids des objets visibles.
     decor: int | None = None
     objets: list[int] = Field(default_factory=list, max_length=MAX_PANEL_OBJECTS)
+    # Lieu de la série : id d'un lieu existant, ou nom d'un nouveau lieu (créé à l'enregistrement) ; null = aucun.
+    lieu: int | Annotated[str, StringConstraints(strip_whitespace=True, max_length=120)] | None = None
 
     _shot = field_validator("shot_type", mode="before")(normalize_shot_type)
     _intensity = field_validator("intensity", mode="before")(_hint)
@@ -191,6 +196,16 @@ class ScriptPanel(_LLMModel):
     @classmethod
     def _no_decor(cls, v: Any) -> Any:
         return None if v in ("", "null", "aucun") else v
+
+    @field_validator("lieu", mode="before")
+    @classmethod
+    def _lieu(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            v = v.strip()
+            if v.isdigit():
+                return int(v)
+            return None if v.lower() in ("", "null", "aucun") else v
+        return v
 
     @field_validator("objets", mode="before")
     @classmethod
@@ -279,7 +294,7 @@ def parse_script(text: str, library: SeriesLibrary | None = None) -> ScriptOutpu
             f"page {p} › case {c} › {problem}"
             for p, page in enumerate(out.pages, start=1)
             for c, panel in enumerate(page.panels, start=1)
-            for problem in library.check_refs(panel.decor, panel.objets)
+            for problem in [*library.check_refs(panel.decor, panel.objets), *library.check_location(panel.lieu)]
         ]
         if problems:
             extra = f" ; … et {len(problems) - 8} autre(s)" if len(problems) > 8 else ""
@@ -405,6 +420,7 @@ def render_messages(prompt: PromptPreset, ctx: ScriptContext) -> list[ChatMessag
         "character_names": ", ".join(f"« {c['name']} »" for c in ctx.characters) or "(aucune fiche personnage)",
         "decors": ctx.library.text("decors") or "(aucun décor enregistré : « decor » vaut null)",
         "objets": ctx.library.text("objets") or "(aucun objet enregistré : « objets » reste vide)",
+        "lieux": ctx.library.text("lieux") or "(aucun lieu enregistré : donne à chaque lieu un nom court)",
         "previous_chapters": prev or "(premier chapitre de la série)",
         "chapter_number": str(ctx.chapter["number"]),
         "chapter_title": ctx.chapter["title"] or "sans titre",
@@ -549,6 +565,7 @@ def save_script(session: Session, chapter: Chapter, output: ScriptOutput) -> lis
                 decor_id=sc.decor,
                 object_ids=list(sc.objets),
             )
+            panel.location = resolve_location(session, chapter.project_id, sc.lieu, decor_id=sc.decor)
             for j, d in enumerate(sc.dialogues):
                 panel.bubbles.append(
                     Bubble(

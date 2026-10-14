@@ -248,6 +248,9 @@ export interface PanelData {
   decor?: number | null;
   /** Objets de la bibliothèque de la série (ids). */
   objets?: number[];
+  /** Lieu de la série (unité de lieu) ; `setting` en est la précision de cadrage. */
+  location?: number | null;
+  location_name?: string | null;
   shot_type: string | null;
   importance: number;
   intensity: Intensity | null;
@@ -553,6 +556,8 @@ export interface PanelInput {
   decor?: number | null;
   /** Absent : objets gardés. */
   objets?: number[];
+  /** Absent : lieu gardé ; null : aucun lieu. */
+  location?: number | null;
   shot_type: string | null;
   importance: number;
   intensity?: Intensity | null;
@@ -2094,6 +2099,75 @@ export function engineUrl(path: string): string {
   return `${ENGINE_BASE}${path}`;
 }
 
+/** Lieu de la série : unité de lieu des cases, avec le décor de la bibliothèque qui le représente. */
+export interface SeriesLocation {
+  id: number;
+  project_id: number;
+  name: string;
+  description: string;
+  decor: number | null;
+  decor_name: string | null;
+  decor_image_url: string | null;
+  panel_count: number;
+  chapters: number[];
+}
+
+export interface SeriesLocationInput {
+  name: string;
+  description?: string;
+  decor?: number | null;
+}
+
+export interface SettingVariant {
+  text: string;
+  panels: number;
+  chapters: number[];
+}
+
+/** Groupe de variantes de texte rangées dans un lieu (proposé par le LLM, relu par l'auteur). */
+export interface LocationGroup {
+  name: string;
+  description: string;
+  existing: number | null;
+  decor: number | null;
+  settings: string[];
+  panels?: number;
+}
+
+export interface LocationProposal {
+  variants: SettingVariant[];
+  groups: LocationGroup[];
+  unattached: number;
+}
+
+export interface LocationApplyResult {
+  created: number;
+  attached: number;
+  inherited: number;
+  unattached: number;
+  locations: SeriesLocation[];
+}
+
+export interface AlertPanelRef {
+  panel_id: number;
+  page_id: number;
+  page: number;
+  panel: number;
+  characters: string[];
+}
+
+export interface ReferenceAlerts {
+  panels_without_reference: AlertPanelRef[];
+  locations_without_decor: {
+    id: number;
+    name: string;
+    panels: number;
+    reason: "no_decor" | "decor_without_image";
+    decor: number | null;
+  }[];
+  unattached: AlertPanelRef[];
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
@@ -3045,6 +3119,21 @@ export const api = {
     ),
   deleteReferenceVariant: (variantId: number) =>
     request<void>(`/reference-variants/${variantId}`, { method: "DELETE" }),
+  // Lieux de la série (unité de lieu des cases)
+  listLocations: (projectId: number) => request<SeriesLocation[]>(`/projects/${projectId}/locations`),
+  createLocation: (projectId: number, body: SeriesLocationInput) =>
+    request<SeriesLocation>(`/projects/${projectId}/locations`, json("POST", body)),
+  updateLocation: (id: number, body: Partial<SeriesLocationInput>) =>
+    request<SeriesLocation>(`/locations/${id}`, json("PATCH", body)),
+  deleteLocation: (id: number) => request<void>(`/locations/${id}`, { method: "DELETE" }),
+  proposeLocations: (projectId: number, chapterId?: number | null) =>
+    request<LocationProposal>(`/projects/${projectId}/locations/proposal`, json("POST", { chapter_id: chapterId ?? null })),
+  applyLocations: (projectId: number, groups: LocationGroup[], chapterId?: number | null) =>
+    request<LocationApplyResult>(
+      `/projects/${projectId}/locations/apply`,
+      json("POST", { chapter_id: chapterId ?? null, groups }),
+    ),
+  referenceAlerts: (chapterId: number) => request<ReferenceAlerts>(`/chapters/${chapterId}/reference-alerts`),
   styleBoard: (projectId: number) => request<StyleBoard>(`/projects/${projectId}/style-board`),
   // Identité visuelle (fiche série)
   identity: (projectId: number) => request<SeriesIdentity>(`/projects/${projectId}/identity`),

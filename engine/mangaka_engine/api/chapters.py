@@ -49,6 +49,7 @@ from ..store.models import (
     Page,
     PageKind,
     Panel,
+    SeriesLocation,
 )
 from .cast import add_crowd_mark
 from .deps import AppContext, get_ctx, get_session
@@ -209,6 +210,8 @@ def page_out(
                 viewpoint=viewpoint_out(p),
                 decor=p.decor_id,
                 objets=list(p.object_ids or []),
+                location=p.location_id,
+                location_name=p.location.name if p.location_id is not None and p.location else None,
                 shot_type=p.shot_type,
                 importance=p.importance,
                 intensity=p.intensity,  # type: ignore[arg-type]
@@ -280,6 +283,7 @@ def _load_pages(session: Session, chapter_id: int) -> list[Page]:
             .options(
                 selectinload(Page.panels).selectinload(Panel.bubbles),
                 selectinload(Page.panels).selectinload(Panel.images),
+                selectinload(Page.panels).selectinload(Panel.location),
             )
             .order_by(Page.number)
         ).all()
@@ -548,6 +552,7 @@ def replace_pages(
     library = SeriesLibrary.load(session, chapter.project_id)
     decor_ids = {e["id"] for e in library.decors}
     object_ids = {e["id"] for e in library.objets}
+    location_ids = {e["id"] for e in library.lieux}
 
     seen_pages: set[int] = set()
     seen_panels: set[int] = set()
@@ -563,6 +568,8 @@ def replace_pages(
                 seen_panels.add(cin.id)
             if cin.decor is not None and cin.decor not in decor_ids:
                 raise FieldError(f"pages.{pi}.panels.{ci}.decor", "décor inconnu dans cette série")
+            if cin.location is not None and cin.location not in location_ids:
+                raise FieldError(f"pages.{pi}.panels.{ci}.location", "lieu inconnu dans cette série")
             unknown = [i for i in cin.objets or [] if i not in object_ids]
             if unknown:
                 raise FieldError(
@@ -612,6 +619,8 @@ def replace_pages(
             # Bibliothèque : un champ absent garde le décor / les objets de la case.
             if "decor" in cin.model_fields_set:
                 panel.decor_id = cin.decor
+            if "location" in cin.model_fields_set:
+                panel.location = session.get(SeriesLocation, cin.location) if cin.location is not None else None
             if cin.objets is not None:
                 panel.object_ids = list(dict.fromkeys(cin.objets))
             # Les bulles sont recréées ; un cadre ou une queue ajustés à la main au lettrage suivent leur `id`.

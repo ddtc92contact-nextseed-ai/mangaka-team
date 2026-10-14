@@ -3,6 +3,7 @@
 Série (`Project`) → Character (+ images de référence)
 Série → SeriesAsset : objets et décors récurrents de la bibliothèque (+ images de référence), et
 références de style de la planche de style (`kind = style` : une seule active, les autres en historique)
+Série → SeriesLocation : lieux de la série (unité de lieu des cases, décor de la bibliothèque rattaché)
 Série → ReferenceVariant : images générées par « Créer des références » d'une fiche, gardées ou non
 Série → Volume (tome : chapitres inclus dans l'ordre via `VolumeChapter`, format et versions de couverture
 `VolumeCover`)
@@ -205,6 +206,9 @@ class Project(TimestampMixin, Base):
     logos: Mapped[list[SeriesLogo]] = relationship(
         back_populates="project", cascade="all, delete-orphan", order_by="SeriesLogo.version"
     )
+    locations: Mapped[list[SeriesLocation]] = relationship(
+        back_populates="project", cascade="all, delete-orphan", order_by="SeriesLocation.name"
+    )
     # Charte des couvertures (pipeline/cover_charter.py) ; None = réglages par défaut de cover_charter.yaml.
     cover_charter: Mapped[CoverCharter | None] = relationship(
         back_populates="project", cascade="all, delete-orphan", uselist=False
@@ -312,6 +316,23 @@ class SeriesAssetImage(Base):
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
     asset: Mapped[SeriesAsset] = relationship(back_populates="reference_images")
+
+
+class SeriesLocation(TimestampMixin, Base):
+    """Lieu de la série (la clairière, la crique, le labo) : l'unité de lieu à laquelle les cases se rattachent
+    (`Panel.location_id`). Son décor de la bibliothèque (`decor_id`, id de `series_assets`, sans clé étrangère
+    comme `Panel.decor_id`) donne la référence de lieu de chaque case rattachée (pipeline/locations.py)."""
+
+    __tablename__ = "series_locations"
+    __table_args__ = NEVER_REUSED
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    description: Mapped[str] = mapped_column(Text, default="", server_default="")
+    decor_id: Mapped[int | None] = mapped_column(Integer, default=None)
+
+    project: Mapped[Project] = relationship(back_populates="locations")
 
 
 class ReferenceVariant(Base):
@@ -503,9 +524,15 @@ class Panel(TimestampMixin, Base):
     # étrangère : un objet ou un décor supprimé est retiré des cases par l'API, ignoré sinon).
     decor_id: Mapped[int | None] = mapped_column(Integer, default=None)
     object_ids: Mapped[list[int]] = mapped_column(JSON, default=list)
+    # Lieu de la série où se passe la case (unité de lieu, `SeriesLocation`) ; None = pas encore rattachée.
+    # Son décor sert de décor à la case quand `decor_id` est vide (référence de lieu, pipeline/library.py).
+    location_id: Mapped[int | None] = mapped_column(
+        ForeignKey("series_locations.id", ondelete="SET NULL"), default=None, index=True
+    )
     shot_type: Mapped[str | None] = mapped_column(String(50), default=None)
-    # Donnés par le scénario : lieu (lieu, moment, éléments du décor) et mise en scène (qui fait quoi,
-    # où dans le cadre, interactions) ; vides pour les cases d'avant (le prompt les omet alors).
+    # Donnés par le scénario : lieu (lieu, moment, éléments du décor — depuis l'unité de lieu, une précision de
+    # cadrage du lieu `location_id`) et mise en scène (qui fait quoi, où dans le cadre, interactions) ; vides
+    # pour les cases d'avant (le prompt les omet alors).
     setting: Mapped[str] = mapped_column(Text, default="", server_default="")
     staging: Mapped[str] = mapped_column(Text, default="", server_default="")
     dialogues: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)  # inutilisé : voir Bubble
@@ -559,6 +586,7 @@ class Panel(TimestampMixin, Base):
     state: Mapped[PanelState] = mapped_column(_enum(PanelState), default=PanelState.draft)
 
     page: Mapped[Page] = relationship(back_populates="panels")
+    location: Mapped[SeriesLocation | None] = relationship()
     images: Mapped[list[PanelImage]] = relationship(
         back_populates="panel", cascade="all, delete-orphan", order_by="PanelImage.version"
     )

@@ -22,6 +22,7 @@ import { StepAlert } from "../step-alert";
 import { buildPanelViews, PageCanvas, type PageCanvasHandle } from "./page-canvas";
 import { PanelInspector } from "./panel-inspector";
 import { QCToolbar } from "./qc-toolbar";
+import { ReferenceAlertsBlock } from "./reference-alerts";
 import { blockedReason } from "@/lib/stages";
 import { StageBanner } from "../stages";
 
@@ -46,6 +47,7 @@ function Workshop() {
   const qcStatus = useEngineData(() => api.qcStatus());
   // Règles de mise en scène encore enfreintes (direction artistique) : avertissement, jamais bloquant.
   const direction = useEngineData(() => api.getDirection(chapter.id), [chapter.id, finished]);
+  const alerts = useEngineData(() => api.referenceAlerts(chapter.id), [chapter.id, finished]);
   const [onlyReview, setOnlyReview] = useState(false);
   const [showBoxes, setShowBoxes] = useState(false);
   const [showLettering, setShowLettering] = useState(false);
@@ -267,6 +269,12 @@ function Workshop() {
         </Alert>
       )}
       {finishJobs.error && <Alert>Historique des finitions indisponible : {finishJobs.error}</Alert>}
+
+      <ReferenceAlertsBlock
+        alerts={alerts.data}
+        projectId={chapter.project_id}
+        onOpenPanel={(pageId, panelId) => navigate(pageId, panelId)}
+      />
 
       <ChapterNameNotes pages={list} onOpenPanel={(pageId, panelId) => navigate(pageId, panelId)} />
 

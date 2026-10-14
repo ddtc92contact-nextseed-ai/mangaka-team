@@ -9,7 +9,8 @@ artistique et leurs contrôles.
   planche (`dialogue_rules_for` → `pipeline/dialogues.py`) ;
 - **directeur artistique** (`pipeline/art_direction.py`) : échelle des plans dans `check_variety`
   (`shot_problems` : plancher des plans larges, plafond des plans serrés — la relance dit « élargis » autant que
-  « resserre ») ; formes de planche, présence et courbe de rythme dans `check_page_rules` (`chapter_issues`) ;
+  « resserre ») ; formes de planche, présence, courbe de rythme et lieux (case d'établissement au changement de
+  lieu, cases de décor muettes) dans `check_page_rules` (`chapter_issues`) ;
 - **prompts** : `$pre_direction` en clair (`script_text` pour le scénariste, `art_text` pour la direction
   artistique) ; `$style_guidelines` reste.
 
@@ -54,6 +55,7 @@ GROUPS: dict[str, str] = {
     "presence": "Présence",
     "dialogue": "Dialogue",
     "rhythm": "Courbe de rythme",
+    "places": "Lieux et décors",
 }
 SHOT_LABELS: dict[str, str] = {
     "close_up": "gros plans",
@@ -101,6 +103,14 @@ LABELS: dict[str, tuple[str, str]] = {
     "rhythm.final_peak_last_pages": (
         "Pic final dans les dernières planches",
         "Nombre de planches de fin où placer un pic (0 = libre).",
+    ),
+    "places.establishing": (
+        "Case d'établissement au changement de lieu",
+        "La première case d'un nouveau lieu est un plan large ou d'ensemble qui installe le lieu.",
+    ),
+    "places.silent_decor_min": (
+        "Cases de décor muettes, au moins",
+        "Ni personnage à l'image ni réplique : le lieu seul. Part des cases du chapitre.",
     ),
 }
 
@@ -418,7 +428,12 @@ def chapter_issues(views: Sequence[PageView], charter: Charter | None) -> list[C
     if charter is None or len(views) < charter.settings.min_pages:
         return []
     views = sorted(views, key=lambda v: v.number)
-    return [*_shape_issues(views, charter), *_presence_issues(views, charter), *_rhythm_issues(views, charter)]
+    return [
+        *_shape_issues(views, charter),
+        *_presence_issues(views, charter),
+        *_rhythm_issues(views, charter),
+        *_place_issues(views, charter),
+    ]
 
 
 def _shape_issues(views: Sequence[PageView], charter: Charter) -> list[CharterIssue]:
@@ -523,6 +538,67 @@ def _presence_issues(views: Sequence[PageView], charter: Charter) -> list[Charte
                     [],
                 )
             )
+    return out
+
+
+def _cases(cases: Sequence[tuple[int, int]]) -> str:
+    shown = ", ".join(f"page {p} case {c}" for p, c in cases[:6])
+    return shown + (f" et {len(cases) - 6} autre(s)" if len(cases) > 6 else "")
+
+
+def _place_issues(views: Sequence[PageView], charter: Charter) -> list[CharterIssue]:
+    """Lieux : case d'établissement au changement de lieu (la première case d'un nouveau lieu de la série en plan
+    large / d'ensemble) et part de cases de décor muettes. Le lieu d'une case est son unité de lieu (`location`,
+    id d'un lieu de la série) : une case sans lieu ne compte ni comme changement ni comme continuité, et un chapitre
+    dont aucune case n'est rattachée à un lieu (d'avant l'unité de lieu) n'est pas mesuré."""
+    d = charter.dna.places
+    s = charter.settings
+    panels = [(v.number, i, pa) for v in views for i, pa in enumerate(v.panels, start=1)]
+    out: list[CharterIssue] = []
+    if not any(pa.get("location") is not None for _p, _i, pa in panels):
+        return out
+    if d.establishing:
+        wide = {_key(p) for p in s.shot_classes["wide"]}
+        missing: list[tuple[int, int]] = []
+        names: list[str] = []
+        previous: Any = None
+        for number, i, pa in panels:
+            loc = pa.get("location")
+            if loc is None:
+                continue
+            if loc != previous and _key(pa.get("plan")) not in wide:
+                missing.append((number, i))
+                name = str(pa.get("location_name") or "")
+                if name and name not in names:
+                    names.append(name)
+            previous = loc
+        if missing:
+            where = f" ({', '.join(f'« {n} »' for n in names[:4])})" if names else ""
+            out.append(
+                CharterIssue(
+                    f"changement de lieu sans case d'établissement{where} : {_cases(missing)} : passe la première case "
+                    f"du nouveau lieu en {' / '.join(s.shot_classes['wide'])} qui installe le lieu (le décor entier, "
+                    "les personnages petits dans leur décor)",
+                    missing,
+                    [],
+                )
+            )
+    total = len(panels)
+    need = _required(d.silent_decor_min, total)
+    silent = [(p, i) for p, i, pa in panels if not pa.get("visible") and not pa.get("replies")]
+    if total and len(silent) < need:
+        # Cases sans réplique : la direction artistique peut en montrer le lieu seul (vue subjective, les
+        # personnages hors cadre) ; les premières cases d'un lieu d'abord.
+        quiet = [(p, i) for p, i, pa in panels if not pa.get("replies") and (p, i) not in silent]
+        out.append(
+            CharterIssue(
+                f"{len(silent)} case{'s' if len(silent) > 1 else ''} de décor muette{'s' if len(silent) > 1 else ''} "
+                f"sur {total} (au moins {need}, {_pct(d.silent_decor_min)}) : montre le lieu seul, sans personnage ni "
+                "réplique — une case sans réplique en vue subjective, les personnages hors cadre",
+                quiet[: max(0, need - len(silent))],
+                [],
+            )
+        )
     return out
 
 
@@ -641,6 +717,27 @@ def _rhythm_lines(charter: Charter, pages: int) -> list[str]:
     return lines
 
 
+def _place_lines(charter: Charter, *, writer: bool) -> list[str]:
+    d = charter.dna.places
+    wide = " / ".join(charter.settings.shot_classes["wide"])
+    lines = []
+    if d.establishing:
+        lines.append(
+            "- case d'établissement : à chaque changement de lieu, la première case du nouveau lieu l'installe"
+            + (
+                " (le lieu entier, les personnages petits dans leur décor ; garde-la sans dialogue si possible) ;"
+                if writer
+                else f" en {wide} ;"
+            )
+        )
+    if d.silent_decor_min > EPS:
+        lines.append(
+            f"- cases de décor muettes (le lieu seul, sans personnage à l'image ni réplique) : au moins "
+            f"{_pct(d.silent_decor_min)} des cases du chapitre ;"
+        )
+    return lines
+
+
 def script_text(charter: Charter | None, target_pages: int = 0) -> str:
     """Charte de la série pour le scénariste : cases par planche, dialogue, courbe de rythme."""
     if charter is None:
@@ -662,6 +759,7 @@ def script_text(charter: Charter | None, target_pages: int = 0) -> str:
     lines.append(
         "  (le directeur artistique fixe le rythme de chaque page : écris l'histoire pour que cette courbe tombe juste)"
     )
+    lines += _place_lines(charter, writer=True)
     return "\n".join(lines)
 
 
@@ -690,6 +788,7 @@ def art_text(charter: Charter | None, pages: int = 0) -> str:
         f"forme sur {_pct(sh.max_same_share)} des planches au plus (forme : page choc, gabarit, ou nombre de cases et "
         "de grandes cases) — varie « template » et « page_choc » ;",
         *_rhythm_lines(charter, pages),
+        *_place_lines(charter, writer=False),
     ]
     return "\n".join(lines)
 

@@ -722,6 +722,7 @@ mesures de « la petite île » (13/10) : 63 % de plans serrés, 11 planches sur
 | `presence` | part de cases en vue subjective, de cases sans personnage | DA (`check_page_rules`) |
 | `dialogue` | répliques par planche, cases muettes par planche | scénariste (`check_dialogues`) |
 | `rhythm` | fenêtre du premier pic, respiration après un pic, pics d'affilée, pic final | DA (`check_page_rules`) |
+| `places` | case d'établissement au changement de lieu (plan large / d'ensemble), part de cases de décor muettes ; mesurée sur l'unité de lieu des cases (lieux de la série), pas sur leur texte | DA (`check_page_rules`) |
 
 `defaults` est le défaut ultime ; `genres` donne, pour chacun des 7 genres, les seules valeurs qui changent.
 La série hérite de son genre et ajuste ce qu'elle veut dans la carte « ADN de la série » de sa fiche
