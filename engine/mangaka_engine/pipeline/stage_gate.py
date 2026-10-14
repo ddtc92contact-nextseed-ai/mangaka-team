@@ -7,7 +7,9 @@ d'éléments en faute :
 - **Direction artistique appliquée** (`direction`) : chaque page de l'histoire a une direction appliquée (une
   page dont l'auteur a rejeté la direction est réglée : c'est une décision) ;
 - **Mise en page posée** (`layout`) : chaque page a une mise en page avec son gabarit, chaque case son cadre ;
-- **Références prêtes** (`references`) : chaque personnage (fiche) présent dans le chapitre a une image ;
+- **Références prêtes** (`references`) : chaque intervenant de la distribution du chapitre (pipeline/cast.py :
+  présents, hors cadre, locuteurs, fiches citées, même secondaires) a une fiche avec une image de référence ;
+  un intervenant sans fiche est en faute, seules les foules marquées « foule sans fiche » sont exclues ;
 - **Prompts rédigés** (`prompts`) : aucune case au prompt final vide (une case décrite reçoit le sien à la mise en
   file : par fragments, ou rédigé par l'IA ; sans description ni prompt, l'image serait inutilisable) ;
 - **Cases approuvées** (`approved`) : chaque case a une version choisie ;
@@ -41,8 +43,6 @@ from sqlalchemy.orm import Session
 from ..store.models import (
     Chapter,
     ChapterStageDecision,
-    Character,
-    CharacterImage,
     ImageKind,
     Page,
     PageKind,
@@ -96,10 +96,10 @@ STAGES: dict[str, StageDef] = {
             "references",
             "Références prêtes",
             "Références manquantes",
-            ("personnage", "personnages"),
-            ("sans image de référence", "sans image de référence"),
-            "Ajoute une image de référence à chaque fiche",
-            "personnages",
+            ("intervenant", "intervenants"),
+            ("sans référence", "sans référence"),
+            "Crée leur fiche et leurs références (Direction artistique › Distribution)",
+            "direction",
         ),
         StageDef(
             "prompts",
@@ -189,6 +189,8 @@ class StageState:
     examples: list[str] = field(default_factory=list)
     decision: Decision | None = None
     tolerated: int = 0
+    # Fautes par motif, dans l'ordre : (« intervenant sans fiche », noms) — étape `references`.
+    parts: list[tuple[tuple[str, str], list[str]]] = field(default_factory=list)
 
     @property
     def stage(self) -> StageDef:
@@ -213,6 +215,9 @@ class StageState:
         """« 5 pages en attente sur 5 » ; « aucune case » pour un chapitre vide."""
         if self.total == 0:
             return f"aucune {self.stage.unit[0]}" if self.key == "script" else "rien à vérifier"
+        if self.parts and self.faults:
+            counts = ", ".join(f"{len(names)} {label[1 if len(names) > 1 else 0]}" for label, names in self.parts)
+            return f"{counts} sur {self.total} {self.stage.unit[1 if self.total > 1 else 0]}"
         many = 1 if self.faults > 1 else 0
         return f"{self.faults} {self.stage.unit[many]} {self.stage.fault[many]} sur {self.total}"
 
@@ -245,8 +250,28 @@ def _inside(position: dict[str, Any], bbox: dict[str, Any]) -> bool:
     return x1 - margin <= cx <= x2 + margin and y1 - margin <= cy <= y2 + margin
 
 
+# Motifs de faute de l'étape `references` (singulier, pluriel).
+WITHOUT_CARD = ("intervenant sans fiche", "intervenants sans fiche")
+WITHOUT_IMAGE = ("fiche sans image", "fiches sans image")
+
+
+def _references(
+    session: Session, chapter: Chapter, pages: Sequence[Page]
+) -> tuple[int, list[str], list[tuple[tuple[str, str], list[str]]]]:
+    """Distribution des pages (pipeline/cast.py) : (intervenants comptés, noms en faute, fautes par motif)."""
+    from .cast import chapter_cast  # cast importe names, qui ne dépend pas d'ici
+
+    cast = chapter_cast(session, chapter, page_ids=[p.id for p in pages])
+    parts = [
+        (label, [m.name for m in members])
+        for label, members in ((WITHOUT_CARD, cast.without_card()), (WITHOUT_IMAGE, cast.without_image()))
+        if members
+    ]
+    return len(cast.counted), [n for _, names in parts for n in names], parts
+
+
 def _check(session: Session, key: str, pages: Sequence[Page]) -> tuple[int, int, list[str]]:
-    """(total, en faute, exemples) d'une étape sur ces pages."""
+    """(total, en faute, exemples) d'une étape sur ces pages (`references` : `_references`)."""
     bad: list[str] = []
     total = 0
     panels = [(pa, p) for p in pages for pa in p.panels]
@@ -269,22 +294,6 @@ def _check(session: Session, key: str, pages: Sequence[Page]) -> tuple[int, int,
             template = p.grid_template or (layout or {}).get("template_id")
             if not layout or not layout.get("panels") or not template or any(pa.bbox is None for pa in p.panels):
                 bad.append(f"page {p.number}")
-    elif key == "references":
-        ids = list(dict.fromkeys(i for pa, _ in panels for i in pa.character_ids or [] if isinstance(i, int)))
-        characters = list(session.scalars(select(Character).where(Character.id.in_(ids)))) if ids else []
-        total = len(characters)
-        with_image = (
-            set(
-                session.scalars(
-                    select(CharacterImage.character_id).where(
-                        CharacterImage.character_id.in_([c.id for c in characters])
-                    )
-                )
-            )
-            if characters
-            else set()
-        )
-        bad = [c.name for c in sorted(characters, key=lambda c: c.name) if c.id not in with_image]
     elif key == "prompts":
         total = len(panels)
         # Une case décrite sans prompt l'obtient à la mise en file (fragments, ou rédaction de l'IA) ; sans
@@ -351,6 +360,11 @@ def chapter_stages(
     keys = [k for k in STAGES if stages is None or k in set(stages)]
     out = []
     for key in keys:
+        if key == "references":
+            total, bad, parts = _references(session, chapter, pages)
+            state = StageState(key, total, len(bad), bad[:20], decisions.get(key), settings.tolerated(key), parts)
+            out.append(state)
+            continue
         total, faults, examples = _check(session, key, pages)
         out.append(StageState(key, total, faults, examples, decisions.get(key), settings.tolerated(key)))
     return out
@@ -374,7 +388,14 @@ def blocked_message(chapter: Chapter, action: ActionDef, state: StageState, *, p
         return f"{where} — aucune case : découpe d'abord le chapitre dans l'onglet Scénario {_before(action.label)}."
     detail = state.summary()
     shown = state.examples[:3]
-    if shown and state.key == "references":
+    if state.parts:
+        # « 2 intervenants sans fiche (le garde, la serveuse), 1 fiche sans image (Mina) sur 4 intervenants »
+        named = ", ".join(
+            f"{len(names)} {label[1 if len(names) > 1 else 0]} ({', '.join(names[:5])}{'…' if len(names) > 5 else ''})"
+            for label, names in state.parts
+        )
+        detail = f"{named} sur {state.total} {state.stage.unit[1 if state.total > 1 else 0]}"
+    elif shown and state.key == "references":
         detail += f" ({', '.join(shown)}{'…' if state.faults > len(shown) else ''})"
     elif shown and state.faults <= 3:
         detail += f" ({', '.join(shown)})"

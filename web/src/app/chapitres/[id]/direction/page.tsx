@@ -35,6 +35,7 @@ import { useEngineData } from "@/lib/hooks";
 import { isFinished, useJob } from "@/lib/jobs";
 import { useChapter } from "../chapter-context";
 import { StepAlert } from "../step-alert";
+import { CastPanel } from "../cast-panel";
 import { StageBanner } from "../stages";
 
 const STEP = "art_direction";
@@ -141,6 +142,9 @@ export default function DirectionPage() {
   return (
     <div className="space-y-6">
       <StageBanner action="generation" />
+      <div id="distribution" className="scroll-mt-4">
+        <CastPanel />
+      </div>
       <Card>
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="max-w-2xl space-y-1 text-sm text-zinc-400">

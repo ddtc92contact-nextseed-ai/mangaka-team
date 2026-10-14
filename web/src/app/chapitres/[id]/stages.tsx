@@ -18,7 +18,7 @@ import { useChapter } from "./chapter-context";
 
 const AUTHOR_KEY = "mangaka.author";
 
-function readAuthor(): string {
+export function readAuthor(): string {
   try {
     return window.localStorage.getItem(AUTHOR_KEY) ?? "";
   } catch {
@@ -26,7 +26,7 @@ function readAuthor(): string {
   }
 }
 
-function saveAuthor(author: string) {
+export function saveAuthor(author: string) {
   try {
     window.localStorage.setItem(AUTHOR_KEY, author);
   } catch {
