@@ -30,6 +30,7 @@ from sqlalchemy.orm import Session
 
 from ..pipeline.back_cover import AGENT_ID as SUMMARY_AGENT
 from ..pipeline.back_cover import BackCoverError, clean_summary, clean_tagline, sign_count, summary_brief, write_summary
+from ..pipeline.cover_charter import charter_format, series_charter
 from ..pipeline.cover_composition import (
     STEP,
     Composition,
@@ -54,7 +55,7 @@ from .deps import AppContext, get_ctx, get_session
 from .errors import FieldError
 from .jobs import job_out
 from .schemas import JobOut
-from .volumes import CoverFormatOut, cover_url, format_out, get_volume_or_404
+from .volumes import CoverFormatOut, CoverIdentityOut, cover_url, format_out, get_volume_or_404, identity_out
 
 router = APIRouter(tags=["tomes"])
 
@@ -114,6 +115,8 @@ class BackVersionOut(BaseModel):
     seed: int | None
     prompt: str
     selected: bool
+    # Contrôle d'identité des personnages (charte des couvertures) : avertissement, jamais de blocage.
+    identity: CoverIdentityOut | None = None
     created_at: datetime
 
 
@@ -254,10 +257,28 @@ def _export_jobs(session: Session, volume_id: int) -> tuple[list[Job], Job | Non
     return active, done
 
 
+def identity_notices(volume: Volume, choice: dict | None) -> list[NoticeOut]:
+    """Avertissements du contrôle d'identité de la 1re retenue et de l'illustration de 4e générée retenue."""
+    out: list[NoticeOut] = []
+    back_id = choice.get("id") if choice and choice.get("source") == "generated" else None
+    for cover in volume.covers:
+        part = "front" if cover.kind == "front" and cover.id == volume.selected_cover_id else None
+        if cover.kind == "back" and cover.id == back_id:
+            part = "back"
+        identity = identity_out(cover) if part else None
+        if identity is None:
+            continue
+        where = "1re de couverture" if part == "front" else "illustration de 4e"
+        for warning in identity.warnings:
+            out.append(NoticeOut(code="identity", message=f"{where} : {warning}", part=part or "front"))
+    return out
+
+
 def composition_out(session: Session, ctx: AppContext, volume: Volume) -> CompositionOut:
     presets = _presets(ctx, volume.project_id)
     series = volume.project
-    fmt = presets.cover_formats.get(volume.cover_format)
+    base_fmt = presets.cover_formats.get(volume.cover_format)
+    fmt = charter_format(base_fmt, series_charter(presets, series)) if base_fmt else None
     problem = None
     comp: Composition | None = None
     try:
@@ -319,6 +340,7 @@ def composition_out(session: Session, ctx: AppContext, volume: Volume) -> Compos
                 seed=c.seed,
                 prompt=str((c.params or {}).get("prompt") or ""),
                 selected=bool(choice and choice["source"] == "generated" and choice.get("id") == c.id),
+                identity=identity_out(c),
                 created_at=c.created_at,
             )
             for c in back_versions
@@ -340,7 +362,7 @@ def composition_out(session: Session, ctx: AppContext, volume: Volume) -> Compos
         spine_mm=info.get("spine_mm"),
         pages=info.get("pages", 0),
         order=info.get("order", []),
-        warnings=[NoticeOut(**n) for n in info.get("warnings", [])],
+        warnings=[NoticeOut(**n) for n in info.get("warnings", [])] + identity_notices(volume, choice),
         problems=[NoticeOut(**n) for n in info.get("problems", [])],
         export_jobs=[job_out(j) for j in active],
         last_export=ExportOut(
@@ -404,7 +426,7 @@ def update_composition(
         placement = body.logo.model_dump()
         try:
             settings = presets.require_composition()
-            fmt = presets.cover_format(volume.cover_format)
+            fmt = charter_format(presets.cover_format(volume.cover_format), series_charter(presets, volume.project))
             comp_inputs = composition_inputs(session, presets, ctx.files, volume)
         except PresetError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from None

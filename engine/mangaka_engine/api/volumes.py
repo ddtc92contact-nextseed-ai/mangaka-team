@@ -21,10 +21,18 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from ..pipeline.cover_charter import (
+    charter_format,
+    charter_lines,
+    charter_summary,
+    outside_charter,
+    series_charter,
+)
 from ..pipeline.covers import (
     active_cover_jobs,
     clear_zone_text,
     cover_brief,
+    cover_characters,
     cover_style,
     enqueue_cover,
     generation_size,
@@ -142,6 +150,36 @@ class CoverCharacterOut(BaseModel):
     name: str
     has_reference: bool
     image_url: str | None
+    # Admis par la charte des couvertures de la série (toujours vrai si la charte ne nomme personne).
+    in_charter: bool = True
+
+
+class IdentityCharacterOut(BaseModel):
+    name: str
+    similarity: float
+    ok: bool
+
+
+class CoverIdentityOut(BaseModel):
+    """Contrôle d'identité d'une version (couche CCIP du QC) : avertissement, jamais de blocage."""
+
+    status: str  # done | skipped | unavailable | error
+    message: str
+    characters: list[IdentityCharacterOut]
+    warnings: list[str]
+    min_similarity: float | None = None
+
+
+class StudioCharterOut(BaseModel):
+    """Charte des couvertures de la série, telle qu'appliquée à ce tome."""
+
+    saved: bool
+    summary: str
+    lines: list[str]  # consignes ajoutées au prompt de la 1re
+    character_ids: list[int]  # personnages admis (vide : tous)
+    present: list[str]  # personnages présents sur la couverture (références envoyées)
+    outside: list[str]  # choisis sur le tome mais hors charte : écartés de la génération
+    warnings: list[str]
 
 
 class CoverVersionOut(BaseModel):
@@ -157,6 +195,7 @@ class CoverVersionOut(BaseModel):
     upscaler_name: str | None
     generated_width: int | None
     generated_height: int | None
+    identity: CoverIdentityOut | None = None
     created_at: datetime
 
 
@@ -177,6 +216,7 @@ class CoverStudioOut(BaseModel):
     workflow: str | None
     workflow_name: str | None
     upscaler_name: str | None
+    charter: StudioCharterOut | None = None
 
 
 # --- conversions ------------------------------------------------------------------------------
@@ -264,6 +304,23 @@ def volume_out(volume: Volume, presets: PresetRegistry) -> VolumeOut:
     )
 
 
+def identity_out(cover: VolumeCover) -> CoverIdentityOut | None:
+    data = (cover.params or {}).get("identity")
+    if not isinstance(data, dict):
+        return None
+    return CoverIdentityOut(
+        status=str(data.get("status") or "skipped"),
+        message=str(data.get("message") or ""),
+        characters=[
+            IdentityCharacterOut(name=str(c["name"]), similarity=float(c["similarity"]), ok=bool(c["ok"]))
+            for c in data.get("characters") or []
+            if isinstance(c, dict) and "name" in c and "similarity" in c
+        ],
+        warnings=[str(w) for w in data.get("warnings") or []],
+        min_similarity=data.get("min_similarity"),
+    )
+
+
 def version_out(cover: VolumeCover, selected_id: int | None) -> CoverVersionOut:
     params: dict[str, Any] = cover.params or {}
     return CoverVersionOut(
@@ -279,13 +336,16 @@ def version_out(cover: VolumeCover, selected_id: int | None) -> CoverVersionOut:
         upscaler_name=params.get("upscaler_name"),
         generated_width=params.get("generated_width"),
         generated_height=params.get("generated_height"),
+        identity=identity_out(cover),
         created_at=cover.created_at,
     )
 
 
 def studio_out(session: Session, presets: PresetRegistry, volume: Volume) -> CoverStudioOut:
     series = volume.project
-    fmt = presets.cover_formats.get(volume.cover_format)
+    charter = series_charter(presets, series)
+    base_fmt = presets.cover_formats.get(volume.cover_format)
+    fmt = charter_format(base_fmt, charter) if base_fmt else None
     cover = presets.cover
     problem = None
     if cover is None:
@@ -295,11 +355,25 @@ def studio_out(session: Session, presets: PresetRegistry, volume: Volume) -> Cov
     loaded = presets.workflows.get(cover.workflow) if cover else None
     upscaler = resolve_cover_upscaler(presets, cover, series) if cover else None
     style = cover_style(presets, series, cover) if cover else None
-    chars = session.scalars(select(Character).where(Character.project_id == series.id).order_by(Character.name))
+    chars = list(session.scalars(select(Character).where(Character.project_id == series.id).order_by(Character.name)))
+    allowed = set(charter.character_ids) if charter and charter.character_ids else None
+    studio_charter = None
+    if charter is not None:
+        present = cover_characters(session, volume, charter)[: cover.max_characters if cover else None]
+        names = {c.id: c.name for c in chars}
+        studio_charter = StudioCharterOut(
+            saved=charter.saved,
+            summary=charter_summary(charter),
+            lines=charter_lines(charter, series, kind="front", names=[c.name for c in present]),
+            character_ids=sorted(allowed or []),
+            present=[c.name for c in present],
+            outside=[names[i] for i in outside_charter(volume, charter) if i in names],
+            warnings=list(charter.problems),
+        )
     return CoverStudioOut(
         volume=volume_out(volume, presets),
         format=format_out(fmt, presets) if fmt else None,
-        formats=[format_out(f, presets) for f in presets.cover_formats.values()],
+        formats=[format_out(fmt if fmt and f.id == fmt.id else f, presets) for f in presets.cover_formats.values()],
         characters=[
             CoverCharacterOut(
                 id=c.id,
@@ -310,6 +384,7 @@ def studio_out(session: Session, presets: PresetRegistry, volume: Volume) -> Cov
                 )
                 if c.reference_images
                 else None,
+                in_charter=allowed is None or c.id in allowed,
             )
             for c in chars
         ],
@@ -328,6 +403,7 @@ def studio_out(session: Session, presets: PresetRegistry, volume: Volume) -> Cov
         workflow=loaded.preset.id if loaded else None,
         workflow_name=loaded.preset.name if loaded else None,
         upscaler_name=upscaler.preset.name if upscaler else None,
+        charter=studio_charter,
     )
 
 
@@ -390,6 +466,14 @@ def _set_characters(session: Session, presets: PresetRegistry, volume: Volume, i
     missing = [i for i in ids if i not in found]
     if missing:
         raise FieldError("cover_character_ids", f"personnage {missing[0]} introuvable dans cette série")
+    charter = series_charter(presets, volume.project)
+    if charter is not None and charter.character_ids:
+        outside = [i for i in ids if i not in set(charter.character_ids)]
+        if outside:
+            raise FieldError(
+                "cover_character_ids",
+                f"personnage {outside[0]} hors de la charte des couvertures de la série (fiche série)",
+            )
     volume.cover_character_ids = ids
 
 

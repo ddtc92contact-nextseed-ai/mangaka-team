@@ -2705,3 +2705,78 @@ class CoverCompositionSettings(_Strict):
         if bad:
             raise ValueError(f"couleur invalide (#rrggbb attendu) : {', '.join(bad)}")
         return {k: c.lower() for k, c in v.items()}
+
+
+# --- charte des couvertures d'une série (cover_charter.yaml) --------------------------------------------------
+CHARTER_PROMPT_VARIABLES = {"colors", "characters", "lead"}
+CHARTER_IDENTITY_VARIABLES = {"tag", "name"}
+
+
+class CharterChoice(_Strict):
+    """Un choix borné de la charte : libellé affiché, explication facultative, phrase envoyée au modèle d'image."""
+
+    label: str = Field(min_length=1)
+    description: str = ""
+    prompt: str = ""
+
+    @field_validator("prompt")
+    @classmethod
+    def _check_prompt(cls, value: str) -> str:
+        _check_templates([value], CHARTER_PROMPT_VARIABLES)
+        return value
+
+
+class CharterLogoPlace(_Strict):
+    """Place réservée au logo et au titre : zone du format, ou bandeau en haut / en bas de `height` (fraction de la
+    hauteur rognée, marge de sécurité comprise)."""
+
+    label: str = Field(min_length=1)
+    description: str = ""
+    band: Literal["format", "top", "bottom"] = "format"
+    height: float = Field(default=0.25, gt=0.05, le=0.5)
+
+
+class CharterDefaults(_Strict):
+    palette_mode: str
+    mood: str
+    shot: str
+    back_shot: str
+    logo_place: str
+    subject: str
+
+
+class CoverCharterSettings(_Strict):
+    """`presets/cover_charter.yaml` : choix bornés de la charte des couvertures d'une série (couleur, ambiance,
+    cadrage, place du logo, sujet principal) et réglages par défaut."""
+
+    defaults: CharterDefaults
+    palette_modes: dict[str, CharterChoice] = Field(min_length=1)
+    palette_roles: dict[str, str] = Field(default_factory=dict)
+    moods: dict[str, CharterChoice] = Field(min_length=1)
+    shots: dict[str, CharterChoice] = Field(min_length=1)
+    logo_places: dict[str, CharterLogoPlace] = Field(min_length=1)
+    subjects: dict[str, CharterChoice] = Field(min_length=1)
+    identity_prompt: str = "$tag is the identity reference for $name: keep the face, hair and outfit."
+    identity_check: bool = True
+
+    @field_validator("identity_prompt")
+    @classmethod
+    def _check_identity(cls, value: str) -> str:
+        _check_templates([value], CHARTER_IDENTITY_VARIABLES)
+        return value
+
+    @model_validator(mode="after")
+    def _check_defaults(self) -> CoverCharterSettings:
+        d = self.defaults
+        pairs = {
+            "palette_mode": (d.palette_mode, self.palette_modes),
+            "mood": (d.mood, self.moods),
+            "shot": (d.shot, self.shots),
+            "back_shot": (d.back_shot, self.shots),
+            "logo_place": (d.logo_place, self.logo_places),
+            "subject": (d.subject, self.subjects),
+        }
+        bad = [f"{name} « {value} »" for name, (value, choices) in pairs.items() if value not in choices]
+        if bad:
+            raise ValueError(f"defaults : choix inconnu ({', '.join(bad)})")
+        return self

@@ -2219,7 +2219,62 @@ export interface CoverCharacter {
   name: string;
   has_reference: boolean;
   image_url: string | null;
+  /** Admis par la charte des couvertures de la série (toujours vrai si la charte ne nomme personne). */
+  in_charter: boolean;
 }
+
+/** Contrôle d'identité d'une version (couche CCIP du QC) : avertissement, jamais de blocage. */
+export interface CoverIdentity {
+  status: "done" | "skipped" | "unavailable" | "error";
+  message: string;
+  characters: { name: string; similarity: number; ok: boolean }[];
+  warnings: string[];
+  min_similarity: number | null;
+}
+
+/** Charte des couvertures de la série, telle qu'appliquée au tome. */
+export interface StudioCharter {
+  saved: boolean;
+  summary: string;
+  lines: string[];
+  character_ids: number[];
+  present: string[];
+  outside: string[];
+  warnings: string[];
+}
+
+export type CharterField = "palette_mode" | "mood" | "shot" | "back_shot" | "logo_place" | "subject";
+
+export interface CharterChoice {
+  id: string;
+  label: string;
+  description: string;
+}
+
+/** Charte des couvertures d'une série (fiche série) : choix bornés de presets/cover_charter.yaml. */
+export interface CoverCharter {
+  project_id: number;
+  available: boolean;
+  problem: string | null;
+  saved: boolean;
+  values: Record<CharterField, string>;
+  character_ids: number[];
+  options: Record<CharterField, CharterChoice[]>;
+  labels: Record<CharterField, string>;
+  characters: { id: number; name: string; has_reference: boolean; image_url: string | null }[];
+  max_characters: number;
+  palette_name: string | null;
+  palette: { role: string; hex: string; sent: boolean }[];
+  monochrome_series: boolean;
+  front_lines: string[];
+  back_lines: string[];
+  identity_check: boolean;
+  identity_available: boolean;
+  min_similarity: number | null;
+  warnings: string[];
+}
+
+export type CoverCharterInput = Partial<Record<CharterField, string>> & { character_ids?: number[] };
 
 export interface CoverVersion {
   id: number;
@@ -2234,6 +2289,7 @@ export interface CoverVersion {
   upscaler_name: string | null;
   generated_width: number | null;
   generated_height: number | null;
+  identity: CoverIdentity | null;
   created_at: string;
 }
 
@@ -2257,6 +2313,8 @@ export interface CoverStudio {
   workflow: string | null;
   workflow_name: string | null;
   upscaler_name: string | null;
+  /** Charte des couvertures de la série (null : preset absent). */
+  charter: StudioCharter | null;
 }
 
 // --- Composition de la couverture (1re, 4e, dos, export) ---------------------
@@ -2308,6 +2366,7 @@ export interface BackVersion {
   seed: Seed | null;
   prompt: string;
   selected: boolean;
+  identity: CoverIdentity | null;
   created_at: string;
 }
 
@@ -2919,6 +2978,11 @@ export const api = {
   updateVolume: (id: number, body: VolumeInput) => request<Volume>(`/volumes/${id}`, json("PATCH", body)),
   deleteVolume: (id: number) => request<void>(`/volumes/${id}`, { method: "DELETE" }),
   coverStudio: (volumeId: number) => request<CoverStudio>(`/volumes/${volumeId}/cover`),
+  coverCharter: (projectId: number) => request<CoverCharter>(`/projects/${projectId}/cover-charter`),
+  saveCoverCharter: (projectId: number, body: CoverCharterInput) =>
+    request<CoverCharter>(`/projects/${projectId}/cover-charter`, json("PUT", body)),
+  resetCoverCharter: (projectId: number) =>
+    request<CoverCharter>(`/projects/${projectId}/cover-charter`, { method: "DELETE" }),
   writeCoverPrompt: (volumeId: number, body: { intent?: string; character_ids?: number[] }) =>
     request<CoverStudio>(`/volumes/${volumeId}/cover/prompt`, json("POST", body)),
   generateCover: (volumeId: number, body: { prompt?: string; seed?: Seed | null } = {}) =>

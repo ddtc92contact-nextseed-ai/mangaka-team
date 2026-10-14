@@ -6,6 +6,7 @@ import { useRef, useState } from "react";
 import { useConfirm } from "@/components/confirm";
 import { AgentOverrides } from "@/components/agent-overrides";
 import { ChapterList } from "@/components/chapter-list";
+import { CoverCharterCard } from "@/components/cover-charter";
 import { LibraryList, LibraryTabs } from "@/components/library";
 import { EstimateLabel } from "@/components/estimate";
 import { LayoutStyleNotices } from "@/components/layout-style-notice";
@@ -109,6 +110,9 @@ export default function ProjectPage() {
       </div>
       <div className="mb-6">
         <SeriesIdentityCard projectId={id} />
+      </div>
+      <div className="mb-6">
+        <CoverCharterCard projectId={id} />
       </div>
       <div className="mb-6">
         <AgentOverrides projectId={id} />
