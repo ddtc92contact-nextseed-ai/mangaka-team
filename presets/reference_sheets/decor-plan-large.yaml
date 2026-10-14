@@ -15,6 +15,7 @@ prompt:
   - "Requested change: $instruction."
   - "$start is the starting image: keep the place, its layout and its elements, and redraw it cleanly as the sheet requires."
   - "Style: $style."
+  - "$subject."
   - "The last image ($style_ref) is a style reference only (line work, screentones, inking): do not copy its character, scene or composition."
   - "No character, clear perspective, no text or readable sign."
 negative_prompt: "person, people, human, character, figure, crowd, silhouette, animal, text, close-up"
