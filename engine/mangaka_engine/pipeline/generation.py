@@ -102,7 +102,15 @@ from .art_direction import (
     is_out_of_date,
     to_apply_at_generation,
 )
-from .camera import CameraError, angle_prompt, camera_plan, direction_target, merge_loras, ordered_views
+from .camera import (
+    CameraError,
+    angle_distance,
+    angle_prompt,
+    camera_plan,
+    direction_target,
+    merge_loras,
+    ordered_views,
+)
 from .framing import framing_sentence, viewpoint_of
 from .inpaint import png_bytes, recompose, soften_mask
 from .jobs import JobReporter
@@ -182,8 +190,12 @@ def panel_characters(session: Session, panel: Panel) -> list[Character]:
     return [found[i] for i in dict.fromkeys(ids) if i in found]
 
 
-# Une fiche de la bibliothèque citée par une case : personnage, décor ou objet.
+# Une fiche de la bibliothèque citée par une case : personnage, décor ou objet (véhicule, créature).
 LibraryEntry = Character | SeriesAsset
+# Sortes dont la vue qui correspond au cadrage de la case passe en tête (« Références par vue »).
+VIEW_KINDS = (AssetKind.vehicle, AssetKind.creature)
+# Écart (degrés) sous lequel une vue étiquetée montre l'angle demandé (profil à 90° pour une case de profil).
+VIEW_TOLERANCE = 22.5
 
 
 @dataclass
@@ -553,11 +565,14 @@ def choose_references(
     catalog: CameraLoraCatalog | None = None,
     preferred: dict[int, int] | None = None,
     shots: dict[int, int] | None = None,
+    framing_ranks: dict[int, int] | None = None,
 ) -> ReferenceChoice:
     """Images envoyées (`pick_references`) et fiches qui avaient une image mais n'ont eu aucun emplacement,
     dans l'ordre d'importance. L'ordre garantit qu'un personnage présent n'est jamais écarté tant qu'un
     décor, un objet ou le style occupe un emplacement."""
-    sent = pick_references(entries, slots, per_entry, target=target, catalog=catalog, preferred=preferred, shots=shots)
+    sent = pick_references(
+        entries, slots, per_entry, target=target, catalog=catalog, preferred=preferred, shots=shots, framing_ranks=framing_ranks
+    )
     served = {id(entry) for entry, _ in sent}
     dropped = [e for e in entries if e.reference_images and id(e) not in served]
     return ReferenceChoice(sent=sent, dropped=dropped)
@@ -577,6 +592,7 @@ def pick_references(
     catalog: CameraLoraCatalog | None = None,
     preferred: dict[int, int] | None = None,
     shots: dict[int, int] | None = None,
+    framing_ranks: dict[int, int] | None = None,
 ) -> list[tuple[LibraryEntry, CharacterImage | SeriesAssetImage]]:
     """Remplit les emplacements par tours, dans l'ordre de priorité des fiches.
 
@@ -601,6 +617,10 @@ def pick_references(
     plein pied pour un gros plan) ne sont envoyées que si le personnage n'en a pas d'autre. Prime sur la
     vue de l'angle, jamais sur le choix du dialogue.
 
+    `framing_ranks` (id d'une image de véhicule ou de créature → rang pour le cadrage de la case, voir `view_ranks`) :
+    les vues qui correspondent au plan ou à l'angle de la case (0 : la vue de profil d'un turnaround pour une
+    case de profil) passent en tête du véhicule, les autres gardent leur ordre.
+
     `preferred` (id du personnage → id de son image, choisi par le dialogue avec l'IA sur la case, voir
     `Panel.reference_choice`) : cette image passe en tête de son personnage, avant tout le reste.
     """
@@ -610,6 +630,8 @@ def pick_references(
         images = ordered_views(c.reference_images, catalog, target) if catalog is not None else list(c.reference_images)
         if shots and isinstance(c, Character):
             images = by_shot(images, shots)
+        elif framing_ranks and isinstance(c, SeriesAsset) and c.kind in VIEW_KINDS:
+            images = by_shot(images, framing_ranks)
         image_id = (preferred or {}).get(c.id) if isinstance(c, Character) else None
         chosen = next((img for img in c.reference_images if img.id == image_id), None)
         if chosen is not None:
@@ -669,9 +691,12 @@ def framing_source(panel: Panel) -> tuple[FramingSource, str | None]:
     return ("scenario" if panel.shot_type else "none"), why
 
 
-def reference_sheets_of(session: Session, image_ids: Iterable[int]) -> dict[int, str]:
-    """Fiche de référence (id du type, `presets/reference_sheets/`) qui a produit chaque image de personnage
-    gardée ; une image importée n'en a pas."""
+def reference_sheets_of(
+    session: Session, image_ids: Iterable[int], kinds: Sequence[str] = ("character",)
+) -> dict[int, str]:
+    """Fiche de référence (id du type, `presets/reference_sheets/`) qui a produit chaque image gardée d'une fiche
+    de ces sortes (personnages par défaut ; les ids d'images de personnage et d'objet ne se mélangent pas) ;
+    une image importée n'en a pas."""
     ids = list(image_ids)
     if not ids:
         return {}
@@ -679,7 +704,7 @@ def reference_sheets_of(session: Session, image_ids: Iterable[int]) -> dict[int,
         v.kept_image_id: v.sheet
         for v in session.scalars(
             select(ReferenceVariant).where(
-                ReferenceVariant.entry_kind == "character", ReferenceVariant.kept_image_id.in_(ids)
+                ReferenceVariant.entry_kind.in_(list(kinds)), ReferenceVariant.kept_image_id.in_(ids)
             )
         )
         if v.kept_image_id is not None
@@ -708,6 +733,48 @@ def panel_shot_ranks(
         return {}
     ids = [img.id for e in entries if isinstance(e, Character) for img in e.reference_images]
     return shot_ranks(presets, plan, reference_sheets_of(session, ids))
+
+
+def view_ranks(
+    presets: PresetRegistry,
+    framing: Sequence[str | None],
+    sheets: dict[int, str],
+    tags: dict[int, str | None] | None = None,
+    target: AngleTarget | None = None,
+) -> dict[int, int]:
+    """Rang de chaque image de véhicule ou de créature (id → 0 : elle montre le cadrage de la case) d'après le
+    plan et l'angle de la case (`framing`) : sa fiche le cite (`angles` ou `shots` du type de fiche : un
+    turnaround pour une case de profil), ou son étiquette d'angle est à moins de `VIEW_TOLERANCE` degrés de
+    l'angle demandé (`target`, vue de « Nouvel angle »). Les autres n'ont pas de rang (1 : elles gardent leur
+    ordre, jamais écartées). {} sans plan ni angle."""
+    values = [v for v in framing if v and v.strip()]
+    if not values:
+        return {}
+    out: dict[int, int] = {}
+    for image_id, sheet_id in sheets.items():
+        sheet = presets.reference_sheets.get(sheet_id)
+        if sheet is not None and any(shot_in(v, [*sheet.angles, *sheet.shots]) for v in values):
+            out[image_id] = 0
+    catalog = presets.camera_loras
+    for image_id, tag in (tags or {}).items():
+        angle = catalog.angle(tag) if tag else None
+        if angle is not None and target is not None and angle_distance(angle, target) <= VIEW_TOLERANCE:
+            out[image_id] = 0
+    return out
+
+
+def panel_view_ranks(
+    session: Session, presets: PresetRegistry, panel: Panel, entries: Sequence[LibraryEntry]
+) -> dict[int, int]:
+    """`view_ranks` des images des véhicules et créatures de la case, pour son plan et son angle."""
+    direction = applied_panel_direction(panel)
+    framing = [str(direction.get("angle") or ""), panel_plan(panel)]
+    images = [img for e in entries if isinstance(e, SeriesAsset) and e.kind in VIEW_KINDS for img in e.reference_images]
+    if not images or not any(framing):
+        return {}
+    sheets = reference_sheets_of(session, [img.id for img in images], [k.value for k in VIEW_KINDS])
+    tags = {img.id: img.angle for img in images}
+    return view_ranks(presets, framing, sheets, tags, panel_angle_target(presets, panel))
 
 
 def collect_loras(panel: Panel, characters: Sequence[LibraryEntry]) -> list[LoraSpec]:
@@ -1579,6 +1646,7 @@ class GenerationExecutor:
                     catalog=catalog,
                     preferred=reference_preferences(panel),
                     shots=panel_shot_ranks(session, presets, panel, entries),
+                    framing_ranks=panel_view_ranks(session, presets, panel, entries),
                 )
                 dropped = [dropped_reference(e) for e in choice.dropped]
                 for entry, image in choice.sent:

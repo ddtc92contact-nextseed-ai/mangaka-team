@@ -1,0 +1,26 @@
+# Type de fiche de référence : voir presets/README.md (« Fiches de référence »).
+id: creature-turnaround
+name: Corps entier face / profil / dos (turnaround)
+description: "La même créature en entier, vue de face, de profil et de dos, avec une silhouette humaine grise pour l'échelle."
+kinds: [creature]
+order: 20
+shots: [plan large, plan d'ensemble, plan américain, plan moyen]
+angles: [de profil, de dos]
+folder: turnaround
+width: 1536
+height: 864
+workflow: qwen-image-base-qualite
+# Repère d'échelle ($scale), facultatif : vide ("") = pas de silhouette. Une silhouette plate et grise, sans
+# visage, ne compte pas comme « un humain » pour le négatif (qui interdit les personnages dessinés).
+scale: "a flat light-grey human silhouette of average height, featureless, standing at the edge"
+prompt:
+  - "Creature turnaround sheet of $name: three full-body views side by side — front view, side view and back view — the same creature at the same scale, each view complete from head to tail and feet."
+  - "$description."
+  - "Details: $keywords."
+  - "For scale only: $scale, drawn as a plain grey shape without any detail."
+  - "Requested change: $instruction."
+  - "$start is the starting image: keep the creature, its body shape, markings and colours, and redraw it cleanly in the three requested views."
+  - "Style: $style."
+  - "The last image ($style_ref) is a style reference only (line work, screentones, inking): do not copy its character, scene or composition."
+  - "Same proportions and colours in every view, plain white background, neutral lighting, no text or captions."
+negative_prompt: "human character, person, people, man, woman, child, rider, owner, extra creatures, second animal, different creatures, crowd, text, background scenery, cropped tail, cropped feet, out of frame, partial body, close-up"

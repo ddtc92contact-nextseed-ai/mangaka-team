@@ -1,0 +1,23 @@
+# Type de fiche de référence : voir presets/README.md (« Fiches de référence »).
+id: vehicule-trois-quarts
+name: Vue 3/4 + détails
+description: "Le véhicule entier en vue de trois quarts, centré, avec deux ou trois détails en médaillon."
+kinds: [vehicle]
+order: 10
+# Angles de case que montre cette fiche (« Références par vue », pipeline/generation.py) : pour une case
+# vue de trois quarts ou de face, cette image du véhicule passe en tête.
+angles: [de trois quarts, de face]
+width: 1328
+height: 992
+# Palier Qualité (vrai CFG, non distillé) : le prompt négatif « aucune personne, aucun pilote » est lu.
+workflow: qwen-image-base-qualite
+prompt:
+  - "Vehicle reference sheet: $name in three-quarter view, the whole vehicle visible and centred, with two or three detail views in round insets around it (cockpit, engine, emblem or wheel)."
+  - "$description."
+  - "Details: $keywords."
+  - "Requested change: $instruction."
+  - "$start is the starting image: keep the vehicle, its silhouette, proportions and markings, and redraw it cleanly as the sheet requires."
+  - "Style: $style."
+  - "The last image ($style_ref) is a style reference only (line work, screentones, inking): do not copy its character, scene or composition."
+  - "Empty vehicle with no pilot or driver visible, plain white background, neutral studio lighting, no scenery, no text."
+negative_prompt: "person, people, human, character, pilot, driver, passenger, face, hands, figure, crowd, landscape, road, sky, scenery, background scenery, text, cropped vehicle"

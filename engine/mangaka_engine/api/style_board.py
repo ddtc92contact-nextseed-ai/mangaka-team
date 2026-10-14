@@ -27,6 +27,7 @@ from ..pipeline.style_board import (
     trials,
 )
 from ..presets import PresetError, PresetRegistry
+from ..presets.schemas import LIBRARY_KINDS
 from ..store.files import cache_headers, versioned_url
 from ..store.models import AssetKind, Project, ReferenceVariant, SeriesAsset
 from .deps import AppContext, get_ctx, get_session
@@ -115,7 +116,7 @@ def board_out(session: Session, presets: PresetRegistry, series: Project) -> Sty
         # Réglage des fiches de personnage ; sortes de fiches qui reçoivent la référence (jamais les
         # objets ni les décors avec les presets livrés).
         use_reference_sheets=settings.sheets_mode("character") if settings is not None else None,
-        reference_sheet_kinds=[k for k in ("character", "object", "decor") if settings.sheets_mode(k) != "never"]
+        reference_sheet_kinds=[k for k in LIBRARY_KINDS if settings.sheets_mode(k) != "never"]
         if settings is not None
         else [],
         use_panels=settings.panels if settings is not None else None,

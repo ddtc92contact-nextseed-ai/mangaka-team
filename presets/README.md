@@ -575,11 +575,14 @@ style_board:
     character: with_subject
     object: never           # sorte absente = never
     decor: never
+    vehicle: never
+    creature: never
   panels: never             # with_subject | free_slot | never : voir « Cases » ci-dessous
 ```
 
 - **Fiches de référence** (`reference_sheets`, une valeur ou une par sorte de fiche). Livré
-  (11/10/2026) : `with_subject` pour les personnages, **`never` pour les objets et les décors** — la
+  (11/10/2026) : `with_subject` pour les personnages, **`never` pour les objets, les décors, les véhicules et les
+  créatures** — la
   planche montre des personnages, qui apparaissaient dans la fiche d'objet ou de décor puis dans chaque
   case qui l'utilise comme référence (la même fuite que sur les cases le 10/10).
   - `with_subject` (personnages) : la référence de style n'est jointe que si une image du sujet est déjà
@@ -665,7 +668,9 @@ même contexte en JSON (le LLM factice du mode mock s'en sert pour produire un d
 
 **Bibliothèque de la série.** Le scénariste (`script.yaml`) et le directeur artistique
 (`direction-artistique.yaml`) reçoivent les décors et objets récurrents de la série (`$decors`,
-`$objets` : « - id N · nom : description courte », et `decors` / `objets` dans le contexte JSON). Par
+`$objets` : « - id N · nom : description courte », et `decors` / `objets` dans le contexte JSON) ; les
+véhicules et les créatures sont dans `$objets`, leur sorte après le nom (« - id 7 · Le Faucon (véhicule) : … »,
+`"sorte": "véhicule"` dans le contexte JSON). Par
 case, le scénario donne `decor` (id ou `null`) et `objets` (liste d'ids) à côté de `characters` ; la
 direction artistique peut les proposer aussi (`null` = garder ceux du scénario). Un id absent de la
 bibliothèque (ou d'une autre sorte) rend la réponse invalide : nouvel essai avec l'erreur (« page 1 ›
@@ -1378,7 +1383,7 @@ GX10, pour un détourage plus fin qu'un rectangle — ce sera un autre preset `i
 
 ## Fiches de référence (`reference_sheets/*.yaml`)
 
-Sur chaque fiche de la bibliothèque (personnage, objet, décor), le panneau **« Créer des références »**
+Sur chaque fiche de la bibliothèque (personnage, objet, décor, véhicule, créature), le panneau **« Créer des références »**
 génère des variantes d'un type de fiche dans la file ComfyUI (même progression, même annulation que
 les cases), à partir de la description visuelle, des mots-clés, du LoRA de style de la série et du
 LoRA de la fiche. **Par défaut, la fiche part de zéro** : texte → image au palier des fiches (`workflow_library` : Turbo ;
@@ -1407,6 +1412,34 @@ dans ces fiches, puis dans chaque case qui les recevait en référence) :
   `POST /reference-variants/{id}/keep` avec `{"accept_people": true}`, noté sur la variante).
   Détecteurs absents ou en erreur : rien n'est bloqué.
 
+**Véhicules et créatures** (14/10/2026 — un vaisseau rangé en « objet » recevait une vue 3/4 en gros plan et le
+négatif d'un accessoire ; une créature s'y voyait interdire visage et silhouette) : deux sortes à part entière,
+avec leurs onglets dans la bibliothèque (« Véhicules », « Créatures ») et leurs fiches livrées :
+
+| Sorte | Fiche | Contenu | Négatif |
+|---|---|---|---|
+| `vehicle` | `vehicule-trois-quarts` | vue 3/4 entière, centrée, 2 ou 3 détails en médaillon | pas de personne, pas de pilote visible, pas de décor |
+| `vehicle` | `vehicule-turnaround` | profil, face, dessus et arrière, mêmes proportions | idem |
+| `creature` | `creature-portrait` | tête et buste de face | pas d'humain, pas d'autre créature — **ni visage, ni yeux, ni corps interdits** |
+| `creature` | `creature-turnaround` | face, profil et dos, corps entier, silhouette humaine grise pour l'échelle (`scale`) | idem (« human character » : la silhouette d'échelle reste permise) |
+
+- palier Qualité imposé (le négatif est lu), jamais de planche de style (`style_board.reference_sheets` :
+  `vehicle: never`, `creature: never`), `$style` sans les mots-clés `people` — le style de la série (et ses
+  réglages, dont un rendu épuré) s'applique par `$style` comme pour les autres fiches ;
+- le détecteur de visages passe sur une fiche de véhicule (personne, pas même le pilote), **jamais** sur une
+  fiche de créature (il y trouverait la créature) ;
+- dans les cases, un véhicule ou une créature se rattache comme un objet (« objets » du scénario et de la
+  direction artistique, `Panel.object_ids`) : les agents les reçoivent dans la liste des objets, leur sorte après
+  le nom (« - id 7 · Le Faucon (véhicule) : … »). Le scénario qui nomme le vaisseau dans la description de la
+  case, ou met la créature parmi les personnages, la rattache par son nom exact : une créature ne parle pas,
+  elle n'entre pas dans la distribution du chapitre. Un nom sans fiche reste signalé comme avant ;
+- **références par vue** : pour un véhicule ou une créature, l'image dont la fiche cite l'angle ou le plan de la
+  case (`angles`, `shots` du type de fiche : le turnaround pour une case « de profil ») passe en tête, comme une
+  vue étiquetée proche de l'angle demandé (« Nouvel angle ») ; les autres gardent leur ordre, rien n'est écarté ;
+- un objet existant **change de catégorie** depuis sa fiche (« Catégorie » : objet ↔ véhicule ↔ créature,
+  `POST /objects/{id}/kind`) : même id, mêmes images et variantes, mêmes cases ; son dossier de ComfyUI passe
+  sous la nouvelle sorte (`objets/<nom>` → `vehicules/<nom>`).
+
 Un type de fiche = un fichier ; en ajouter un ne demande aucun code (il est validé au démarrage, une
 erreur apparaît dans `GET /presets` et `GET /health`) :
 
@@ -1414,7 +1447,8 @@ erreur apparaît dans `GET /presets` et `GET /health`) :
 id: objet-eclate                 # unique, minuscules et tirets
 name: Vue éclatée                # libellé de la liste déroulante
 description: "Pièces séparées, alignées sur un axe."
-kinds: [object]                  # character | object | decor (plusieurs possibles)
+kinds: [object]                  # character | object | decor | vehicle | creature (plusieurs possibles) ;
+                                 # une sorte inconnue est refusée (« sorte de fiche inconnue : … »)
 order: 30                        # ordre dans la liste
 folder: eclate                   # facultatif : sous-dossier de la bibliothèque lisible
                                  # (objets/<nom>/eclate/) ; absent : l'id sans la sorte (`eclate`) ;
@@ -1434,6 +1468,10 @@ prompt:                          # morceaux assemblés ; un morceau dont une var
 negative_prompt: "person, people, text"   # en anglais ; remplace le négatif du workflow (termes « pas de texte » toujours ajoutés)
 large_build_keywords: [grand, géant, trapu, tall, stocky]   # facultatif : mots entiers (sans casse) cherchés dans la
                                  # description et les mots-clés de la fiche ; ceux trouvés remplissent $large_build
+shots: [gros plan, plan rapproché]   # facultatif : plans de case que sert la fiche (image en tête pour ces plans)
+angles: [de profil, de dos]      # facultatif (véhicule, créature) : angles de case (`angle` / `plan` de la direction
+                                 # artistique) que montre la fiche ; son image passe en tête pour ces cases
+scale: "a flat light-grey human silhouette"   # facultatif : repère d'échelle, remplit $scale ("" = aucun)
 ```
 
 **Plein pied (`personnage-turnaround`)** (12/10/2026 — un personnage grand et trapu était coupé aux genoux en

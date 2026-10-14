@@ -106,7 +106,7 @@ user: |
   Décors récurrents (bibliothèque) :
   $decors
 
-  Objets récurrents (bibliothèque) :
+  Objets, véhicules et créatures récurrents (bibliothèque ; la sorte suit le nom) :
   $objets
 
   Lieux de la série (chaque case se rattache à l'un d'eux) :
@@ -165,8 +165,8 @@ user: |
   - « sfx » : onomatopées suggérées (0 à 4), chacune {"text": "…", "intensity": l'une de $sfx_intensities} ;
   - « decor » (facultatif) : null pour garder le décor du scénario, sinon l'id d'un décor de la
     bibliothèque ci-dessus — jamais un id absent de la liste ;
-  - « objets » (facultatif) : null pour garder les objets du scénario, sinon la liste des ids d'objets
-    de la bibliothèque visibles dans la case — jamais un id absent de la liste ;
+  - « objets » (facultatif) : null pour garder les objets du scénario, sinon la liste des ids d'objets,
+    de véhicules et de créatures de la bibliothèque visibles dans la case — jamais un id absent de la liste ;
   - « lieu » (facultatif) : null pour garder le lieu du scénario, sinon l'id d'un lieu de la série
     ci-dessus si la case se passe ailleurs — jamais un id absent de la liste. La première case d'un
     NOUVEAU LIEU est une case d'établissement (voir la charte) : elle installe le lieu ;

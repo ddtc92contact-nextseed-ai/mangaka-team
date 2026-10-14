@@ -1,4 +1,5 @@
-"""« Créer des références » : fiches de référence d'un personnage, d'un objet ou d'un décor via ComfyUI.
+"""« Créer des références » : fiches de référence d'un personnage, d'un objet, d'un décor, d'un véhicule ou d'une
+créature via ComfyUI.
 
 - `sheet_prompt` / `sheet_loras` / `sheet_preset_id` / `sheet_params` (purs) : prompt du type de fiche
   (`presets/reference_sheets/*.yaml`) rempli avec la fiche de la bibliothèque et la série, chaîne de
@@ -13,10 +14,11 @@
 - `keep_variant` : « Garder comme référence » copie la variante parmi les images de référence de la
   fiche (en dernière position ; l'ordre se règle ensuite à la main).
 
-Fiches d'objet et de décor sans personne : jamais de référence de style (`reference_sheets` par sorte),
-palier à vrai CFG (`workflow` du type de fiche) pour que le négatif « person, people… » soit lu, style
-sans les mots-clés marqués `people`, et après la génération le détecteur de visages du QC passe sur
-l'image (`people_check`). Un visage trouvé : avertissement sur la variante, et « Garder comme référence »
+Fiches d'objet, de décor et de véhicule sans personne : jamais de référence de style (`reference_sheets` par
+sorte), palier à vrai CFG (`workflow` du type de fiche) pour que le négatif « person, people, pilot… » soit lu,
+style sans les mots-clés marqués `people`, et après la génération le détecteur de visages du QC passe sur
+l'image (`people_check`). Une créature a un visage : son négatif n'interdit que les humains et les autres
+créatures, et le détecteur de visages ne passe pas sur sa fiche (il y trouverait la créature). Un visage trouvé : avertissement sur la variante, et « Garder comme référence »
 refusé tant qu'elle n'est pas acceptée à la main — elle ne peut donc pas servir de référence aux cases.
 
 Référence de style (planche de style de la série), selon `style_board.reference_sheets` de defaults.yaml :
@@ -87,13 +89,26 @@ MAX_KEPT = 8
 
 LibraryEntry = Character | SeriesAsset
 ReferenceImage = CharacterImage | SeriesAssetImage
-ENTRY_KINDS = ("character", "object", "decor")
-# Sorte → dossier sous data/projects/{id}/ (le même que les images envoyées).
-FOLDERS = {"character": "characters", "object": "objects", "decor": "decors"}
-KIND_LABELS = {"character": "personnage", "object": "objet", "decor": "décor"}
+ENTRY_KINDS = ("character", "object", "decor", "vehicle", "creature")
+# Sorte → dossier sous data/projects/{id}/ (le même que les images envoyées) et segment d'URL de l'API.
+FOLDERS = {
+    "character": "characters",
+    "object": "objects",
+    "decor": "decors",
+    "vehicle": "vehicles",
+    "creature": "creatures",
+}
+KIND_LABELS = {
+    "character": "personnage",
+    "object": "objet",
+    "decor": "décor",
+    "vehicle": "véhicule",
+    "creature": "créature",
+}
+FEMININE_KINDS = ("creature",)
 UPLOAD_LABELS = {"variant": "la variante de départ", "start": "l'image de départ", "style": "la référence de style"}
 # Sortes de fiches qui ne doivent montrer personne : visages cherchés après chaque génération.
-PEOPLE_CHECK_KINDS = ("object", "decor")
+PEOPLE_CHECK_KINDS = ("object", "decor", "vehicle")
 PEOPLE_WARNING = "Personnage détecté dans la fiche : régénérer avant de l'utiliser"
 # `sheet` des variantes de « Nouvel angle » (pas un type de presets/reference_sheets/).
 ANGLE_SHEET = "nouvel-angle"
@@ -191,12 +206,14 @@ def sheet_prompt(
         "name": _clean(entry.name),
         "description": _clean(entry.visual_description),
         "keywords": ", ".join(keywords),
-        # Objets et décors : sans les mots-clés de style qui évoquent des personnes (« jeune héros »…).
+        # Objets, décors, véhicules et créatures : sans les mots-clés de style qui évoquent des personnes
+        # (« jeune héros »…).
         "style": _clean(series_style(presets, series, people=entry_kind(entry) == "character")),
         "instruction": _clean(instruction),
         "start": "<image1>" if start else "",
         "style_ref": f"<image{style_slot}>" if style_slot else "",
         "large_build": ", ".join(large_build(sheet, entry)),
+        "scale": _clean(sheet.scale),
     }
     parts: list[str] = []
     for part in sheet.prompt:
@@ -310,7 +327,8 @@ def sheet_for(presets: PresetRegistry, entry: LibraryEntry, sheet_id: str) -> Re
     kind = entry_kind(entry)
     sheet = presets.reference_sheet(sheet_id)
     if kind not in sheet.kinds:
-        raise GenerationError(f"la fiche « {sheet.name} » ne s'applique pas à un {KIND_LABELS[kind]}")
+        article = "une" if kind in FEMININE_KINDS else "un"
+        raise GenerationError(f"la fiche « {sheet.name} » ne s'applique pas à {article} {KIND_LABELS[kind]}")
     return sheet
 
 

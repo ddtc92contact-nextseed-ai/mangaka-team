@@ -528,6 +528,16 @@ def bible_out(session: Session, ctx: AppContext, project: Project) -> BibleOut:
             for a in assets
             if a.kind == AssetKind.object
         ],
+        vehicules=[
+            BibleAsset(id=a.id, name=a.name, visual_description=a.visual_description)
+            for a in assets
+            if a.kind == AssetKind.vehicle
+        ],
+        creatures=[
+            BibleAsset(id=a.id, name=a.name, visual_description=a.visual_description)
+            for a in assets
+            if a.kind == AssetKind.creature
+        ],
         chapter_summaries=[ChapterSummaryEntry(**e) for e in (bible.chapter_summaries if bible else [])],
         rendered=BibleSummary(**rendered.as_dict()) if rendered else None,
         updated_at=bible.updated_at if bible else None,

@@ -576,7 +576,9 @@ class Defaults(_Strict):
 
 STYLE_BOARD_VARIABLES = {"scene", "style"}
 SheetStyleMode = Literal["with_subject", "always", "never"]
-LibraryKindName = Literal["character", "object", "decor"]
+LibraryKindName = Literal["character", "object", "decor", "vehicle", "creature"]
+# Sortes de fiches de la bibliothèque (dans l'ordre de l'interface), pour les messages d'erreur.
+LIBRARY_KINDS: tuple[str, ...] = ("character", "object", "decor", "vehicle", "creature")
 
 
 class StyleBoardSettings(_Strict):
@@ -596,7 +598,8 @@ class StyleBoardSettings(_Strict):
     # Fiches de référence : `with_subject` = jointe seulement après une image du sujet (image de départ ou
     # variante d'« Affiner »), `always` = jointe à chaque fiche (seule image sans sujet), `never` = jamais.
     # Une valeur pour toutes les sortes, ou une par sorte ({character: with_subject, object: never, …} ;
-    # sorte absente = never) : la planche montre des personnages, qui fuiraient dans un objet ou un décor.
+    # sorte absente = never) : la planche montre des personnages, qui fuiraient dans un objet, un décor, un
+    # véhicule ou une créature.
     reference_sheets: SheetStyleMode | dict[LibraryKindName, SheetStyleMode]
     # Cases : `with_subject` = jointe s'il reste un emplacement, et seulement si la case a déjà une image
     # de référence d'un personnage, du décor ou d'un objet (jamais seule : une case sans référence passe
@@ -604,7 +607,7 @@ class StyleBoardSettings(_Strict):
     panels: Literal["with_subject", "free_slot", "never"]
 
     def sheets_mode(self, kind: str) -> SheetStyleMode:
-        """Réglage `reference_sheets` d'une sorte de fiche (character, object, decor)."""
+        """Réglage `reference_sheets` d'une sorte de fiche (character, object, decor, vehicle, creature)."""
         if isinstance(self.reference_sheets, str):
             return self.reference_sheets
         return self.reference_sheets.get(kind, "never")  # type: ignore[call-overload]
@@ -1148,8 +1151,9 @@ class CameraLoraCatalog(_Strict):
     main_view: str | None = None
     direction_angles: dict[str, AngleTarget] = Field(default_factory=dict)
     prompts: CameraPrompts = Field(default_factory=CameraPrompts)
-    # « Nouvel angle » d'une fiche : négatif par sorte (character, object, decor), taille ≈ side × side.
-    sheet_negatives: dict[Literal["character", "object", "decor"], str] = Field(default_factory=dict)
+    # « Nouvel angle » d'une fiche : négatif par sorte (character, object, decor, vehicle, creature), taille ≈
+    # side × side.
+    sheet_negatives: dict[LibraryKindName, str] = Field(default_factory=dict)
     sheet_side: int = Field(default=1024, ge=256, le=2048)
 
     @model_validator(mode="after")
@@ -1906,9 +1910,11 @@ class ReferenceSorting(_Strict):
     character: str = ""
     decor: str = ""
     object: str = ""
+    vehicle: str = ""
+    creature: str = ""
     style: str = ""
 
-    @field_validator("character", "decor", "object", "style")
+    @field_validator("character", "decor", "object", "vehicle", "creature", "style")
     @classmethod
     def _check_line(cls, value: str) -> str:
         _check_templates([value], REFERENCE_LINE_VARIABLES)
@@ -1921,9 +1927,11 @@ class ReferenceSortingMonochrome(_Strict):
     character: str | None = None
     decor: str | None = None
     object: str | None = None
+    vehicle: str | None = None
+    creature: str | None = None
     style: str | None = None
 
-    @field_validator("character", "decor", "object", "style")
+    @field_validator("character", "decor", "object", "vehicle", "creature", "style")
     @classmethod
     def _check_line(cls, value: str | None) -> str | None:
         if value is not None:
@@ -1976,6 +1984,14 @@ class ReferencePromptSettings(_Strict):
         "show it from the new camera angle."
     )
     object: str = "<image$slot> is the design reference for the object $name: keep its shape, colours and details."
+    vehicle: str = (
+        "<image$slot> is the design reference for the vehicle $name: keep its shape, proportions, colours and "
+        "markings; show it from the new camera angle."
+    )
+    creature: str = (
+        "<image$slot> is the identity reference for the creature $name: keep its head, body shape, markings and "
+        "colours; ignore its pose, framing and background."
+    )
     style: str = (
         "<image$slot> is a style reference only (line work, inking, screentones, colours): do not copy its "
         "characters, scene or composition."
@@ -1988,7 +2004,7 @@ class ReferencePromptSettings(_Strict):
     # (absente = la même), sans « colours » qui pousse Qwen-Image vers la couleur et le lavis gris.
     monochrome: ReferenceMonochrome = Field(default_factory=lambda: ReferenceMonochrome())
 
-    @field_validator("character", "decor", "object", "style")
+    @field_validator("character", "decor", "object", "vehicle", "creature", "style")
     @classmethod
     def _check_line(cls, value: str) -> str:
         _check_templates([value], REFERENCE_LINE_VARIABLES)
@@ -2005,7 +2021,7 @@ class ReferencePromptSettings(_Strict):
         if not monochrome:
             return self
         bw = self.monochrome
-        lines = {k: v for k in ("character", "decor", "object", "style") if (v := getattr(bw, k)) is not None}
+        lines = {k: v for k in (*LIBRARY_KINDS, "style") if (v := getattr(bw, k)) is not None}
         sorting = {k: v for k, v in bw.sorting.model_dump().items() if v is not None}
         return self.model_copy(
             update={
@@ -2156,6 +2172,7 @@ REFERENCE_SHEET_VARIABLES = {
     "start",
     "style_ref",
     "large_build",
+    "scale",
 }
 # Sous-dossiers de la bibliothèque lisible tenus par l'appli (vues de « Nouvel angle », images envoyées).
 REFERENCE_SHEET_RESERVED_FOLDERS = frozenset({"angles", "imports"})
@@ -2170,13 +2187,16 @@ class ReferenceSheet(_Strict):
     $instruction (consigne d'« Affiner », vide pour une première génération), $start (« image 1 » si
     une image de départ est envoyée, vide sinon), $style_ref (« image N » si la référence de style de
     la série est jointe, toujours en dernier, vide sinon), $large_build (mots de `large_build_keywords`
-    trouvés dans la description ou les mots-clés de la fiche — personnage grand, géant, trapu… —, vide sinon).
+    trouvés dans la description ou les mots-clés de la fiche — personnage grand, géant, trapu… —, vide sinon),
+    $scale (`scale` du type de fiche : repère d'échelle, ex. une silhouette humaine grise ; vide = aucun).
     """
 
     id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
     name: str
     description: str = ""
-    kinds: list[LibraryKindName] = Field(min_length=1, description="Sortes de fiches concernées")
+    kinds: list[LibraryKindName] = Field(
+        min_length=1, description="Sortes de fiches concernées (character, object, decor, vehicle, creature)"
+    )
     prompt: list[str] = Field(min_length=1)
     negative_prompt: str = Field(default="", description="Ajouté au prompt négatif du workflow")
     width: int = Field(ge=256, le=2048, multiple_of=8)
@@ -2193,6 +2213,14 @@ class ReferenceSheet(_Strict):
     # plein pied pour un plan large). Pour un plan absent de la liste, l'image n'est envoyée que si le
     # personnage n'en a pas d'autre. Vide : aucune préférence (l'image garde sa place).
     shots: list[str] = Field(default_factory=list)
+    # Angles de case (champ `angle`, ou `plan` pour plongée / contre-plongée, de la direction artistique ; sans
+    # casse, comme `direction_angles` de camera_loras.yaml) que montre cette fiche : pour une case à l'un de ces
+    # angles, l'image d'un véhicule tirée de cette fiche passe en tête de ses images (la vue de profil d'un
+    # turnaround pour une case de profil). Vide : aucune préférence.
+    angles: list[str] = Field(default_factory=list)
+    # Repère d'échelle ($scale), facultatif : « a plain light-grey human silhouette of average height » ;
+    # vide = pas de repère (le morceau du prompt qui le cite est omis).
+    scale: str = ""
     # Sous-dossier de la fiche dans la bibliothèque lisible (`references/personnages/<nom>/<dossier>/`, voir
     # pipeline/comfy_library.py) ; absent : l'id sans la sorte (`personnage-portrait` → `portrait`).
     folder: str | None = Field(default=None, pattern=r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
@@ -2214,6 +2242,18 @@ class ReferenceSheet(_Strict):
             unknown = set(tpl.get_identifiers()) - REFERENCE_SHEET_VARIABLES
             if unknown:
                 raise ValueError(f"variables inconnues : {', '.join(sorted(unknown))}")
+        return value
+
+    @field_validator("kinds", mode="before")
+    @classmethod
+    def _known_kinds(cls, value: Any) -> Any:
+        if isinstance(value, list):
+            unknown = [k for k in value if k not in LIBRARY_KINDS]
+            if unknown:
+                raise ValueError(
+                    f"sorte de fiche inconnue : {', '.join(map(str, unknown))} "
+                    f"(sortes possibles : {', '.join(LIBRARY_KINDS)})"
+                )
         return value
 
     @field_validator("kinds")

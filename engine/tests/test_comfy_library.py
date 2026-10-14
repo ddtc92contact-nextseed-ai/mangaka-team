@@ -65,6 +65,8 @@ def test_new_series_creates_its_tree_and_trash(c: TestClient, comfy_dir: Path) -
         "references/personnages",
         "references/objets",
         "references/decors",
+        "references/vehicules",
+        "references/creatures",
         "references/style",
         "trash",
     }

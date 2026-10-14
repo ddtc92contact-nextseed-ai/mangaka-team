@@ -60,7 +60,7 @@ def test_presets_endpoint(client: TestClient) -> None:
     board = data["defaults"]["style_board"]
     assert (board["trials"], board["reference_sheets"], board["panels"]) == (
         4,
-        {"character": "with_subject", "object": "never", "decor": "never"},
+        {"character": "with_subject", "object": "never", "decor": "never", "vehicle": "never", "creature": "never"},
         "never",
     )
     assert {st["id"] for st in data["layout_styles"]} >= {"sage", "dynamique", "nerveuse"}

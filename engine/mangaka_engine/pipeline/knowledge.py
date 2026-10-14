@@ -736,11 +736,17 @@ def _character_lines(session: Session, bible: SeriesBible, character_ids: Sequen
 
 
 def _library_sections(session: Session, project_id: int) -> list[str]:
-    """Décors et objets récurrents de la bibliothèque de la série (id, nom, description courte)."""
+    """Décors, objets, véhicules et créatures récurrents de la bibliothèque de la série (id, nom, description
+    courte)."""
     library = SeriesLibrary.load(session, project_id)
     out = []
-    for key, label in (("decors", "Décors récurrents"), ("objets", "Objets récurrents")):
-        text = library.text(key)
+    for key, sorte, label in (
+        ("decors", None, "Décors récurrents"),
+        ("objets", "", "Objets récurrents"),
+        ("objets", "véhicule", "Véhicules récurrents"),
+        ("objets", "créature", "Créatures récurrentes"),
+    ):
+        text = library.text(key, sorte)
         if text:
             out.append(f"{label} :\n{text}")
     return out

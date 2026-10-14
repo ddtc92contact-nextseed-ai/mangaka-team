@@ -63,7 +63,7 @@ from .dialogues import DialoguePanel, Reply, check_dialogues, dialogue_text, roo
 from .framing import aliases_from, settle_cast, split_cast
 from .knowledge import AgentKnowledge, KnowledgeBase
 from .layout import LayoutError
-from .library import SeriesLibrary
+from .library import SeriesLibrary, named_in_text, named_objects, split_named_objects
 from .locations import resolve_location
 from .names import CharacterMatcher, link_speakers, panel_ids
 from .pages import layout_pages
@@ -532,6 +532,9 @@ def save_script(session: Session, chapter: Chapter, output: ScriptOutput) -> lis
     # fiche reste dans `character_names` et l'API le signale à l'auteur.
     matcher = CharacterMatcher.for_project(session, chapter.project_id)
     aliases = aliases_from(matcher)
+    # Un véhicule ou une créature de la bibliothèque cité parmi les personnages (« Momo » le chat) : rattaché à
+    # la case par son nom, comme un objet — une créature n'entre pas dans la distribution du chapitre.
+    named = named_objects(session, chapter.project_id, {" ".join(key) for card in matcher.cards for key in card.keys})
     # Sans autoflush : la cascade de `session.delete` charge les relations de la page (cases, direction
     # artistique) ; un autoflush à ce moment, page déjà retirée de `chapter.pages`, fait échouer la session
     # (« Failed to add object to the flush context ») et un second « Découper » n'était jamais enregistré.
@@ -551,7 +554,9 @@ def save_script(session: Session, chapter: Chapter, output: ScriptOutput) -> lis
     for p_index, sp in enumerate(output.pages):
         page = Page(chapter_id=chapter.id, number=p_index + 1, kind=PageKind.story, rythme=sp.rythme)
         for i, sc in enumerate(sp.panels):
-            present, offscreen = settle_cast(sc.description, sc.characters, sc.offscreen, aliases)
+            cast_names, named_ids = split_named_objects(sc.characters, named)
+            offscreen_names, _ = split_named_objects(sc.offscreen, named)
+            present, offscreen = settle_cast(sc.description, cast_names, offscreen_names, aliases)
             panel = Panel(
                 index=i,
                 description=sc.description,
@@ -563,7 +568,7 @@ def save_script(session: Session, chapter: Chapter, output: ScriptOutput) -> lis
                 importance=sc.importance,
                 intensity=sc.intensity,
                 decor_id=sc.decor,
-                object_ids=list(sc.objets),
+                object_ids=list(dict.fromkeys([*sc.objets, *named_ids, *named_in_text(sc.description, named)])),
             )
             panel.location = resolve_location(session, chapter.project_id, sc.lieu, decor_id=sc.decor)
             for j, d in enumerate(sc.dialogues):

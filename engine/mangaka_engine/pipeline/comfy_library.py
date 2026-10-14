@@ -12,6 +12,8 @@ sans être retenu — data/ reste le stockage de l'appli.
           imports/             <nom>-import.png (images envoyées à la main)
         objets/<nom>/          trois-quarts/, imports/
         decors/<nom>/          plan-large/, autre-angle/, imports/
+        vehicules/<nom>/       trois-quarts/, turnaround/, angles/, imports/
+        creatures/<nom>/       portrait/, turnaround/, angles/, imports/
         style/                 planche-de-style.png (+ planche-de-style-2.png… : autres images de la référence active)
       chapitre-01/
         page-01/               case-01-croquis.png (croquis validé), case-01.png (version choisie, finie si agrandie)
@@ -93,8 +95,10 @@ EXTENSIONS = ("png", "jpg", "jpeg", "webp", "svg")
 # Nom d'un fichier de la bibliothèque : slug + extension (jamais `_`, `.` en tête, `/` ni `..`).
 FILE_NAME = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.(?:" + "|".join(EXTENSIONS) + r")$")
 CHAPTER_DIR = re.compile(r"^chapitre-\d+$")
-SHEET_KIND_PREFIX = re.compile(r"^(?:personnage|objet|decor|style)-")
+SHEET_KIND_PREFIX = re.compile(r"^(?:personnage|objet|decor|vehicule|creature|style)-")
 ANGLE_SHEET = "nouvel-angle"  # comme pipeline/reference_sheets.py (variantes de « Nouvel angle »)
+# Sortes dont `angles/` est créé d'avance : un sujet qu'on fait tourner (« Nouvel angle »).
+ANGLE_KINDS = ("character", "vehicle", "creature")
 # Champs dont le changement modifie la bibliothèque (objets modifiés : les ajouts et suppressions comptent tous).
 WATCHED: dict[type, tuple[str, ...]] = {
     Project: ("slug",),
@@ -145,11 +149,12 @@ def sheet_folder(sheet: str, presets: PresetRegistry | None = None) -> str:
 
 
 def sheet_folders(kind: str, presets: PresetRegistry | None) -> list[str]:
-    """Sous-dossiers créés d'avance pour une fiche de cette sorte (character, object, decor), dans l'ordre
-    des presets : un par type de fiche, `angles/` pour un personnage, `imports/`."""
+    """Sous-dossiers créés d'avance pour une fiche de cette sorte (character, object, decor, vehicle, creature),
+    dans l'ordre des presets : un par type de fiche, `angles/` pour un personnage, un véhicule ou une créature
+    (vues tournées autour du sujet), `imports/`."""
     sheets = presets.reference_sheets.values() if presets is not None else ()
     out = [sheet_folder(sheet.id, presets) for sheet in sheets if kind in sheet.kinds]
-    if kind == "character":
+    if kind in ANGLE_KINDS:
         out.append(ANGLES)
     out.append(IMPORTS)
     return list(dict.fromkeys(out))
