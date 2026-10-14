@@ -1,0 +1,55 @@
+# Qwen-Image 2.1 · Qualité — illustration de 1re de couverture d'un tome (écran « Couverture »).
+# Même graphe que qwen-image-edit-ref-qualite (int8 convrot, vrai CFG, jusqu'à 5 images de référence des
+# personnages, une par emplacement, emplacements vides retirés) : workflow dédié pour pouvoir régler la
+# couverture (pas, cfg, négatif) sans toucher aux cases. La taille (ratio du format, fond perdu compris,
+# plus grand côté `long_side` de presets/cover.yaml) est calculée par le moteur ; l'agrandissement jusqu'au
+# DPI du format passe ensuite par l'agrandisseur de la finition d'impression (presets/upscalers/).
+# Jamais proposé comme palier de série (pas de `tier.choice`).
+id: qwen-image-couverture
+name: "Qwen-Image 2.1 · Qualité — couverture de tome"
+description: >-
+  Illustration de couverture en couleur au palier Qualité (int8 convrot, 35 étapes, cfg 2,5 : négatif actif), guidée par les images de référence des personnages choisis, sans aucun texte dessiné.
+distilled: false
+workflow_file: qwen-image-couverture.json
+output_node: "11"
+timeout_s: 3600   # image plus grande qu'une case (≈ 2 Mpx)
+tier:
+  name: Qualité
+estimated_s: 1200
+mapping:
+  positive_prompt: { node: "6", input: prompt }
+  negative_prompt: { node: "6", input: negative_prompt }
+  seed: { node: "9", input: seed }
+  steps: { node: "9", input: steps }
+  cfg: { node: "9", input: cfg }
+  width: { node: "8", input: width }
+  height: { node: "8", input: height }
+  filename_prefix: { node: "11", input: filename_prefix }
+reference_images:
+  - { node: "20", input: image }
+  - { node: "21", input: image }
+  - { node: "22", input: image }
+  - { node: "23", input: image }
+  - { node: "24", input: image }
+lora_chain:
+  class_type: LoraLoaderModelOnly
+  model_from: { node: "1", output: 0 }
+  model_input: model
+  name_input: lora_name
+  strength_input: strength_model
+defaults:
+  negative_prompt: "text, letters, title, logo, speech bubble, caption, watermark, signature, multiple panels, comic page layout, collage, split screen, character sheet, turnaround, duplicate character, extra limbs, deformed hands, blurry, low quality"
+  steps: 35
+  cfg: 2.5
+  width: 1216
+  height: 1664
+  filename_prefix: mangaka/couverture
+# « Générer une case d'essai » (tableau de bord) : petite image, peu d'étapes.
+trial:
+  positive_prompt: >-
+    Full-colour manga volume cover illustration, a young swordswoman on a rooftop at dusk, wind in her
+    hair, vivid sunset sky in the top quarter, no text
+  width: 384
+  height: 528
+  steps: 8
+  filename_prefix: mangaka/essai

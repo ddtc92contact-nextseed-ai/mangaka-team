@@ -268,7 +268,7 @@ def test_fresh_database_has_the_stage_table(tmp_path: Path) -> None:
     create_db_engine(db).dispose()
     con = sqlite3.connect(db)
     try:
-        assert con.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 31
+        assert con.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION >= 31
         cols = {r[1] for r in con.execute("PRAGMA table_info(chapter_stage_decisions)")}
         assert {"chapter_id", "stage", "decision", "author", "created_at", "faults", "total"} <= cols
     finally:
@@ -286,7 +286,7 @@ def test_v30_database_gets_the_stage_table(tmp_path: Path) -> None:
     create_db_engine(db).dispose()
     con = sqlite3.connect(db)
     try:
-        assert con.execute("PRAGMA user_version").fetchone()[0] == 31
+        assert con.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         assert con.execute("SELECT count(*) FROM chapter_stage_decisions").fetchone()[0] == 0
     finally:
         con.close()

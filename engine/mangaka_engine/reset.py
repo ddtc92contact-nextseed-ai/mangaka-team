@@ -65,6 +65,10 @@ SERIES_TABLES = (
     "panel_dialog_turns",
     "panels",
     "pages",
+    # Tomes : chapitres inclus et versions de couverture (fichiers sous data/projects/<série>/volumes/).
+    "volume_covers",
+    "volume_chapters",
+    "volumes",
     "chapters",
     "reference_variants",
     "character_images",

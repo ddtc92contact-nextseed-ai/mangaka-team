@@ -1,0 +1,31 @@
+# Couverture d'un tome (écran « Couverture ») : illustration de 1re de couverture par un flux ComfyUI dédié.
+# Voir engine/mangaka_engine/pipeline/covers.py et presets/README.md (« Couverture d'un tome »).
+#
+# Workflow dédié (presets/workflows/) : Qwen-Image 2.1 au palier Qualité, variante avec images de référence
+# (une image principale par personnage choisi, emplacements vides retirés). L'image est générée au ratio du
+# format, fond perdu compris, au plus grand côté `long_side`, puis agrandie par l'agrandisseur de la finition
+# d'impression jusqu'au DPI du format, et recadrée au pixel près (fond perdu compris).
+workflow: qwen-image-couverture
+# Agrandisseur (presets/upscalers/) ; absent = celui de la série, sinon celui de defaults.yaml.
+# upscaler: realesrgan-x4plus-anime-6b
+# Plus grand côté généré (px) : le plus haut que le flux tient (Qwen-Image 2.1 ≈ 2 Mpx), multiple de `multiple`.
+long_side: 1664
+multiple: 16
+# Rédaction du prompt par l'IA (presets/prompts/) — LLM du Dessinateur (écran « L'équipe »).
+prompt: redacteur-couverture
+# La couverture est TOUJOURS en couleur, même pour une série en noir et blanc : style de la série avec ce rendu
+# couleur (presets/style_renderings/) à la place du sien ; jamais le filtre des mots de couleur des séries N&B.
+rendering: couleur
+# Phrase qui ouvre le prompt de couverture (ajoutée par le moteur si le LLM l'oublie).
+lead: "Full-colour manga volume cover illustration, a single striking image, vivid colours."
+# Phrases toujours ajoutées à la fin du prompt (zone du logo dégagée, aucun texte dessiné par le modèle).
+# Variable : $clear_zone (zone réservée `clear: true` du format, ex. « the top quarter of the image »).
+rules:
+  - "Keep $clear_zone clear and simple (open sky or a plain background) for the title logo."
+  - "Absolutely no text, no letters, no title, no logo, no signature, no watermark anywhere in the image."
+# Ajouté au négatif du workflow (les termes « pas de texte » d'image_prompt.yaml s'y ajoutent toujours).
+negative_prompt: "black and white, monochrome, greyscale, screentone, comic page layout, multiple panels, title text, logo, letters, typography, barcode"
+# Personnages au plus sur une couverture (une image de référence chacun) : borné par les emplacements du workflow.
+max_characters: 4
+# Versions gardées par tome (les plus anciennes non retenues sont effacées) ; absent = toutes.
+versions_kept: 12

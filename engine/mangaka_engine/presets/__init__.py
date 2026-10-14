@@ -1,5 +1,8 @@
 from .loader import LoadedUpscaler, LoadedWorkflow, PresetError, PresetIssue, PresetRegistry
 from .schemas import (
+    CoverFormat,
+    CoverSettings,
+    CoverZone,
     ImagePromptSettings,
     KnowledgeAgent,
     KnowledgeSettings,
@@ -29,6 +32,9 @@ from .workflow import (
 __all__ = [
     "BuiltWorkflow",
     "ControlInput",
+    "CoverFormat",
+    "CoverSettings",
+    "CoverZone",
     "ImagePromptSettings",
     "KnowledgeAgent",
     "KnowledgeSettings",
