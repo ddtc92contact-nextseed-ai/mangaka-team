@@ -1445,6 +1445,22 @@ export interface ReferenceStudio {
   kept_count: number;
   /** Emplacements d'images de référence d'une case de la série. */
   reference_slots: number;
+  /** Image principale créée avec un autre dessin que celui de la série (« Épuré ») ; null sinon. */
+  stale_drawing: StaleDrawing | null;
+}
+
+/** « Créée avec l'ancien rendu (détaillé) » : la base garde son trait, ses variantes aussi. */
+export interface StaleDrawing {
+  /** Réglage de style_options.yaml (`dessin`). */
+  option: string;
+  /** « Créée avec l'ancien rendu (détaillé) ». */
+  message: string;
+  /** « Refaire la base en épuré ». */
+  action: string;
+  /** Image principale concernée. */
+  image_id: number;
+  /** Type de fiche de cette image, à refaire. */
+  sheet: string;
 }
 
 /** Essai de la planche de style (palier croquis). */
@@ -1595,6 +1611,8 @@ export interface ReferenceGenerateInput {
   quality?: boolean;
   /** Image de départ : une image de référence de la fiche ; absente = à partir de la description seule. */
   start_image_id?: number | null;
+  /** « Refaire la base » : sans image de départ, la variante gardée devient l'image principale. */
+  rebase?: boolean;
 }
 
 export interface ReferenceRefineInput {

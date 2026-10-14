@@ -34,6 +34,7 @@ from ..pipeline.reference_sheets import (
     load_entry,
     sheet_for,
 )
+from ..pipeline.style import stale_drawing
 from ..presets import PresetError, PresetRegistry
 from ..store.files import cache_headers, versioned_url
 from ..store.models import Character, Project, ReferenceVariant
@@ -58,6 +59,7 @@ from .schemas import (
     ReferenceSheetOut,
     ReferenceStudioOut,
     ReferenceVariantOut,
+    StaleDrawingOut,
 )
 
 router = APIRouter(tags=["bibliothèque"])
@@ -131,6 +133,25 @@ def _reference_slots(presets: PresetRegistry, series: Project | None) -> int:
         fallback = presets.defaults.workflow_with_references
         loaded = presets.workflows.get(fallback) if fallback else None
     return len(loaded.preset.reference_images) if loaded is not None else 0
+
+
+def _stale_drawing(
+    presets: PresetRegistry, series: Project | None, entry: LibraryEntry, variants: list[ReferenceVariant]
+) -> StaleDrawingOut | None:
+    """Image principale de la fiche générée avec un autre dessin que celui de la série (« Épuré ») : elle garde
+    son trait. Une image envoyée à la main (aucune variante) n'est pas signalée : c'est le dessin de l'auteur."""
+    if series is None or not entry.reference_images:
+        return None
+    base = entry.reference_images[0]
+    variant = next((v for v in variants if v.kept_image_id == base.id), None)
+    if variant is None or (variant.params or {}).get("camera"):
+        return None
+    stale = stale_drawing(presets, series, (variant.params or {}).get("drawing"))
+    if stale is None or variant.sheet not in presets.reference_sheets:
+        return None
+    return StaleDrawingOut(
+        option=stale.option, message=stale.message, action=stale.action, image_id=base.id, sheet=variant.sheet
+    )
 
 
 def _require_comfyui(ctx: AppContext) -> None:
@@ -223,12 +244,15 @@ def _routes(kind: str) -> APIRouter:
             .where(ReferenceVariant.entry_kind == kind, ReferenceVariant.entry_id == entry.id)
             .order_by(ReferenceVariant.id.desc())
         ).all()
+        presets = _presets(ctx, entry.project_id)
+        series = session.get(Project, entry.project_id)
         return ReferenceStudioOut(
             variants=[variant_out(v, entry) for v in rows],
             active_jobs=[job_out(j) for j in active_jobs(session, kind, entry.id, entry.project_id)],
             max_kept=MAX_KEPT,
             kept_count=len(entry.reference_images),
-            reference_slots=_reference_slots(_presets(ctx, entry.project_id), session.get(Project, entry.project_id)),
+            reference_slots=_reference_slots(presets, series),
+            stale_drawing=_stale_drawing(presets, series, entry, list(rows)),
         )
 
     @sub.post(
@@ -248,6 +272,8 @@ def _routes(kind: str) -> APIRouter:
         entry = _entry_or_404(session, kind, entry_id)
         start = None
         if body.start_image_id is not None:
+            if body.rebase:
+                raise FieldError("start_image_id", "« Refaire la base » part sans image de départ")
             start = next((img for img in entry.reference_images if img.id == body.start_image_id), None)
             if start is None:
                 raise FieldError(
@@ -263,6 +289,7 @@ def _routes(kind: str) -> APIRouter:
                 quality=body.quality,
                 seed=body.seed,
                 start=start,
+                rebase=body.rebase,
             )
         except (PresetError, GenerationError) as exc:
             raise FieldError("sheet", str(exc)) from None

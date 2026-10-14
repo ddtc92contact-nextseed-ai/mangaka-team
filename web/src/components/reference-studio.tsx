@@ -95,6 +95,25 @@ export function ReferenceStudio({
     setNotice(message);
   }
 
+  /** « Refaire la base en épuré » : sans image de départ (elle figerait l'ancien rendu) ; la variante gardée
+   * devient l'image principale, l'ancienne base reste parmi les images de la fiche. */
+  async function rebase(sheetToRedo: string, label: string) {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const newJobs = await api.generateReferences(kind, entry.id, { sheet: sheetToRedo, count, quality, rebase: true });
+      enqueued(
+        newJobs,
+        `${plural(newJobs.length, "variante")} « ${label} » en file, sans image de départ : garde celle qui te plaît, elle deviendra l’image principale (l’ancienne base reste dans les images de référence).`,
+      );
+    } catch (err) {
+      setError(fullErrorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function generate(e: FormEvent) {
     e.preventDefault();
     if (!sheet) return;
@@ -152,7 +171,9 @@ export function ReferenceStudio({
       setNotice(
         variant.sheet === ANGLE_SHEET
           ? "Vue validée : rangée parmi les vues de la fiche, étiquetée par son angle."
-          : "Image ajoutée aux références de la fiche (en dernière position : change l’ordre dans « Images de référence »).",
+          : variant.params?.rebase
+            ? "Nouvelle base : l’image devient la principale de la fiche ; l’ancienne base reste dans les images de référence."
+            : "Image ajoutée aux références de la fiche (en dernière position : change l’ordre dans « Images de référence »).",
       );
       studio.reload();
     } catch (err) {
@@ -191,8 +212,29 @@ export function ReferenceStudio({
   if (sheets.error || studio.error) return <Alert>{sheets.error ?? studio.error}</Alert>;
 
   const variants = studio.data?.variants ?? [];
+  const stale = studio.data?.stale_drawing ?? null;
   return (
     <div className="space-y-5">
+      {stale && (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm" data-testid="stale-drawing">
+          <p className="min-w-0 flex-1 text-amber-200">
+            <span className="font-medium">{stale.message}.</span>{" "}
+            <span className="text-amber-200/80">
+              Ce dessin garde son trait, et ses variantes aussi : une image de départ fige le rendu. La nouvelle base est créée sans image de départ ; l’ancienne version est conservée.
+            </span>
+          </p>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={busy || full}
+            title={full ? `${maxKept} images de référence au plus : supprimes-en une` : undefined}
+            onClick={() => rebase(stale.sheet, sheetsById.get(stale.sheet)?.name ?? stale.sheet)}
+            data-testid="stale-drawing-rebase"
+          >
+            {stale.action}
+          </Button>
+        </div>
+      )}
       <p className="text-sm text-zinc-500">
         À partir de la description visuelle, des mots-clés, du style de la série (packs et LoRA de style) et du LoRA
         de la fiche ; une image de départ est facultative.{" "}

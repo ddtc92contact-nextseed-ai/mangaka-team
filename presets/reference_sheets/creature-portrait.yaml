@@ -19,6 +19,7 @@ prompt:
   - "Requested change: $instruction."
   - "$start is the starting image: keep the creature, its head, markings and colours, and redraw it cleanly as the sheet requires."
   - "Style: $style."
+  - "$subject."
   - "The last image ($style_ref) is a style reference only (line work, screentones, inking): do not copy its character, scene or composition."
   - "Plain white background, even neutral lighting, a single creature, no human, no text."
 negative_prompt: "human, person, people, man, woman, child, rider, owner, extra creatures, second animal, multiple creatures, crowd, text, cluttered background, back view"

@@ -22,7 +22,7 @@ Après modification d'un preset, redémarre le moteur (`npm run dev`).
 | `style_genres/*.yaml` | Packs de style : **genre et public** (shōnen, seinen, shōjo, jeunesse, magical girl, tranche de vie, franco-belge) — mots-clés, mise en page, sens de lecture, polices, consignes LLM, tons autorisés, scène test de la planche de style |
 | `style_renderings/*.yaml` | Packs de style : **rendu** (N&B à trames par défaut, N&B encre, couleur, couleur douce) |
 | `style_tones/*.yaml` | Packs de style : **ton** (lumineux, neutre par défaut, dark, humour) |
-| `style_options.yaml` | Réglages fins bornés du style : trait, trames (N&B seulement), détail des décors, finition (propre, croquis, pinceau nerveux, scan) |
+| `style_options.yaml` | Réglages fins bornés du style : dessin des personnages (détaillé, épuré — remplace au lieu d'ajouter), trait, trames (N&B seulement), détail des décors, finition (propre, croquis, pinceau nerveux, scan) |
 | `style_loras.yaml` | Catalogue des LoRA de style : mots déclencheurs et poids conseillé |
 | `pre_direction.yaml` | ADN de la série : charte chiffrée (cases, formes de planche, plans, présence, dialogue, rythme), défauts des 7 genres |
 | `series_creator.yaml` | Créateur de série : questions fermées de l'échange avec l'auteur et pistes d'ADN de chaque réponse |
@@ -545,7 +545,52 @@ réservée `$finition` d'`image_prompt.yaml`, juste après la phrase de style, d
 `$style`, dont le plafond `style_max_chars` la tronquerait en silence. `negative_keywords` d'un choix :
 ajoutés au prompt négatif de la case, lu seulement à vrai CFG (cfg > 1, palier Qualité ; ignoré en Turbo,
 Rapide et croquis). `propre` (ou « Par défaut ») n'ajoute rien : le prompt est identique, octet pour octet,
-à celui d'une série sans finition. Les mots-clés vides et `negative_keywords` ne sont permis qu'avec `piece`.
+à celui d'une série sans finition. Les mots-clés vides et `negative_keywords` ne sont permis qu'avec `piece`
+(ou dans un réglage qui remplace, ci-dessous).
+
+**Dessin des personnages : remplacer, pas ajouter** (`dessin`, 14/10/2026). Toutes les séries sortaient des
+personnages très détaillés : sans image de départ (création d'une fiche), c'est `$style` qui décide du trait, et
+ses mots de détail viennent du genre (seinen : « mature detailed ink style »), du rendu (« halftone screentone
+dots ») et des réglages fins (`trait: epais` « thick bold linework, heavy inking », `trames: moyennes`
+« medium-density halftone dot screentone, medium grey »). Mesures du 14/10 (projet 3, seinen N&B à trames,
+14 générations avec le code de l'appli, même planche de style, descriptions de l'auteur mot pour mot) :
+
+| chaîne de style | résultat |
+|---|---|
+| chaîne complète **+** mots épurés ajoutés à la suite (P1) | très détaillé et réaliste |
+| chaîne où les mots de détail sont **remplacés** (P2) | simple et épuré |
+| recette épurée seule, sans image de départ (Turbo 16 s, Qualité 76 s) | « simple et épuré », 7/8 jugés valables |
+
+**Les mots déjà présents gagnent quel que soit l'ajout** : un réglage qui ne fait qu'ajouter des mots-clés à
+`$style` ne produit rien. D'où trois champs propres à un choix de réglage fin :
+
+- `replaces` : mots-clés (sans casse, mot-clé entier) **retirés** de `$style` — genre (ou ancien texte libre
+  `legacy_style`), rendu, ton et autres réglages fins, jamais les mots déclencheurs du LoRA — et des morceaux
+  de la phrase de style (`lead` du rendu coupé aux virgules : « hand-drawn inked line art with halftone
+  screentone shading » ; 1er mot-clé non remplacé du genre). C'est le mécanisme de `drop` (`style_groups`),
+  étendu aux packs. Les mots-clés du choix passent alors **en tête des packs**, entiers, juste après les mots
+  déclencheurs du LoRA ; les autres packs se partagent la place qui reste sous `style_max_chars`. En seinen N&B,
+  la recette (229 caractères) prend tout le bloc : c'est exactement la chaîne mesurée ;
+- `{text: …, monochrome: true}` dans `prompt_keywords` : mot-clé gardé seulement sur un rendu N&B (« flat
+  white paper », « a few flat grey screentone areas ») — sur un rendu couleur, il contredirait les couleurs ;
+- `subject_keywords` (avec `replaces` seulement) : une fois la chaîne épurée, **la description du personnage
+  reprend la main** (« combinaison style mechatronique » ramenait des panneaux d'armure). Ces mots anti-détail
+  génériques (« plain smooth untextured surfaces, no mechanical panel lines, no rivets, no greebles ») vont au
+  prompt positif des fiches (`$subject` des types de fiche) et des cases (pièce `$finition`, après les mots de
+  la finition), hors `$style` ; `negative_keywords` va au négatif des fiches et des cases (palier Qualité
+  seulement). Rien de propre à une série ou à un costume.
+
+Le choix neutre (« Détaillé (genre) », ou « Par défaut ») n'a aucun mot-clé et ne change rien : `$style`, phrase
+de style, `$finition`, négatifs et prompts de fiche identiques, octet pour octet, à ceux d'une série sans le
+réglage (golden des cases). La finition reste entière (choisie exprès, elle n'est pas remplacée).
+
+**L'image de départ fige le rendu** : une base détaillée contamine tous ses variants, même avec une chaîne
+épurée. Une fiche créée avant le passage en Épuré garde donc son trait ; chaque génération de fiche note le
+dessin de la série (`drawing` des paramètres), et la fiche dont l'image principale vient d'un autre dessin
+affiche « Créée avec l'ancien rendu (détaillé) » avec « Refaire la base en épuré » : de nouvelles variantes du
+même type de fiche, **sans image de départ** ni planche de style ; celle qu'on garde devient l'image
+principale, l'ancienne base reste parmi les images de référence (rien n'est effacé). Une image envoyée à la
+main n'est pas signalée.
 
 `loras` : `file` (nom exact listé par ComfyUI, sous-dossier compris), `name`, `trigger_words` (ajoutés
 en tête de `$style`) et `weight` (pré-rempli quand on choisit ce LoRA). Le LoRA de style se choisit
@@ -1464,6 +1509,7 @@ prompt:                          # morceaux assemblés ; un morceau dont une var
   - "Requested change: $instruction."   # consigne d'« Affiner » (omis sinon)
   - "$start is the starting image: keep the object and its silhouette."   # « <image1> » si une image de départ est choisie
   - "Style: $style."             # packs de style de la série + mots déclencheurs du LoRA de style
+  - "$subject."                  # mots anti-détail du dessin « Épuré » de la série (omis en « Détaillé »)
   - "The last image ($style_ref) is a style reference only."   # « <imageN> » si la référence de style est jointe
 negative_prompt: "person, people, text"   # en anglais ; remplace le négatif du workflow (termes « pas de texte » toujours ajoutés)
 large_build_keywords: [grand, géant, trapu, tall, stocky]   # facultatif : mots entiers (sans casse) cherchés dans la

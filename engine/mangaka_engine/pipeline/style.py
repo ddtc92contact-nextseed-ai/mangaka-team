@@ -9,6 +9,11 @@ style_options.yaml). Ce module en tire :
   (image_prompt.yaml) : chaque pack y garde au moins son premier mot-clé ;
 - `$finition` (`series_finition`) : mots-clés du réglage à pièce réservée « finition », juste après la
   phrase de style et jamais dans `$style`, et ses termes négatifs (`series_finition_negative`) ;
+- un réglage qui **remplace** (`replaces` d'un choix, réglage `dessin` « Épuré ») : ses mots-clés passent en
+  tête de `$style` et les mots-clés listés sont retirés des autres packs et de la phrase de style — ajouter
+  des mots « épurés » à une chaîne détaillée ne change rien (mesuré le 14/10/2026), il faut remplacer. Ses
+  mots anti-détail (`subject_keywords`) vont dans `$finition` des cases et `$subject` des fiches
+  (`series_subject`), ses termes négatifs avec ceux de la finition (`series_style_negative`) ;
 - le nom des packs et leurs consignes pour les LLM (scénario, direction artistique) ;
 - la validation des combinaisons (API) : ids connus, ton autorisé par le genre, trames en N&B seulement.
 
@@ -118,9 +123,18 @@ def _chosen_options(
     return out
 
 
-def _words(pack: StylePack | StyleOptionChoice, people: bool) -> list[str]:
-    """Mots-clés d'un pack ; sans ceux qui évoquent des personnes si `people` est faux."""
-    return [k for k in pack.prompt_keywords if people or k not in pack.people_keywords]
+def _words(pack: StylePack | StyleOptionChoice, people: bool, monochrome: bool = True) -> list[str]:
+    """Mots-clés d'un pack ; sans ceux qui évoquent des personnes si `people` est faux, sans ceux réservés au
+    noir et blanc (`monochrome_keywords` d'un choix) sur un rendu couleur."""
+    mono = getattr(pack, "monochrome_keywords", ())
+    return [
+        k for k in pack.prompt_keywords if (people or k not in pack.people_keywords) and (monochrome or k not in mono)
+    ]
+
+
+def _replaced(chosen: list[tuple[StyleOption, StyleOptionChoice]]) -> set[str]:
+    """Mots-clés (sans casse) que les choix qui remplacent (`replaces`) retirent des autres packs."""
+    return {_clean(w).casefold() for _, choice in chosen for w in choice.replaces}
 
 
 def style_groups(
@@ -129,23 +143,34 @@ def style_groups(
     """Mots-clés complets du style, par pack, dans l'ordre fixe : LoRA, genre (ou ancien texte), rendu,
     ton, puis un groupe par réglage fin choisi — (sorte, mots-clés). `people` faux : sans les mots-clés
     marqués `people` (fiches d'objet et de décor). `drop` : mots-clés écartés (sans casse), ceux du ton
-    que contredit l'ambiance d'une case (`prompt.mood_dropped_terms`)."""
+    que contredit l'ambiance d'une case (`prompt.mood_dropped_terms`).
+
+    Un choix qui remplace (`replaces`, réglage `dessin` « Épuré ») forme le groupe « replacing », juste après
+    le LoRA ; ses mots-clés listés dans `replaces` sont retirés du genre, du rendu, du ton et des autres
+    réglages (jamais des mots déclencheurs du LoRA)."""
     groups: list[tuple[str, list[str]]] = [("lora", list(lora_triggers(presets, series)))]
+    rendering = series_rendering(presets, series)
+    monochrome = rendering is None or rendering.monochrome
+    chosen = _chosen_options(presets, series, rendering)
+    for _, choice in chosen:
+        if choice.replaces:
+            groups.append(("replacing", _words(choice, people, monochrome)))
     genre = presets.style_genres.get(series.style_genre or "")
     if genre is not None:
         groups.append(("genre", _words(genre, people)))
     elif not series.style_genre:
         # Ancien texte libre : découpé aux virgules, comme des mots-clés.
         groups.append(("genre", (series.legacy_style or "").split(",")))
-    rendering = series_rendering(presets, series)
     if rendering is not None:
         groups.append(("rendering", _words(rendering, people)))
     tone = presets.style_tones.get(series.style_tone or "")
     if tone is not None:
         groups.append(("tone", _words(tone, people)))
-    for option, choice in _chosen_options(presets, series, rendering):
-        if option.piece is None:  # une pièce réservée (finition) n'entre jamais dans $style
-            groups.append(("option", _words(choice, people)))
+    for option, choice in chosen:
+        # Une pièce réservée (finition) n'entre jamais dans $style ; le choix neutre d'un réglage qui remplace
+        # (« Détaillé ») n'a aucun mot-clé.
+        if option.piece is None and not choice.replaces and choice.prompt_keywords:
+            groups.append(("option", _words(choice, people, monochrome)))
     missing = [
         f"{field} « {value} »"
         for field, value, known in (
@@ -158,7 +183,18 @@ def style_groups(
     if missing:
         log.warning("série %s : pack de style introuvable (%s), ignoré", series.id, ", ".join(missing))
     dropped = {_clean(d).casefold() for d in drop}
-    return [(kind, [w for w in (_clean(x) for x in g) if w and w.casefold() not in dropped]) for kind, g in groups]
+    replaced = dropped | _replaced(chosen)
+    return [
+        (
+            kind,
+            [
+                w
+                for w in (_clean(x) for x in g)
+                if w and w.casefold() not in (dropped if kind in ("lora", "replacing") else replaced)
+            ],
+        )
+        for kind, g in groups
+    ]
 
 
 def _redundant(word: str, kept: list[str]) -> bool:
@@ -173,7 +209,8 @@ def style_keywords(
 ) -> list[str]:
     """Mots-clés retenus pour `$style`, dans l'ordre fixe des packs, sans doublon.
 
-    Bloc court (`style_max_chars` de image_prompt.yaml) : les mots déclencheurs du LoRA d'abord, puis
+    Bloc court (`style_max_chars` de image_prompt.yaml) : les mots déclencheurs du LoRA d'abord, puis tous
+    ceux d'un choix qui remplace (« Épuré » : la recette mesurée part entière), puis
     chaque pack donne ses mots-clés tour à tour (le 1er de chaque pack, puis le 2e…) tant que le
     plafond le permet ; un pack s'arrête au premier mot-clé qui ne tient plus. À chaque tour, le rendu
     passe en premier : sans planche de style jointe aux cases, c'est lui qui porte trait, encrage et
@@ -203,10 +240,12 @@ def style_keywords(
         used = size
         return True
 
-    for word in groups[0]:
-        take(0, word)
+    head = [i for i, kind in enumerate(kinds) if kind in ("lora", "replacing")]
+    for i in head:
+        for word in groups[i]:
+            take(i, word)
     stopped = [False] * len(groups)
-    turn = sorted(range(1, len(groups)), key=lambda i: kinds[i] != "rendering")
+    turn = sorted((i for i in range(len(groups)) if i not in head), key=lambda i: kinds[i] != "rendering")
     for rank in range(max((len(g) for g in groups), default=0)):
         for i in turn:
             if stopped[i] or rank >= len(groups[i]):
@@ -232,12 +271,19 @@ def series_style_lead(presets: PresetRegistry, series: Project) -> str:
     """Phrase de style qui ouvre chaque prompt de case (« Black and white manga panel, inked line art with
     halftone screentone shading, seinen manga style. ») : `lead` du rendu de la série (sinon son 1er
     mot-clé) et 1er mot-clé du genre (ou de l'ancien style libre), dans les morceaux `style_lead`
-    d'image_prompt.yaml. Sans le modèle d'image ancré par une référence, c'est elle qui tient le style."""
+    d'image_prompt.yaml. Sans le modèle d'image ancré par une référence, c'est elle qui tient le style.
+
+    Un choix qui remplace (`replaces`, « Épuré ») retire de la phrase les morceaux du `lead` (coupé aux
+    virgules) qu'il liste (« hand-drawn inked line art with halftone screentone shading »), et le genre y
+    donne son 1er mot-clé non remplacé ; sans lui, la phrase est inchangée."""
     rendering = series_rendering(presets, series)
+    replaced = _replaced(_chosen_options(presets, series, rendering))
     lead = _clean(rendering.lead) or _clean(rendering.prompt_keywords[0]) if rendering is not None else ""
+    if replaced:
+        lead = ", ".join(p for p in (_clean(x) for x in lead.split(",")) if p and p.casefold() not in replaced)
     genre = presets.style_genres.get(series.style_genre or "")
     words = genre.prompt_keywords if genre is not None else (series.legacy_style or "").split(",")
-    first = next((w for w in (_clean(x) for x in words) if w), "")
+    first = next((w for w in (_clean(x) for x in words) if w and w.casefold() not in replaced), "")
     values = {"rendering": lead, "genre": first}
     parts: list[str] = []
     for part in presets.image_prompt.style_lead:
@@ -261,13 +307,31 @@ def _finition(presets: PresetRegistry, series: Project) -> StyleOptionChoice | N
     return None
 
 
+def _replacing(presets: PresetRegistry, series: Project) -> list[StyleOptionChoice]:
+    """Choix de la série qui remplacent (`replaces` : « Épuré » du réglage `dessin`), dans l'ordre du fichier."""
+    return [c for _, c in _chosen_options(presets, series, series_rendering(presets, series)) if c.replaces]
+
+
+def series_subject(presets: PresetRegistry, series: Project) -> str:
+    """Mots anti-détail du dessin choisi (`subject_keywords` d'un choix qui remplace, « plain smooth untextured
+    surfaces, no mechanical panel lines… »), joints par « , » ; "" sans ce choix. Hors `$style` : `$subject` des
+    fiches de référence, et ajoutés à `$finition` des cases (`series_finition`). Une fois la chaîne de style
+    épurée, la description du personnage reprend la main (« style mechatronique » ramène des panneaux
+    d'armure, mesuré le 14/10/2026) : ces mots génériques l'éteignent."""
+    words = [w for c in _replacing(presets, series) for w in (_clean(k) for k in c.subject_keywords) if w]
+    return ", ".join(dict.fromkeys(words))
+
+
 def series_finition(presets: PresetRegistry, series: Project) -> str:
     """`$finition` des prompts de case : mots-clés de la finition choisie par la série (« croquis »,
-    « pinceau-nerveux », « scan »), joints par « , », sans point final et la majuscule en tête (« Printed on
-    cheap paper, coarse halftone dots… »), juste après la phrase de style ; "" pour « propre » ou sans choix.
+    « pinceau-nerveux », « scan »), puis les mots anti-détail du dessin (`series_subject`, « Épuré »), joints
+    par « , », sans point final et la majuscule en tête (« Printed on cheap paper, coarse halftone dots… »),
+    juste après la phrase de style ; "" pour « propre » (ou sans choix) et un dessin « Détaillé ».
     Jamais dans `$style` : plafonné à `style_max_chars`, il les tronquerait en silence."""
     choice = _finition(presets, series)
-    text = ", ".join(w for w in (_clean(k) for k in choice.prompt_keywords) if w) if choice is not None else ""
+    words = [w for w in (_clean(k) for k in choice.prompt_keywords) if w] if choice is not None else []
+    subject = series_subject(presets, series)
+    text = ", ".join([*words, subject] if subject else words)
     return text[:1].upper() + text[1:]
 
 
@@ -277,6 +341,79 @@ def series_finition_negative(presets: PresetRegistry, series: Project) -> list[s
     du prompt positif porte la finition."""
     choice = _finition(presets, series)
     return list(choice.negative_keywords) if choice is not None else []
+
+
+def series_style_negative(presets: PresetRegistry, series: Project) -> list[str]:
+    """Termes du prompt négatif des cases de la série : ceux de la finition (`series_finition_negative`), puis
+    ceux d'un choix qui remplace (« Épuré » : « mechanical panel lines, rivets… »), sans doublon. Lus à vrai CFG
+    seulement (palier Qualité)."""
+    words = [
+        *series_finition_negative(presets, series),
+        *(w for c in _replacing(presets, series) for w in c.negative_keywords),
+    ]
+    return list(dict.fromkeys(words))
+
+
+def series_subject_negative(presets: PresetRegistry, series: Project) -> list[str]:
+    """Termes négatifs d'un choix qui remplace (« Épuré »), ajoutés au prompt négatif des fiches de référence
+    (palier Qualité). La finition (croquis, scan…) ne touche pas aux fiches."""
+    return list(dict.fromkeys(w for c in _replacing(presets, series) for w in c.negative_keywords))
+
+
+# --- dessin des personnages (réglage qui remplace) : fiches créées avant ---------------------------
+def drawing_record(presets: PresetRegistry, series: Project) -> dict[str, str]:
+    """Choix de la série pour chaque réglage qui remplace (`dessin`), noté sur une fiche générée : on sait
+    ensuite avec quel dessin elle a été créée. Vide pour une série sans ce réglage (« Détaillé » d'office)."""
+    chosen = series.style_options or {}
+    return {
+        key: chosen[key]
+        for key, option in presets.style_options.options.items()
+        if any(c.replaces for c in option.choices.values()) and chosen.get(key) in option.choices
+    }
+
+
+@dataclass(frozen=True)
+class StaleDrawing:
+    """Fiche créée avec un autre dessin que celui de la série : « Créée avec l'ancien rendu (détaillé) »."""
+
+    option: str
+    current: str  # nom court du dessin de la série (« épuré »)
+    previous: str  # nom court du dessin de la fiche (« détaillé »)
+
+    @property
+    def message(self) -> str:
+        return f"Créée avec l'ancien rendu ({self.previous})"
+
+    @property
+    def action(self) -> str:
+        return f"Refaire la base en {self.current}"
+
+
+def _short(name: str) -> str:
+    """« Détaillé (genre) » → « détaillé »."""
+    return name.split(" (")[0].strip().lower()
+
+
+def stale_drawing(presets: PresetRegistry, series: Project, recorded: Mapping[str, Any] | None) -> StaleDrawing | None:
+    """La série a choisi un dessin qui remplace (« Épuré ») mais la fiche (`recorded` : `drawing_record` noté à
+    sa génération, absent avant ce réglage = « Détaillé ») a été créée avec un autre : elle garde son trait,
+    ses variantes aussi (l'image de départ fige le rendu). None si rien n'a changé."""
+    rendering = series_rendering(presets, series)
+    chosen = series.style_options or {}
+    for key, option in presets.style_options.options.items():
+        current = option.choices.get(chosen.get(key) or "")
+        if current is None or not current.replaces:
+            continue
+        if option.monochrome_only and rendering is not None and not rendering.monochrome:
+            continue
+        before = (recorded or {}).get(key)
+        if before == chosen.get(key):
+            continue
+        previous = option.choices.get(str(before or "")) or next(
+            (c for c in option.choices.values() if not c.replaces), None
+        )
+        return StaleDrawing(key, _short(current.name), _short(previous.name) if previous else "détaillé")
+    return None
 
 
 @dataclass(frozen=True)

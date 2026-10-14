@@ -18,6 +18,7 @@ prompt:
   - "Requested change: $instruction."
   - "$start is the starting image: keep the vehicle, its silhouette, proportions and markings, and redraw it cleanly as the sheet requires."
   - "Style: $style."
+  - "$subject."
   - "The last image ($style_ref) is a style reference only (line work, screentones, inking): do not copy its character, scene or composition."
   - "Empty vehicle with no pilot or driver visible, plain white background, neutral studio lighting, no scenery, no text."
 negative_prompt: "person, people, human, character, pilot, driver, passenger, face, hands, figure, crowd, landscape, road, sky, scenery, background scenery, text, cropped vehicle"

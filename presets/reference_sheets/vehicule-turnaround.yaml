@@ -19,6 +19,7 @@ prompt:
   - "Requested change: $instruction."
   - "$start is the starting image: keep the vehicle, its silhouette, proportions and markings, and redraw it cleanly in the four requested views."
   - "Style: $style."
+  - "$subject."
   - "The last image ($style_ref) is a style reference only (line work, screentones, inking): do not copy its character, scene or composition."
   - "Same proportions, colours and markings in all four views, each view whole and uncropped, empty vehicle with no pilot or driver visible, plain white background, neutral lighting, no scenery, no text or captions."
 negative_prompt: "person, people, human, character, pilot, driver, passenger, face, hands, figure, crowd, landscape, road, sky, scenery, background scenery, text, cropped vehicle, perspective distortion, different vehicles"

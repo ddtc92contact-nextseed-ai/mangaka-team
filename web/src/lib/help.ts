@@ -9,6 +9,8 @@ export const HELP = {
     "Le rendu des images : N&B encre pure, N&B à trames, couleur douce ou cel-shading. Il s'applique à toutes les cases de la série ; les réglages de trames n'apparaissent qu'en noir et blanc.",
   "serie.tone":
     "L'ambiance visuelle (lumineuse, sombre, humour…) ajoutée au style de chaque case. Certains tons ne sont pas proposés pour tous les genres.",
+  "serie.option.dessin":
+    "Épuré : traits fins et simples, peu de détails, pour que la série ne ressemble pas aux autres. Il remplace les mots de détail du genre, du rendu et des trames au lieu d'en ajouter. Les fiches déjà créées gardent leur trait : « Refaire la base en épuré » sur la fiche.",
   "serie.option.trait":
     "L'épaisseur du trait d'encrage, de fin à épais. Laisse « Par défaut » pour garder celle du genre.",
   "serie.option.trames":
