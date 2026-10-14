@@ -61,6 +61,120 @@ class PageFormat(_Strict):
         return self.mm_to_px(self.height_mm)
 
 
+class CoverZone(_Strict):
+    """Zone réservée d'une couverture (logo et titre, numéro de tome, auteur), en mm depuis le coin haut gauche
+    du format rogné (fond perdu non compris)."""
+
+    id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
+    label: str = Field(min_length=1)
+    x_mm: float = Field(ge=0)
+    y_mm: float = Field(ge=0)
+    width_mm: float = Field(gt=0)
+    height_mm: float = Field(gt=0)
+    # Zone à garder dégagée dans l'illustration (ciel, fond simple) : le logo s'y pose.
+    clear: bool = False
+
+
+class CoverFormat(_Strict):
+    """Format de couverture d'un tome (`presets/cover_formats/`) : dimensions rognées, DPI, fond perdu, marge
+    de sécurité et zones réservées. `page_format` : dimensions, DPI et fond perdu repris de ce format de page
+    (résolu au chargement, les valeurs du fichier priment)."""
+
+    id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
+    name: str
+    page_format: str | None = None
+    default: bool = False
+    order: int = 0
+    width_mm: float = Field(gt=0)
+    height_mm: float = Field(gt=0)
+    dpi: int = Field(ge=72, le=1200)
+    bleed_mm: float = Field(default=0, ge=0)
+    # Marge de sécurité intérieure au format rogné : rien d'important au-delà (massicot).
+    safety_mm: float = Field(default=5, ge=0)
+    zones: list[CoverZone] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _check_zones(self) -> CoverFormat:
+        s = self.safety_mm
+        if 2 * s >= min(self.width_mm, self.height_mm):
+            raise ValueError("la marge de sécurité dépasse la moitié du format")
+        ids = [z.id for z in self.zones]
+        if len(set(ids)) != len(ids):
+            raise ValueError("zones : identifiant en double")
+        eps = 1e-6
+        for z in self.zones:
+            if (
+                z.x_mm < s - eps
+                or z.y_mm < s - eps
+                or z.x_mm + z.width_mm > self.width_mm - s + eps
+                or z.y_mm + z.height_mm > self.height_mm - s + eps
+            ):
+                raise ValueError(f"zone « {z.id} » hors de la marge de sécurité ({s:g} mm)")
+        if sum(z.clear for z in self.zones) > 1:
+            raise ValueError("une seule zone `clear` (celle du logo)")
+        return self
+
+    def mm_to_px(self, mm: float) -> int:
+        return round(mm / MM_PER_INCH * self.dpi)
+
+    @property
+    def trim_px(self) -> tuple[int, int]:
+        """Format rogné en px."""
+        return self.mm_to_px(self.width_mm), self.mm_to_px(self.height_mm)
+
+    @property
+    def bleed_px(self) -> int:
+        return self.mm_to_px(self.bleed_mm)
+
+    @property
+    def full_mm(self) -> tuple[float, float]:
+        """Format avec le fond perdu des quatre côtés (mm)."""
+        return self.width_mm + 2 * self.bleed_mm, self.height_mm + 2 * self.bleed_mm
+
+    @property
+    def full_px(self) -> tuple[int, int]:
+        """Image à produire : format avec le fond perdu des quatre côtés (px)."""
+        return tuple(self.mm_to_px(v) for v in self.full_mm)  # type: ignore[return-value]
+
+    def zone_px(self, zone: CoverZone) -> dict[str, int]:
+        """Zone dans l'image complète (fond perdu compris) : {x, y, width, height} en px."""
+        b = self.bleed_mm
+        x1, y1 = self.mm_to_px(b + zone.x_mm), self.mm_to_px(b + zone.y_mm)
+        x2 = self.mm_to_px(b + zone.x_mm + zone.width_mm)
+        y2 = self.mm_to_px(b + zone.y_mm + zone.height_mm)
+        return {"x": x1, "y": y1, "width": x2 - x1, "height": y2 - y1}
+
+    @property
+    def clear_zone(self) -> CoverZone | None:
+        return next((z for z in self.zones if z.clear), None)
+
+
+COVER_RULE_VARIABLES = {"clear_zone"}
+
+
+class CoverSettings(_Strict):
+    """Couverture d'un tome (`presets/cover.yaml`) : flux ComfyUI dédié, taille générée, rédaction du prompt."""
+
+    workflow: str
+    upscaler: str | None = None
+    long_side: int = Field(default=1664, ge=256, le=4096)
+    multiple: int = Field(default=16, ge=1, le=128)
+    prompt: str = "redacteur-couverture"
+    # Rendu couleur de la couverture (presets/style_renderings/, `monochrome: false`), même en série N&B.
+    rendering: str
+    lead: str = ""
+    rules: list[str] = Field(default_factory=list)
+    negative_prompt: str = ""
+    max_characters: int = Field(default=4, ge=0, le=10)
+    versions_kept: int | None = Field(default=None, ge=1)
+
+    @field_validator("rules")
+    @classmethod
+    def _check_rules(cls, value: list[str]) -> list[str]:
+        _check_templates(value, COVER_RULE_VARIABLES)
+        return value
+
+
 class NodeInput(_Strict):
     """Pointe vers `workflow[node]["inputs"][input]` dans le JSON API ComfyUI."""
 

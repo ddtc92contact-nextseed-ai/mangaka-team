@@ -14,6 +14,7 @@ from ..pipeline.art_direction import applied_panel_direction, is_out_of_date, is
 from ..pipeline.comfy_trial import STEP as TRIAL_STEP
 from ..pipeline.composition import SOURCE_LABELS, control_settings, drop_lock_on_delete, lock_preset_id, type_problem
 from ..pipeline.composition import STEP as CONTROL_MAP_STEP
+from ..pipeline.covers import STEP as COVER_STEP
 from ..pipeline.estimate import Estimate, estimate_panels, remaining_panels
 from ..pipeline.finishing import STEP as FINISH_STEP
 from ..pipeline.finishing import FinishingError, drop_finishes, panel_print_info, resolve_upscaler
@@ -1048,6 +1049,7 @@ def get_queue(session: Session = Depends(get_session), ctx: AppContext = Depends
                         STYLE_BOARD_STEP,
                         FINISH_STEP,
                         CONTROL_MAP_STEP,
+                        COVER_STEP,
                     ]
                 ),
                 Job.status.in_(ACTIVE),
@@ -1108,6 +1110,10 @@ def get_queue(session: Session = Depends(get_session), ctx: AppContext = Depends
                 if params.get("mode") == "clean"
                 else "Planche de style · essai"
             )
+            if series is not None:
+                label = f"{series.title} · {label}"
+        elif job.step == COVER_STEP:
+            label = f"Couverture · tome {params.get('volume_number') or '?'}"
             if series is not None:
                 label = f"{series.title} · {label}"
         elif job.step == TRIAL_STEP:

@@ -69,7 +69,13 @@ def test_presets_endpoint(client: TestClient) -> None:
     assert formats["a4-300dpi"]["width_px"] == 2480
     assert formats["b4-300dpi"]["dpi"] == 300
     assert any(t["panel_count"] == 6 for t in data["layout_templates"])
-    assert data["prompts"] == ["direction-artistique", "redacteur-image", "redacteur-image-dialogue", "script"]
+    assert data["prompts"] == [
+        "direction-artistique",
+        "redacteur-couverture",
+        "redacteur-image",
+        "redacteur-image-dialogue",
+        "script",
+    ]
     assert data["workflows"][0]["id"] == "qwen-image-base"
     assert data["issues"] == []
 
