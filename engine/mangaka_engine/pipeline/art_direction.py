@@ -15,6 +15,15 @@ Sortie JSON validée par Pydantic puis contre le chapitre (pages, nombre de case
 la bibliothèque) ;
 invalide → nouvel essai avec l'erreur (`max_retries`, 2 au maximum) → sinon `ArtDirectionError`.
 
+Name scène par scène (`pipeline/scene_name.py`) : quand le chapitre a des scènes validées et que chaque page de
+l'histoire est rattachée à l'une d'elles, l'agent dirige le chapitre UNE SCÈNE À LA FOIS (ou une seule scène,
+`scene_id`) : il reçoit le type et le profil de la scène (`$scene`), `check_variety` et `check_page_rules` lisent les
+parts de plans de la charte de la scène (ADN de la série précisé par le profil : au moins 50 % de gros plans en
+combat), quel que soit son nombre de pages ; les lignes de mouvement imposées ou interdites du profil partent dans
+l'action et l'ambiance des cases (`apply_motion`) ; la famille `rhythm` du chapitre garde son rôle (pas de pics
+d'affilée, une respiration après un pic, rythmes des pages d'avant compris ; premier pic et pic final en
+avertissement sur le chapitre entier).
+
 Savoir-faire : cherché page par page (`page_query` : le scénario de la page), dans le budget de l'agent,
 sans doublon ; la trace du passage (« Sources utilisées ») note les pages de chaque fiche.
 
@@ -116,7 +125,17 @@ from .layout import LayoutError
 from .library import SeriesLibrary
 from .names import CharacterMatcher
 from .pages import applied_values, is_stale, layout_page
-from .pre_direction import Charter, PageView, art_text, chapter_issues, series_charter, shot_problems
+from .pre_direction import (
+    Charter,
+    PageView,
+    _rhythm_issues,
+    art_text,
+    chapter_issues,
+    scene_issues,
+    series_charter,
+    shot_problems,
+)
+from .scene_name import SceneFrame, frame_of, motion_rule, scene_frames, scene_mode
 from .script import DIRECTION_LABELS, _render
 from .style import NO_GUIDELINES, style_brief
 
@@ -365,11 +384,25 @@ class DirectionContext:
     library: SeriesLibrary = field(default_factory=SeriesLibrary)
     rules: VarietyRules | None = None  # `variety_rules` du preset
     page_rules: PageRules | None = None  # `page_rules` du preset (règles par planche)
-    charter: Charter | None = None  # ADN de la série (presets/pre_direction.yaml)
+    charter: Charter | None = None  # ADN de la série (presets/pre_direction.yaml), de la scène pour une scène
+    # Name scène par scène : la scène dirigée, les rythmes des pages d'avant (dans l'ordre) et le lieu de la
+    # dernière case d'avant.
+    scene: SceneFrame | None = None
+    before: list[str | None] = field(default_factory=list)
+    previous_location: Any = None
 
     def as_json(self) -> dict[str, Any]:
         return {
             "task": "art_direction",
+            **(
+                {
+                    "scene": {**self.scene.as_json(), "motion_lines": motion_rule(self.scene.profile)},
+                    "before_rythmes": list(self.before),
+                    "previous_location": self.previous_location,
+                }
+                if self.scene is not None
+                else {}
+            ),
             "series": self.series,
             **self.library.as_json(),
             "chapter": self.chapter,
@@ -525,13 +558,20 @@ def build_context(
     *,
     pages: Sequence[Page] | None = None,
     knowledge: KnowledgeBase | None = None,
+    scene: SceneFrame | None = None,
+    single: bool | None = None,
+    before: Sequence[str | None] = (),
+    previous_location: Any = None,
 ) -> DirectionContext:
+    """Contexte de l'agent : tout le chapitre, une page (« Proposer autre chose »), ou les pages d'une scène
+    (`scene` : sa charte remplace celle de la série)."""
     series = chapter.project
     characters = session.scalars(
         select(Character).where(Character.project_id == series.id).order_by(Character.name)
     ).all()
     targets = list(pages) if pages is not None else story_pages(chapter)
-    single = pages is not None and len(targets) == 1
+    if single is None:
+        single = pages is not None and len(targets) == 1 and scene is None
     templates = list(presets.layout_templates.values())
     aliases = aliases_from(CharacterMatcher(characters))
     briefs = []
@@ -583,7 +623,10 @@ def build_context(
         library=SeriesLibrary.load(session, series.id),
         rules=prompt.variety_rules,
         page_rules=prompt.page_rules,
-        charter=series_charter(presets, series),
+        charter=scene.charter if scene is not None else series_charter(presets, series),
+        scene=scene,
+        before=list(before),
+        previous_location=previous_location,
     )
 
 
@@ -625,6 +668,41 @@ def _pages_text(ctx: DirectionContext) -> str:
                 lines.append(f"    « {d} »")
         blocks.append("\n".join(lines))
     return "\n\n".join(blocks)
+
+
+NO_SCENE = (
+    "(chapitre dirigé d'un seul tenant : pas de scène validée, la charte de la série s'applique à toutes les pages)"
+)
+MOTION_TEXT = {
+    "required": "lignes de mouvement IMPOSÉES : chaque case d'action les montre (vitesse, impact, trajectoire) — "
+    "écris-les dans « action » et « ambiance »",
+    "forbidden": "lignes de mouvement INTERDITES : image posée, sans effet de vitesse — ni dans « action » ni dans "
+    "« ambiance »",
+}
+
+
+def scene_text(ctx: DirectionContext) -> str:
+    """La scène dirigée en clair ($scene) : type, pages, profil de tempo, lignes de mouvement, rythmes d'avant."""
+    f = ctx.scene
+    if f is None:
+        return NO_SCENE
+    span = f"page {f.first_page}" if f.pages == 1 else f"pages {f.first_page} à {f.last_page}"
+    lines = [
+        f"Tu diriges la {f.label}, {span} : {f.summary}",
+        f"Profil de la scène (prime sur la charte de la série pour ces pages) : {f.tempo}.",
+    ]
+    rule = motion_rule(f.profile)
+    if rule:
+        lines.append(f"- {MOTION_TEXT[rule]} ;")
+    if any(p.startswith("shots.") for p in f.profile):
+        lines.append("- parts de plans de la scène vérifiées sur ses seules cases (voir la charte ci-dessous) ;")
+    if ctx.before:
+        last = [r or "?" for r in ctx.before[-3:]]
+        lines.append(
+            f"- rythme des pages juste avant la scène : {', '.join(last)} — pas de pics d'affilée au-delà de la charte, "
+            "une respiration juste après un pic, y compris à la jonction des scènes."
+        )
+    return "\n".join(lines)
 
 
 def _previous_text(prev: dict[str, Any] | None) -> str:
@@ -701,6 +779,8 @@ def render_messages(prompt: PromptPreset, ctx: DirectionContext) -> list[ChatMes
         "page_rules": page_rules_text(ctx.page_rules),
         # Charte de la série (ADN) : échelle des plans, présence, formes de planche, courbe de rythme.
         "pre_direction": art_text(ctx.charter, len(ctx.pages)),
+        # Scène dirigée (name scène par scène) : type, profil, lignes de mouvement, rythmes des pages d'avant.
+        "scene": scene_text(ctx),
         "context_json": json.dumps(ctx.as_json(), ensure_ascii=False, indent=2),
         "savoir_faire": (ctx.knowledge.savoir_faire() if ctx.knowledge else "")
         or "(aucun savoir-faire pour cet agent)",
@@ -914,16 +994,21 @@ def _runs(values: Sequence[str], limit: int) -> list[tuple[int, int, str]]:
 
 
 def check_variety(
-    pages: Sequence[tuple[int, Sequence[dict[str, Any]]]], rules: VarietyRules | None, charter: Charter | None = None
+    pages: Sequence[tuple[int, Sequence[dict[str, Any]]]],
+    rules: VarietyRules | None,
+    charter: Charter | None = None,
+    *,
+    scene: bool = False,
 ) -> tuple[dict[int, list[str]], list[str]]:
     """Règles de variété sur des pages (numéro, cases dans l'ordre avec plan, angle, action) :
     (problèmes par numéro de page, problèmes du chapitre). Messages lisibles, en français. Avec `charter`
-    (ADN de la série), l'échelle des plans du chapitre suit aussi ses parts par famille de plans."""
+    (ADN de la série), l'échelle des plans du chapitre suit aussi ses parts par famille de plans ; `scene` : pages
+    d'une scène, `charter` est celle de la scène et ses parts de plans valent quel que soit le nombre de pages."""
     by_page: dict[int, list[str]] = {}
     chapter: list[str] = []
     if rules is None:
         plans = [pa.get("plan") for _n, panels in pages for pa in panels]
-        return by_page, shot_problems(plans, charter, len(pages))
+        return by_page, shot_problems(plans, charter, len(pages), scene=scene)
     frontal = {_key(a) for a in rules.frontal_angles}
     off_level = {_key(a) for a in rules.off_eye_level}
     wide_medium = {_key(p) for p in rules.wide_medium_plans}
@@ -991,14 +1076,17 @@ def check_variety(
             f"({allowed} au plus, {round(rules.max_wide_medium_share * 100)} %) : resserre sur les visages, "
             "les gestes et les objets"
         )
-    chapter += shot_problems([pa.get("plan") for _n, panels in pages for pa in panels], charter, len(pages))
+    plans = [pa.get("plan") for _n, panels in pages for pa in panels]
+    chapter += shot_problems(plans, charter, len(pages), scene=scene)
     return by_page, chapter
 
 
-def output_variety(out: DirectionOutput, rules: VarietyRules | None, charter: Charter | None = None) -> list[str]:
+def output_variety(
+    out: DirectionOutput, rules: VarietyRules | None, charter: Charter | None = None, *, scene: bool = False
+) -> list[str]:
     """Règles de variété enfreintes par une réponse du LLM (messages pour la relance)."""
     pages = [(dp.page, [pa.model_dump() for pa in sorted(dp.panels, key=lambda p: p.panel)]) for dp in out.pages]
-    by_page, chapter = check_variety(pages, rules, charter)
+    by_page, chapter = check_variety(pages, rules, charter, scene=scene)
     return [f"page {n} : {p}" for n, problems in by_page.items() for p in problems] + chapter
 
 
@@ -1008,10 +1096,14 @@ def page_warnings(
     chapter_level: bool = True,
     page_rules: PageRules | None = None,
     charter: Charter | None = None,
+    frames: Sequence[SceneFrame] = (),
 ) -> dict[int, list[str]]:
     """Avertissements de variété, des règles par planche et de la charte de la série des choix stockés, par id
     de page (« chapitre : … » sur chacune, ou sur les pages concernées pour une règle de la charte ou des cases
-    « choc » d'affilée d'une page à l'autre)."""
+    « choc » d'affilée d'une page à l'autre). Avec `frames` (name scène par scène), chaque scène est mesurée avec
+    sa propre charte (`scene_warnings`)."""
+    if frames:
+        return scene_warnings(pages, rules, page_rules, charter, frames, chapter_level=chapter_level)
     rows = [(p.number, list((p.direction.values or {}).get("panels") or [])) for p in pages if p.direction]
     by_page, chapter = check_variety(rows, rules, charter)
     common = [CHAPTER_PREFIX + c for c in chapter] if chapter_level else []
@@ -1019,6 +1111,78 @@ def page_warnings(
         check_page_rules(stored_rows(pages), page_rules, chapter_names(pages), charter, stored_info(pages))
     )
     return {p.id: [*by_page.get(p.number, []), *ruled.get(p.number, []), *common] for p in pages if p.direction}
+
+
+def _directed(page: Page) -> bool:
+    return page.direction is not None and bool((page.direction.values or {}).get("panels"))
+
+
+def _last_location(page: Page) -> Any:
+    panels = (page.direction.values or {}).get("panels") or [] if page.direction else []
+    by_id = {pa.id: pa for pa in page.panels}
+    for choice in reversed(panels):
+        panel = by_id.get(choice.get("panel_id"))
+        location = panel.location_id if panel is not None and panel.location_id is not None else choice.get("lieu")
+        if location is not None:
+            return location
+    return None
+
+
+def scene_warnings(
+    pages: Sequence[Page],
+    rules: VarietyRules | None,
+    page_rules: PageRules | None,
+    charter: Charter | None,
+    frames: Sequence[SceneFrame],
+    *,
+    chapter_level: bool = True,
+) -> dict[int, list[str]]:
+    """Avertissements des choix stockés, scène par scène : variété et parts de plans de la charte de la scène, règles
+    par planche, charte de la scène (grande case du profil, case d'établissement, pics d'affilée et respiration avec
+    les pages d'avant) — « scène N … : » devant ce qui porte sur la scène entière ; et, sur le chapitre entier
+    (`chapter_level`), la place du premier pic et le pic final de la courbe de rythme de la série. Seules les pages
+    de `pages` reçoivent des avertissements, mesurées avec toutes les pages dirigées de leur scène."""
+    wanted = {p.id for p in pages if p.direction}
+    out: dict[int, list[str]] = {pid: [] for pid in wanted}
+    if not pages:
+        return out
+    chapter = pages[0].chapter
+    every = [p for p in story_pages(chapter) if _directed(p)]
+    by_number = {p.number: p for p in every}
+    for frame in frames:
+        group = [p for p in every if p.scene_id == frame.id]
+        if not group or not wanted & {p.id for p in group}:
+            continue
+        rows = [(p.number, list((p.direction.values or {}).get("panels") or [])) for p in group]  # type: ignore[union-attr]
+        by_page, whole = check_variety(rows, rules, frame.charter, scene=True)
+        earlier = [p for p in every if p.number < group[0].number]
+        issues = check_page_rules(stored_rows(group), page_rules, chapter_names(group))
+        issues += scene_rule_issues(
+            stored_rows(group),
+            frame.charter,
+            frame,
+            stored_info(group),
+            [(p.direction.values or {}).get("rythme") for p in earlier],  # type: ignore[union-attr]
+            _last_location(earlier[-1]) if earlier else None,
+        )
+        ruled: dict[int, list[str]] = {}
+        for issue in issues:
+            for number in issue.pages:
+                ruled.setdefault(number, []).append(issue.message)
+        common = [f"{frame.label} : {w}" for w in whole]
+        for page in group:
+            if page.id in wanted:
+                out[page.id] += [*by_page.get(page.number, []), *ruled.get(page.number, []), *common]
+    if chapter_level and charter is not None and len(every) >= charter.settings.min_pages:
+        views = [PageView(p.number, (p.direction.values or {}).get("rythme"), None, None, []) for p in every]  # type: ignore[union-attr]
+        for issue in _rhythm_issues(views, charter):
+            if "d'affilée" in issue.message or "respiration" in issue.message:
+                continue  # déjà mesurés scène par scène, jonctions comprises
+            for number in issue.pages:
+                page = by_number.get(number)
+                if page is not None and page.id in wanted:
+                    out[page.id].append(CHAPTER_PREFIX + issue.message)
+    return out
 
 
 # --- règles par planche (page_rules) -------------------------------------------------------
@@ -1401,7 +1565,7 @@ def _run_full(llm: LLMProvider, prompt: PromptPreset, ctx: DirectionContext, pro
         try:
             output = parse_direction(result.text, ctx)
             viewpoints = viewpoint_problems(output, ctx)
-            variety = output_variety(output, ctx.rules, ctx.charter)
+            variety = output_variety(output, ctx.rules, ctx.charter, scene=ctx.scene is not None)
             if viewpoints or variety:
                 fallback = DirectionRun(output=output, attempts=attempt, messages=messages, variety=variety)
                 parts = []
@@ -1452,9 +1616,52 @@ class DirectionPatch(_LLMModel):
 
 def output_page_issues(out: DirectionOutput, ctx: DirectionContext) -> list[RuleIssue]:
     names = [c["name"] for c in ctx.characters if c.get("name")]
+    rows = output_rows(out, ctx)
+    if ctx.scene is not None:
+        # Une scène : règles par planche, puis la charte de la scène (grande case du profil, case d'établissement,
+        # pics d'affilée et respiration avec les pages d'avant).
+        issues = check_page_rules(rows, ctx.page_rules, names)
+        return issues + scene_rule_issues(
+            rows, ctx.charter, ctx.scene, output_info(out), ctx.before, ctx.previous_location
+        )
     # Charte du chapitre (formes, présence, rythme) : seulement sur toutes les pages dirigées ensemble.
     charter = None if ctx.single_page else ctx.charter
-    return check_page_rules(output_rows(out, ctx), ctx.page_rules, names, charter, output_info(out))
+    return check_page_rules(rows, ctx.page_rules, names, charter, output_info(out))
+
+
+def scene_rule_issues(
+    rows: Sequence[PageRow],
+    charter: Charter | None,
+    frame: SceneFrame,
+    info: PageInfo | None,
+    before: Sequence[str | None] = (),
+    previous_location: Any = None,
+) -> list[RuleIssue]:
+    """Charte d'une scène (`pre_direction.scene_issues`) en règles par planche."""
+    info = info or {}
+    views = [
+        PageView(
+            number,
+            rythme,
+            (info.get(number) or {}).get("template"),
+            (info.get(number) or {}).get("page_choc"),
+            panels,
+        )
+        for number, rythme, panels in rows
+    ]
+    every = [number for number, _r, _p in rows]
+    out = []
+    for issue in scene_issues(views, charter, frame.profile, before=before, previous_location=previous_location):
+        touched = list(dict.fromkeys([*issue.pages, *(p for p, _c in issue.cases)]))
+        out.append(
+            RuleIssue(
+                f"{frame.label} : {issue.message}",
+                [*((p, 0) for p in issue.pages), *issue.cases],
+                sorted(touched) or every,
+                chapter=True,
+            )
+        )
+    return out
 
 
 def targeted_text(rules: PageRules, issues: Sequence[RuleIssue]) -> str:
@@ -1538,13 +1745,46 @@ def enforce_page_rules(
         if merged is not None and not check_against(merged, ctx):
             default_viewpoints(merged, ctx)
             after = output_page_issues(merged, ctx)
-            variety = output_variety(merged, ctx.rules, ctx.charter)
+            variety = output_variety(merged, ctx.rules, ctx.charter, scene=ctx.scene is not None)
             if len(after) + len(variety) < len(issues) + len(run.variety):
                 run = DirectionRun(output=merged, attempts=run.attempts, messages=run.messages, variety=variety)
                 issues = after
         run.targeted = True
     run.page_rules = [i.text() for i in issues]
     return run
+
+
+# --- lignes de mouvement du profil de la scène ----------------------------------------------
+MOTION_REQUIRED = "lignes de mouvement marquées (vitesse, impact)"
+MOTION_FORBIDDEN = "image posée, sans lignes de mouvement"
+_MOTION_WORDS = re.compile(r",?\s*(?:avec |et )?(?:des )?lignes de (?:mouvement|vitesse)[^,;.]*", re.IGNORECASE)
+
+
+def _append(text: str, extra: str, limit: int) -> str:
+    text = text.strip().rstrip(".")
+    if extra.lower() in text.lower():
+        return text
+    joined = f"{text}, {extra}" if text else extra[:1].upper() + extra[1:]
+    return joined if len(joined) <= limit else text[: max(0, limit - len(extra) - 3)].rstrip() + f"…, {extra}"
+
+
+def apply_motion(out: DirectionOutput, frame: SceneFrame | None) -> None:
+    """Lignes de mouvement imposées ou interdites par le profil de la scène : recopiées dans l'action et l'ambiance
+    des cases (que lit le rédacteur de prompt image). Imposées : chaque case qui n'est pas calme les porte dans son
+    ambiance et son action ; interdites : retirées du texte, et l'ambiance dit « image posée »."""
+    rule = motion_rule(frame.profile) if frame is not None else None
+    if rule is None:
+        return
+    for dp in out.pages:
+        for pa in dp.panels:
+            if rule == "required":
+                if pa.intensity == "calme":
+                    continue
+                pa.ambiance = _append(pa.ambiance, MOTION_REQUIRED, 300)
+                pa.action = _append(pa.action, "lignes de vitesse", 200)
+            else:
+                pa.action = _MOTION_WORDS.sub("", pa.action).strip()
+                pa.ambiance = _append(_MOTION_WORDS.sub("", pa.ambiance).strip(), MOTION_FORBIDDEN, 300)
 
 
 # --- stockage, verrous ------------------------------------------------------------
@@ -1647,13 +1887,17 @@ def save_direction(
     rules: VarietyRules | None = None,
     page_rules: PageRules | None = None,
     charter: Charter | None = None,
+    frames: Sequence[SceneFrame] = (),
+    force: bool = False,
 ) -> list[int]:
     """Enregistre la proposition ; renvoie les numéros des pages modifiées.
 
     Une page validée ou appliquée n'est pas remplacée par une proposition de tout le chapitre (seul
     « Proposer autre chose » sur cette page la relance) ; une page rejetée reçoit la nouvelle proposition
     et redevient « proposée ». Les champs verrouillés sont gardés. Les règles
-    de variété encore enfreintes (après verrous) sont notées sur chaque page (`warnings`).
+    de variété encore enfreintes (après verrous) sont notées sur chaque page (`warnings`). `force` : une scène
+    redirigée seule — ses pages reçoivent la nouvelle proposition même appliquées (verrous gardés) ; `frames` :
+    avertissements scène par scène (`scene_warnings`).
     """
     by_number = {dp.page: dp for dp in output.pages}
     changed: list[int] = []
@@ -1666,13 +1910,13 @@ def save_direction(
         if d is None:
             d = PageDirection(chapter_id=chapter.id, project_id=chapter.project_id, values={}, locks=[])
             page.direction = d
-        elif d.status in KEPT_STATUSES and not single_page:
+        elif d.status in KEPT_STATUSES and not (single_page or force):
             continue
         # Cases supprimées depuis : leurs verrous disparaissent.
         ids = {str(p.id) for p in page.panels}
         d.locks = [k for k in d.locks or [] if "." not in k or k.split(".", 1)[0] in ids]
         d.values = merge_locked(to_values(dp, page), d.values, d.locks)
-        if single_page or d.status == "rejected":
+        if single_page or force or d.status == "rejected":
             d.status = "proposed"  # nouvelle proposition : appliquée à la prochaine génération, sauf rejet
         if single_page:
             d.variant = (d.variant or 0) + 1
@@ -1680,7 +1924,8 @@ def save_direction(
         saved.append(page)
     for page in saved:
         page.direction.values = {**page.direction.values, "warnings": []}
-    for page_id, warnings in page_warnings(saved, rules, page_rules=page_rules, charter=charter).items():
+    session.flush()
+    for page_id, warnings in page_warnings(saved, rules, page_rules=page_rules, charter=charter, frames=frames).items():
         page = next(p for p in saved if p.id == page_id)
         page.direction.values = {**page.direction.values, "warnings": warnings}
     session.flush()
@@ -1785,7 +2030,12 @@ def edit_direction(
     page_rules = prompt.page_rules if prompt is not None else None
     charter = series_charter(presets, page.chapter.project)
     kept = [w for w in values.get("warnings") or [] if w.startswith(CHAPTER_PREFIX)]
-    fresh = page_warnings([page], rules, chapter_level=False, page_rules=page_rules, charter=charter).get(page.id, [])
+    frames = scene_frames(presets, page.chapter)
+    if not scene_mode(page.chapter, frames):
+        frames = []
+    fresh = page_warnings(
+        [page], rules, chapter_level=False, page_rules=page_rules, charter=charter, frames=frames
+    ).get(page.id, [])
     d.values = {**values, "warnings": [*fresh, *kept]}
     return d
 
@@ -2081,8 +2331,10 @@ def direction_job(
     page_id: int | None = None,
     knowledge: KnowledgeBase | None = None,
     job_id: int | None = None,
+    scene_id: int | None = None,
 ) -> Callable[[Progress], str]:
-    """Job « Direction artistique » d'un chapitre, ou d'une seule page (« Proposer autre chose »)."""
+    """Job « Direction artistique » d'un chapitre — scène par scène quand ses scènes sont validées et ses pages
+    rattachées —, d'une seule scène (`scene_id`) ou d'une seule page (« Proposer autre chose »)."""
 
     def run(progress: Progress) -> str:
         prompt = presets.prompt(PROMPT_ID)
@@ -2091,14 +2343,36 @@ def direction_job(
             if chapter is None:
                 raise ArtDirectionError("Chapitre introuvable (supprimé entre-temps ?)")
             targets = _targets(chapter, page_id)
+            frames = scene_frames(presets, chapter)
+            if not scene_mode(chapter, frames):
+                frames = []
+            if scene_id is not None and frame_of(frames, scene_id) is None:
+                raise ArtDirectionError(
+                    "Scène introuvable, ou chapitre pas écrit scène par scène : valide les scènes, puis réécris le "
+                    "scénario"
+                )
             progress(5, "Préparation du contexte (scénario, bible, style de la série, chapitre précédent)…")
+            if frames and page_id is None:
+                return _run_scenes(db, presets, llm, chapter, prompt, frames, scene_id, knowledge, job_id, progress)
+            frame = frame_of(frames, targets[0].scene_id) if frames and page_id is not None else None
+            before, previous = _before(chapter, targets[0]) if frame is not None else ([], None)
             ctx = build_context(
-                session, presets, chapter, prompt, pages=targets if page_id else None, knowledge=knowledge
+                session,
+                presets,
+                chapter,
+                prompt,
+                pages=targets if page_id else None,
+                knowledge=knowledge,
+                scene=frame,
+                single=True if page_id is not None else None,
+                before=before,
+                previous_location=previous,
             )
             if ctx.knowledge is not None:
                 record_run(session, chapter, ctx.knowledge, job_id=job_id, model=getattr(llm, "model", llm.name))
                 session.commit()
         run = run_direction(llm, prompt, ctx, progress)
+        apply_motion(run.output, frame)
         progress(90, "Enregistrement des choix de direction artistique…")
         with db.session_scope() as session:
             chapter = session.get(Chapter, chapter_id)
@@ -2113,7 +2387,8 @@ def direction_job(
                 single_page=page_id is not None,
                 rules=prompt.variety_rules,
                 page_rules=prompt.page_rules,
-                charter=ctx.charter,
+                charter=series_charter(presets, chapter.project),
+                frames=frames,
             )
             session.commit()
         tries = f" en {run.attempts} essais" if run.attempts > 1 else ""
@@ -2134,6 +2409,126 @@ def direction_job(
         return f"{len(changed)} page{'s' if len(changed) > 1 else ''} dirigée{'s' if len(changed) > 1 else ''}{extra}{tries}"
 
     return run
+
+
+def _before(
+    chapter: Chapter, first: Page, chosen: Mapping[int, str | None] | None = None
+) -> tuple[list[str | None], Any]:
+    """Rythmes des pages de l'histoire avant `first` (choix de ce passage `chosen`, sinon direction stockée) et lieu
+    de la dernière case d'avant."""
+    earlier = [p for p in story_pages(chapter) if p.number < first.number]
+    chosen = chosen or {}
+    rythmes = [
+        chosen[p.number] if p.number in chosen else ((p.direction.values or {}).get("rythme") if p.direction else None)
+        for p in earlier
+    ]
+    location = None
+    if earlier:
+        location = _last_location(earlier[-1]) if _directed(earlier[-1]) else None
+        if location is None:
+            location = next((pa.location_id for pa in reversed(earlier[-1].panels) if pa.location_id is not None), None)
+    return rythmes, location
+
+
+def _run_scenes(
+    db: Database,
+    presets: PresetRegistry,
+    llm: LLMProvider,
+    chapter: Chapter,
+    prompt: PromptPreset,
+    frames: Sequence[SceneFrame],
+    scene_id: int | None,
+    knowledge: KnowledgeBase | None,
+    job_id: int | None,
+    progress: Progress,
+) -> str:
+    """Direction scène par scène : une génération par scène (ou la seule scène `scene_id`), chacune avec sa charte,
+    son profil et les rythmes des pages d'avant ; la proposition de toutes les scènes est enregistrée d'un coup.
+    Appelé avec la session de préparation ouverte (fermée avant le premier appel au LLM)."""
+    session = object_session(chapter)
+    assert session is not None
+    chapter_id = chapter.id
+    todo = [f for f in frames if scene_id is None or f.id == scene_id]
+    plans: list[tuple[SceneFrame, list[int], DirectionContext]] = []
+    for frame in todo:
+        pages = [p for p in story_pages(chapter) if p.scene_id == frame.id]
+        if not pages:
+            continue
+        ctx = build_context(session, presets, chapter, prompt, pages=pages, knowledge=knowledge, scene=frame)
+        if ctx.knowledge is not None:
+            record_run(session, chapter, ctx.knowledge, job_id=job_id, model=getattr(llm, "model", llm.name))
+        plans.append((frame, [p.id for p in pages], ctx))
+    if not plans:
+        raise ArtDirectionError("Aucune page à diriger dans cette scène : écris d'abord son scénario")
+    first_pages = {
+        frame.id: min(p.number for p in story_pages(chapter) if p.scene_id == frame.id) for frame, _i, _c in plans
+    }
+    session.commit()
+    session.close()
+
+    chosen: dict[int, str | None] = {}
+    outputs: list[DirectionPage] = []
+    runs: list[DirectionRun] = []
+    span = 80 / len(plans)
+    for k, (frame, _ids, ctx) in enumerate(plans):
+        # Rythmes d'avant : ceux de ce passage pour les scènes déjà dirigées, sinon la direction stockée.
+        with db.session_scope() as s2:
+            ch = s2.get(Chapter, chapter_id)
+            if ch is None:
+                raise ArtDirectionError("Chapitre introuvable (supprimé entre-temps ?)")
+            first = next(p for p in story_pages(ch) if p.number == first_pages[frame.id])
+            ctx.before, ctx.previous_location = _before(ch, first, chosen)
+        low = 5 + k * span
+
+        def step(pct: int, message: str, low: float = low, frame: SceneFrame = frame) -> None:
+            progress(int(low + span * min(max(pct, 0), 100) / 100), f"Scène {frame.number}/{len(frames)} — {message}")
+
+        run = run_direction(llm, prompt, ctx, step)
+        apply_motion(run.output, frame)
+        runs.append(run)
+        for dp in run.output.pages:
+            chosen[dp.page] = dp.rythme
+            outputs.append(dp)
+    progress(90, "Enregistrement des choix de direction artistique…")
+    merged = DirectionOutput.model_construct(pages=outputs)
+    ids = [i for _f, page_ids, _c in plans for i in page_ids]
+    with db.session_scope() as s3:
+        ch = s3.get(Chapter, chapter_id)
+        if ch is None:
+            raise ArtDirectionError("Chapitre introuvable (supprimé entre-temps ?)")
+        targets = [p for p in story_pages(ch) if p.id in ids]
+        changed = save_direction(
+            s3,
+            ch,
+            targets,
+            merged,
+            single_page=False,
+            rules=prompt.variety_rules,
+            page_rules=prompt.page_rules,
+            charter=series_charter(presets, ch.project),
+            frames=frames,
+            force=scene_id is not None,
+        )
+        s3.commit()
+    attempts = max(r.attempts for r in runs)
+    tries = f" en {attempts} essais" if attempts > 1 else ""
+    if any(r.targeted for r in runs):
+        tries += ", relance ciblée sur les règles par planche"
+    warned = sum(len(r.variety) + len(r.page_rules) for r in runs)
+    if warned:
+        tries += f", avec {warned} avertissement{'s' if warned > 1 else ''} de mise en scène"
+    n = len(changed)
+    pages = f"{n} page{'s' if n > 1 else ''} dirigée{'s' if n > 1 else ''}"
+    if scene_id is not None:
+        return f"Scène {plans[0][0].number} redirigée : {pages}{tries}"
+    kept = len(ids) - n
+    extra = (
+        f" ({kept} page{'s' if kept > 1 else ''} appliquée{'s' if kept > 1 else ''} gardée{'s' if kept > 1 else ''} :"
+        " « Proposer autre chose » ou « Rediriger la scène » pour la changer)"
+        if kept
+        else ""
+    )
+    return f"{pages}, scène par scène ({len(plans)} scène{'s' if len(plans) > 1 else ''}){extra}{tries}"
 
 
 def _targets(chapter: Chapter, page_id: int | None) -> list[Page]:

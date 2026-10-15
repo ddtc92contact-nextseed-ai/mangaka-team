@@ -344,9 +344,10 @@ def _required(share: float, total: int) -> int:
     return math.ceil(share * total - EPS)
 
 
-def shot_problems(plans: Sequence[Any], charter: Charter | None, pages: int) -> list[str]:
-    """Parts de l'échelle des plans sur les cases dirigées ensemble (dès `min_pages` pages), en français."""
-    if charter is None or pages < charter.settings.min_pages or not plans:
+def shot_problems(plans: Sequence[Any], charter: Charter | None, pages: int, *, scene: bool = False) -> list[str]:
+    """Parts de l'échelle des plans sur les cases dirigées ensemble (dès `min_pages` pages), en français. `scene` :
+    cases d'une scène, mesurées quel que soit leur nombre de pages (parts du profil de la scène)."""
+    if charter is None or (pages < charter.settings.min_pages and not scene) or not plans:
         return []
     s = charter.settings
     shots = charter.dna.shots
@@ -492,6 +493,18 @@ def _shape_issues(views: Sequence[PageView], charter: Charter) -> list[CharterIs
                 same[allowed:],
             )
         )
+    return [*out, *_big_share_issues(views, charter, shapes)]
+
+
+def _big_share_issues(
+    views: Sequence[PageView], charter: Charter, shapes: Sequence[Shape] | None = None
+) -> list[CharterIssue]:
+    """Part de planches à grande case (`shapes.big_panel_share`)."""
+    d = charter.dna.shapes
+    n = len(views)
+    shapes = shapes or [page_shape(v, charter) for v in views]
+    numbers = [v.number for v in views]
+    out: list[CharterIssue] = []
     big = [numbers[i] for i, s in enumerate(shapes) if s.big]
     need = _required(d.big_panel_share.min, n)
     if len(big) < need:
@@ -572,7 +585,9 @@ def _cases(cases: Sequence[tuple[int, int]]) -> str:
     return shown + (f" et {len(cases) - 6} autre(s)" if len(cases) > 6 else "")
 
 
-def _place_issues(views: Sequence[PageView], charter: Charter) -> list[CharterIssue]:
+def _place_issues(
+    views: Sequence[PageView], charter: Charter, *, previous: Any = None, establishing_only: bool = False
+) -> list[CharterIssue]:
     """Lieux : case d'établissement au changement de lieu (la première case d'un nouveau lieu de la série en plan
     large / d'ensemble) et part de cases de décor muettes. Le lieu d'une case est son unité de lieu (`location`,
     id d'un lieu de la série) : une case sans lieu ne compte ni comme changement ni comme continuité, et un chapitre
@@ -587,7 +602,6 @@ def _place_issues(views: Sequence[PageView], charter: Charter) -> list[CharterIs
         wide = {_key(p) for p in s.shot_classes["wide"]}
         missing: list[tuple[int, int]] = []
         names: list[str] = []
-        previous: Any = None
         for number, i, pa in panels:
             loc = pa.get("location")
             if loc is None:
@@ -609,6 +623,8 @@ def _place_issues(views: Sequence[PageView], charter: Charter) -> list[CharterIs
                     [],
                 )
             )
+    if establishing_only:
+        return out
     total = len(panels)
     need = _required(d.silent_decor_min, total)
     silent = [(p, i) for p, i, pa in panels if not pa.get("visible") and not pa.get("replies")]
@@ -697,6 +713,71 @@ def _rhythm_issues(views: Sequence[PageView], charter: Charter) -> list[CharterI
                 tail,
             )
         )
+    return out
+
+
+# --- direction artistique d'une scène (name scène par scène) ----------------------------------
+def scene_issues(
+    views: Sequence[PageView],
+    charter: Charter | None,
+    profile: Mapping[str, Any],
+    *,
+    before: Sequence[str | None] = (),
+    previous_location: Any = None,
+) -> list[CharterIssue]:
+    """Règles de la charte sur les pages d'UNE scène dirigée seule : formes de planche quand le profil de la scène
+    en écrit (une grande case sur chaque planche d'une révélation), case d'établissement au changement de lieu
+    (`previous_location` : lieu de la dernière case de la scène d'avant), et la famille `rhythm` du chapitre — pas
+    plus de pics d'affilée, une respiration après un pic — avec les rythmes des pages d'avant (`before`, dans
+    l'ordre). La position du premier pic et le pic final restent des règles du chapitre entier (`chapter_issues`)."""
+    if charter is None or not views:
+        return []
+    views = sorted(views, key=lambda v: v.number)
+    out: list[CharterIssue] = []
+    if any(p.startswith("shapes.") for p in profile):
+        out += _big_share_issues(views, charter)
+    out += _place_issues(views, charter, previous=previous_location, establishing_only=True)
+    out += _streak_issues(views, charter, before)
+    return out
+
+
+def _streak_issues(views: Sequence[PageView], charter: Charter, before: Sequence[str | None]) -> list[CharterIssue]:
+    """Pics d'affilée et respiration après un pic, sur les pages de la scène précédées des rythmes `before`."""
+    d = charter.dna.rhythm
+    s = charter.settings
+    peaks_set = {_key(r) for r in s.peak_rythmes}
+    breaths = {_key(r) for r in s.breath_rythmes}
+    tail = list(before)[-(d.max_peaks_in_a_row + 1) :]
+    rythmes = [*tail, *(v.rythme for v in views)]
+    numbers: list[int | None] = [*([None] * len(tail)), *(v.number for v in views)]
+    is_peak = [_key(r) in peaks_set for r in rythmes]
+    out: list[CharterIssue] = []
+    run = 0
+    for i, peak in enumerate(is_peak):
+        run = run + 1 if peak else 0
+        number = numbers[i]
+        if number is None:
+            continue
+        if peak and run > d.max_peaks_in_a_row:
+            out.append(
+                CharterIssue(
+                    f"courbe de rythme : page {number} : {run} pics d'affilée ({d.max_peaks_in_a_row} au plus, pages "
+                    "de la scène d'avant comprises) : passe-la en « montée »",
+                    [],
+                    [number],
+                )
+            )
+        if d.breath_after_peak and i > 0 and is_peak[i - 1] and not peak and _key(rythmes[i]) not in breaths:
+            previous = numbers[i - 1]
+            where = f"de la page {previous}" if previous is not None else "de la dernière page de la scène d'avant"
+            out.append(
+                CharterIssue(
+                    f"courbe de rythme : page {number} : pas de respiration après le pic {where} (rythme "
+                    f"« {' » ou « '.join(s.breath_rythmes)} » attendu)",
+                    [],
+                    [number],
+                )
+            )
     return out
 
 

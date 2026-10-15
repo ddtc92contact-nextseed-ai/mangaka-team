@@ -5,6 +5,7 @@ import { useMemo, useRef, useState, type ComponentProps } from "react";
 import { useConfirm } from "@/components/confirm";
 import { HelpLabel, InfoTip } from "@/components/info-tip";
 import { PassageList, formatTokens } from "@/components/knowledge";
+import { SceneMeasurePanel } from "@/components/scene-measure";
 import { useToast } from "@/components/toast";
 import { LibraryIcon } from "@/components/library-icon";
 import { UnmatchedNames } from "@/components/unmatched-names";
@@ -70,6 +71,8 @@ export default function ScenarioPage() {
   const brief = useEngineData(() => api.scriptBrief(chapter.id), [chapter.id]);
   // Scènes validées (étape Scènes) : « Scène 2 · Combat » en tête de chaque page qui s'y rattache.
   const sceneList = useEngineData(() => api.getScenes(chapter.id), [chapter.id]);
+  // Name scène par scène : mesure de chaque scène face à son profil, réécriture d'une seule scène.
+  const measures = useEngineData(() => api.sceneMeasures(chapter.id), [chapter.id]);
   const sceneLabels = useMemo(() => {
     const names = new Map(sceneList.data?.types.map((t) => [t.id, t.name]) ?? []);
     return new Map(
@@ -109,6 +112,7 @@ export default function ScenarioPage() {
       places.reload(); // lieux créés par le scénariste
       dialogues.reload();
       sceneList.reload();
+      measures.reload();
       reloadChapter();
       reloadStages();
     }
@@ -165,6 +169,7 @@ export default function ScenarioPage() {
       const saved = await api.savePages(chapter.id, fromDraft(draft));
       pages.setData(saved);
       dialogues.reload();
+      measures.reload();
       setEdited(null);
       setSavedAt(Date.now());
       toast("Découpage enregistré");
@@ -235,6 +240,16 @@ export default function ScenarioPage() {
       {brief.data && <ScriptBriefCard brief={brief.data} />}
 
       {sources.data && <UsedSources sources={sources.data} />}
+
+      {measures.data && (
+        <SceneMeasurePanel
+          chapterId={chapter.id}
+          measures={measures.data}
+          kind="script"
+          disabled={running || dirty}
+          onStarted={(j) => setStarted(j)}
+        />
+      )}
 
       <section aria-label="Découpage">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">

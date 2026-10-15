@@ -199,6 +199,7 @@ settings:
       - variety_rules
       - page_rules
       - pre_direction
+      - scene
       - context_json
       - bible
       - savoir_faire

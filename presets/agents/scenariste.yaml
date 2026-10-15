@@ -120,3 +120,60 @@ settings:
     type: prompt
     source: prompts/script.yaml#retry
     variables: [error]
+  # Name scène par scène (chapitre aux scènes validées) : une génération par scène, prompts/script-scene.yaml.
+  - key: scene_system
+    label: Consignes système — name d'une scène
+    group: Prompts
+    type: prompt
+    source: prompts/script-scene.yaml#system
+    variables: &scene_vars
+      - series_title
+      - style_packs
+      - style_guidelines
+      - series_style
+      - reading_direction
+      - characters
+      - character_names
+      - decors
+      - objets
+      - lieux
+      - previous_chapters
+      - chapter_number
+      - chapter_title
+      - synopsis
+      - target_pages
+      - shot_types
+      - bubble_kinds
+      - intensities
+      - rythmes
+      - dialogue_rules
+      - pre_direction
+      - scenes
+      - context_json
+      - bible
+      - savoir_faire
+      - scene_number
+      - scene_title
+      - scene_type
+      - scene_type_name
+      - scene_summary
+      - scene_pages
+      - scene_first_page
+      - scene_last_page
+      - scene_tempo
+      - scene_fiches
+      - written_scenes
+    help: Règles de name (une case = une action, l'image d'abord, la tourne de page…) appliquées à chaque scène.
+  - key: scene_user
+    label: Gabarit d'une scène
+    group: Prompts
+    type: prompt
+    source: prompts/script-scene.yaml#user
+    variables: *scene_vars
+    help: Gardez le bloc <contexte>$context_json</contexte> pour le mode mock.
+  - key: scene_retry
+    label: Consigne de relance — scène
+    group: Prompts
+    type: prompt
+    source: prompts/script-scene.yaml#retry
+    variables: [error]

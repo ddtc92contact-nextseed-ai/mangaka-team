@@ -5,9 +5,17 @@ from __future__ import annotations
 import re
 import string
 import unicodedata
-from typing import Any, ClassVar, Literal
+from typing import Annotated, Any, ClassVar, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, PositiveFloat, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PositiveFloat,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 
 from ..providers.qc.dghs import check_detector_options
 
@@ -1905,6 +1913,11 @@ class SceneType(_Strict):
     name: str = Field(min_length=1, max_length=60)
     description: str = Field(default="", max_length=400)
     tempo: dict[str, Any] = Field(default_factory=dict)
+    # Fiches du savoir-faire (ids des packs : « FUND_001 », « LAY_005 ») citées au scénariste pour une scène de ce
+    # type (name scène par scène, pipeline/scene_name.py).
+    fiches: list[Annotated[str, StringConstraints(pattern=r"^[A-Z][A-Z0-9_]*$")]] = Field(
+        default_factory=list, max_length=8
+    )
 
     @field_validator("tempo", mode="before")
     @classmethod
@@ -1985,6 +1998,17 @@ class SeriesCreatorSettings(_Strict):
         return self
 
 
+class OneActionRule(_Strict):
+    """« Une case = un moment, une seule action » (prompts/script-scene.yaml, pipeline/scene_name.py) : une
+    description de case qui enchaîne plusieurs actions — un de ces mots de liaison (« puis », « et ensuite »…), ou
+    plus de `max_verbs` verbes d'action de la liste `verbs` — relance le scénariste sur la case fautive, puis
+    devient un avertissement."""
+
+    connectors: list[str] = Field(default_factory=list, max_length=60)
+    verbs: list[str] = Field(default_factory=list, max_length=400)
+    max_verbs: int = Field(default=2, ge=1, le=10)
+
+
 class PromptPreset(_Strict):
     """Gabarits `string.Template` ($variable) d'une étape LLM."""
 
@@ -2013,6 +2037,8 @@ class PromptPreset(_Strict):
     page_rules: PageRules | None = None
     # Densité et variété des dialogues du scénariste (prompts/script.yaml).
     dialogue_rules: DialogueRules | None = None
+    # Name scène par scène (prompts/script-scene.yaml) : contrôle « une action par case ».
+    one_action: OneActionRule | None = None
 
     @field_validator("plans")
     @classmethod
