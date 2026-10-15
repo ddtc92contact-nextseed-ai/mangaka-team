@@ -454,3 +454,54 @@ def test_sketch_cannot_be_repaired(make_client: Callable[..., TestClient]) -> No
         img = session.query(PanelImage).filter(PanelImage.panel_id == p3["id"]).one()
         with pytest.raises(GenerationError, match="croquis"):
             enqueue_repair(session, ctx.presets, ctx.files, img, target="zone")
+
+
+# --- garde-fou anti-doublon dans le prompt positif (#187) ---------------------------------------------
+def _positive(loaded_id: str, wf: dict[str, Any]) -> str:
+    node = REG.workflow(loaded_id).preset.mapping["positive_prompt"]
+    return str(wf[node.node]["inputs"][node.input])
+
+
+def test_anti_duplicate_line_is_in_the_positive_prompt_of_sketch_and_clean(
+    make_client: Callable[..., TestClient],  # noqa: F811
+) -> None:
+    """Croquis (Turbo distillé, cfg 1 : négatif jamais lu) et version propre : la ligne `single_instance` est
+    dans le prompt POSITIF du workflow construit (`build_workflow`), une seule fois ; une case sans personnage
+    ne la reçoit pas."""
+    line = REG.image_prompt.single_instance
+    assert line and "only once" in line
+    comfy = MockComfyUIClient()
+    c = make_client(comfy)
+    data = setup_chapter(c)
+    chapter_id = data["chapter"]["id"]
+    p1, _p2, p3 = data["panels"]
+    for pid in (p1["id"], p3["id"]):
+        _ok(c.post(f"/panels/{pid}/sketch"), 202)
+        _wait(c)
+    [sk1] = _images(c, p1["id"])
+    [sk3] = _images(c, p3["id"])
+    wf = comfy.prompts[sk1["params"]["comfyui_prompt_id"]]
+    assert _positive("qwen-image-edit-ref-croquis", wf).count(line) == 1
+    assert sk1["params"]["prompt"].count(line) == 1
+    assert line not in _positive("qwen-image-croquis", comfy.prompts[sk3["params"]["comfyui_prompt_id"]])
+
+    _ok(c.post(f"/panels/{p1['id']}/sketch/validate"))
+    force_stages(c, chapter_id)
+    [job] = _ok(c.post(f"/pages/{data['pages'][0]['id']}/clean"), 202)["jobs"]
+    _wait(c)
+    final = next(i for i in _images(c, p1["id"]) if i["kind"] == "final")
+    clean_wf = comfy.prompts[final["params"]["comfyui_prompt_id"]]
+    assert _positive(job["params"]["preset"], clean_wf).count(line) == 1
+    negative = REG.workflow(job["params"]["preset"]).preset.mapping["negative_prompt"]
+    assert line not in str(clean_wf[negative.node]["inputs"][negative.input])
+
+
+def test_build_workflow_writes_the_anti_duplicate_line_in_the_positive_node() -> None:
+    from mangaka_engine.pipeline.prompt import with_single_instance
+
+    line = REG.image_prompt.single_instance
+    prompt = with_single_instance(PARAMS["positive_prompt"], line)
+    assert with_single_instance(prompt, line) == prompt  # jamais deux fois
+    for preset_id in ("qwen-image-croquis", "qwen-image-turbo"):
+        built = build_workflow(REG.workflow(preset_id), {**PARAMS, "positive_prompt": prompt})
+        assert _positive(preset_id, built.workflow).count(line) == 1

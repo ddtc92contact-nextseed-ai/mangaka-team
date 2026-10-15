@@ -82,6 +82,8 @@ class DirectionOptions(BaseModel):
     page_chocs: list[str]
     sfx_intensities: list[str]
     points_de_vue: list[str] = Field(default_factory=list)
+    # Au-delà de N personnages présents, avertissement sur la case (`mentions.crowd_warning` d'image_prompt.yaml).
+    crowd_limit: int = 0
     styles: list[Option]
     templates: list[dict[str, Any]]
 
@@ -210,6 +212,7 @@ def get_direction(
             page_chocs=list(da.PAGE_CHOCS),
             sfx_intensities=list(da.SFX_INTENSITIES),
             points_de_vue=list(da.POINTS_DE_VUE),
+            crowd_limit=presets.image_prompt.mentions.crowd_warning,
             styles=[Option(value=s.id, label=s.name) for s in presets.layout_styles.values()],
             templates=[
                 {"id": t.id, "name": t.name, "panel_count": t.panel_count} for t in presets.layout_templates.values()

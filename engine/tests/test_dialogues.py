@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 import httpx
@@ -424,3 +425,106 @@ def test_dialogue_report_404(client: TestClient) -> None:
 def test_dialogue_rules_schema_rejects_unknown_kinds() -> None:
     with pytest.raises(ValueError, match="cri"):
         DialogueRules(inner_voice_kinds=["cri"])
+
+
+# --- dialogue réglable par série : famille « dialogue » de l'ADN (#187) -------------------------------------
+def _charter(**overrides: Any):  # type: ignore[no-untyped-def]
+    from mangaka_engine.pipeline.pre_direction import Charter, apply_overrides
+
+    settings = PRESETS.pre_direction
+    assert settings is not None
+    dna = apply_overrides(PRESETS.genre_dna(None), overrides)  # type: ignore[arg-type]
+    return Charter(dna, settings, tuple(PRESETS.layout_templates.values()), None)
+
+
+def _with_reply(words: int) -> str:
+    """Le découpage dense, sa première réplique allongée à `words` mots."""
+    out = vulcano.script_output(dense=True)
+    first = next(d for p in out["pages"] for pa in p["panels"] for d in pa["dialogues"] if d["kind"] == "speech")
+    first["text"] = " ".join(["mot"] * words)
+    return json.dumps(out, ensure_ascii=False)
+
+
+def _length_problems(retry: str) -> list[str]:
+    """« N mots, M au plus » de chaque réplique trop longue citée par la relance."""
+    return [f"{n} mots, {m} au plus" for n, m in re.findall(r"trop longue \((\d+) mots, (\d+) au plus\)", retry)]
+
+
+def test_dna_dialogue_defaults_are_today_values_for_every_genre() -> None:
+    from mangaka_engine.pipeline.pre_direction import dialogue_rules_for, flatten
+
+    assert RULES is not None
+    for genre in (None, *PRESETS.pre_direction.genres):  # type: ignore[union-attr]
+        flat = flatten(PRESETS.genre_dna(genre))  # type: ignore[arg-type]
+        assert flat["dialogue.max_words"] == RULES.max_words == 12
+        assert flat["dialogue.max_mean_words"] == RULES.max_mean_words == 7
+        assert flat["dialogue.target_per_panel"] == RULES.target_per_panel == 2
+        assert flat["dialogue.action_needs_voice"] is RULES.action_needs_voice is True
+    rules = dialogue_rules_for(RULES, _charter())
+    assert rules is not None
+    assert (rules.max_words, rules.max_mean_words, rules.target_per_panel, rules.action_needs_voice) == (12, 7, 2, True)
+
+
+def test_series_max_words_22_drives_the_scriptwriter_retry() -> None:
+    """Critère d'acceptation : une série réglée à 22 mots par réplique — une réplique de 18 mots passe, une de 25
+    relance le scénariste avec ce plafond (et non celui de 12 du preset)."""
+    ctx = _ctx()
+    ctx.charter = _charter(**{"dialogue.max_words": 22})
+    _, user = render_messages(PROMPT, ctx)
+    assert "22 mots" in user.content
+
+    llm = _sequence(_with_reply(18), DENSE, DENSE)
+    run_script(llm, PROMPT, ctx, lambda _p, _m: None)
+    retries = [m[-1].content for m in llm.calls[1:]]
+    assert not any(_length_problems(r) for r in retries)
+
+    llm = _sequence(_with_reply(25), DENSE, DENSE)
+    run_script(llm, PROMPT, ctx, lambda _p, _m: None)
+    assert len(llm.calls) >= 2
+    assert _length_problems(llm.calls[1][-1].content) == ["25 mots, 22 au plus"]
+
+    # Sans ADN réglé (série existante) : le plafond reste 12.
+    ctx.charter = _charter()
+    llm = _sequence(_with_reply(18), DENSE, DENSE)
+    run_script(llm, PROMPT, ctx, lambda _p, _m: None)
+    assert _length_problems(llm.calls[1][-1].content) == ["18 mots, 12 au plus"]
+
+
+def test_series_can_allow_a_silent_action_panel() -> None:
+    from mangaka_engine.pipeline.pre_direction import dialogue_rules_for
+
+    choc = _panel(0, intensity="choc")
+    base = {"min_per_page": 0, "min_silent_panels_per_page": 0, "require_inner_voice": False}
+    loud = dialogue_rules_for(RULES, _charter(**{"dialogue.min_per_page": 0, "dialogue.min_silent_panels": 0}))
+    assert any("case d'action muette" in p for p in check_dialogues([choc], loud.model_copy(update=base)))  # type: ignore[union-attr]
+    silent = dialogue_rules_for(
+        RULES,
+        _charter(**{"dialogue.min_per_page": 0, "dialogue.min_silent_panels": 0, "dialogue.action_needs_voice": False}),
+    )
+    assert check_dialogues([choc], silent.model_copy(update=base)) == []  # type: ignore[union-attr]
+
+
+def test_dna_card_exposes_the_dialogue_settings(client: TestClient) -> None:
+    s = _ok(client.post("/projects", json={**STYLE, "title": "Bavards"}), 201)
+    dna = _ok(client.get(f"/projects/{s['id']}/pre-direction"))
+    fields = {f["path"]: f for f in dna["fields"]}
+    for path, kind in (
+        ("dialogue.max_words", "int"),
+        ("dialogue.max_mean_words", "int"),
+        ("dialogue.target_per_panel", "int"),
+        ("dialogue.action_needs_voice", "bool"),
+    ):
+        assert fields[path]["group"] == "dialogue" and fields[path]["kind"] == kind and fields[path]["label"]
+    assert dna["inherited"]["dialogue.max_words"] == 12 and dna["inherited"]["dialogue.action_needs_voice"] is True
+    tuned = _ok(
+        client.put(
+            f"/projects/{s['id']}/pre-direction",
+            json={"overrides": {"dialogue.max_words": 22, "dialogue.action_needs_voice": False}},
+        )
+    )
+    assert tuned["effective"]["dialogue.max_words"] == 22 and tuned["effective"]["dialogue.action_needs_voice"] is False
+    bad = client.put(
+        f"/projects/{s['id']}/pre-direction",
+        json={"overrides": {"dialogue.max_words": 5, "dialogue.max_mean_words": 9}},
+    )
+    assert bad.status_code == 422 and "moyenne" in bad.text

@@ -64,6 +64,7 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 import math
 import re
 import unicodedata
@@ -72,10 +73,12 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, field_validator
+import yaml
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints, ValidationError, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session, object_session
 
+from ..config import get_settings
 from ..presets import PageRules, PresetRegistry, PromptPreset, VarietyRules
 from ..providers.llm import ChatMessage, LLMError, LLMProvider
 from ..store.db import Database
@@ -121,9 +124,10 @@ AGENT = "art_direction"  # rôle de l'agent dans presets/knowledge.yaml
 STEP = "art_direction"  # étape des jobs
 PROMPT_ID = "direction-artistique"  # presets/prompts/direction-artistique.yaml
 
+log = logging.getLogger("mangaka_engine")
+
 RYTHMES = ("calme", "montée", "climax", "respiration")
 INTENSITIES = ("calme", "normal", "choc")
-PLANS = ("plan large", "plan moyen", "plan rapproché", "gros plan", "insert", "plongée", "contre-plongée")
 ANGLES = (
     "de face",
     "de trois quarts",
@@ -146,9 +150,38 @@ VARIETY_LABELS = {
 # Rythme de direction artistique → indice de rythme de la grammaire de mise en page (layout_style.py).
 RYTHME_TO_LAYOUT = {"calme": "lent", "respiration": "lent", "montée": "normal", "climax": "rapide"}
 
+
+# Plans de la direction artistique : vocabulaire de l'appli, dans le preset (`plans` de
+# presets/prompts/direction-artistique.yaml), lu une fois au chargement du module.
+def _preset_plans() -> tuple[str, ...]:
+    """`plans` de presets/prompts/direction-artistique.yaml (dossier de presets du moteur). Preset absent ou
+    illisible : aucun plan (la direction artistique refuse alors tout plan ; l'erreur du preset est exposée par
+    `GET /presets`)."""
+    path = get_settings().presets_dir / "prompts" / f"{PROMPT_ID}.yaml"
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        log.warning("plans de la direction artistique illisibles (%s)", path)
+        return ()
+    plans = data.get("plans") if isinstance(data, dict) else None
+    if not isinstance(plans, list):
+        log.warning("plans de la direction artistique absents de %s", path)
+        return ()
+    return tuple(dict.fromkeys(" ".join(str(p).split()) for p in plans if str(p).strip()))
+
+
+PLANS: tuple[str, ...] = _preset_plans()
+
+
+def _known_plan(value: str) -> str:
+    if value not in PLANS:
+        raise ValueError(f"valeur non autorisée « {value} » (attendu : {', '.join(PLANS)})")
+    return value
+
+
+PlanName = Annotated[str, AfterValidator(_known_plan)]
 RythmeName = Literal["calme", "montée", "climax", "respiration"]
 IntensityName = Literal["calme", "normal", "choc"]
-PlanName = Literal["plan large", "plan moyen", "plan rapproché", "gros plan", "insert", "plongée", "contre-plongée"]
 AngleName = Literal[
     "de face",
     "de trois quarts",
