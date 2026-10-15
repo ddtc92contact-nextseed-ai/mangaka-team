@@ -841,7 +841,7 @@ def test_generation_applies_every_proposal_except_a_rejected_one(c: TestClient) 
     r = c.post(f"/chapters/{chapter_id}/generate", json={})
     assert r.status_code == 422 and r.json()["errors"][0]["field"] == "stage.direction", r.text
     # Héros et Rival, inventés par le scénario factice, n'ont pas de fiche : références forcées aussi.
-    force_stages(c, chapter_id, "direction", "references")
+    force_stages(c, chapter_id, "direction", "references", "name")
     r = c.post(f"/chapters/{chapter_id}/generate", json={})
     assert r.status_code == 202, r.text
     assert _statuses(c, chapter_id) == ["applied", "applied", "rejected"]  # plus aucune « proposed »

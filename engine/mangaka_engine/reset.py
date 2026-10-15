@@ -60,6 +60,7 @@ SERIES_TABLES = (
     "llm_runs",
     "bubbles",
     "page_directions",
+    "page_name_validations",
     "panel_dialog_turns",
     "panel_images",
     "panel_dialog_turns",

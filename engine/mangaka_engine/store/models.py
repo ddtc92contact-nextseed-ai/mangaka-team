@@ -550,6 +550,10 @@ class Page(TimestampMixin, Base):
     direction: Mapped[PageDirection | None] = relationship(
         back_populates="page", cascade="all, delete-orphan", uselist=False
     )
+    # « Valider la name » (palier croquis, voir pipeline/name_board.py) ; None = page pas encore validée.
+    name_validation: Mapped[PageNameValidation | None] = relationship(
+        back_populates="page", cascade="all, delete-orphan", uselist=False
+    )
 
 
 class Panel(TimestampMixin, Base):
@@ -956,6 +960,22 @@ class PageDirection(TimestampMixin, Base):
     variant: Mapped[int] = mapped_column(Integer, default=0)  # « Proposer autre chose » : nombre de relances
 
     page: Mapped[Page] = relationship(back_populates="direction")
+
+
+class PageNameValidation(Base):
+    """Name validée d'une page (pipeline/name_board.py) : empreinte des cases au moment de la validation
+    (`key` : ids, ordre, description, plan, croquis retenu). Une case modifiée depuis (description, plan,
+    découpe, croquis) rend la validation caduque : la page n'est plus validée, sans rien effacer."""
+
+    __tablename__ = "page_name_validations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    page_id: Mapped[int] = mapped_column(ForeignKey("pages.id", ondelete="CASCADE"), unique=True, index=True)
+    key: Mapped[str] = mapped_column(String(64))
+    author: Mapped[str] = mapped_column(String(120), default="")
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+    page: Mapped[Page] = relationship(back_populates="name_validation")
 
 
 class GenerationLog(Base):

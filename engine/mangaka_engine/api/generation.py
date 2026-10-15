@@ -74,6 +74,7 @@ from ..pipeline.qc_bench import STEP as BENCH_STEP
 from ..pipeline.reference_sheets import KIND_LABELS
 from ..pipeline.reference_sheets import STEP as REFERENCE_STEP
 from ..pipeline.repair import concerned_character, default_repair_prompt, enqueue_repair, repair_context
+from ..pipeline.script import SHOT_TYPES, normalize_shot_type
 from ..pipeline.sketch import validated_sketch
 from ..pipeline.style_board import STEP as STYLE_BOARD_STEP
 from ..presets import PresetError, PresetRegistry
@@ -510,6 +511,19 @@ def _update_cast(session: Session, ctx: AppContext, panel: Panel, body: PanelUpd
     update_panel_prompt(_presets(ctx, panel), session, panel, ctx.knowledge, reset=True)
 
 
+def _set_shot_type(panel: Panel, value: str | None) -> None:
+    """Plan choisi par l'auteur (planche brouillon) : celui du scénario, et un choix de la case qui passe
+    par-dessus la direction artistique appliquée (comme un plan imposé par le dialogue avec l'IA)."""
+    shot = normalize_shot_type(value) if value else None
+    if shot is not None and shot not in SHOT_TYPES:
+        raise FieldError("shot_type", f"plan inconnu : « {value} » (au choix : {', '.join(SHOT_TYPES)})")
+    panel.shot_type = shot
+    own = {k: v for k, v in (panel.dialog_direction or {}).items() if k != "plan"}
+    if shot is not None:
+        own["plan"] = shot
+    panel.dialog_direction = own or None
+
+
 @router.patch("/panels/{panel_id}", response_model=PanelDetailOut)
 def update_panel(
     panel_id: int, body: PanelUpdate, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
@@ -532,6 +546,9 @@ def update_panel(
             update_panel_prompt(_presets(ctx, panel), session, panel, ctx.knowledge, reset=True)
     if {"characters", "offscreen_characters", "viewpoint"} & changes.keys():
         _update_cast(session, ctx, panel, body)
+    if "shot_type" in changes:
+        _set_shot_type(panel, changes["shot_type"])
+        update_panel_prompt(_presets(ctx, panel), session, panel, ctx.knowledge, reset=True)
     if "generation_preset" in changes:
         preset = changes["generation_preset"]
         known = _presets(ctx, panel).workflows

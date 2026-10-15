@@ -25,7 +25,7 @@ from mangaka_engine.providers.comfyui import ComfyUIUnavailableError, MockComfyU
 from mangaka_engine.store.db import create_db_engine
 from mangaka_engine.store.migrations import SCHEMA_VERSION
 from mangaka_engine.store.models import GenerationEvent, GenerationLog, ReferenceVariant
-from tests.conftest import PRESETS_DIR, STYLE, png_bytes
+from tests.conftest import PRESETS_DIR, STYLE, force_stages, png_bytes
 from tests.test_generation import _ok, _wait, make_client, setup_chapter  # noqa: F401 — fixture
 from tests.test_migrations import _columns
 
@@ -178,6 +178,7 @@ def test_sketch_clean_repair_angle_reference_and_style_kinds(make_client: Callab
     _wait(c)
     [sketch] = _images(c, p1["id"])
     _ok(c.post(f"/panels/{p1['id']}/sketch/validate"))
+    force_stages(c, data["chapter"]["id"], "name")  # name non relue ici
     _ok(c.post(f"/panels/{p1['id']}/clean"), 202)
     _wait(c)
     final = next(i for i in _images(c, p1["id"]) if i["kind"] == "final")
