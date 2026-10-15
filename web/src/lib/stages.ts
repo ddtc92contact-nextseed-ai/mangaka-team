@@ -3,11 +3,12 @@
 import type { ChapterStage, StageKey } from "./api";
 
 /** Actions gardées, avec le verbe que le moteur met dans `blocks` (« générer », « lettrer »…). */
-export type StageAction = "layout" | "generation" | "lettering" | "export" | "ready";
+export type StageAction = "layout" | "generation" | "clean" | "lettering" | "export" | "ready";
 
 export const ACTION_VERB: Record<StageAction, string> = {
   layout: "mettre en page",
   generation: "générer",
+  clean: "passer au propre",
   lettering: "lettrer",
   export: "exporter",
   ready: "passer le chapitre en « prêt »",
@@ -20,6 +21,7 @@ const SCREEN_LABEL: Record<string, string> = {
   "mise-en-page": "Aller à la Mise en page",
   atelier: "Aller à l'Atelier",
   lettrage: "Aller au Lettrage",
+  croquis: "Aller aux Croquis",
   personnages: "Ouvrir les fiches de la série",
 };
 
@@ -65,4 +67,4 @@ export function decisionLabel(stage: Pick<ChapterStage, "decision">): string | n
 }
 
 /** Ordre des étapes (celui du moteur). */
-export const STAGE_ORDER: StageKey[] = ["script", "direction", "layout", "references", "prompts", "approved", "lettering"];
+export const STAGE_ORDER: StageKey[] = ["script", "direction", "layout", "references", "prompts", "name", "approved", "lettering"];

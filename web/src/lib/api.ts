@@ -571,7 +571,20 @@ export interface PageData {
   state: string;
   layout: PageLayout | null;
   layout_stale: boolean;
+  /** Name (palier croquis) : validée, caduque (case modifiée depuis) ou à valider ; null sans palier croquis. */
+  name_state?: NameState | null;
+  name_validated_at?: string | null;
   panels: PanelData[];
+}
+
+export type NameState = "validated" | "stale" | "pending";
+
+/** « Couper la case en deux » : les deux cases touchées, la page remise en page, les croquis mis en file. */
+export interface PanelSplitResult {
+  page: PageData;
+  panel_ids: number[];
+  jobs: Job[];
+  sketch_note: string | null;
 }
 
 /** Découpage envoyé au moteur : `id` absent = nouvel élément. */
@@ -3039,7 +3052,7 @@ export interface Stats {
 }
 
 /** Étapes vitales d'un chapitre (garde d'étapes du moteur : pipeline/stage_gate.py). */
-export type StageKey = "script" | "direction" | "layout" | "references" | "prompts" | "approved" | "lettering";
+export type StageKey = "script" | "direction" | "layout" | "references" | "prompts" | "name" | "approved" | "lettering";
 
 export interface StageDecision {
   decision: "validated" | "forced" | "revoked";
@@ -3332,6 +3345,7 @@ export const api = {
       characters?: string[];
       offscreen_characters?: string[];
       viewpoint?: { mode: Viewpoint["mode"]; spectators: string[] } | null;
+      shot_type?: string | null;
     },
   ) =>
     request<PanelDetail>(`/panels/${id}`, json("PATCH", body)),
@@ -3394,6 +3408,11 @@ export const api = {
   sketchChapter: (id: number) => request<BatchGenerateResult>(`/chapters/${id}/sketch`, { method: "POST" }),
   cleanPage: (id: number) => request<BatchGenerateResult>(`/pages/${id}/clean`, { method: "POST" }),
   cleanChapter: (id: number) => request<BatchGenerateResult>(`/chapters/${id}/clean`, { method: "POST" }),
+  validateName: (pageId: number, author = "") => request<PageData>(`/pages/${pageId}/name/validate`, json("POST", { author })),
+  unvalidateName: (pageId: number) => request<PageData>(`/pages/${pageId}/name/validate`, { method: "DELETE" }),
+  splitPanel: (id: number, body: { first?: string; second?: string; move_bubble_ids?: number[]; sketch?: boolean } = {}) =>
+    request<PanelSplitResult>(`/panels/${id}/split`, json("POST", body)),
+  deleteReply: (bubbleId: number) => request<PageLettering>(`/bubbles/${bubbleId}/reply`, { method: "DELETE" }),
   pageSketchEstimate: (id: number) => request<SketchEstimate>(`/pages/${id}/sketch-estimate`),
   chapterSketchEstimate: (id: number) => request<SketchEstimate>(`/chapters/${id}/sketch-estimate`),
   upscalers: () => request<Upscaler[]>("/presets/upscalers"),

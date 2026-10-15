@@ -2,13 +2,12 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { InfoTip } from "@/components/info-tip";
 import { modalOpen } from "@/components/modal";
 import { ProductionLink } from "@/components/production-link";
 import { queueItems, useQueue } from "@/components/queue";
 import { useToast } from "@/components/toast";
-import { ValidatedCheck } from "@/components/validated-check";
 import { Alert, Button, ButtonLink, Card, EmptyState, Loading, ProgressBar, Select, Textarea } from "@/components/ui";
 import {
   api,
@@ -16,16 +15,20 @@ import {
   fullErrorMessage,
   type BatchGenerateResult,
   type Estimate,
-  type LayoutPanel,
   type PageData,
   type PanelData,
 } from "@/lib/api";
 import { formatEstimate } from "@/lib/generation";
 import { useEngineData } from "@/lib/hooks";
-import { cssClipPath, panelPolygon } from "@/lib/layout";
-import { buildPanelViews, runningLabel, type PanelView } from "../atelier/page-canvas";
+import { nameCounts } from "@/lib/name";
+import { buildPanelViews, type PanelView } from "../atelier/page-canvas";
 import { useChapter } from "../chapter-context";
+import { readAuthor, StageBanner } from "../stages";
 import { StepAlert } from "../step-alert";
+import { DraftBoard, NameBar } from "./draft-board";
+import { NameReader } from "./name-reader";
+import { PanelFixes, type SplitRequest } from "./panel-fixes";
+import { isValidated, panelStatus, plural, STATUS_LABEL } from "./status";
 
 export default function SketchRoute() {
   return (
@@ -33,36 +36,6 @@ export default function SketchRoute() {
       <SketchTriage />
     </Suspense>
   );
-}
-
-type Status = "running" | "queued" | "failed" | "clean" | "validated" | "sketch" | "empty";
-
-/** Où en est une case au tri : génération en cours, propre, croquis validé, croquis à trier, rien. */
-function panelStatus(panel: PanelData, view: PanelView | undefined): Status {
-  if (view?.running) return "running";
-  if (view?.pending.length) return "queued";
-  if (panel.selected_image_url) return "clean";
-  if (panel.sketch_validated) return "validated";
-  if (view?.failure) return "failed";
-  if (panel.sketch_image_url) return "sketch";
-  return "empty";
-}
-
-const STATUS_LABEL: Record<Status, string> = {
-  running: "Croquis en cours",
-  queued: "En file",
-  failed: "Échec",
-  clean: "Au propre",
-  validated: "Composition validée",
-  sketch: "À trier",
-  empty: "Pas encore croquée",
-};
-
-/** Une case est « validée » quand sa composition est retenue (ou qu'elle a déjà une version propre). */
-const isValidated = (p: PanelData) => Boolean(p.sketch_validated || p.selected_image_id !== null);
-
-function plural(n: number, word: string): string {
-  return `${n} ${word}${n > 1 ? "s" : ""}`;
 }
 
 function estimateText(est: Estimate | undefined): string {
@@ -83,7 +56,7 @@ function isTyping(target: EventTarget | null): boolean {
 }
 
 function SketchTriage() {
-  const { chapter, series, reload: reloadChapter } = useChapter();
+  const { chapter, series, reload: reloadChapter, reloadStages } = useChapter();
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -96,7 +69,9 @@ function SketchTriage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ text: string; queued: boolean } | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
+  const [bubbles, setBubbles] = useState(true);
   const toast = useToast();
+  const reading = params.get("vue") === "lecture";
   const editRef = useRef<HTMLTextAreaElement>(null);
 
   const list = useMemo(() => pages.data ?? [], [pages.data]);
@@ -126,10 +101,11 @@ function SketchTriage() {
   const prev = at > 0 ? order[at - 1] : null;
   const next = at >= 0 && at < order.length - 1 ? order[at + 1] : null;
 
-  function navigate(pageId: number | null, panelId: number | null) {
+  function navigate(pageId: number | null, panelId: number | null, read = reading) {
     const q = new URLSearchParams();
     if (pageId) q.set("page", String(pageId));
     if (panelId) q.set("case", String(panelId));
+    if (read) q.set("vue", "lecture");
     setEditing(null);
     router.replace(`${pathname}?${q.toString()}`, { scroll: false });
   }
@@ -214,6 +190,59 @@ function SketchTriage() {
       return { text: batchNotice(res, "passer au propre", "non validées, déjà au propre ou en file"), queued: res.panel_ids.length > 0 };
     });
 
+  // --- name : validation par page et corrections rapides ---
+  const validateName = (p: PageData) =>
+    run(async () => {
+      await api.validateName(p.id, readAuthor());
+      reloadStages();
+      return { text: `Name de la page ${p.number} validée : ses croquis retenus serviront au propre.`, queued: false };
+    });
+  const unvalidateName = (p: PageData) =>
+    run(async () => {
+      await api.unvalidateName(p.id);
+      reloadStages();
+      return { text: `Validation de la name de la page ${p.number} retirée.`, queued: false };
+    });
+  const changeShot = (panel: PanelData, shot: string | null) =>
+    run(async () => {
+      await api.updatePanel(panel.id, { shot_type: shot });
+      await api.sketchPanel(panel.id);
+      refresh();
+      reloadStages();
+      return { text: `Case ${panel.index + 1} : ${shot ?? "aucun plan"}, nouveau croquis en file.`, queued: true };
+    });
+  const rewriteReply = (panel: PanelData, bubbleId: number, text: string) =>
+    run(async () => {
+      await api.updateBubble(bubbleId, { text });
+      return { text: `Réplique de la case ${panel.index + 1} réécrite.`, queued: false };
+    });
+  const deleteReply = (panel: PanelData, bubbleId: number) =>
+    run(async () => {
+      await api.deleteReply(bubbleId);
+      return { text: `Réplique supprimée de la case ${panel.index + 1}.`, queued: false };
+    });
+  const deleteSfx = (panel: PanelData, bubbleId: number) =>
+    run(async () => {
+      await api.deleteSfx(bubbleId);
+      return { text: `Onomatopée supprimée de la case ${panel.index + 1}.`, queued: false };
+    });
+  const splitPanel = (panel: PanelData, req: SplitRequest) =>
+    run(async () => {
+      const res = await api.splitPanel(panel.id, {
+        first: req.first.trim(),
+        second: req.second.trim(),
+        move_bubble_ids: req.moveBubbleIds,
+      });
+      refresh();
+      reloadStages();
+      navigate(res.page.id, res.panel_ids[1] ?? panel.id);
+      const sketched = res.jobs.length ? ` ${plural(res.jobs.length, "croquis")} en file.` : "";
+      return {
+        text: `Case ${panel.index + 1} coupée en deux, page ${res.page.number} remise en page.${sketched}${res.sketch_note ? ` ${res.sketch_note}.` : ""}`,
+        queued: res.jobs.length > 0,
+      };
+    });
+
   function startEdit(panel: PanelData) {
     setEditing(panel.description);
     requestAnimationFrame(() => editRef.current?.focus());
@@ -226,7 +255,7 @@ function SketchTriage() {
       // Entrée sur un bouton ou un lien : c'est lui qui agit.
       const tag = (e.target as HTMLElement | null)?.tagName;
       if (e.key === "Enter" && (tag === "BUTTON" || tag === "A")) return;
-      if (!current || busy) return;
+      if (!current || busy || reading) return;
       const key = e.key.toLowerCase();
       const status = panelStatus(current, views.get(current.id));
       if (key === "arrowright" || key === "n") goNext();
@@ -272,6 +301,7 @@ function SketchTriage() {
   const chapterValidated = chapterPanels.filter(isValidated).length;
   const est = pageEst.data;
   const cEst = chapterEst.data;
+  const name = nameCounts(list);
 
   return (
     <div className="space-y-4" data-testid="sketch-triage">
@@ -285,6 +315,7 @@ function SketchTriage() {
               <option key={p.id} value={p.id}>
                 Page {p.number} — {p.panels.filter(isValidated).length}/{plural(p.panels.length, "case")} validée
                 {p.panels.length > 1 ? "s" : ""}
+                {p.name_state === "validated" ? " · name ✓" : p.name_state === "stale" ? " · name à revalider" : ""}
                 {!p.layout && p.panels.length ? " · sans mise en page" : ""}
               </option>
             ))}
@@ -298,6 +329,31 @@ function SketchTriage() {
           {cleanCount > 0 && <span className="text-zinc-500"> (dont {cleanCount} au propre)</span>}
           <span className="ml-2 text-zinc-500">· chapitre {chapterValidated}/{chapterPanels.length}</span>
         </p>
+        <p className="text-sm text-zinc-300" data-testid="name-counter" aria-live="polite">
+          Name :{" "}
+          <strong className="font-semibold text-zinc-50">
+            {name.validated} / {plural(name.total, "page")}
+          </strong>{" "}
+          validée{name.validated > 1 ? "s" : ""}
+          {name.stale > 0 && <span className="text-amber-300"> · {name.stale} à revalider</span>}
+        </p>
+        <div className="flex rounded-md border border-zinc-700 p-0.5 text-xs" role="group" aria-label="Vue">
+          {[
+            { read: false, label: "Tri" },
+            { read: true, label: "Lecture" },
+          ].map((v) => (
+            <button
+              key={v.label}
+              type="button"
+              aria-pressed={reading === v.read}
+              onClick={() => navigate(page.id, v.read ? null : (current?.id ?? null), v.read)}
+              className={`rounded px-2.5 py-1 ${reading === v.read ? "bg-zinc-700 text-zinc-50" : "text-zinc-400 hover:text-zinc-100"}`}
+              data-testid={v.read ? "view-reading" : "view-triage"}
+            >
+              {v.label}
+            </button>
+          ))}
+        </div>
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <InfoTip help="croquis.croquer" label="Croquer" />
           <Button onClick={() => sketchPage(page)} disabled={busy || !page.layout || !est?.to_sketch} data-testid="sketch-page">
@@ -337,6 +393,7 @@ function SketchTriage() {
         )}
       </p>
 
+      <StageBanner action="clean" />
       {error && <StepAlert message={error} />}
       {notice && !error && (
         <Alert tone="info">
@@ -344,7 +401,21 @@ function SketchTriage() {
         </Alert>
       )}
 
-      {!page.panels.length ? (
+      {reading ? (
+        <Card className="p-3 sm:p-5">
+          <NameReader
+            key={chapter.id}
+            pages={sortable}
+            direction={series.reading_direction}
+            pageId={page.id}
+            refreshKey={`${finished}-${version}`}
+            busy={busy}
+            onValidate={validateName}
+            onUnvalidate={unvalidateName}
+            onOpen={(p) => navigate(p.id, null, false)}
+          />
+        </Card>
+      ) : !page.panels.length ? (
         <EmptyState title="Page sans case">Cette page n&apos;a rien à croquer.</EmptyState>
       ) : !page.layout ? (
         <EmptyState title="Page pas encore mise en page">
@@ -355,11 +426,23 @@ function SketchTriage() {
         </EmptyState>
       ) : (
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_26rem]">
-          <Card className="p-3 sm:p-5">
-            <SketchPage page={page} views={views} currentId={current?.id ?? null} onPick={(id) => navigate(page.id, id)} />
-            <p className="mt-3 text-center text-xs text-zinc-500">
-              Chaque croquis apparaît dès qu&apos;il est prêt · clique sur une case pour la trier.
-            </p>
+          <Card className="space-y-3 p-3 sm:p-5">
+            <DraftBoard
+              page={page}
+              views={views}
+              currentId={current?.id ?? null}
+              onPick={(id) => navigate(page.id, id)}
+              refreshKey={`${finished}-${version}`}
+              bubbles={bubbles}
+            />
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-500">
+              <p>Chaque croquis apparaît dès qu&apos;il est prêt · clique sur une case pour la trier.</p>
+              <label className="flex items-center gap-1.5 text-zinc-300">
+                <input type="checkbox" checked={bubbles} onChange={(e) => setBubbles(e.target.checked)} data-testid="toggle-bubbles" />
+                Bulles et onomatopées
+              </label>
+            </div>
+            <NameBar page={page} busy={busy} onValidate={() => validateName(page)} onUnvalidate={() => unvalidateName(page)} />
           </Card>
           {current && (
             <CurrentPanel
@@ -381,104 +464,22 @@ function SketchTriage() {
               onNext={goNext}
               onPrev={goPrev}
               workshopHref={`/chapitres/${chapter.id}/atelier?page=${page.id}&case=${current.id}`}
+              fixes={
+                <PanelFixes
+                  panel={current}
+                  busy={busy}
+                  locked={["running", "queued", "clean"].includes(panelStatus(current, views.get(current.id)))}
+                  onShot={(shot) => changeShot(current, shot)}
+                  onReplyText={(id, text) => rewriteReply(current, id, text)}
+                  onReplyDelete={(id) => deleteReply(current, id)}
+                  onSfxDelete={(id) => deleteSfx(current, id)}
+                  onSplit={(req) => splitPanel(current, req)}
+                />
+              }
             />
           )}
         </div>
       )}
-    </div>
-  );
-}
-
-// --- planche en croquis ---------------------------------------------------------------------
-const RING: Record<Status, string> = {
-  running: "ring-2 ring-rose-400",
-  queued: "ring-2 ring-zinc-500",
-  failed: "ring-2 ring-red-500",
-  clean: "ring-2 ring-sky-500",
-  validated: "ring-4 ring-emerald-500",
-  sketch: "ring-2 ring-zinc-900",
-  empty: "ring-2 ring-zinc-900",
-};
-
-function SketchPage({
-  page,
-  views,
-  currentId,
-  onPick,
-}: {
-  page: PageData;
-  views: Map<number, PanelView>;
-  currentId: number | null;
-  onPick: (panelId: number) => void;
-}) {
-  const layout = page.layout!;
-  const { width: W, height: H } = layout.page;
-  const byId = new Map(page.panels.map((p) => [p.id, p]));
-  const panelOf = (lp: LayoutPanel) => (lp.panel_id !== null ? byId.get(lp.panel_id) : undefined) ?? page.panels[lp.index];
-  const pct = (v: number, total: number) => `${(v / total) * 100}%`;
-  return (
-    <div
-      className="relative mx-auto overflow-hidden rounded-sm bg-zinc-100 shadow-lg shadow-black/40"
-      style={{ aspectRatio: `${W} / ${H}`, width: `min(100%, calc(74vh * ${W} / ${H}))` }}
-      role="group"
-      aria-label={`Page ${page.number} en croquis`}
-      data-testid="sketch-page-canvas"
-    >
-      {[...layout.panels.filter((p) => !p.inset), ...layout.panels.filter((p) => p.inset)].map((lp) => {
-        const panel = panelOf(lp);
-        if (!panel) return null;
-        const view = views.get(panel.id);
-        const status = panelStatus(panel, view);
-        const url = panel.selected_image_url ?? panel.sketch_image_url ?? null;
-        const poly = lp.slanted ? panelPolygon(lp) : null;
-        const isCurrent = panel.id === currentId;
-        return (
-          <button
-            key={lp.index}
-            type="button"
-            onClick={() => onPick(panel.id)}
-            aria-pressed={isCurrent}
-            aria-label={`Case ${panel.index + 1} — ${STATUS_LABEL[status]}`}
-            data-testid="sketch-panel"
-            data-state={status}
-            className={`absolute overflow-hidden bg-zinc-200 focus-visible:z-20 focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-sky-400 ${
-              poly ? "" : RING[status]
-            } ${isCurrent ? "z-10 outline outline-4 outline-offset-2 outline-rose-500" : ""}`}
-            style={{
-              left: pct(lp.x1, W),
-              top: pct(lp.y1, H),
-              width: pct(lp.width, W),
-              height: pct(lp.height, H),
-              clipPath: poly ? cssClipPath(poly, lp) : undefined,
-            }}
-          >
-            {url ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={engineUrl(url)}
-                alt=""
-                className={`h-full w-full object-cover ${status === "running" || status === "queued" ? "opacity-50" : ""}`}
-                draggable={false}
-              />
-            ) : (
-              <span className="flex h-full w-full items-center justify-center text-lg font-bold text-zinc-500">{panel.index + 1}</span>
-            )}
-            <span className="absolute left-1 top-1 rounded bg-zinc-950/80 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-100">
-              {panel.index + 1}
-              <span className="ml-1 font-normal text-zinc-300">· {STATUS_LABEL[status]}</span>
-            </span>
-            {status === "validated" && <ValidatedCheck />}
-            {status === "running" && view?.running && (
-              <span className="absolute inset-x-0 bottom-0 bg-zinc-950/80 px-1.5 py-1">
-                <span className="block text-[10px] text-zinc-100">{runningLabel(view.running)}</span>
-                <span className="mt-0.5 block h-1 overflow-hidden rounded bg-zinc-700">
-                  <span className="block h-full bg-rose-400 transition-[width] duration-500" style={{ width: `${view.running.job.progress}%` }} />
-                </span>
-              </span>
-            )}
-          </button>
-        );
-      })}
     </div>
   );
 }
@@ -508,6 +509,7 @@ function CurrentPanel({
   onNext,
   onPrev,
   workshopHref,
+  fixes,
 }: {
   panel: PanelData;
   view: PanelView | undefined;
@@ -526,6 +528,7 @@ function CurrentPanel({
   onNext: () => void;
   onPrev: () => void;
   workshopHref: string;
+  fixes?: ReactNode;
 }) {
   const status = panelStatus(panel, view);
   const active = status === "running" || status === "queued";
@@ -635,6 +638,7 @@ function CurrentPanel({
           Modifier la description <Kbd>E</Kbd>
         </Button>
       </div>
+      {fixes}
       <div className="flex gap-2">
         <Button variant="ghost" onClick={onPrev} disabled={!hasPrev} aria-label="Case précédente (←)">
           ← Précédente
