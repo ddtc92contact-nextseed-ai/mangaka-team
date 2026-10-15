@@ -28,6 +28,12 @@ max_retries: 2            # nouveaux essais après une réponse invalide (2 au m
 temperature: 0.6
 variety: equilibree       # audace : sobre, equilibree ou audacieuse
 
+# Plans que l'agent et l'auteur peuvent choisir ($plans) : le vocabulaire de l'appli. Chaque plan a son terme de
+# cadrage anglais (camera_terms d'image_prompt.yaml), sa famille dans l'ADN (shot_classes de pre_direction.yaml)
+# et, s'il y a lieu, ses fiches de référence (shots de reference_sheets/) et son pont de savoir-faire
+# (vocabulary de knowledge_packs/). Lu au démarrage du moteur.
+plans: [plan large, plan moyen, plan rapproché, gros plan, très gros plan, insert, plongée, contre-plongée]
+
 # Mise en scène variée, vérifiée sur chaque réponse (pipeline/art_direction.py `check_variety`) : une
 # règle enfreinte relance l'agent avec l'erreur ; après les relances, la proposition est gardée avec un
 # avertissement visible dans l'écran Direction artistique. Sans ce bloc, aucune règle.

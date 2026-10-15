@@ -1730,16 +1730,25 @@ class DnaPresence(_Strict):
 
 
 class DnaDialogue(_Strict):
-    """Dialogue compté par planche (onomatopées à part)."""
+    """Dialogue compté par planche (onomatopées à part), brièveté des répliques, répliques visées par case et
+    parole exigée dans une case d'action. Remplace les valeurs de `dialogue_rules` (prompts/script.yaml) ; les
+    défauts sont ceux d'avant l'ADN (12 mots au plus, 7 en moyenne, 2 répliques visées, case d'action parlée)."""
 
     min_per_page: int = Field(ge=0, le=30)
     max_per_page: int = Field(ge=1, le=30)
     min_silent_panels: int = Field(ge=0, le=9)
+    max_words: int = Field(default=12, ge=1, le=100)
+    max_mean_words: int = Field(default=7, ge=1, le=100)
+    target_per_panel: int = Field(default=2, ge=0, le=6)
+    # false : une case d'action muette (onomatopée seule) est permise.
+    action_needs_voice: bool = True
 
     @model_validator(mode="after")
     def _order(self) -> DnaDialogue:
         if self.min_per_page > self.max_per_page:
             raise ValueError("min_per_page doit être ≤ max_per_page")
+        if self.max_mean_words > self.max_words:
+            raise ValueError("max_mean_words doit être ≤ max_words")
         return self
 
 
@@ -1995,12 +2004,27 @@ class PromptPreset(_Strict):
     language: Literal["fr", "en"] | None = None
     min_words: int | None = Field(default=None, ge=10, le=1000)
     max_words: int | None = Field(default=None, ge=10, le=1000)
+    # Plans de la direction artistique (prompts/direction-artistique.yaml) : vocabulaire de l'appli, proposé au
+    # LLM et à l'auteur, lu par pipeline/art_direction.py (`PLANS`).
+    plans: list[str] | None = Field(default=None, min_length=1)
     # Règles de variété de la direction artistique (prompts/direction-artistique.yaml).
     variety_rules: VarietyRules | None = None
     # Règles par planche de la direction artistique (prompts/direction-artistique.yaml) : relance ciblée.
     page_rules: PageRules | None = None
     # Densité et variété des dialogues du scénariste (prompts/script.yaml).
     dialogue_rules: DialogueRules | None = None
+
+    @field_validator("plans")
+    @classmethod
+    def _check_plans(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        plans = [" ".join(p.split()) for p in value]
+        if any(not p for p in plans):
+            raise ValueError("plans : un plan vide")
+        if len(set(plans)) != len(plans):
+            raise ValueError("plans : plan en double")
+        return plans
 
     @model_validator(mode="after")
     def _check_words(self) -> PromptPreset:
@@ -2209,6 +2233,22 @@ class FramingSettings(_Strict):
     only: str = "Only $names in the frame, nobody else"
 
 
+class MentionSettings(_Strict):
+    """`mentions` d'image_prompt.yaml : noms des personnages dans le prompt d'une case. Un nom répété fait dessiner
+    plusieurs fois le même personnage (essai « Nuit du pari » du 15/10 : 26 noms pour 4 personnages, 2 ou 3 copies
+    du même voyou)."""
+
+    # Chaque nom au plus N fois par champ du prompt (description, action, mise en scène, lieu, ambiance,
+    # personnages, bible…) : par fragments et dans les données du rédacteur de prompt (0 = pas de plafond).
+    max_per_field: int = Field(default=1, ge=0, le=20)
+    # Remplace une mention au-delà du plafond ; vide = la mention est retirée.
+    replacement: str = ""
+    # Paragraphe du rédacteur : chaque nom au plus N fois, consigne donnée au LLM ($max_mentions).
+    writer_max: int = Field(default=2, ge=1, le=20)
+    # Au-delà de N personnages présents, avertissement sur la case (écrans Scénario et Direction ; 0 = jamais).
+    crowd_warning: int = Field(default=2, ge=0, le=20)
+
+
 class ImagePromptSettings(_Strict):
     """Construction du prompt final d'une case (voir pipeline/prompt.py)."""
 
@@ -2302,6 +2342,12 @@ class ImagePromptSettings(_Strict):
     tight_shots: TightShotSettings = Field(default_factory=TightShotSettings)
     # Personnages cités hors cadre, vue subjective, case sans personnage : consigne de cadrage ($framing).
     framing: FramingSettings = Field(default_factory=FramingSettings)
+    # Noms des personnages : plafond de mentions par champ, avertissement « trop de personnages ».
+    mentions: MentionSettings = Field(default_factory=MentionSettings)
+    # Garde-fou anti-doublon ajouté au prompt POSITIF de chaque génération de case qui a un personnage à l'image
+    # (croquis, version propre, Turbo…) : à cfg 1 le négatif (« duplicate character ») n'est jamais lu.
+    # Vide = aucune ligne.
+    single_instance: str = ""
 
     @field_validator("parts")
     @classmethod

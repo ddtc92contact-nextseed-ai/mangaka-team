@@ -21,7 +21,10 @@
 #             ou `medium.max`, « resserre »
 #   presence  part de cases en vue subjective et de cases sans personnage à l'image
 #   dialogue  répliques par planche (onomatopées à part, minimum borné par la place des cases, table `room` de
-#             prompts/script.yaml) et cases sans réplique par planche (dès `silent_min_panels` cases)
+#             prompts/script.yaml) et cases sans réplique par planche (dès `silent_min_panels` cases) ; mots par
+#             réplique au plus (`max_words`) et en moyenne (`max_mean_words`), répliques visées par case
+#             (`target_per_panel`), parole exigée dans une case d'action (`action_needs_voice` ; false : une case
+#             d'action muette est permise). Ces quatre-là remplacent ceux de `dialogue_rules` (prompts/script.yaml).
 #   rhythm    courbe des rythmes de page de la direction artistique : position du premier pic, respiration après
 #             un pic, pics d'affilée, pic final dans les N dernières planches (0 = libre)
 #   places    décors et rythme : case d'établissement au changement de lieu (`establishing` : la première case d'un
@@ -59,7 +62,16 @@ defaults:
   presence:
     subjective: { min: 0, max: 0.25 }
     empty: { min: 0, max: 0.3 }
-  dialogue: { min_per_page: 4, max_per_page: 8, min_silent_panels: 1 }
+  # Brièveté et parole : les valeurs d'avant l'ADN (prompts/script.yaml), pour que les séries existantes ne
+  # bougent pas ; un genre ou une série peut les changer.
+  dialogue:
+    min_per_page: 4
+    max_per_page: 8
+    min_silent_panels: 1
+    max_words: 12
+    max_mean_words: 7
+    target_per_panel: 2
+    action_needs_voice: true
   rhythm:
     first_peak: { min: 0.25, max: 0.4 }
     breath_after_peak: true
@@ -68,7 +80,9 @@ defaults:
   places: { establishing: true, silent_decor_min: 0.03 }
 
 # Défauts des 7 genres : la prose de leur `llm_guidelines` (style_genres/), chiffrée. Seules les valeurs qui
-# changent sont écrites ; le reste vient de `defaults`.
+# changent sont écrites ; le reste vient de `defaults`. Brièveté et parole du dialogue (`max_words`,
+# `max_mean_words`, `target_per_panel`, `action_needs_voice`) : héritées de `defaults` par tous les genres, pour
+# que les séries existantes gardent leurs valeurs ; un genre les règle dans son bloc `dialogue`.
 genres:
   # Rythme soutenu, 4 à 6 cases, grandes cases pour l'action, cliffhanger final ; dialogues courts et directs.
   shonen:

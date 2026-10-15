@@ -39,7 +39,7 @@ collections:
 skip: ["0.A", "0.D", "Annexe C"]
 
 # Pont de vocabulaire : codes `shot_scale` / `camera_angle` du bloc meta d'une fiche → termes de l'appli
-# (art_direction.PLANS / ANGLES). Ajoutés à l'index des mots-clés seulement (jamais au texte injecté) :
+# (plans de prompts/direction-artistique.yaml, art_direction.PLANS / ANGLES). Ajoutés à l'index des mots-clés seulement (jamais au texte injecté) :
 # une case en « gros plan » « en contre-plongée » retrouve les fiches correspondantes.
 vocabulary:
   shot_scale:
@@ -50,7 +50,7 @@ vocabulary:
     medium: plan moyen
     medium_close: plan rapproché
     close_up: gros plan
-    extreme_close_up: gros plan
+    extreme_close_up: très gros plan
     detail: insert
   camera_angle:
     high: en plongée

@@ -553,6 +553,7 @@ function PageEditor({
                     pa={pa}
                     description={page?.panels.find((p) => p.id === pa.panel_id)?.description ?? ""}
                     inscribedShot={page?.panels.find((p) => p.id === pa.panel_id)?.shot_type ?? null}
+                    present={page?.panels.find((p) => p.id === pa.panel_id)?.characters.length ?? 0}
                     options={options}
                     libraryNames={libraryNames}
                     busy={busy}
@@ -623,6 +624,7 @@ function PanelRow({
   pa,
   description,
   inscribedShot,
+  present,
   options,
   libraryNames,
   busy,
@@ -636,6 +638,8 @@ function PanelRow({
   description: string;
   /** Plan inscrit dans la case (celui du scénario tant que la direction n'est pas appliquée). */
   inscribedShot: string | null;
+  /** Personnages présents dans la case (scénario). */
+  present: number;
   options: ChapterDirection["options"];
   libraryNames: Record<number, string>;
   busy: boolean;
@@ -695,6 +699,12 @@ function PanelRow({
           </span>
         )}
         {description && <span className="block text-xs text-zinc-500">{description}</span>}
+        {(options.crowd_limit ?? 0) > 0 && present > (options.crowd_limit ?? 0) && (
+          <span className="block text-xs text-amber-300" data-testid="panel-crowded">
+            ⚠ {present} personnages présents (plus de {options.crowd_limit}) : le modèle d&apos;image risque d&apos;en
+            dessiner des copies. Serre le cadre sur une partie d&apos;entre eux ou découpe la case dans le Scénario.
+          </span>
+        )}
         {(pa.decor != null || pa.objets != null) && (
           <span className="block text-xs text-amber-200/80" data-testid="direction-library">
             Proposé par l&apos;agent (appliqué avec la direction artistique) :

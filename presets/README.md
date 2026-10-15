@@ -292,8 +292,10 @@ pas se répéter) et son savoir-faire (`knowledge.yaml` › `art_direction`). Il
 - par page : `rythme` (`calme`, `montée`, `climax`, `respiration`), `layout_style` (null ou un style),
   `template` (null ou un gabarit possible), `page_choc` (null, `pleine page`, `splash`), `rationale`
   (justification en français montrée à l'auteur) ;
-- par case : `intensity`, `plan` (plan large / moyen / rapproché, gros plan, insert, plongée,
-  contre-plongée), `angle`, `cadre` (normal, sans bord, fond perdu, incrustation), `ambiance`, `action`
+- par case : `intensity`, `plan` (un des `plans` du preset : plan large / moyen / rapproché, gros plan,
+  très gros plan, insert, plongée, contre-plongée — la liste vit dans `direction-artistique.yaml`, pas dans
+  le code ; un plan ajouté y reçoit aussi son terme `camera_terms`, sa famille `shot_classes` de l'ADN et, s'il
+  y a lieu, ses fiches de référence), `angle`, `cadre` (normal, sans bord, fond perdu, incrustation), `ambiance`, `action`
   (courte phrase en français : le mouvement ou la pose du corps — « bondit par-dessus la rambarde,
   manteau au vent », jamais « regarde » ou « est debout » seuls ; reprise par le rédacteur de prompt),
   `sfx` (onomatopées : texte + intensité).
@@ -739,6 +741,9 @@ aucune pensée, voix off ni narration. Chaque réponse valide du scénariste est
   allonge pas) ;
 - `action_needs_voice` : une case « choc » (`action_intensities`) ou avec onomatopée porte au moins un
   mot d'un personnage présent (cri, ordre, réaction) ;
+- `max_words`, `max_mean_words`, `target_per_panel` et `action_needs_voice` sont aussi dans la famille
+  `dialogue` de l'ADN (`pre_direction.yaml`), réglables par genre et par série : l'ADN les remplace (les
+  valeurs ci-dessus restent les défauts) ;
 - `require_inner_voice` : au moins une réplique de `inner_voice_kinds` (pensée, voix off, narration) par
   chapitre — `false` si l'auteur s'en passe ;
 - `check_room` : le découpage est mis en page à blanc et lettré (sans visages) ; chaque bulle doit tenir
@@ -748,7 +753,8 @@ Une règle enfreinte relance le scénariste avec l'erreur (mêmes `max_retries` 
 les relances, le découpage est gardé, le job le signale (« avec N avertissements de dialogues ») et
 l'écran Scénario affiche la mesure du chapitre et les règles encore enfreintes
 (`GET /chapters/{id}/dialogues`, recalculé à chaque retouche). Les règles sont écrites en clair dans le
-prompt (`$dialogue_rules`) et réglables dans le profil du Scénariste (groupe « Dialogues »). Sans bloc
+prompt (`$dialogue_rules`) et réglables dans le profil du Scénariste (groupe « Dialogues ») — sauf la
+densité, la brièveté, les répliques visées et la case d'action parlée, réglées dans l'ADN de la série. Sans bloc
 `dialogue_rules`, aucune règle. Mode mock : `[mock:dialogues-maigres:N]` dans le synopsis rend les N
 premiers découpages maigres (comme le chapitre 3).
 
@@ -770,7 +776,7 @@ mesures de « la petite île » (13/10) : 63 % de plans serrés, 11 planches sur
 | `shapes` | part de planches à grande case, planches de même forme d'affilée, part d'une même forme | DA (`check_page_rules`) |
 | `shots` | part min / max de gros plans, plans rapprochés, moyens, larges, inserts ; plafond des plans serrés | DA (`check_variety`) |
 | `presence` | part de cases en vue subjective, de cases sans personnage | DA (`check_page_rules`) |
-| `dialogue` | répliques par planche, cases muettes par planche | scénariste (`check_dialogues`) |
+| `dialogue` | répliques par planche, cases muettes par planche, mots par réplique au plus et en moyenne, répliques visées par case, case d'action parlée (`action_needs_voice: false` : case d'action muette permise) | scénariste (`check_dialogues`) |
 | `rhythm` | fenêtre du premier pic, respiration après un pic, pics d'affilée, pic final | DA (`check_page_rules`) |
 | `places` | case d'établissement au changement de lieu (plan large / d'ensemble), part de cases de décor muettes ; mesurée sur l'unité de lieu des cases (lieux de la série), pas sur leur texte | DA (`check_page_rules`) |
 
@@ -1699,6 +1705,22 @@ Exemple (deux personnages, une image principale chacun, prompt par fragments) : 
 identity reference for Kaï: … <image2> is the identity reference for Lina: … Wide shot. … Setting: …
 Staging: … Two characters: Kaï (…); Lina (…). Style: … Use the reference images for identity and design
 only … no plain white background. »
+
+### Noms des personnages et garde-fou anti-doublon (`mentions`, `single_instance`)
+
+Essai « Nuit du pari » (15/10) : une case à 4 personnages citait 26 fois des noms (« Voyou 1 » 7 fois) et
+l'image dessinait 2 ou 3 copies du même personnage. Dans le prompt par fragments comme dans les données du
+rédacteur, chaque nom (fiches et noms écrits par le scénario) apparaît au plus `mentions.max_per_field` fois
+par champ (description, action, mise en scène, lieu, ambiance, personnages, bible…) ; les mentions suivantes
+sont retirées (ou remplacées par `mentions.replacement`). Le rédacteur reçoit la consigne de ne pas nommer un
+personnage plus de `mentions.writer_max` fois dans son paragraphe (`$max_mentions`). Au-delà de
+`mentions.crowd_warning` personnages présents, les écrans Scénario et Direction artistique avertissent sur la
+case.
+
+Le croquis tourne sur Turbo, distillé, à cfg 1 : le prompt négatif (« duplicate character, extra people ») n'y
+est jamais lu. La phrase `single_instance` (anglais) est donc ajoutée au prompt **positif** de chaque génération
+d'une case qui a un personnage à l'image (croquis, version propre, Turbo, Qualité), une seule fois, avant la
+tonalité du rendu (qui reste en fin de prompt).
 
 ### Rédacteur de prompt (`prompts/redacteur-image.yaml`)
 

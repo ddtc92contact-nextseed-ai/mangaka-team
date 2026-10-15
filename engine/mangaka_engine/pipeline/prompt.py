@@ -61,6 +61,43 @@ def strip_quoted(text: str) -> str:
     return _SPACES.sub(" ", out).strip(" ,;:")
 
 
+def _name_pattern(names: Sequence[str]) -> re.Pattern[str] | None:
+    keys = sorted({" ".join(n.split()) for n in names if n and n.strip()}, key=len, reverse=True)
+    if not keys:
+        return None
+    alts = "|".join(r"\s+".join(re.escape(w) for w in k.split()) for k in keys)
+    return re.compile(rf"(?<![\w-])(?:{alts})(?![\w-])", re.IGNORECASE)
+
+
+def mention_count(text: str, name: str) -> int:
+    """Mentions de `name` dans `text` (mots entiers, sans casse)."""
+    pattern = _name_pattern([name])
+    return len(pattern.findall(text or "")) if pattern else 0
+
+
+def cap_mentions(text: str, names: Sequence[str], limit: int, replacement: str = "") -> str:
+    """Chaque nom de `names` au plus `limit` fois dans `text` (mots entiers, sans casse ; le nom le plus long
+    d'abord : « Voyou 1 » n'est pas compté comme « Voyou ») ; les mentions suivantes sont remplacées par
+    `replacement`, retirées s'il est vide. `limit` 0 : texte inchangé."""
+    pattern = _name_pattern(names) if limit > 0 and text else None
+    if pattern is None:
+        return text
+    seen: dict[str, int] = {}
+
+    def repl(m: re.Match[str]) -> str:
+        key = " ".join(m.group(0).split()).casefold()
+        seen[key] = seen.get(key, 0) + 1
+        return m.group(0) if seen[key] <= limit else replacement
+
+    out = pattern.sub(repl, text)
+    if out == text:
+        return text
+    out = _SPACES.sub(" ", out)
+    out = re.sub(r"\s+([,.])", r"\1", out)  # espace laissée avant « , » ou « . »
+    out = re.sub(r"([,;])(?:\s*[,;])+", r"\1", out)  # « , , » laissé par un nom retiré d'une liste
+    return out.strip(" ,;")
+
+
 def describe_character(character: PromptCharacter, settings: ImagePromptSettings) -> str:
     details = [_clean(character.visual_description), *(_clean(k) for k in character.prompt_keywords)]
     details = list(dict.fromkeys(d for d in details if d))
@@ -115,8 +152,13 @@ def build_prompt(
     bible: str = "",
     settings: ImagePromptSettings | None = None,
     framing: str = "",
+    names: Sequence[str] = (),
 ) -> str:
     """Assemble le prompt positif d'une case à partir des morceaux du preset.
+
+    Chaque nom de personnage (fiches `characters` et `names`, les noms écrits par le scénario, figurants compris)
+    apparaît au plus `mentions.max_per_field` fois par champ (`cap_mentions`) : un nom répété fait dessiner
+    plusieurs copies du même personnage.
 
     `framing` : consigne de cadrage (`$framing`, `framing.framing_sentence`) d'une case dont des personnages
     cités restent hors cadre ; "" pour une case ordinaire (le morceau est omis).
@@ -162,6 +204,10 @@ def build_prompt(
         "savoir_faire": _clean(savoir_faire),
         "bible": _clean(bible),
     }
+    who = [*(c.name for c in characters), *names]
+    limit = settings.mentions.max_per_field
+    for key in ("action", "ambiance", "description", "setting", "staging", "characters", "decor", "objects", "bible"):
+        values[key] = cap_mentions(values[key], who, limit, settings.mentions.replacement)
     parts: list[str] = []
     for part in settings.parts:
         tpl = string.Template(part)
@@ -300,6 +346,15 @@ def append_instruction(prompt: str, instruction: str) -> str:
         return prompt
     body = _sentence(prompt)
     return f"{body} {extra}" if body else extra
+
+
+def with_single_instance(prompt: str, line: str) -> str:
+    """Garde-fou anti-doublon (`single_instance` d'image_prompt.yaml) en phrase distincte à la fin du prompt
+    positif, une seule fois (un prompt stocké qui l'a déjà, croquis repassé au propre, reste tel quel)."""
+    line = _sentence(line)
+    if not line or line.rstrip(".").casefold() in prompt.casefold():
+        return prompt
+    return append_instruction(prompt, line)
 
 
 def term_pattern(term: str) -> re.Pattern[str]:

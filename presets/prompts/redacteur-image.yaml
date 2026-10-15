@@ -24,6 +24,8 @@
 #
 # Variables disponibles ($nom ; écrire $$ pour un « $ » littéral) :
 #   $language ($language_name : « English » ou « French ») $min_words $max_words
+#   $max_mentions    (chaque nom de personnage au plus N fois dans le paragraphe, mentions.writer_max
+#                     d'image_prompt.yaml : un nom répété fait dessiner deux fois le même personnage)
 #   $plan $angle (direction artistique, sinon type de plan du scénario ; français)
 #   $camera          (plan et angle en termes de cadrage anglais, camera_terms d'image_prompt.yaml : chaque
 #                     plan dit où le cadre coupe le corps, à reprendre tel quel)
@@ -104,6 +106,9 @@ system: |
     show the whole body;
   - no text, speech bubble, letter, caption, title or sound effect in the image, and never copy a line
     of dialogue: all the lettering is added later;
+  - name each character at most $max_mentions times in the whole paragraph (the reference role sentence
+    counts): afterwards refer to them by a pronoun or by their place in the frame, never by name again.
+    A repeated name makes the image model draw the same character twice;
   - between $min_words and $max_words words; no list, no heading, no quotation marks.
   $palette_rule
   You answer ONLY with a valid JSON object, with no text around it and no code block.

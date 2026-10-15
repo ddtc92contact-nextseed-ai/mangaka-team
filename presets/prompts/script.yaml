@@ -42,9 +42,11 @@ dialogue_rules:
   max_per_page: 8
   min_silent_panels_per_page: 1
   silent_min_panels: 2
+  # Brièveté, répliques visées par case et parole d'une case d'action : valeurs par défaut aussi, remplacées par
+  # l'ADN de la série (famille « dialogue » : max_words, max_mean_words, target_per_panel, action_needs_voice).
   max_words: 12             # mots au plus par réplique (la brièveté fait le rythme : on ajoute des bulles,
   max_mean_words: 7         # on ne les allonge pas) ; au plus 7 mots en moyenne
-  action_needs_voice: true  # case d'action (choc ou onomatopée) : au moins un mot d'un personnage
+  action_needs_voice: true  # case d'action (choc ou onomatopée) : au moins un mot d'un personnage (false : muette permise)
   action_intensities: [choc]
   require_inner_voice: true # au moins une pensée, voix off ou narration par chapitre (false : l'auteur s'en passe)
   inner_voice_kinds: [thought, "off", narration]   # « off » entre guillemets (sinon YAML lit un booléen)

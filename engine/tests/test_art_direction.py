@@ -898,3 +898,63 @@ def test_apply_on_an_existing_chapter_lands_the_stored_proposals(c: TestClient) 
     # La page rejetée, demandée par son id : appliquée (choix explicite de l'auteur).
     out = c.post(f"/chapters/{chapter_id}/direction/apply", json={"page_ids": [pages[2]["page_id"]]}).json()
     assert out["applied"] == [3] and _statuses(c, chapter_id) == ["applied"] * 3
+
+
+# --- « très gros plan » : plans de la DA dans le preset (#187) -------------------------------------------
+def test_plans_come_from_the_preset_and_include_the_extreme_close_up() -> None:
+    assert PROMPT.plans is not None and list(da.PLANS) == PROMPT.plans
+    assert "très gros plan" in da.PLANS
+    ctx = _ctx()
+    _, user = render_messages(PROMPT, ctx)
+    assert "très gros plan" in user.content.split("« plan » : ")[1].split("\n")[0]
+    data = _valid(ctx)
+    data["pages"][0]["panels"][0]["plan"] = "Très  Gros Plan"
+    assert parse_direction(json.dumps(data, ensure_ascii=False), ctx).pages[0].panels[0].plan == "très gros plan"
+    data["pages"][0]["panels"][0]["plan"] = "plan drone"
+    with pytest.raises(DirectionValidationError, match="valeur non autorisée « plan drone »"):
+        parse_direction(json.dumps(data, ensure_ascii=False), ctx)
+
+
+def test_extreme_close_up_reaches_prompt_negative_references_and_knowledge() -> None:
+    """Le prompt image, le négatif des plans serrés, le choix de la vue de référence et le savoir-faire
+    connaissent le très gros plan."""
+    from mangaka_engine.pipeline.knowledge_packs import load_manifest
+    from mangaka_engine.pipeline.prompt import build_negative_prompt, camera_term, shot_in
+
+    settings = PRESETS.image_prompt
+    assert camera_term("très gros plan", settings).startswith("extreme close-up")
+    assert "feet visible" in build_negative_prompt("", settings, plan="très gros plan")
+    assert any(shot_in("très gros plan", s.shots) for s in PRESETS.reference_sheets.values())
+    pack = load_manifest(PRESETS_DIR / "knowledge_packs" / "manga_visual_knowledge.yaml")
+    assert pack.vocabulary.shot_scale["extreme_close_up"] == "très gros plan"
+
+
+def test_author_applies_an_extreme_close_up(c: TestClient) -> None:
+    """L'auteur choisit « très gros plan » dans l'écran Direction et valide : le plan est inscrit dans la case,
+    appliqué, et le prompt image le dit (« extreme close-up »)."""
+    chapter_id, page = _three_panel_page(c, "sage", ai_prompt=False)  # prompt par fragments
+    data = c.get(f"/chapters/{chapter_id}/direction").json()
+    assert "très gros plan" in data["options"]["plans"]
+    # Seuil de l'avertissement « plus de 2 personnages » des écrans Direction et Scénario (preset).
+    assert data["options"]["crowd_limit"] == PRESETS.image_prompt.mentions.crowd_warning == 2
+    assert c.get(f"/chapters/{chapter_id}/script-brief").json()["crowd_limit"] == 2
+    _store_proposal(
+        c,
+        page["id"],
+        [
+            {"plan": "plan large", "angle": "de trois quarts", "action": "Aiko court sur le quai"},
+            {"plan": "plan moyen", "angle": "en plongée", "action": "Aiko saute la barrière"},
+            {"plan": "gros plan", "angle": "de face", "action": "Aiko serre les dents"},
+        ],
+    )
+    target = page["panels"][2]["id"]
+    out = _panel_edit(c, page["id"], panels=[{"panel_id": target, "plan": "très gros plan"}], accept=True)
+    assert out["status"] == "applied"
+    assert next(pa for pa in out["panels"] if pa["panel_id"] == target)["plan"] == "très gros plan"
+    detail = c.get(f"/panels/{target}").json()
+    assert detail["shot_type"] == "très gros plan" and detail["framing_source"] == "direction"
+    with _session(c) as session:
+        panel = session.get(Panel, target)
+        assert panel_plan(panel) == "très gros plan"
+        assert panel_framing(panel) == ("très gros plan", "de face")
+        assert "extreme close-up" in build_panel_prompt(PRESETS, panel, []).lower()

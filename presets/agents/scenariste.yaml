@@ -62,35 +62,8 @@ settings:
     source: prompts/script.yaml#max_previous_chapters
   # Règles de dialogue (dialogue_rules, vérifiées sur chaque réponse : une règle enfreinte relance
   # l'agent, puis le découpage est gardé avec un avertissement dans l'écran Scénario).
-  - key: target_per_panel
-    label: Répliques visées par case
-    group: Dialogues
-    type: integer
-    min: 0
-    max: 6
-    source: prompts/script.yaml#dialogue_rules.target_per_panel
-    help: Dans chaque case où un personnage présent peut parler, sans dépasser la place de la case.
-  - key: max_words
-    label: Mots au plus par réplique
-    group: Dialogues
-    type: integer
-    min: 1
-    max: 100
-    source: prompts/script.yaml#dialogue_rules.max_words
-  - key: max_mean_words
-    label: Mots par réplique en moyenne (au plus)
-    group: Dialogues
-    type: number
-    min: 1
-    max: 100
-    step: 0.5
-    source: prompts/script.yaml#dialogue_rules.max_mean_words
-  - key: action_needs_voice
-    label: Case d'action jamais réduite à l'onomatopée
-    group: Dialogues
-    type: boolean
-    source: prompts/script.yaml#dialogue_rules.action_needs_voice
-    help: Une case « choc » ou avec onomatopée porte au moins un cri, un ordre ou une réaction d'un personnage.
+  # Répliques visées par case, mots par réplique (au plus, en moyenne) et case d'action parlée : dans l'ADN de
+  # la série (famille « dialogue » de pre_direction.yaml, carte « ADN de la série »), réglés par genre et par série.
   - key: require_inner_voice
     label: Pensée, voix off ou narration obligatoire
     group: Dialogues

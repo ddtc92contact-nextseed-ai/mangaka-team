@@ -310,6 +310,7 @@ export default function ScenarioPage() {
                 total={draft.length}
                 library={library}
                 sceneLabel={page.sceneId ? sceneLabels.get(page.sceneId) : undefined}
+                crowdLimit={brief.data?.crowd_limit ?? 0}
                 disabled={running}
                 onChange={(next) => edit((d) => d.map((p, i) => (i === pi ? next : p)))}
                 onMove={(delta) => edit((d) => moveItem(d, pi, delta))}
@@ -622,6 +623,7 @@ function PageEditor({
   total,
   library,
   sceneLabel,
+  crowdLimit,
   disabled,
   onChange,
   onMove,
@@ -632,6 +634,7 @@ function PageEditor({
   total: number;
   library: SceneLibrary;
   sceneLabel?: string;
+  crowdLimit: number;
   disabled: boolean;
   onChange: (p: DraftPage) => void;
   onMove: (delta: number) => void;
@@ -706,6 +709,7 @@ function PageEditor({
             total={page.panels.length}
             pageIndex={index}
             library={library}
+            crowdLimit={crowdLimit}
             disabled={disabled}
             onChange={(next) => setPanels((ps) => ps.map((p, i) => (i === ci ? next : p)))}
             onMove={(delta) => setPanels((ps) => moveItem(ps, ci, delta))}
@@ -731,6 +735,7 @@ function PanelEditor({
   total,
   pageIndex,
   library,
+  crowdLimit,
   disabled,
   onChange,
   onMove,
@@ -741,6 +746,7 @@ function PanelEditor({
   total: number;
   pageIndex: number;
   library: SceneLibrary;
+  crowdLimit: number;
   disabled: boolean;
   onChange: (p: DraftPanel) => void;
   onMove: (delta: number) => void;
@@ -750,6 +756,9 @@ function PanelEditor({
   const missing = unmatchedNames(panel);
   // Case sans personnage à l'image : la mise en scène n'est pas envoyée à la génération (#167).
   const stagingUnused = !!panel.staging.trim() && !panel.charactersText.split(",").some((c) => c.trim());
+  // Trop de personnages présents : le modèle d'image en dessine des copies (seuil `mentions.crowd_warning`).
+  const present = new Set(panel.charactersText.split(",").map((c) => c.trim().toLowerCase()).filter(Boolean)).size;
+  const crowded = crowdLimit > 0 && present > crowdLimit;
   const set = <K extends keyof DraftPanel>(k: K, v: DraftPanel[K]) => onChange({ ...panel, [k]: v });
   const setDialogues = (update: (d: DraftDialogue[]) => DraftDialogue[]) =>
     onChange({ ...panel, dialogues: update(panel.dialogues) });
@@ -931,6 +940,12 @@ function PanelEditor({
               aria-describedby={missing.length ? `${id}-missing` : undefined}
               disabled={disabled}
             />
+            {crowded && (
+              <p className="text-xs text-amber-300" data-testid="panel-crowded">
+                ⚠ {present} personnages présents (plus de {crowdLimit}) : le modèle d&apos;image risque d&apos;en
+                dessiner des copies. Sors-en du cadre ou découpe la case.
+              </p>
+            )}
             {missing.length > 0 && (
               <p id={`${id}-missing`} className="text-xs text-amber-300" data-testid="panel-unmatched">
                 ⚠ Sans fiche : {missing.map((n) => `« ${n} »`).join(", ")} — à rattacher en haut du découpage.

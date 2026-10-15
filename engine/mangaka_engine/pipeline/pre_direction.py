@@ -104,6 +104,17 @@ LABELS: dict[str, tuple[str, str]] = {
     "dialogue.min_per_page": ("Répliques par planche, au moins", "Onomatopées à part ; borné par la place des cases."),
     "dialogue.max_per_page": ("Répliques par planche, au plus", ""),
     "dialogue.min_silent_panels": ("Cases muettes par planche, au moins", "Cases sans aucune réplique."),
+    "dialogue.max_words": ("Mots par réplique, au plus", "Au-delà, le scénariste est relancé : « coupe la réplique »."),
+    "dialogue.max_mean_words": ("Mots par réplique en moyenne, au plus", "Moyenne sur le chapitre."),
+    "dialogue.target_per_panel": (
+        "Répliques visées par case",
+        "Dans chaque case où un personnage présent peut parler, sans dépasser la place des bulles.",
+    ),
+    "dialogue.action_needs_voice": (
+        "Case d'action parlée",
+        "Une case d'action ou de combat a au moins une parole en plus de l'onomatopée. Non : case d'action muette "
+        "permise.",
+    ),
     "rhythm.first_peak.min": ("Premier pic, au plus tôt", "Position dans le chapitre (0 % = début)."),
     "rhythm.first_peak.max": ("Premier pic, au plus tard", ""),
     "rhythm.breath_after_peak": ("Respiration obligatoire après un pic", ""),
@@ -218,7 +229,10 @@ def apply_overrides(base: PreDirection, overrides: Mapping[str, Any]) -> PreDire
         path = loc if loc in LEAVES else next((p for p in overrides if p.startswith(loc)), loc)
         label = LABELS.get(path, (path,))[0]
         message = str(err["msg"]).removeprefix("Value error, ")
-        bounds = {"min doit être ≤ max": "le minimum doit rester sous le maximum"}
+        bounds = {
+            "min doit être ≤ max": "le minimum doit rester sous le maximum",
+            "max_mean_words doit être ≤ max_words": "la moyenne doit rester sous le plafond de mots par réplique",
+        }
         raise DnaError(path, f"{label} : {bounds.get(message, message)}") from None
 
 
@@ -289,6 +303,10 @@ def dialogue_rules_for(rules: DialogueRules | None, charter: Charter | None) -> 
             "min_per_page": d.min_per_page,
             "max_per_page": d.max_per_page,
             "min_silent_panels_per_page": d.min_silent_panels,
+            "max_words": d.max_words,
+            "max_mean_words": float(d.max_mean_words),
+            "target_per_panel": d.target_per_panel,
+            "action_needs_voice": d.action_needs_voice,
         }
     )
 

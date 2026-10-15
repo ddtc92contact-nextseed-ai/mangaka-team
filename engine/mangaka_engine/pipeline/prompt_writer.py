@@ -48,6 +48,7 @@ from .prompt import (
     PromptCharacter,
     ReferenceSlot,
     camera_term,
+    cap_mentions,
     found_terms,
     image_tags,
     reference_line,
@@ -187,6 +188,8 @@ class PromptBrief:
     language: str = DEFAULT_LANGUAGE
     min_words: int = DEFAULT_MIN_WORDS
     max_words: int = DEFAULT_MAX_WORDS
+    # Chaque nom au plus N fois dans le paragraphe (`mentions.writer_max` d'image_prompt.yaml, $max_mentions).
+    max_mentions: int = 2
 
     @classmethod
     def build(
@@ -230,8 +233,14 @@ class PromptBrief:
         colour_terms = list(settings.monochrome_forbidden_terms) if monochrome else []
         names = [e.name for e in [*characters, *objects, *([decor] if decor else [])]] + list(extras)
 
+        who = [*(c.name for c in characters), *extras]
+
+        def cap(text: str) -> str:
+            # Chaque nom au plus `mentions.max_per_field` fois par champ : le rédacteur ne le répète pas non plus.
+            return cap_mentions(text, who, settings.mentions.max_per_field, settings.mentions.replacement)
+
         def plain(value: str | None) -> str:
-            return _text(remove_terms(value or "", colour_terms, keep=names)) if colour_terms else _text(value)
+            return cap(_text(remove_terms(value or "", colour_terms, keep=names)) if colour_terms else _text(value))
 
         def entry(e: PromptCharacter) -> PromptCharacter:
             if not colour_terms:
@@ -258,7 +267,7 @@ class PromptBrief:
             style=_SPACES.sub(" ", style or "").strip().rstrip(" .;,"),
             style_lead=_SPACES.sub(" ", style_lead or "").strip(),
             finition=_SPACES.sub(" ", finition or "").strip().rstrip(" .;,"),
-            bible=_text(bible),
+            bible=cap(_text(bible)),
             # Passages entiers avec leur source (titres entre « ») : ni guillemets retirés ni lignes fusionnées.
             savoir_faire=(savoir_faire or "").strip(),
             photo_terms=list(settings.forbidden_photo_terms),
@@ -268,6 +277,7 @@ class PromptBrief:
             language=(prompt.language if prompt and prompt.language else DEFAULT_LANGUAGE),
             min_words=(prompt.min_words if prompt and prompt.min_words else DEFAULT_MIN_WORDS),
             max_words=(prompt.max_words if prompt and prompt.max_words else DEFAULT_MAX_WORDS),
+            max_mentions=settings.mentions.writer_max,
         )
 
     def reference_lines(self) -> list[dict[str, Any]]:
@@ -358,6 +368,7 @@ def template_values(brief: PromptBrief) -> dict[str, str]:
         "language_name": LANGUAGE_NAMES.get(brief.language, brief.language),
         "min_words": str(brief.min_words),
         "max_words": str(brief.max_words),
+        "max_mentions": str(brief.max_mentions),
         "plan": _or(brief.plan, "(free)"),
         "angle": _or(brief.angle, "(free)"),
         "camera": _or(brief.camera, "(free: pick a dynamic angle that serves the action)"),
