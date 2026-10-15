@@ -18,10 +18,12 @@ generation:
 # Zone réservée aux bulles, placée en haut de la case, du côté où commence la lecture
 # (gauche en ltr, droite en rtl). Sa surface dépend de la longueur des dialogues :
 # min_fraction de la case pour une réplique très courte → max_fraction à partir de full_at_chars.
+# max_fraction : jamais plus de la moitié de la case (règle de la name) ; 0,5 depuis les répliques de 22 mots
+# (15/10 : à 0,4, deux répliques de 15 mots débordaient d'une case de planche à 6 cases).
 bubble_zone:
   padding_mm: 2
   min_fraction: 0.10
-  max_fraction: 0.40
+  max_fraction: 0.50
   full_at_chars: 240
   width_fraction: 0.55   # largeur de départ (part de la largeur de la case)
   max_height_fraction: 0.60

@@ -663,7 +663,7 @@ def script_job(
                 try:
                     pages = save_script(session, chapter, output)
                     layout_pages(presets, pages)
-                    return room_problems(presets, pages)
+                    return room_problems(presets, pages, rules=rules)
                 except LayoutError:
                     return []  # l'erreur de mise en page sera signalée à l'enregistrement
                 finally:

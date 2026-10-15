@@ -18,6 +18,10 @@ ellipse_factor: 1.25
 speech_shape: ellipse       # ellipse | rounded
 rounded_radius_mm: 3
 preferred_aspect: 1.5       # rapport largeur / hauteur visé quand on choisit le retour à la ligne
+# Formes essayées ensuite, à la même taille de texte, quand les bulles d'une case ne tiennent pas dans sa
+# zone : plus plate (bulles empilées) puis plus haute (côte à côte), avant de réduire la police. Une
+# réplique de 22 mots tient ainsi à la taille normale dans une case de planche à 6 cases.
+fallback_aspects: [2.5, 1.0]
 
 cloud:                      # pensée : nuage + petites bulles de queue
   bump_mm: 5
