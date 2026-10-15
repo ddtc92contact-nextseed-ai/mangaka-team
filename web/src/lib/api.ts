@@ -2114,6 +2114,8 @@ export interface ChapterDirection {
     page_chocs: DaPageChoc[];
     sfx_intensities: string[];
     points_de_vue?: string[];
+    /** Au-delà de ce nombre de personnages présents, avertissement sur la case (0 = jamais). */
+    crowd_limit?: number;
     styles: { value: string; label: string }[];
     templates: LayoutTemplate[];
   };
@@ -2812,6 +2814,8 @@ export interface ScriptBrief {
   art_pre_direction: string;
   bible_empty: boolean;
   characters_without_note: { id: number; name: string }[];
+  /** Au-delà de ce nombre de personnages présents, avertissement sur la case (0 = jamais). */
+  crowd_limit?: number;
 }
 
 export type BibleInput = Partial<Pick<Bible, "world" | "tone" | "rules" | "motifs" | "chapter_summaries">> & {

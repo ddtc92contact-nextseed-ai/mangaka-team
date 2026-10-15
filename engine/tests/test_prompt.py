@@ -142,3 +142,77 @@ def test_reference_framing_is_skipped_after_the_style_sentence() -> None:
     assert defines_references(written, 1) and framed.startswith(written)
     assert framed.count("<image1> is") == 1
     assert "drawn in the same manga style as the reference images" in framed
+
+
+# --- plafond de mentions par personnage (#187, essai « Nuit du pari » du 15/10) -----------------------------
+NUIT = [PromptCharacter("Voyou 1", "blouson de cuir"), PromptCharacter("Voyou 2"), PromptCharacter("Kaï")]
+NUIT_NAMES = ["Voyou 1", "Voyou 2", "Voyou 3", "Kaï"]
+
+
+def test_cap_mentions_keeps_the_first_mention_of_each_name() -> None:
+    from mangaka_engine.pipeline.prompt import cap_mentions, mention_count
+
+    text = "Voyou 1 attrape Voyou 2 par le col, Voyou 1 le plaque au mur, voyou 1 rit. Voyou 10 regarde."
+    out = cap_mentions(text, ["Voyou 1", "Voyou 2", "Voyou"], 1)
+    assert out == "Voyou 1 attrape Voyou 2 par le col, le plaque au mur, rit. Voyou 10 regarde."
+    assert mention_count(out, "Voyou 1") == 1 and mention_count(out, "Voyou 10") == 1  # « Voyou 10 » : un autre
+    assert mention_count(cap_mentions(text, ["Voyou 1"], 2), "Voyou 1") == 2
+    assert cap_mentions(text, ["Voyou 1"], 0) == text  # 0 : pas de plafond
+    assert cap_mentions(text, ["Voyou 1"], 1, "he").startswith("Voyou 1 attrape Voyou 2 par le col, he le plaque")
+
+
+def test_a_panel_naming_four_characters_names_each_once_per_field() -> None:
+    """Critère d'acceptation : une case qui nomme 4 personnages → chaque nom au plus une fois par champ."""
+    from mangaka_engine.pipeline.prompt import mention_count
+
+    reg = PresetRegistry.load(PRESETS_DIR)
+    assert reg.image_prompt.mentions.max_per_field == 1
+    fields = {
+        "description": "Voyou 1 jette les dés, Voyou 2 et Voyou 3 se penchent, Kaï fixe Voyou 1, Voyou 1 sourit à "
+        "Voyou 2, Voyou 3 recule et Kaï se lève",
+        "action": "Voyou 1 frappe la table, Voyou 1 pointe Kaï, Kaï repousse Voyou 1",
+        "staging": "Voyou 1 à gauche, Voyou 2 derrière Voyou 1, Voyou 3 à droite de Voyou 2, Kaï face à Voyou 1",
+        "setting": "le tripot où Voyou 1 et Voyou 2 jouent, la table de Voyou 1",
+        "ambiance": "néon rouge sur Voyou 1, ombre sur Kaï et sur Voyou 1",
+    }
+    prompt = build_prompt(
+        **fields,
+        plan="plan moyen",
+        characters=NUIT,
+        bible="Voyou 1 : chef. Voyou 2 : suit Voyou 1. Kaï : joueur.",
+        settings=reg.image_prompt,
+        names=NUIT_NAMES,
+    )
+    parts = {
+        "description": prompt.split("Action and pose:")[0],
+        "action": prompt.split("Action and pose: ")[1].split("Setting:")[0],
+        "setting": prompt.split("Setting: ")[1].split("Staging:")[0],
+        "staging": prompt.split("Staging: ")[1].split("Mood and lighting:")[0],
+        "ambiance": prompt.split("Mood and lighting: ")[1].split("Three characters:")[0],
+        "characters": prompt.split("Three characters: ")[1].split("Series bible notes:")[0],
+        "bible": prompt.split("Series bible notes: ")[1].split("A single continuous")[0],
+    }
+    for field, text in parts.items():
+        for name in NUIT_NAMES:
+            assert mention_count(text, name) <= 1, (field, name, text)
+    assert "Voyou 1 jette les dés, Voyou 2 et Voyou 3 se penchent, Kaï fixe" in prompt
+
+
+def test_writer_brief_names_each_character_once_per_field_and_states_the_cap() -> None:
+    from mangaka_engine.pipeline.prompt import mention_count
+    from mangaka_engine.pipeline.prompt_writer import PromptBrief, render_messages
+
+    reg = PresetRegistry.load(PRESETS_DIR)
+    brief = PromptBrief.build(
+        description="Voyou 1 jette les dés, Voyou 1 rit, Kaï fixe Voyou 1",
+        action="Voyou 1 frappe la table, Voyou 1 pointe Kaï",
+        staging="Voyou 1 à gauche, Kaï face à Voyou 1",
+        characters=NUIT,
+        extras=["Voyou 3"],
+        settings=reg.image_prompt,
+        prompt=reg.prompt("redacteur-image"),
+    )
+    for text in (brief.description, brief.action, brief.staging):
+        assert mention_count(text, "Voyou 1") == 1 and mention_count(text, "Kaï") <= 1
+    system, _ = render_messages(reg.prompt("redacteur-image"), brief)
+    assert f"name each character at most {reg.image_prompt.mentions.writer_max} times" in system.content

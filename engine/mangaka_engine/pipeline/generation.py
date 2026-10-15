@@ -131,6 +131,7 @@ from .prompt import (
     mood_dropped_terms,
     remove_terms,
     shot_in,
+    with_single_instance,
 )
 from .prompt_dialog import (
     DIRECTION_LABELS,
@@ -347,6 +348,7 @@ def build_panel_prompt(
         bible=bible,
         settings=presets.image_prompt,
         framing=panel_framing_sentence(presets, panel),
+        names=list(panel.character_names or []),
     )
 
 
@@ -1680,15 +1682,20 @@ class GenerationExecutor:
             panel_prompt = prompt
             rendering = series_rendering(presets, chapter.project)
             monochrome = rendering is not None and rendering.monochrome
+            # Anti-doublon dans le prompt POSITIF : à cfg 1 (Turbo, croquis), le négatif n'est pas lu.
+            single = presets.image_prompt.single_instance if panel.character_names else ""
             if angle_id:
                 # Mot déclencheur et vocabulaire de caméra en tête, puis la scène de la version de départ.
-                prompt = angle_prompt(catalog.prompts.panel, camera, scene=prompt)
+                prompt = with_single_instance(angle_prompt(catalog.prompts.panel, camera, scene=prompt), single)
             elif repair is None:
                 # Chaque image nommée dans l'ordre des emplacements + ce qu'il faut en prendre, puis
-                # « identité seulement, scène nouvelle » ; enfin la tonalité du rendu (papier blanc).
+                # « identité seulement, scène nouvelle », l'anti-doublon ; enfin la tonalité du rendu (papier blanc).
                 slots = [ReferenceSlot(r["kind"], r["name"]) for r in references]
                 prompt = frame_references(prompt, slots, presets.image_prompt, monochrome=monochrome)
+                prompt = with_single_instance(prompt, single)
                 prompt = append_instruction(prompt, rendering.tonality if rendering is not None else "")
+            else:
+                prompt = with_single_instance(prompt, single)
             prompt = sent_prompt(
                 presets,
                 panel,

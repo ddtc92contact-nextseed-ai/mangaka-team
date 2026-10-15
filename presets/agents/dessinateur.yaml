@@ -236,6 +236,7 @@ settings:
       - language_name
       - min_words
       - max_words
+      - max_mentions
       - plan
       - angle
       - camera

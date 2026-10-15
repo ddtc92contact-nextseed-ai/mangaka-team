@@ -363,6 +363,20 @@ tight_shots:
   shots: [plan moyen, plan rapproché, gros plan, très gros plan, insert]
   negative: [full body, full-length, feet visible, standing pose facing viewer]
 
+# Noms des personnages dans le prompt d'une case (essai « Nuit du pari » du 15/10 : une case à 4 personnages
+# citait 26 fois des noms, « Voyou 1 » 7 fois, et l'image dessinait 2 ou 3 copies du même personnage).
+mentions:
+  max_per_field: 1     # chaque nom au plus 1 fois par champ (description, action, mise en scène, lieu, ambiance,
+                       # personnages, bible…), par fragments comme dans les données du rédacteur ; 0 = pas de plafond
+  replacement: ""      # une mention au-delà du plafond est retirée (sinon remplacée par ce texte)
+  writer_max: 2        # paragraphe du rédacteur : chaque nom au plus 2 fois (rôle de l'image, sujet) — $max_mentions
+  crowd_warning: 2     # au-delà de 2 personnages présents : avertissement sur la case (écrans Scénario et Direction)
+
+# Garde-fou anti-doublon, ajouté au prompt POSITIF de chaque génération de case qui a un personnage à l'image
+# (croquis, version propre, Turbo, Qualité) : le croquis tourne sur Turbo, distillé, à cfg 1, où le prompt
+# négatif (« duplicate character, extra people ») n'est jamais lu. Texte en anglais, comme les packs de style.
+single_instance: "Each character appears only once in the panel, no duplicate or twin of the same character"
+
 # Qui est dans l'image (pipeline/framing.py) : un personnage cité mais hors cadre n'est ni nommé comme sujet
 # dessiné ni pourvu d'image de référence. Ces phrases ($framing des morceaux ci-dessus, et consigne du
 # rédacteur de prompt) disent au modèle ce que montre la case : la vue subjective d'un spectateur, une case

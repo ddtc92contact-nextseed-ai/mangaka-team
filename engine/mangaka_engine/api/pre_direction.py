@@ -5,7 +5,7 @@
 - `PUT /projects/{id}/pre-direction` : ajustements de la série (chemin → valeur ; `{}` : tout hériter du genre).
   Une valeur égale à celle du genre n'est pas gardée : elle suit le genre s'il change ;
 - `GET /chapters/{id}/script-brief` : charte envoyée au scénariste et au directeur artistique (`$pre_direction`,
-  en clair) et alerte « bible vide » (bible de la série vide, personnages cités sans note) — un avertissement,
+  en clair), seuil de l'avertissement « trop de personnages » d'une case (`crowd_limit`) et alerte « bible vide » (bible de la série vide, personnages cités sans note) — un avertissement,
   jamais un blocage.
 """
 
@@ -82,6 +82,9 @@ class ScriptBriefOut(BaseModel):
     art_pre_direction: str  # `$pre_direction` du directeur artistique
     bible_empty: bool
     characters_without_note: list[BibleCharacterRef]
+    # Au-delà de N personnages présents, avertissement sur la case (`mentions.crowd_warning` d'image_prompt.yaml ;
+    # 0 = jamais).
+    crowd_limit: int = 0
 
 
 def pre_direction_out(ctx: AppContext, project: Project) -> PreDirectionOut:
@@ -160,7 +163,8 @@ def script_brief(
     if chapter is None:
         raise HTTPException(status_code=404, detail="Chapitre introuvable")
     project = chapter.project
-    charter = series_charter(ctx.agents.presets_for(project.id), project)
+    presets = ctx.agents.presets_for(project.id)
+    charter = series_charter(presets, project)
     empty, notes = _bible_empty(session, project.id)
     # Personnages présents : fiches citées par le synopsis, ou déjà dans les cases du chapitre.
     in_panels = {
@@ -181,4 +185,5 @@ def script_brief(
         art_pre_direction=art_text(charter, stories or chapter.target_page_count),
         bible_empty=empty,
         characters_without_note=[BibleCharacterRef(id=c.id, name=c.name) for c in present if str(c.id) not in notes],
+        crowd_limit=presets.image_prompt.mentions.crowd_warning,
     )
