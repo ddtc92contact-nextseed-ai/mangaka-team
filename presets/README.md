@@ -735,10 +735,16 @@ aucune pensée, voix off ni narration. Chaque réponse valide du scénariste est
   planche**, de `min_per_page` à `max_per_page` répliques (4 à 8 par défaut, le minimum borné par la place)
   et au moins `min_silent_panels_per_page` case sans réplique dès `silent_min_panels` cases (jamais une case
   d'action, qui reste parlée). Ces trois valeurs viennent de l'ADN de la série (ci-dessous). `room` donne,
-  selon le nombre de cases de la page, les répliques au plus par case (`big_panel_bonus` de plus pour une
-  case d'importance 3) ;
-- `max_words` mots au plus par réplique, `max_mean_words` en moyenne (on ajoute des bulles, on ne les
-  allonge pas) ;
+  selon le nombre de cases de la page, la place des bulles d'une case : répliques au plus (`replies`) et mots
+  au plus pour toutes ses répliques (`words`, la longueur réelle ; jamais sous `max_words`, une réplique
+  permise tient toujours seule). Une case d'importance 3 reçoit `big_panel_bonus` réplique et
+  `big_panel_bonus_words` mots de plus. Livré (mesuré le 15/10, A4 300 DPI, police à sa taille normale) :
+  jusqu'à 4 cases → 3 répliques, 46 mots ; 5 à 6 cases → 2 répliques, 36 mots ; 7 à 9 cases → 1 réplique,
+  22 mots ; case forte : +1 réplique, +14 mots ;
+- `max_words` mots au plus par réplique, `max_mean_words` en moyenne : **22 et 14 par défaut** (décision du
+  15/10 : 12 mots coupaient les phrases ; essai « Nuit du pari », 14,2 mots par réplique). Une réplique peut
+  porter une phrase entière, mais l'image raconte d'abord : une longue tirade se coupe en plusieurs bulles ou
+  sur plusieurs cases. Le genre jeunesse garde des répliques plus brèves (14 au plus, 8 en moyenne) ;
 - `action_needs_voice` : une case « choc » (`action_intensities`) ou avec onomatopée porte au moins un
   mot d'un personnage présent (cri, ordre, réaction) ;
 - `max_words`, `max_mean_words`, `target_per_panel` et `action_needs_voice` sont aussi dans la famille
@@ -747,7 +753,8 @@ aucune pensée, voix off ni narration. Chaque réponse valide du scénariste est
 - `require_inner_voice` : au moins une réplique de `inner_voice_kinds` (pensée, voix off, narration) par
   chapitre — `false` si l'auteur s'en passe ;
 - `check_room` : le découpage est mis en page à blanc et lettré (sans visages) ; chaque bulle doit tenir
-  dans la zone de bulles de sa case (`bubble_zone`).
+  dans la zone de bulles de sa case (`bubble_zone`), et les bulles d'une case n'en couvrent jamais plus de
+  `max_cover` (0,5 : la moitié, règle de la name).
 
 Une règle enfreinte relance le scénariste avec l'erreur (mêmes `max_retries` et gabarit `retry`) ; après
 les relances, le découpage est gardé, le job le signale (« avec N avertissements de dialogues ») et
@@ -760,7 +767,10 @@ premiers découpages maigres (comme le chapitre 3).
 
 La zone de bulles de `layout.yaml` a, en plus de sa fraction de case, un plancher absolu : `bubble_mm2`
 par bulle et `char_mm2` par caractère (taille réelle du lettrage, toujours bornée à `max_fraction`) —
-sans lui, deux répliques courtes débordaient déjà d'une case d'une planche à 6 cases.
+sans lui, deux répliques courtes débordaient déjà d'une case d'une planche à 6 cases. `max_fraction` vaut
+0,5 (jamais plus de la moitié de la case) depuis les répliques de 22 mots ; au lettrage, des bulles qui ne
+tiennent pas avec la forme visée (`preferred_aspect`) essaient d'abord d'autres formes à la même taille
+(`fallback_aspects` de `lettering.yaml` : plus plate, puis plus haute) avant de réduire la police.
 
 ## ADN de la série (`pre_direction.yaml`)
 
