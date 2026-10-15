@@ -281,6 +281,7 @@ def test_lettering_preview_prefers_clean_then_validated_then_latest_sketch(
     assert shown() == (latest["url"], "croquis")  # dernier croquis
     _ok(c.post(f"/panels/{p3['id']}/sketch/validate", json={"image_id": first["id"]}))
     assert shown() == (first["url"], "croquis")  # croquis validé
+    force_stages(c, data["chapter"]["id"], "name")  # name non relue ici
     [job] = _ok(c.post(f"/panels/{p3['id']}/clean"), 202)
     _wait(c)
     final = next(i for i in _images(c, p3["id"]) if i["kind"] == "final")
@@ -320,6 +321,7 @@ def test_validate_any_sketch_switches_preview_crop_and_clean(
         assert shown["sketch_image_url"] == img["url"]
         assert shown["crop"] == crop  # cadrage de la case gardé (reborné au rendu)
 
+    force_stages(c, chapter_id, "name")  # name non relue ici
     _ok(c.post(f"/panels/{p3['id']}/clean"), 202)
     _wait(c)
     [final] = [i for i in _images(c, p3["id"]) if i["kind"] == "final"]
@@ -359,6 +361,7 @@ def test_denoise_panel_over_series_over_preset(make_client: Callable[..., TestCl
     _wait(c)
     for pid in (p2["id"], p3["id"]):
         _ok(c.post(f"/panels/{pid}/sketch/validate"))
+    force_stages(c, data["chapter"]["id"], "name")  # name non relue ici
     [j2] = _ok(c.post(f"/panels/{p2['id']}/clean"), 202)
     [j3] = _ok(c.post(f"/panels/{p3['id']}/clean"), 202)
     assert (j2["params"]["denoise"], j3["params"]["denoise"]) == (0.5, 0.72)

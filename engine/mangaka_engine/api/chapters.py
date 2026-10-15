@@ -20,6 +20,7 @@ from ..pipeline.knowledge import record_chapter_summary
 from ..pipeline.layout import LayoutError, clamp_to_live
 from ..pipeline.lettering import Box
 from ..pipeline.library import SeriesLibrary
+from ..pipeline.name_board import name_state
 from ..pipeline.names import CharacterMatcher, link_speakers, name_key, panel_ids, relink_project
 from ..pipeline.pages import (
     FRAME_KEYS,
@@ -196,6 +197,9 @@ def page_out(
         state=page.state.value,
         layout=layout,
         layout_stale=bool(page.panels) and is_stale(page),
+        # Name (palier croquis seulement) : validée, caduque (case modifiée depuis) ou à valider.
+        name_state=name_state(page) if page.chapter.project.sketch_enabled and page.panels else None,
+        name_validated_at=page.name_validation.created_at if page.name_validation is not None else None,
         panels=[
             PanelOut(
                 id=p.id,
@@ -284,6 +288,7 @@ def _load_pages(session: Session, chapter_id: int) -> list[Page]:
                 selectinload(Page.panels).selectinload(Panel.bubbles),
                 selectinload(Page.panels).selectinload(Panel.images),
                 selectinload(Page.panels).selectinload(Panel.location),
+                selectinload(Page.name_validation),
             )
             .order_by(Page.number)
         ).all()

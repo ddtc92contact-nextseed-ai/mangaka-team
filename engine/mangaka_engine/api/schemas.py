@@ -525,6 +525,10 @@ class PageOut(BaseModel):
     state: str
     layout: dict[str, Any] | None
     layout_stale: bool
+    # Name (palier croquis, pipeline/name_board.py) : validée, caduque (case modifiée depuis la validation) ou
+    # à valider ; None sans palier croquis (ou page sans case).
+    name_state: Literal["validated", "stale", "pending"] | None = None
+    name_validated_at: datetime | None = None
     panels: list[PanelOut]
 
 
@@ -821,6 +825,9 @@ class PanelUpdate(_In):
     viewpoint: ViewpointIn | None = None
     # Débruitage du passage au propre de cette case ; null = celui de la série (sinon du preset).
     sketch_denoise: Denoise | None = None
+    # Plan de la case (planche brouillon : « changer le plan ») ; null = aucun. L'emporte sur celui de la
+    # direction artistique appliquée (gardé comme un choix du dialogue avec l'IA).
+    shot_type: Short | None = None
 
 
 DialogInstruction = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)]
@@ -1055,6 +1062,29 @@ class SketchValidateIn(_In):
 
 class CleanIn(_In):
     denoise: Denoise | None = None  # null : case > série > preset
+
+
+class NameValidateIn(_In):
+    """« Valider la name » d'une page (palier croquis, pipeline/name_board.py)."""
+
+    author: Short = ""
+
+
+class PanelSplitIn(_In):
+    """Couper une case en deux : descriptions des deux moitiés (absent = celle de la case), répliques qui
+    passent dans la nouvelle case (la seconde), et re-croquer les deux cases (palier croquis)."""
+
+    first: LongText | None = None
+    second: LongText | None = None
+    move_bubble_ids: Annotated[list[int], Field(max_length=50)] = Field(default_factory=list)
+    sketch: bool = True
+
+
+class PanelSplitOut(BaseModel):
+    page: PageOut
+    panel_ids: list[int]  # les deux cases touchées (la case coupée, puis la nouvelle)
+    jobs: list[JobOut]  # croquis mis en file pour ces deux cases
+    sketch_note: str | None = None  # pourquoi rien n'est re-croqué (ComfyUI hors ligne, palier désactivé…)
 
 
 class SketchEstimateOut(BaseModel):
@@ -1982,7 +2012,7 @@ class StatsOut(BaseModel):
 
 
 # --- Garde d'étapes (pipeline/stage_gate.py) -------------------------------------------------
-StageName = Literal["script", "direction", "layout", "references", "prompts", "approved", "lettering"]
+StageName = Literal["script", "direction", "layout", "references", "prompts", "name", "approved", "lettering"]
 
 
 class StageDecisionOut(BaseModel):

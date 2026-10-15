@@ -428,6 +428,7 @@ def test_clean_mode_img2img_or_controlnet(make_client: Callable[..., TestClient]
     for pid in (p2["id"], p3["id"], p1["id"]):
         _sketch_and_validate(c, pid)
 
+    force_stages(c, data["chapter"]["id"], "name")  # name non relue ici
     # img2img (défaut de #51).
     [job] = _ok(c.post(f"/panels/{p3['id']}/clean"), 202)
     assert job["params"]["preset"] == "qwen-image-base-qualite-from-sketch" and "control" not in job["params"]
