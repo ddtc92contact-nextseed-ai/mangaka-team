@@ -124,7 +124,7 @@ def _panel(replies: int, *, panels_on_page: int = 4, sfx: list[str] | None = Non
 
 
 def test_thresholds_come_from_the_preset() -> None:
-    assert (RULES.target_per_panel, RULES.max_mean_words) == (2, 7)
+    assert (RULES.target_per_panel, RULES.max_words, RULES.max_mean_words) == (2, 22, 14)
     assert (RULES.min_per_page, RULES.max_per_page, RULES.min_silent_panels_per_page) == (4, 8, 1)
     panels = [_panel(1), _panel(1), _panel(1)]
     problems = check_dialogues(panels, RULES)
@@ -228,13 +228,44 @@ def test_density_bends_to_the_room_table() -> None:
     assert RULES.room_for(4) == 3 and RULES.room_for(9) == 1
 
 
+def test_room_counts_the_words_not_only_the_replies() -> None:
+    """Place recalibrée sur la longueur réelle (#191) : budget en mots par case selon le nombre de cases."""
+    quiet = {"require_inner_voice": False, "min_per_page": 0, "min_silent_panels_per_page": 0, "max_mean_words": 22}
+    rules = RULES.model_copy(update=quiet)
+    assert (rules.room_words_for(4), rules.room_words_for(6), rules.room_words_for(9)) == (46, 36, 22)
+    assert rules.room_words_for(6, importance=3) == 36 + rules.big_panel_bonus_words
+    # Jamais sous le plafond par réplique : une réplique permise tient toujours seule dans sa case.
+    assert rules.model_copy(update={"max_words": 30}).room_words_for(9) == 30
+
+    def case(*words: int, panels_on_page: int = 6) -> DialoguePanel:
+        p = _panel(0, panels_on_page=panels_on_page)
+        p.replies = [Reply("speech", " ".join(["mot"] * n), "Angus") for n in words]
+        return p
+
+    assert check_dialogues([case(22, 14)], rules) == []  # 36 mots : la place d'une case de planche à 6 cases
+    assert check_dialogues([case(22, panels_on_page=9)], rules) == []  # une réplique de 22 mots, même serrée
+    heavy = check_dialogues([case(22, 20)], rules)
+    assert heavy == [
+        "page 1 › case 1 : 42 mots de répliques pour la place d'au plus 36 (page de 6 cases) : coupe la tirade "
+        "sur la case suivante ou garde l'essentiel"
+    ]
+    strong = case(22, 20)
+    strong.importance = 3
+    assert check_dialogues([strong], rules) == []  # case forte : 14 mots de plus
+
+
 def test_long_replies_are_flagged_one_by_one_and_on_average() -> None:
     rules = RULES.model_copy(update={"require_inner_voice": False, "min_per_page": 0})
     p = _panel(0)
-    p.replies = [Reply("speech", "un deux trois quatre cinq six sept huit neuf dix onze douze treize")]
+    p.replies = [Reply("speech", " ".join(["mot"] * 22))]
+    assert check_dialogues([p], rules) == [
+        "répliques trop longues : 22,0 mots en moyenne (14,0 au plus) : laisse l'image raconter, coupe les longues "
+        "tirades en plusieurs bulles"
+    ]
+    p.replies = [Reply("speech", " ".join(["mot"] * 23))]
     problems = check_dialogues([p], rules)
-    assert any("trop longue (13 mots, 12 au plus)" in x for x in problems)
-    assert any("13,0 mots en moyenne (7,0 au plus)" in x for x in problems)
+    assert any("trop longue (23 mots, 22 au plus)" in x for x in problems)
+    assert any("23,0 mots en moyenne (14,0 au plus)" in x for x in problems)
 
 
 def test_prompt_states_the_rules() -> None:
@@ -243,7 +274,15 @@ def test_prompt_states_the_rules() -> None:
     assert text in user.content
     assert "vise 2 répliques dans chaque case" in text
     assert "4 à 8 répliques par planche" in text and "au moins 1 case sans aucune réplique par planche" in text
-    assert "1 à 4 cases → 3 ; 5 à 6 cases → 2 ; 7 à 9 cases → 1" in text
+    assert (
+        "1 à 4 cases → 3 répliques, 46 mots en tout ; 5 à 6 cases → 2 répliques, 36 mots en tout ; "
+        "7 à 9 cases → 1 réplique, 22 mots en tout (+1 réplique, +14 mots pour une case forte, importance 3)"
+    ) in text
+    assert "jamais plus de la moitié de la case" in text
+    # Plus « la brièveté fait le rythme » : une phrase entière, l'image d'abord, la tirade coupée.
+    assert "22 mots au plus, 14,0 en moyenne" in text
+    assert "phrase entière" in text and "l'image raconte d'abord" in text and "plusieurs bulles" in text
+    assert "brièveté" not in user.content and "courtes" not in text
     assert "jamais réduite à son onomatopée" in text
     assert "pensée, voix off, narration" in text
     assert dialogue_text(None) == "(aucune règle imposée)"
@@ -267,7 +306,7 @@ def test_sparse_answer_triggers_a_corrective_retry() -> None:
     retry = llm.calls[1][-1]
     assert retry.role == "user" and "dialogues à revoir" in retry.content
     assert "seulement l'onomatopée « RATATATA ! »" in retry.content
-    assert "ajoute ou retire des répliques courtes" in retry.content
+    assert "ajoute, coupe ou retire des répliques" in retry.content
     assert "page 3 : 1 réplique (au moins 4 par planche" in retry.content
     assert check_dialogues(script_panels(run.output), RULES) == []
 
@@ -450,28 +489,38 @@ def _length_problems(retry: str) -> list[str]:
     return [f"{n} mots, {m} au plus" for n, m in re.findall(r"trop longue \((\d+) mots, (\d+) au plus\)", retry)]
 
 
-def test_dna_dialogue_defaults_are_today_values_for_every_genre() -> None:
+def test_dna_dialogue_defaults_are_22_words_and_14_on_average() -> None:
+    """#191 : 22 mots au plus, 14 en moyenne pour tous les genres, sauf la jeunesse (lecteurs débutants)."""
     from mangaka_engine.pipeline.pre_direction import dialogue_rules_for, flatten
 
     assert RULES is not None
+    assert (RULES.max_words, RULES.max_mean_words) == (22, 14)
     for genre in (None, *PRESETS.pre_direction.genres):  # type: ignore[union-attr]
         flat = flatten(PRESETS.genre_dna(genre))  # type: ignore[arg-type]
-        assert flat["dialogue.max_words"] == RULES.max_words == 12
-        assert flat["dialogue.max_mean_words"] == RULES.max_mean_words == 7
+        expected = (14, 8) if genre == "jeunesse" else (22, 14)
+        assert (flat["dialogue.max_words"], flat["dialogue.max_mean_words"]) == expected, genre
         assert flat["dialogue.target_per_panel"] == RULES.target_per_panel == 2
         assert flat["dialogue.action_needs_voice"] is RULES.action_needs_voice is True
     rules = dialogue_rules_for(RULES, _charter())
     assert rules is not None
-    assert (rules.max_words, rules.max_mean_words, rules.target_per_panel, rules.action_needs_voice) == (12, 7, 2, True)
+    values = (rules.max_words, rules.max_mean_words, rules.target_per_panel, rules.action_needs_voice)
+    assert values == (22, 14, 2, True)
 
 
-def test_series_max_words_22_drives_the_scriptwriter_retry() -> None:
-    """Critère d'acceptation : une série réglée à 22 mots par réplique — une réplique de 18 mots passe, une de 25
-    relance le scénariste avec ce plafond (et non celui de 12 du preset)."""
+def test_series_max_words_drives_the_scriptwriter_retry() -> None:
+    """Une série réglée à 12 mots par réplique — une réplique de 18 mots relance le scénariste avec ce plafond ;
+    sans réglage, le défaut de 22 laisse passer 18 mots et relance à 25."""
     ctx = _ctx()
-    ctx.charter = _charter(**{"dialogue.max_words": 22})
+    ctx.charter = _charter(**{"dialogue.max_words": 12, "dialogue.max_mean_words": 7})
     _, user = render_messages(PROMPT, ctx)
-    assert "22 mots" in user.content
+    assert "12 mots au plus" in user.content
+    llm = _sequence(_with_reply(18), DENSE, DENSE)
+    run_script(llm, PROMPT, ctx, lambda _p, _m: None)
+    assert _length_problems(llm.calls[1][-1].content) == ["18 mots, 12 au plus"]
+
+    ctx.charter = _charter()
+    _, user = render_messages(PROMPT, ctx)
+    assert "22 mots au plus" in user.content
 
     llm = _sequence(_with_reply(18), DENSE, DENSE)
     run_script(llm, PROMPT, ctx, lambda _p, _m: None)
@@ -482,12 +531,6 @@ def test_series_max_words_22_drives_the_scriptwriter_retry() -> None:
     run_script(llm, PROMPT, ctx, lambda _p, _m: None)
     assert len(llm.calls) >= 2
     assert _length_problems(llm.calls[1][-1].content) == ["25 mots, 22 au plus"]
-
-    # Sans ADN réglé (série existante) : le plafond reste 12.
-    ctx.charter = _charter()
-    llm = _sequence(_with_reply(18), DENSE, DENSE)
-    run_script(llm, PROMPT, ctx, lambda _p, _m: None)
-    assert _length_problems(llm.calls[1][-1].content) == ["18 mots, 12 au plus"]
 
 
 def test_series_can_allow_a_silent_action_panel() -> None:
@@ -515,16 +558,104 @@ def test_dna_card_exposes_the_dialogue_settings(client: TestClient) -> None:
         ("dialogue.action_needs_voice", "bool"),
     ):
         assert fields[path]["group"] == "dialogue" and fields[path]["kind"] == kind and fields[path]["label"]
-    assert dna["inherited"]["dialogue.max_words"] == 12 and dna["inherited"]["dialogue.action_needs_voice"] is True
+    assert dna["inherited"]["dialogue.max_words"] == 22 and dna["inherited"]["dialogue.action_needs_voice"] is True
     tuned = _ok(
         client.put(
             f"/projects/{s['id']}/pre-direction",
-            json={"overrides": {"dialogue.max_words": 22, "dialogue.action_needs_voice": False}},
+            json={"overrides": {"dialogue.max_words": 30, "dialogue.action_needs_voice": False}},
         )
     )
-    assert tuned["effective"]["dialogue.max_words"] == 22 and tuned["effective"]["dialogue.action_needs_voice"] is False
+    assert tuned["effective"]["dialogue.max_words"] == 30 and tuned["effective"]["dialogue.action_needs_voice"] is False
     bad = client.put(
         f"/projects/{s['id']}/pre-direction",
         json={"overrides": {"dialogue.max_words": 5, "dialogue.max_mean_words": 9}},
     )
     assert bad.status_code == 422 and "moyenne" in bad.text
+
+
+# --- répliques plus longues par défaut (#191) ----------------------------------------------------------------
+LONG_22 = (
+    "Je t'avais bien prévenu, Kenji : si tu remontes au vieux phare cette nuit, la marée haute te coupera "
+    "la route du village."
+)
+LONG_19 = "Écoute-moi bien, on n'a plus que dix minutes avant que le dernier train ne quitte la gare du port."
+
+
+def test_new_series_gets_22_words_and_a_tuned_series_keeps_its_values(client: TestClient) -> None:
+    new = _ok(client.post("/projects", json={**STYLE, "title": "Nuit du pari"}), 201)
+    dna = _ok(client.get(f"/projects/{new['id']}/pre-direction"))
+    assert (dna["effective"]["dialogue.max_words"], dna["effective"]["dialogue.max_mean_words"]) == (22, 14)
+
+    # Série d'avant #191 qui avait réglé ses répliques : ses valeurs ne bougent pas.
+    tuned = _ok(client.post("/projects", json={**STYLE, "title": "Ancienne série"}), 201)
+    old = {"dialogue.max_words": 12, "dialogue.max_mean_words": 7}
+    _ok(client.put(f"/projects/{tuned['id']}/pre-direction", json={"overrides": old}))
+    dna = _ok(client.get(f"/projects/{tuned['id']}/pre-direction"))
+    assert dna["overrides"] == old
+    assert (dna["effective"]["dialogue.max_words"], dna["effective"]["dialogue.max_mean_words"]) == (12, 7)
+
+
+def test_a_series_ceiling_below_the_new_mean_is_kept() -> None:
+    """Une série qui n'avait réglé que le plafond (10 mots) : la moyenne héritée (14) le suit, l'ajustement
+    n'est pas rejeté (sinon tout l'ADN de la série retomberait sur celui du genre)."""
+    charter = _charter(**{"dialogue.max_words": 10})
+    assert (charter.dna.dialogue.max_words, charter.dna.dialogue.max_mean_words) == (10, 10)
+
+
+def _six_panel_page(dialogues: list[list[dict[str, str]]]) -> dict[str, Any]:
+    panels = [
+        {
+            "description": f"Kenji et Aiko sur la jetée, case {i + 1}.",
+            "characters": ["Angus", "Seku"],
+            "importance": 2,
+            "intensity": "normal",
+            "dialogues": d,
+        }
+        for i, d in enumerate(dialogues)
+    ]
+    return {"pages": [{"rythme": "normal", "panels": panels}]}
+
+
+def test_a_22_word_reply_fits_a_medium_panel_at_its_normal_size(client: TestClient) -> None:
+    """Planche de 6 cases (taille moyenne) : une réplique de 22 mots, accents compris, tient dans la zone de
+    bulles de sa case et dans la case, sans débordement ni police réduite ; deux longues répliques aussi."""
+    assert count_words(LONG_22) == 22
+    ch = _series(client, "Nuit du pari")
+    speech = [{"speaker": "Angus", "text": LONG_22, "kind": "speech"}]
+    two = [*speech, {"speaker": "Seku", "text": "Tant pis, j'y vais quand même.", "kind": "speech"}]
+    pages = _ok(client.put(f"/chapters/{ch['id']}/pages", json=_six_panel_page([speech, two, [], speech, [], []])))
+    let = _ok(client.get(f"/pages/{pages[0]['id']}/lettering"))
+    assert not [w for w in let["warnings"] if w["code"] == "text_overflow"]
+    panels = {p["id"]: p for p in let["panels"]}
+    assert len(let["bubbles"]) == 4
+    for b in let["bubbles"]:
+        panel, zone, box = panels[b["panel_id"]], panels[b["panel_id"]]["bubble_zone"], b["box"]
+        assert not b["overflow"]
+        assert b["font"]["size_pt"] == b["font"]["style_size_pt"]  # taille normale, jamais réduite
+        for frame in (zone, panel["box"]):  # dans la zone de bulles, donc dans la case
+            assert frame["x1"] - 1 <= box["x"] and box["x"] + box["w"] <= frame["x2"] + 1, (b["text"], box, frame)
+            assert frame["y1"] - 1 <= box["y"] and box["y"] + box["h"] <= frame["y2"] + 1, (b["text"], box, frame)
+    text = " ".join(line["text"] for b in let["bubbles"] for line in b["lines"])
+    assert "prévenu" in text and "marée" in text and "même" in text
+    # Contrôle de place : rien à redire (la moyenne de 18 mots, elle, dépasse les 14 du chapitre).
+    warnings = _ok(client.get(f"/chapters/{ch['id']}/dialogues"))["warnings"]
+    assert not [w for w in warnings if "zone de bulles" in w or "couvrent" in w or "pour la place" in w], warnings
+
+
+def test_bubbles_covering_more_than_half_a_panel_warn(client: TestClient) -> None:
+    """Planche de 9 cases : trois répliques de 19 à 22 mots dans une même case couvriraient plus de la moitié de
+    la case — l'avertissement de place le dit (et la relance du scénariste avec)."""
+    ch = _series(client, "Nuit du pari")
+    tirade = [
+        {"speaker": "Angus", "text": LONG_22, "kind": "speech"},
+        {"speaker": "Seku", "text": LONG_19, "kind": "speech"},
+        {"speaker": "Angus", "text": LONG_22, "kind": "speech"},
+    ]
+    page = _six_panel_page([tirade, *[[] for _ in range(8)]])
+    _ok(client.put(f"/chapters/{ch['id']}/pages", json=page))
+    warnings = _ok(client.get(f"/chapters/{ch['id']}/dialogues"))["warnings"]
+    assert any(
+        w.startswith("page 1 › case 1 : les bulles couvrent") and "(la moitié au plus)" in w for w in warnings
+    ), warnings
+    assert any(w.startswith("page 1 › case 1") and "zone de bulles" in w for w in warnings)
+    assert any("page 1 › case 1 : 3 répliques pour la place d'au plus 1" in w for w in warnings)

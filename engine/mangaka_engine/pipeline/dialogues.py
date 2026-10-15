@@ -4,16 +4,17 @@ Mesuré sur les bulles (`bubbles`), onomatopées à part : une onomatopée n'est
 
 - **densité, par planche** : de `min_per_page` à `max_per_page` répliques par planche, le minimum borné par la
   place (on vise `target_per_panel` répliques dans chaque case où un personnage présent peut parler, jamais
-  plus que la place de la case : table `room` selon le nombre de cases de la page), et au moins
+  plus que la place de la case : table `room` selon le nombre de cases de la page, en répliques et en mots
+  pour toute la case), et au moins
   `min_silent_panels_per_page` case sans réplique par planche (dès `silent_min_panels` cases). Ces trois
   valeurs viennent de l'ADN de la série quand elle en a un (`pre_direction.dialogue_rules_for`) ;
-- **brièveté** : `max_words` mots au plus par réplique, `max_mean_words` en moyenne ;
+- **longueur** : `max_words` mots au plus par réplique, `max_mean_words` en moyenne ;
 - **action** : une case d'action ou de combat (intensité « choc » ou onomatopée) porte au moins un mot d'un
   personnage (cri, ordre, réaction) en plus de l'onomatopée ;
 - **variété** : au moins une pensée, voix off ou narration par chapitre (`require_inner_voice`) ;
 - **place réelle** (`room_problems`) : une fois la page mise en page, chaque bulle doit tenir dans la zone
   de bulles de sa case (`bubble_zone`, lettrage simulé sans visages) : une bulle qui en sort recouvre le
-  dessin.
+  dessin ; et les bulles d'une case n'en couvrent jamais plus de `max_cover` (la moitié, règle de la name).
 
 Le scénariste est relancé avec ces problèmes (`pipeline/script.py`) ; après les relances, le découpage est
 gardé et les mêmes contrôles, refaits sur les bulles enregistrées, s'affichent dans l'écran Scénario
@@ -151,6 +152,13 @@ def check_dialogues(panels: Sequence[DialoguePanel], rules: DialogueRules | None
                 f"{p.label} : {len(p.replies)} répliques pour la place d'au plus {room} "
                 f"(page de {p.panels_on_page} cases) : garde les plus fortes"
             )
+        budget = rules.room_words_for(p.panels_on_page, p.importance)
+        words = sum(count_words(r.text) for r in p.replies)
+        if budget is not None and len(p.replies) > 1 and words > budget:
+            problems.append(
+                f"{p.label} : {words} mots de répliques pour la place d'au plus {budget} "
+                f"(page de {p.panels_on_page} cases) : coupe la tirade sur la case suivante ou garde l'essentiel"
+            )
         for r in p.replies:
             n = count_words(r.text)
             if n > rules.max_words:
@@ -170,7 +178,7 @@ def check_dialogues(panels: Sequence[DialoguePanel], rules: DialogueRules | None
         problems.append(
             f"répliques trop longues : {_fr(stats.mean_words, 1)} mots en moyenne "
             f"({_fr(rules.max_mean_words, 1)} au plus) : "
-            "préfère plusieurs bulles courtes"
+            "laisse l'image raconter, coupe les longues tirades en plusieurs bulles"
         )
     if rules.require_inner_voice and stats.inner_voice == 0:
         problems.append(
@@ -236,19 +244,28 @@ def dialogue_text(rules: DialogueRules | None) -> str:
             if silent
             else " ;"
         ),
-        f"- répliques courtes : {rules.max_words} mots au plus, {_fr(rules.max_mean_words, 1)} en moyenne ; "
-        "plusieurs bulles courtes plutôt qu'une longue ;",
+        f"- répliques : {rules.max_words} mots au plus, {_fr(rules.max_mean_words, 1)} en moyenne ; une réplique "
+        "peut porter une phrase entière, mais l'image raconte d'abord : une longue tirade se coupe en plusieurs "
+        "bulles ou sur plusieurs cases ;",
     ]
     if rules.room:
         rooms = sorted(rules.room, key=lambda r: r.max_panels)
         parts, low = [], 1
         for r in rooms:
             span = f"{low} case{'s' if low > 1 else ''}" if low == r.max_panels else f"{low} à {r.max_panels} cases"
-            parts.append(f"{span} → {r.replies}")
+            words = rules.room_words_for(r.max_panels)
+            many = f"{r.replies} réplique{'s' if r.replies > 1 else ''}"
+            parts.append(f"{span} → {many}" + (f", {words} mots en tout" if words is not None else ""))
             low = r.max_panels + 1
-        bonus = f", +{rules.big_panel_bonus} pour une case forte (importance 3)" if rules.big_panel_bonus else ""
+        extra = []
+        if rules.big_panel_bonus:
+            extra.append(f"+{rules.big_panel_bonus} réplique")
+        if rules.big_panel_bonus_words and any(r.words is not None for r in rooms):
+            extra.append(f"+{rules.big_panel_bonus_words} mots")
+        bonus = f" ({', '.join(extra)} pour une case forte, importance 3)" if extra else ""
         lines.append(
             f"- place des bulles : au plus, par case, selon le nombre de cases de la page : {' ; '.join(parts)}{bonus} ;"
+            " les bulles ne couvrent jamais plus de la moitié de la case ;"
         )
     if rules.action_needs_voice:
         lines.append(
@@ -297,9 +314,25 @@ def _inside(box: Box, zone: Box, tolerance: float = 1.0) -> bool:
     )
 
 
-def room_problems(presets: PresetRegistry, pages: Sequence[Page], fonts: FontBook | None = None) -> list[str]:
-    """Place réelle : bulles qui ne tiennent pas dans la zone de bulles de leur case, une fois la page mise
-    en page (lettrage simulé, sans visages ni positions manuelles). Pages sans mise en page à jour : ignorées."""
+def _covered(panel: Box, bubbles: Sequence[Box]) -> float:
+    """Part de la case couverte par ses bulles (cadres des bulles, dans la case ; ils ne se chevauchent pas)."""
+    area = panel.w * panel.h
+    if area <= 0:
+        return 0.0
+    inside = (b.intersection(panel) for b in bubbles)
+    return sum(b.w * b.h for b in inside if b is not None) / area
+
+
+def room_problems(
+    presets: PresetRegistry,
+    pages: Sequence[Page],
+    fonts: FontBook | None = None,
+    rules: DialogueRules | None = None,
+) -> list[str]:
+    """Place réelle : bulles qui ne tiennent pas dans la zone de bulles de leur case, ou qui couvrent plus de
+    `max_cover` de la case, une fois la page mise en page (lettrage simulé, sans visages ni positions
+    manuelles). Pages sans mise en page à jour : ignorées."""
+    rules = rules or DialogueRules()
     fonts = fonts or FontBook(presets)
     problems: list[str] = []
     story = [p for p in sorted(pages, key=lambda p: p.number) if p.kind == PageKind.story and p.panels]
@@ -341,6 +374,12 @@ def room_problems(presets: PresetRegistry, pages: Sequence[Page], fonts: FontBoo
             )
             placed = letterer.letter_panel(spec, direction).bubbles
             out = sum(1 for b in placed if b.overflow or not _inside(b.box, zone))
+            covered = _covered(box, [b.box for b in placed])
+            if covered > rules.max_cover + 1e-9:
+                problems.append(
+                    f"{label} : les bulles couvrent {round(covered * 100)} % de la case (la moitié au plus) : "
+                    "coupe la tirade sur la case suivante ou garde l'essentiel"
+                )
             if out:
                 fit = len(bubbles) - out
                 keep = (
@@ -371,5 +410,5 @@ def chapter_report(
     panels = page_panels(pages)
     warnings = check_dialogues(panels, rules)
     if rules is not None and rules.check_room:
-        warnings += room_problems(presets, pages, fonts)
+        warnings += room_problems(presets, pages, fonts, rules)
     return DialogueReport(dialogue_stats(panels, rules), warnings)

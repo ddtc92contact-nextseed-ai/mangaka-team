@@ -62,14 +62,16 @@ defaults:
   presence:
     subjective: { min: 0, max: 0.25 }
     empty: { min: 0, max: 0.3 }
-  # Brièveté et parole : les valeurs d'avant l'ADN (prompts/script.yaml), pour que les séries existantes ne
-  # bougent pas ; un genre ou une série peut les changer.
+  # Longueur des répliques : 22 mots au plus, 14 en moyenne (décision du 15/10 : 12 mots coupaient les phrases ;
+  # essai « Nuit du pari », 14,2 mots par réplique mesurés). Une réplique peut porter une phrase entière ; une
+  # longue tirade se coupe en plusieurs bulles ou plusieurs cases. Un genre ou une série peut les changer (une
+  # série qui a réglé ses valeurs les garde).
   dialogue:
     min_per_page: 4
     max_per_page: 8
     min_silent_panels: 1
-    max_words: 12
-    max_mean_words: 7
+    max_words: 22
+    max_mean_words: 14
     target_per_panel: 2
     action_needs_voice: true
   rhythm:
@@ -80,9 +82,9 @@ defaults:
   places: { establishing: true, silent_decor_min: 0.03 }
 
 # Défauts des 7 genres : la prose de leur `llm_guidelines` (style_genres/), chiffrée. Seules les valeurs qui
-# changent sont écrites ; le reste vient de `defaults`. Brièveté et parole du dialogue (`max_words`,
-# `max_mean_words`, `target_per_panel`, `action_needs_voice`) : héritées de `defaults` par tous les genres, pour
-# que les séries existantes gardent leurs valeurs ; un genre les règle dans son bloc `dialogue`.
+# changent sont écrites ; le reste vient de `defaults`. Longueur des répliques et parole du dialogue
+# (`max_words`, `max_mean_words`, `target_per_panel`, `action_needs_voice`) : héritées de `defaults`, sauf un
+# genre qui a une raison d'être plus bref (jeunesse) ; un genre les règle dans son bloc `dialogue`.
 genres:
   # Rythme soutenu, 4 à 6 cases, grandes cases pour l'action, cliffhanger final ; dialogues courts et directs.
   shonen:
@@ -170,7 +172,8 @@ genres:
     rhythm:
       first_peak: { min: 0.25, max: 0.5 }
     places: { silent_decor_min: 0.04 }
-  # Enfants de 6 à 10 ans : simple et lisible, 3 à 5 cases, une action par case, phrases courtes.
+  # Enfants de 6 à 10 ans : simple et lisible, 3 à 5 cases, une action par case, phrases courtes. Répliques
+  # plus brèves que le défaut (14 mots au plus, 8 en moyenne) : un lecteur débutant lit une bulle d'une traite.
   jeunesse:
     panels: { min_per_page: 3, max_per_page: 5 }
     shapes:
@@ -182,7 +185,7 @@ genres:
     presence:
       subjective: { min: 0, max: 0.15 }
       empty: { min: 0, max: 0.2 }
-    dialogue: { min_per_page: 3, max_per_page: 6, min_silent_panels: 1 }
+    dialogue: { min_per_page: 3, max_per_page: 6, min_silent_panels: 1, max_words: 14, max_mean_words: 8 }
     rhythm:
       first_peak: { min: 0.25, max: 0.45 }
       max_peaks_in_a_row: 1

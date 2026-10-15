@@ -55,9 +55,10 @@ settings:
     group: Zone de bulles
     type: number
     min: 0
-    max: 1
+    max: 0.5
     step: 0.01
     source: layout.yaml#bubble_zone.max_fraction
+    help: Jamais plus de la moitié de la case (règle de la name).
   - key: bubble_full_at_chars
     label: Longueur de dialogue pour la surface maximale (caractères)
     group: Zone de bulles

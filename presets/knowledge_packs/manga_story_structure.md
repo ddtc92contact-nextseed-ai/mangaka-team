@@ -588,8 +588,8 @@ muette (réaction), relance (2). Soit 7 répliques et une case muette pour 5 cas
 - Case bavarde : 2 répliques, 3 au plus sur une page de 4 cases ou moins (une case forte en reçoit une de plus) ;
   sur une page de 5 ou 6 cases, 2 au plus (3 pour une case forte) ; de 7 à 9 cases, 1 seule (2 pour une case
   forte).
-- Réplique : 12 mots au plus, 7 en moyenne ; la brièveté fait le rythme : on ajoute une bulle, on ne l'allonge
-  pas.
+- Réplique : 22 mots au plus, 14 en moyenne ; une réplique peut porter une phrase entière, mais l'image raconte
+  d'abord : une longue tirade se coupe en plusieurs bulles ou sur plusieurs cases.
 - La réplique clé d'une scène est seule dans sa case, la plus courte possible (3 à 6 mots), et suivie d'une
   case de réaction (muette ou d'un seul mot).
 

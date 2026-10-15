@@ -894,12 +894,22 @@ class Letterer:
         return max(1.0, w - 2 * px), max(1.0, h - 2 * py)
 
     def fit(
-        self, kind: str, text: str, size_pt: float, max_w: float, max_h: float, *, fill: bool = False
+        self,
+        kind: str,
+        text: str,
+        size_pt: float,
+        max_w: float,
+        max_h: float,
+        *,
+        fill: bool = False,
+        aspect: float | None = None,
     ) -> _Fit | None:
         """Meilleur retour à la ligne à cette taille pour une bulle tenant dans max_w × max_h. `fill` (cadre
-        ajusté à la main) : marges proportionnelles à la taille, forme visée = celle du cadre."""
+        ajusté à la main) : marges proportionnelles à la taille, forme visée = celle du cadre. `aspect` : autre
+        forme visée que `preferred_aspect` (essais de `fallback_aspects` au placement)."""
         scale = self.margin_scale(kind, size_pt) if fill else 1.0
-        aspect = max_w / max_h if fill and max_h > 0 else self.s.preferred_aspect
+        if aspect is None:
+            aspect = max_w / max_h if fill and max_h > 0 else self.s.preferred_aspect
         inner_w, _ = self.inner_size(kind, max_w, max_h, scale)
         size_px = self.pt(size_pt)
         lo = min(inner_w, size_px * 5)
@@ -1175,23 +1185,30 @@ class Letterer:
 
             regions = [r for r in ((panel.zone.intersection(inner) if panel.zone else None), inner) if r is not None]
             steps = max(len(self.bubble_sizes(b)) for b in auto)
+            # Formes essayées à chaque taille avant de réduire le texte : celle visée, puis des bulles plus plates
+            # (empilées) ou plus hautes (côte à côte) — une longue réplique tient souvent en changeant de forme.
+            aspects: list[float | None] = [None, *self.s.fallback_aspects]
             placed: tuple[list[_Fit], list[Box]] | None = None
             for k in range(steps):
                 for region in regions:
-                    fitted: list[_Fit] = []
-                    for b, text in zip(auto, texts, strict=True):
-                        sizes = self.bubble_sizes(b)
-                        f = self.fit(b.kind, text, sizes[min(k, len(sizes) - 1)], region.w, region.h)
-                        if f is None:
-                            break
-                        fitted.append(f)
-                    else:
-                        boxes = self.place_sequence(
-                            [f.outer for f in fitted], region, [*faces, *obstacles], direction, tails, fits
-                        )
-                        if boxes is not None:
-                            placed = (fitted, boxes)
-                            break
+                    for aspect in aspects:
+                        fitted: list[_Fit] = []
+                        for b, text in zip(auto, texts, strict=True):
+                            sizes = self.bubble_sizes(b)
+                            size = sizes[min(k, len(sizes) - 1)]
+                            f = self.fit(b.kind, text, size, region.w, region.h, aspect=aspect)
+                            if f is None:
+                                break
+                            fitted.append(f)
+                        else:
+                            boxes = self.place_sequence(
+                                [f.outer for f in fitted], region, [*faces, *obstacles], direction, tails, fits
+                            )
+                            if boxes is not None:
+                                placed = (fitted, boxes)
+                                break
+                    if placed:
+                        break
                 if placed:
                     break
             overflow_ids: set[int] = set()
