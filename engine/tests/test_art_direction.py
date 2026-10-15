@@ -30,7 +30,7 @@ from mangaka_engine.presets import PresetRegistry
 from mangaka_engine.providers.llm import LLMAuthError, MockLLMProvider
 from mangaka_engine.providers.llm.mock import mock_art_direction
 from mangaka_engine.store.models import Page, PageDirection, Panel
-from tests.conftest import LEAD, PRESETS_DIR, STYLE, force_stages
+from tests.conftest import LEAD, PRESETS_DIR, STYLE, force_stages, start_script
 
 PRESETS = PresetRegistry.load(PRESETS_DIR)
 PROMPT = PRESETS.prompt("direction-artistique")
@@ -212,7 +212,7 @@ def _scripted_chapter(c: TestClient, sid: int, pages: int = 4) -> int:
         f"/projects/{sid}/chapters",
         json={"synopsis": "Un duel sous la pluie. Le rival frappe.", "target_page_count": pages},
     ).json()
-    assert _wait(c, c.post(f"/chapters/{ch['id']}/script").json())["status"] == "succeeded"
+    assert _wait(c, start_script(c, ch["id"]).json())["status"] == "succeeded"
     return ch["id"]
 
 
@@ -280,7 +280,7 @@ def test_invalid_answers_end_in_a_visible_job_error(c: TestClient) -> None:
     ch = c.post(
         f"/projects/{sid}/chapters", json={"synopsis": "Un duel. [mock:da-invalide:3]", "target_page_count": 2}
     ).json()
-    assert _wait(c, c.post(f"/chapters/{ch['id']}/script").json())["status"] == "succeeded"
+    assert _wait(c, start_script(c, ch["id"]).json())["status"] == "succeeded"
     job = _wait(c, c.post(f"/chapters/{ch['id']}/direction", json={}).json())
     assert job["status"] == "failed" and "invalide 3 fois de suite" in job["error"]
     # deux réponses invalides puis une bonne : le job réussit

@@ -23,7 +23,7 @@ from mangaka_engine.pipeline.script import ScriptContext, parse_script, render_m
 from mangaka_engine.presets import PresetRegistry
 from mangaka_engine.presets.schemas import DialogueRoom, DialogueRules
 from mangaka_engine.providers.llm import ChatMessage, LLMAuthError, LLMResult, MockLLMProvider
-from tests.conftest import PRESETS_DIR, STYLE
+from tests.conftest import PRESETS_DIR, STYLE, start_script
 from tests.fixtures import vulcano
 
 PRESETS = PresetRegistry.load(PRESETS_DIR)
@@ -348,7 +348,7 @@ def _series(c: TestClient, synopsis: str, pages: int = 5) -> dict[str, Any]:
 
 
 def _decouper(c: TestClient, chapter_id: int) -> dict[str, Any]:
-    job = _ok(c.post(f"/chapters/{chapter_id}/script"), 202)
+    job = _ok(start_script(c, chapter_id), 202)
     c.app.state.ctx.jobs.wait(job["id"])  # type: ignore[attr-defined]
     done = _ok(c.get(f"/jobs/{job['id']}"))
     assert done["status"] == "succeeded", done["error"]

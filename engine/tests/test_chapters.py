@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from mangaka_engine.config import Settings
 from mangaka_engine.main import create_app
 from mangaka_engine.providers.llm import MockLLMProvider
-from tests.conftest import STYLE
+from tests.conftest import STYLE, start_script
 
 
 @pytest.fixture
@@ -33,7 +33,7 @@ def _chapter(c: TestClient, sid: int, **body: Any) -> dict:
 
 
 def _script(c: TestClient, chapter_id: int) -> dict:
-    resp = c.post(f"/chapters/{chapter_id}/script")
+    resp = start_script(c, chapter_id)
     assert resp.status_code == 202, resp.text
     job = resp.json()
     c.app.state.ctx.jobs.wait(job["id"])  # type: ignore[attr-defined]
@@ -165,13 +165,13 @@ def test_mock_three_invalid_answers_end_in_visible_error(make_settings: Callable
         assert job["finished_at"] is not None  # pas de spinner infini
         assert c.get(f"/chapters/{ch['id']}/pages").json() == []
         # un nouvel essai est possible tout de suite
-        assert c.post(f"/chapters/{ch['id']}/script").status_code == 202
+        assert start_script(c, ch["id"]).status_code == 202
 
 
 def test_script_requires_synopsis(app_client: TestClient) -> None:
     sid = _series(app_client)["id"]
     ch = _chapter(app_client, sid)
-    r = app_client.post(f"/chapters/{ch['id']}/script")
+    r = start_script(app_client, ch["id"])
     assert r.status_code == 422 and r.json()["errors"][0]["field"] == "synopsis"
 
 
@@ -179,7 +179,7 @@ def test_script_with_broken_llm_config_is_503(make_settings: Callable[..., Setti
     with TestClient(create_app(make_settings(llm_provider="deepseek"))) as c:
         sid = _series(c)["id"]
         ch = _chapter(c, sid, synopsis="x")
-        r = c.post(f"/chapters/{ch['id']}/script")
+        r = start_script(c, ch["id"])
         assert r.status_code == 503 and "DEEPSEEK_API_KEY" in r.json()["detail"]
 
 

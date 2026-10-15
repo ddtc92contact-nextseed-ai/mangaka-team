@@ -803,6 +803,63 @@ artistique (échelle des plans, présence, formes, courbe — c'est lui qui fixe
 agents », `GET /chapters/{id}/script-brief`) et avertit, sans bloquer, quand la bible de la série est vide ou
 qu'un personnage cité par le synopsis n'y a pas de note. Le LLM factice tient la charte des 7 genres.
 
+## Types de scène (`scene_types.yaml`, `prompts/scenes.yaml`)
+
+L'appli suit la méthode des mangakas : intrigue → **liste des scènes avec leurs pages** → name → relecture →
+dessin. L'étape « Scènes » (onglet du chapitre, avant Scénario ; `engine/mangaka_engine/pipeline/scenes.py`)
+pose l'unité **scène** : ordre, titre, résumé en 1 ou 2 phrases, type, nombre de pages, lieu de la série
+facultatif (`chapter_scenes`) ; chaque page de l'histoire porte sa scène (`pages.scene_id`).
+
+**Liste fermée.** `types` contient exactement `calme`, `dialogue`, `combat`, `poursuite`, `sport_collectif`,
+`revelation` (un type absent ou en trop rend le preset invalide ; l'agent et l'écran ne proposent qu'eux, un type
+hors liste est refusé). Chaque type a `name`, `description` et un **profil de tempo** (`tempo`) écrit avec les
+**noms des curseurs de l'ADN** (`panels.*`, `shapes.*`, `shots.*`, `presence.*`, `dialogue.*`, `rhythm.*`,
+`places.*`, mêmes bornes), plus quelques valeurs propres au tempo :
+
+| Valeur | Sens |
+| --- | --- |
+| `motion_lines.required` / `motion_lines.forbidden` | lignes de mouvement imposées / interdites (jamais les deux) |
+| `narration.max_per_page` | encadrés de narration par planche, au plus (0 = aucun ; 0 à 6) |
+| `staging.no_repeated_shot` | jamais deux fois de suite le même cadrage |
+| `staging.constant_direction` | sens de course constant |
+| `staging.alternate_wide_tight` | alternance plan large / plan serré |
+| `staging.page_turn_reveal` | la révélation tombe à la tourne de page (grande case ou pleine page) |
+
+Repères livrés (note de Morigane) : calme 5-6 cases, 4-8 répliques, lignes interdites ; dialogue 4-5 cases,
+6-10 répliques, jamais deux fois le même cadrage ; combat 6 cases, gros plans ≥ 50 % (2 gros plans + 1 très gros
+plan sur 6), plans larges ≤ 17 % (1 sur 6), 2-4 répliques, 2 cases muettes ou plus, lignes imposées, aucun
+encadré ; poursuite 5 cases, 2-3 répliques, sens de course constant, lignes imposées ; sport_collectif 6 cases,
+plans larges et gros plans ≥ 30 % chacun, alternance large / serré ; revelation 1-4 cases, 0-3 répliques, une
+grande case sur chaque planche (`shapes.big_panel_share.min: 1`), révélation à la tourne.
+
+**Héritage.** Défaut ultime → genre → ADN de la série → profil du type → ajustements de la série. Un profil
+**précise ou resserre** : seules les valeurs qu'il écrit changent, toutes les autres restent celles de la série
+(`apply_tempo`). Si une valeur du profil croise sa borne jumelle héritée (au moins 6 cases dans une série « 3 à
+5 »), la borne héritée suit (6 à 6). Le chargement vérifie que chaque profil s'applique à l'ADN de chaque genre.
+La série ajuste chaque profil dans la carte « ADN de la série » (familles « Tempo — Combat »…, chemins
+`tempo.<type>.<curseur>`), stockés à part dans `projects.scene_tempo` ; une valeur égale au preset n'est pas
+gardée. `max_pages_per_scene` (12) et `max_scenes` (20) bornent la liste.
+
+**Agent « Découpage en scènes »** (`prompts/scenes.yaml`, LLM du scénariste, savoir-faire du rôle `script`) :
+synopsis, bible, résumés des chapitres précédents (et ce qu'ils ont reporté), lieux, types avec leur tempo en
+clair (`$scene_types`), méthode (kishōtenketsu, pic vers les 2/3, 3 premières pages fortes, tourne de page).
+**Le nombre de pages du chapitre est fixe** : la somme des pages des scènes vaut `target_page_count` ; ce qui ne
+rentre pas va dans `deferred` (« à reporter au chapitre suivant »), jamais tassé. Réponse JSON validée (type,
+pages, somme, lieu), relancée avec l'erreur (`max_retries`, 2 au plus), puis erreur lisible. Le LLM factice
+devine le type d'après les mots de chaque phrase du synopsis (`[mock:scenes-invalide:N]` : N essais invalides).
+
+**Validation et garde.** L'auteur retouche la liste (type, pages, ordre, résumé, ajout, suppression, fusion,
+« Redemander une proposition ») et clique sur « Valider les scènes » — le rôle de l'éditeur, refusé tant que la
+somme ne vaut pas la cible ; toute retouche retire la validation. L'étape `scenes` de la garde d'étapes est exigée
+par l'écriture du scénario (« passer outre » possible). Un chapitre déjà écrit sans scènes est en « ancien
+mode » : jamais bloqué.
+
+**Scénariste.** Il reçoit la liste validée en clair (`$scenes` de `prompts/script.yaml` : scène, type, pages,
+tempo) ; chaque page rendue porte `scene`, le nombre de pages de chaque scène est contrôlé (relance, puis
+avertissement) et chaque page enregistrée est rattachée à sa scène (par sa déclaration si elle respecte la liste,
+sinon par sa place). Les profils de tempo ne sont pas encore vérifiés case par case : ce sera le « name par
+scène ».
+
 ## Créateur de série (`series_creator.yaml`, `agents/createur-serie.yaml`, `prompts/createur-serie.yaml`)
 
 Septième agent, le seul qui intervient **avant** le premier synopsis : à la création d'une série (la fiche s'ouvre

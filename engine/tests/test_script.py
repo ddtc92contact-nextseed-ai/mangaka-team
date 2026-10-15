@@ -19,7 +19,7 @@ from mangaka_engine.pipeline.script import (
 from mangaka_engine.presets import PresetError, PresetRegistry
 from mangaka_engine.providers.llm import ChatMessage, LLMAuthError, LLMResult, LLMTimeoutError, MockLLMProvider
 from mangaka_engine.providers.llm.mock import mock_script
-from tests.conftest import PRESETS_DIR, STYLE
+from tests.conftest import PRESETS_DIR, STYLE, start_script
 
 PRESETS = PresetRegistry.load(PRESETS_DIR)
 PROMPT = PRESETS.prompt("script")
@@ -329,7 +329,7 @@ def test_second_decoupage_replaces_story_pages_and_is_persisted(client: TestClie
     ).json()
     jobs = client.app.state.ctx.jobs  # type: ignore[attr-defined]
     for _ in range(2):
-        job = client.post(f"/chapters/{ch['id']}/script").json()
+        job = start_script(client, ch["id"]).json()
         jobs.wait(job["id"])
         done = client.get(f"/jobs/{job['id']}").json()
         assert done["status"] == "succeeded", done["error"]

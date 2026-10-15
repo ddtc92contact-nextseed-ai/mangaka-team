@@ -103,6 +103,7 @@ settings:
       - rythmes
       - dialogue_rules
       - pre_direction
+      - scenes
       - context_json
       - bible
       - savoir_faire

@@ -1,0 +1,88 @@
+# Types de scène et leurs profils de tempo : l'unité « scène » du chapitre (étape Scènes, avant le Scénario).
+# Voir presets/README.md (« Types de scène ») et engine/mangaka_engine/pipeline/scenes.py.
+#
+# Liste FERMÉE : calme, dialogue, combat, poursuite, sport_collectif, revelation — ni plus, ni moins. Le découpage
+# en scènes ne propose que ces types ; un type hors liste est refusé (relance de l'agent, puis erreur lisible).
+#
+# Chaque type a un profil de tempo (`tempo`) écrit avec les NOMS DES CURSEURS DE L'ADN (presets/pre_direction.yaml :
+# panels.*, shapes.*, shots.*, presence.*, dialogue.*, rhythm.*, places.*), plus quelques valeurs propres au tempo :
+#   motion_lines.required / motion_lines.forbidden   lignes de mouvement imposées / interdites (jamais les deux)
+#   narration.max_per_page                           encadrés de narration par planche, au plus (0 = aucun)
+#   staging.no_repeated_shot                         jamais deux fois de suite le même cadrage
+#   staging.constant_direction                       sens de course constant d'une case à l'autre
+#   staging.alternate_wide_tight                     alternance plan large / plan serré
+#   staging.page_turn_reveal                         la révélation tombe à la tourne de page (grande case ou pleine page)
+#
+# Héritage : défaut ultime → genre → ADN de la série → profil du type → ajustements de la série (écran ADN, famille
+# « Tempo »). Un profil PRÉCISE ou RESSERRE les valeurs héritées, il ne les remplace pas en bloc : seules les valeurs
+# écrites ici changent, toutes les autres restent celles de la série. Si une valeur du profil croise la borne héritée
+# (cases au moins 6 dans une série « 3 à 5 cases »), l'autre borne suit (6 à 6), jamais l'inverse.
+#
+# Parts (shots.*, shapes.*) : part des cases (ou des planches) de la scène, de 0 à 1 ; sur une planche de 6 cases,
+# 0.17 ≈ 1 case, 0.5 = 3 cases.
+
+max_pages_per_scene: 12   # une scène plus longue est à découper en deux
+max_scenes: 20            # scènes au plus par chapitre
+
+types:
+  calme:
+    name: Calme
+    description: Installation, respiration, quotidien. On laisse vivre le décor et les personnages.
+    tempo:
+      panels: { min_per_page: 5, max_per_page: 6 }
+      dialogue: { min_per_page: 4, max_per_page: 8 }
+      motion_lines: { forbidden: true }
+      narration: { max_per_page: 2 }
+
+  dialogue:
+    name: Dialogue
+    description: Échange entre personnages ; le texte porte la scène, l'image la rythme.
+    tempo:
+      panels: { min_per_page: 4, max_per_page: 5 }
+      dialogue: { min_per_page: 6, max_per_page: 10 }
+      staging: { no_repeated_shot: true }
+      narration: { max_per_page: 1 }
+
+  combat:
+    name: Combat
+    description: Affrontement ; l'image raconte, très peu de mots, des visages et des impacts.
+    tempo:
+      panels: { min_per_page: 6, max_per_page: 6 }
+      # 2 gros plans et 1 très gros plan au moins sur 6 cases (3/6), 1 plan large au plus (1/6).
+      shots:
+        close_up: { min: 0.5, max: 0.7 }
+        wide: { max: 0.17 }
+        tight_max: 0.85
+      dialogue: { min_per_page: 2, max_per_page: 4, min_silent_panels: 2 }
+      motion_lines: { required: true }
+      narration: { max_per_page: 0 }
+
+  poursuite:
+    name: Poursuite
+    description: Course, fuite, traque ; le lecteur suit le mouvement sans jamais se perdre.
+    tempo:
+      panels: { min_per_page: 5, max_per_page: 5 }
+      dialogue: { min_per_page: 2, max_per_page: 3 }
+      staging: { constant_direction: true }
+      motion_lines: { required: true }
+
+  sport_collectif:
+    name: Sport collectif
+    description: Match, jeu d'équipe ; on alterne la vue d'ensemble du terrain et les visages.
+    tempo:
+      panels: { min_per_page: 6, max_per_page: 6 }
+      shots:
+        wide: { min: 0.3 }
+        close_up: { min: 0.3 }
+      staging: { alternate_wide_tight: true }
+
+  revelation:
+    name: Révélation
+    description: Le secret tombe, le personnage apparaît ; une grande case ou une pleine page à la tourne.
+    tempo:
+      panels: { min_per_page: 1, max_per_page: 4 }
+      shapes:
+        big_panel_share: { min: 1.0 }   # chaque planche de la scène a sa grande case
+      dialogue: { min_per_page: 0, max_per_page: 3, min_silent_panels: 1 }
+      staging: { page_turn_reveal: true }
+      narration: { max_per_page: 1 }

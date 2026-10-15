@@ -8,6 +8,8 @@ Série → ReferenceVariant : images générées par « Créer des références 
 Série → Volume (tome : chapitres inclus dans l'ordre via `VolumeChapter`, format et versions de couverture
 `VolumeCover`)
 Série → Chapter → Page → Panel (+ versions d'image → annotation humaine) → Bubble · Job.
+Chapter → ChapterScene : scènes du chapitre (ordre, type, pages ; validées par l'auteur), chaque page de l'histoire
+rattachée à sa scène (`Page.scene_id`).
 Banc d'essai du QC : `QCBenchRun` (historique des mesures du QC sur les cases annotées).
 Savoir-faire : `KnowledgeCollection` (globale ou d'une série) → `KnowledgeDocument` → `KnowledgeChunk`
 (+ index plein texte FTS5 `knowledge_fts`, tenu à jour par des triggers) · `SeriesBible` (une par série)
@@ -190,6 +192,9 @@ class Project(TimestampMixin, Base):
     # ADN de la série (presets/pre_direction.yaml) : seules les valeurs ajustées par l'auteur, par chemin
     # ({"shots.wide.min": 0.2}) ; tout le reste est hérité du genre (pipeline/pre_direction.py `series_dna`).
     pre_direction: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, server_default="{}")
+    # Profils de tempo des types de scène (presets/scene_types.yaml) ajustés par la série, par type et chemin
+    # ({"combat.panels.max_per_page": 7}) ; le reste vient du preset (pipeline/pre_direction.py `tempo_profile`).
+    scene_tempo: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, server_default="{}")
 
     characters: Mapped[list[Character]] = relationship(
         back_populates="project", cascade="all, delete-orphan", order_by="Character.name"
@@ -393,11 +398,42 @@ class Chapter(TimestampMixin, Base):
     planned_date: Mapped[date | None] = mapped_column(default=None)
     # Résumé produit par l'étape « scénario », relu par les chapitres suivants (continuité).
     summary: Mapped[str] = mapped_column(Text, default="")
+    # Étape « Scènes » (pipeline/scenes.py) : validation de la liste par l'auteur (l'éditeur) — None = pas validée ;
+    # une retouche de la liste la retire. `scenes_deferred` : ce que le découpage en scènes reporte au chapitre
+    # suivant (jamais tassé dans celui-ci).
+    scenes_validated_at: Mapped[datetime | None] = mapped_column(default=None)
+    scenes_validated_by: Mapped[str] = mapped_column(String(120), default="", server_default="")
+    scenes_deferred: Mapped[list[str]] = mapped_column(JSON, default=list, server_default="[]")
 
     project: Mapped[Project] = relationship(back_populates="chapters")
     pages: Mapped[list[Page]] = relationship(
         back_populates="chapter", cascade="all, delete-orphan", order_by="Page.number"
     )
+    scenes: Mapped[list[ChapterScene]] = relationship(
+        back_populates="chapter", cascade="all, delete-orphan", order_by="ChapterScene.position"
+    )
+
+
+class ChapterScene(TimestampMixin, Base):
+    """Scène d'un chapitre (pipeline/scenes.py) : place dans le chapitre, titre, résumé en une ou deux phrases, type
+    (liste fermée de presets/scene_types.yaml, qui donne son profil de tempo), nombre de pages et lieu de la série
+    facultatif. La somme des pages des scènes vaut `Chapter.target_page_count` une fois validée."""
+
+    __tablename__ = "chapter_scenes"
+    __table_args__ = NEVER_REUSED
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chapter_id: Mapped[int] = mapped_column(ForeignKey("chapters.id", ondelete="CASCADE"), index=True)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    title: Mapped[str] = mapped_column(String(200), default="")
+    summary: Mapped[str] = mapped_column(Text, default="")
+    scene_type: Mapped[str] = mapped_column(String(40))
+    page_count: Mapped[int] = mapped_column(Integer, default=1)
+    location_id: Mapped[int | None] = mapped_column(
+        ForeignKey("series_locations.id", ondelete="SET NULL"), default=None, index=True
+    )
+
+    chapter: Mapped[Chapter] = relationship(back_populates="scenes")
 
 
 class Volume(TimestampMixin, Base):
@@ -502,6 +538,10 @@ class Page(TimestampMixin, Base):
     # Indice de rythme donné par le scénario : lent | normal | rapide (None = normal).
     rythme: Mapped[str | None] = mapped_column(String(20), default=None)
     state: Mapped[PageState] = mapped_column(_enum(PageState), default=PageState.draft)
+    # Scène du chapitre à laquelle appartient la page (None : page bonus, ou chapitre écrit sans scènes).
+    scene_id: Mapped[int | None] = mapped_column(
+        ForeignKey("chapter_scenes.id", ondelete="SET NULL"), default=None, index=True
+    )
 
     chapter: Mapped[Chapter] = relationship(back_populates="pages")
     panels: Mapped[list[Panel]] = relationship(

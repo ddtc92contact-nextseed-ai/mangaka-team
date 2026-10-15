@@ -35,6 +35,7 @@ Arborescence attendue :
       style_loras.yaml         # catalogue des LoRA de style (mots déclencheurs, poids conseillé)
       camera_loras.yaml        # LoRA Multiple-Angles et Cohérence anime, vocabulaire de caméra
       pre_direction.yaml       # ADN de la série : charte chiffrée, défaut ultime et défauts des 7 genres
+      scene_types.yaml         # types de scène (liste fermée) et leurs profils de tempo, en curseurs de l'ADN
       series_creator.yaml      # créateur de série : questions fermées de l'échange avec l'auteur (ADN et bible)
 
 Un preset invalide n'empêche pas le moteur de démarrer : il est écarté et
@@ -78,6 +79,7 @@ from .schemas import (
     ProvidersPreset,
     QCSettings,
     ReferenceSheet,
+    SceneTypesSettings,
     SeriesCreatorSettings,
     StyleGenre,
     StyleLoraCatalog,
@@ -161,6 +163,8 @@ class PresetRegistry:
     cover_charter: CoverCharterSettings | None = None
     # ADN de la série (pre_direction.yaml) ; None : absent ou invalide (aucune charte vérifiée).
     pre_direction: PreDirectionSettings | None = None
+    # Types de scène et profils de tempo (scene_types.yaml) ; None : absent ou invalide (pas d'étape Scènes possible).
+    scene_types: SceneTypesSettings | None = None
     # Créateur de série (series_creator.yaml) ; None : absent ou invalide (échange indisponible).
     series_creator: SeriesCreatorSettings | None = None
     issues: list[PresetIssue] = field(default_factory=list)
@@ -482,6 +486,7 @@ class PresetRegistry:
         reg.reference_sheets = dict(sorted(reg.reference_sheets.items(), key=lambda kv: (kv[1].order, kv[1].name)))
         reg._load_styles()
         reg._load_pre_direction()
+        reg._load_scene_types()
         reg._load_series_creator()
         reg._load_covers()
         reg._load_identity()
@@ -501,6 +506,28 @@ class PresetRegistry:
         if unknown:
             self.issues.append(PresetIssue(self._rel(path), f"genres : genre inconnu « {unknown[0]} » (style_genres/)"))
         self.pre_direction = settings
+
+    def _load_scene_types(self) -> None:
+        """Types de scène : chaque profil de tempo doit s'appliquer à l'ADN par défaut sans le rendre invalide."""
+        path = self.root / "scene_types.yaml"
+        if not path.exists():
+            return
+        settings = self._parse(path, SceneTypesSettings)
+        if settings is None:
+            return
+        if self.pre_direction is not None:
+            # Import local : pipeline/pre_direction importe ce paquet.
+            from ..pipeline.pre_direction import DnaError, apply_tempo
+
+            for type_id, scene_type in settings.types.items():
+                for genre in [None, *self.pre_direction.genres]:
+                    try:
+                        apply_tempo(self.pre_direction.genre(genre), scene_type.tempo)
+                    except DnaError as exc:
+                        where = f" (genre {genre})" if genre else ""
+                        self.issues.append(PresetIssue(self._rel(path), f"types.{type_id}{where} : {exc.message}"))
+                        return
+        self.scene_types = settings
 
     def _load_series_creator(self) -> None:
         """Questions du créateur de série : leurs pistes d'ADN visent des valeurs connues de pre_direction.yaml."""

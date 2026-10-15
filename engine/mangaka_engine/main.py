@@ -41,6 +41,7 @@ from .api import (
     qc_bench,
     reference_sheets,
     reset,
+    scenes,
     series_creator,
     sketch,
     stages,
@@ -300,6 +301,7 @@ def create_app(settings: Settings | None = None, providers: Providers | None = N
     app.include_router(cover_composition.router)
     app.include_router(cover_charter.router)
     app.include_router(stages.router)
+    app.include_router(scenes.router)
     app.include_router(cast.router)
     app.include_router(art_direction.router)
     app.include_router(jobs.router)

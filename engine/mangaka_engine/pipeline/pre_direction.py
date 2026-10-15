@@ -12,7 +12,10 @@ artistique et leurs contrôles.
   « resserre ») ; formes de planche, présence, courbe de rythme et lieux (case d'établissement au changement de
   lieu, cases de décor muettes) dans `check_page_rules` (`chapter_issues`) ;
 - **prompts** : `$pre_direction` en clair (`script_text` pour le scénariste, `art_text` pour la direction
-  artistique) ; `$style_guidelines` reste.
+  artistique) ; `$style_guidelines` reste ;
+- **tempo des scènes** (`presets/scene_types.yaml`) : le profil d'un type de scène précise ou resserre l'ADN de la
+  série (`apply_tempo`, jamais en bloc) ; la série ajuste chaque profil (`Project.scene_tempo`, famille « tempo » de
+  l'écran ADN) ; `tempo_text` le dit en clair au découpage en scènes et au scénariste.
 
 La charte avertit, elle ne bloque pas : une règle enfreinte relance l'agent, puis devient un avertissement visible.
 Elle est distincte de la garde d'étapes (`pipeline/stage_gate.py`). Aucun seuil ici : tous viennent du preset.
@@ -31,15 +34,20 @@ from pydantic import BaseModel, ValidationError
 
 from ..presets import PresetRegistry
 from ..presets.schemas import (
+    SCENE_TYPES,
     SHOT_CLASSES,
+    TEMPO_EXTRAS,
     TIGHT_CLASSES,
     DialogueRules,
     LayoutTemplate,
     PreDirection,
     PreDirectionSettings,
+    SceneTypesSettings,
     ShareRange,
+    check_tempo_value,
 )
 from ..store.models import Project
+from ..validation import translate_error
 from .framing import REACTION, SUBJECTIVE, plain, viewpoint_key
 from .layout import _leaf_shares
 
@@ -836,4 +844,180 @@ def field_specs() -> list[dict[str, Any]]:
                 "step": 0.05 if kind == "share" else 1 if kind == "int" else None,
             }
         )
+    return out
+
+
+# --- tempo des scènes (presets/scene_types.yaml) ---------------------------------------
+TEMPO_LABELS: dict[str, tuple[str, str]] = {
+    "motion_lines.required": ("Lignes de mouvement imposées", "Vitesse, impact : le mouvement se dessine."),
+    "motion_lines.forbidden": ("Lignes de mouvement interdites", "Image posée, sans effet de vitesse."),
+    "narration.max_per_page": ("Encadrés de narration par planche, au plus", "0 = aucun récitatif."),
+    "staging.no_repeated_shot": ("Jamais deux fois le même cadrage", "D'une case à la suivante."),
+    "staging.constant_direction": ("Sens de course constant", "Le mouvement va toujours dans le même sens."),
+    "staging.alternate_wide_tight": ("Alternance large / serré", "Vue d'ensemble, puis visages, et ainsi de suite."),
+    "staging.page_turn_reveal": (
+        "Révélation à la tourne de page",
+        "Une grande case ou une pleine page juste après la tourne.",
+    ),
+}
+
+
+def _sibling(path: str) -> tuple[str, bool] | None:
+    """Borne jumelle d'une valeur de l'ADN : (chemin, la valeur donnée est-elle le minimum)."""
+    for low, high in ((".min", ".max"), (".min_per_page", ".max_per_page")):
+        if path.endswith(low):
+            return path[: -len(low)] + high, True
+        if path.endswith(high):
+            return path[: -len(high)] + low, False
+    return None
+
+
+def apply_tempo(base: PreDirection, tempo: Mapping[str, Any]) -> PreDirection:
+    """ADN d'une scène : celui de la série (`base`) précisé par un profil de tempo (chemin → valeur). Seules les
+    valeurs de l'ADN écrites dans le profil changent ; si l'une croise sa borne jumelle héritée (au moins 6 cases dans
+    une série « 3 à 5 »), la borne héritée suit (6 à 6). `DnaError` sur une valeur invalide."""
+    dna = {p: v for p, v in tempo.items() if p in LEAVES}
+    for path, value in tempo.items():
+        error = check_tempo_value(path, value)
+        if error:
+            raise DnaError(path, error)
+    flat = {**flatten(base), **{p: (int(v) if _kind(p) == "int" else v) for p, v in dna.items()}}
+    for path, value in dna.items():
+        twin = _sibling(path)
+        if twin is None or twin[0] in dna or twin[0] not in flat:
+            continue
+        other, is_min = twin
+        if (is_min and flat[other] < value) or (not is_min and flat[other] > value):
+            flat[other] = value
+    try:
+        return PreDirection.model_validate(_nest(flat))
+    except ValidationError as exc:
+        err = exc.errors()[0]
+        loc = ".".join(str(x) for x in err["loc"])
+        message = (
+            str(err["msg"]).removeprefix("Value error, ") if err.get("type") == "value_error" else translate_error(err)  # type: ignore[arg-type]
+        )
+        raise DnaError(loc, f"{LABELS.get(loc, (loc,))[0]} : {message}") from None
+
+
+def tempo_profile(settings: SceneTypesSettings | None, project: Project | None, type_id: str) -> dict[str, Any]:
+    """Profil de tempo d'un type pour une série : celui du preset, ajusté par la série (`Project.scene_tempo`,
+    {"combat.panels.max_per_page": 7}) ; un ajustement devenu invalide est ignoré."""
+    if settings is None or type_id not in settings.types:
+        return {}
+    profile = dict(settings.types[type_id].tempo)  # type: ignore[index]
+    for key, value in ((project.scene_tempo if project is not None else None) or {}).items():
+        t, _, path = key.partition(".")
+        if t == type_id and path in profile and check_tempo_value(path, value) is None:
+            profile[path] = value
+    return profile
+
+
+def scene_dna(charter: Charter | None, profile: Mapping[str, Any]) -> PreDirection | None:
+    """ADN effectif d'une scène (ADN de la série + profil) ; None sans charte ; l'ADN de la série si le profil ne
+    s'applique plus (preset changé)."""
+    if charter is None:
+        return None
+    try:
+        return apply_tempo(charter.dna, profile)
+    except DnaError as exc:
+        log.warning("profil de tempo ignoré (%s)", exc.message)
+        return charter.dna
+
+
+def _tempo_value(path: str, value: Any) -> str:
+    if path in TEMPO_EXTRAS:
+        return str(value)
+    if _kind(path) == "share":
+        return _pct(float(value))
+    return str(value)
+
+
+def tempo_text(profile: Mapping[str, Any], dna: PreDirection | None = None) -> str:
+    """Profil de tempo en clair (une ligne) : « 6 cases par planche ; gros plans au moins 50 % ; 2 à 4 répliques par
+    planche ; lignes de mouvement imposées ». Avec `dna` (ADN effectif de la scène), les bornes sont celles qui
+    s'appliquent vraiment (la borne héritée qui a suivi le profil comprise)."""
+    values = flatten(dna) if dna is not None else {}
+
+    def get(path: str) -> Any:
+        return values.get(path, profile.get(path))
+
+    parts: list[str] = []
+    done: set[str] = set()
+    for prefix, unit in (("panels", "cases par planche"), ("dialogue", "répliques par planche")):
+        lo, hi = f"{prefix}.min_per_page", f"{prefix}.max_per_page"
+        if lo in profile or hi in profile:
+            a, b = get(lo), get(hi)
+            parts.append(f"{a} {unit}" if a == b else f"{a} à {b} {unit}")
+            done |= {lo, hi}
+    for cls in SHOT_CLASSES:
+        lo, hi = f"shots.{cls}.min", f"shots.{cls}.max"
+        if lo in profile and hi in profile:
+            parts.append(f"{SHOT_LABELS[cls]} {_pct(get(lo))} à {_pct(get(hi))} des cases")
+        elif lo in profile:
+            parts.append(f"{SHOT_LABELS[cls]} au moins {_pct(get(lo))} des cases")
+        elif hi in profile:
+            parts.append(f"{SHOT_LABELS[cls]} au plus {_pct(get(hi))} des cases")
+        done |= {lo, hi}
+    if "dialogue.min_silent_panels" in profile:
+        n = int(get("dialogue.min_silent_panels"))
+        parts.append(f"au moins {n} case{'s' if n > 1 else ''} muette{'s' if n > 1 else ''} par planche")
+        done.add("dialogue.min_silent_panels")
+    if "shapes.big_panel_share.min" in profile:
+        share = float(get("shapes.big_panel_share.min"))
+        parts.append(
+            "une grande case sur chaque planche" if share >= 1 - EPS else f"grande case sur {_pct(share)} des planches"
+        )
+        done |= {"shapes.big_panel_share.min", "shapes.big_panel_share.max"}
+    if profile.get("motion_lines.required"):
+        parts.append("lignes de mouvement imposées")
+    if profile.get("motion_lines.forbidden"):
+        parts.append("lignes de mouvement interdites")
+    done |= {"motion_lines.required", "motion_lines.forbidden"}
+    if "narration.max_per_page" in profile:
+        n = int(profile["narration.max_per_page"])
+        parts.append(
+            "aucun encadré de narration"
+            if n == 0
+            else f"{n} encadré{'s' if n > 1 else ''} de narration par planche au plus"
+        )
+        done.add("narration.max_per_page")
+    for path, (label, _help) in TEMPO_LABELS.items():
+        if path.startswith("staging.") and profile.get(path):
+            parts.append(label.lower())
+        done.add(path)
+    for path in profile:
+        if path not in done:
+            label = LABELS.get(path, (path,))[0]
+            parts.append(f"{label.lower()} : {_tempo_value(path, get(path))}")
+    return " ; ".join(parts) or "pas de profil (valeurs de la série)"
+
+
+def tempo_specs(settings: SceneTypesSettings | None) -> list[dict[str, Any]]:
+    """Valeurs réglables de la famille « tempo » de l'écran ADN : celles qu'écrit chaque profil, par type
+    (« tempo.combat.panels.max_per_page »), avec le libellé et les bornes du curseur de l'ADN correspondant."""
+    if settings is None:
+        return []
+    base = {f["path"]: f for f in field_specs()}
+    out: list[dict[str, Any]] = []
+    for type_id in SCENE_TYPES:
+        scene_type = settings.types.get(type_id)  # type: ignore[call-overload]
+        if scene_type is None:
+            continue
+        for path in scene_type.tempo:
+            if path in base:
+                spec = dict(base[path])
+            else:
+                kind, low, high = TEMPO_EXTRAS[path]
+                label, help_text = TEMPO_LABELS.get(path, (path, ""))
+                spec = {
+                    "label": label,
+                    "help": help_text,
+                    "kind": kind,
+                    "min": low if kind == "int" else None,
+                    "max": high if kind == "int" else None,
+                    "step": 1 if kind == "int" else None,
+                }
+            spec.update(path=f"tempo.{type_id}.{path}", group=f"tempo.{type_id}")
+            out.append(spec)
     return out

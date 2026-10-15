@@ -31,7 +31,7 @@ from mangaka_engine.presets import KnowledgeAgent, KnowledgeSettings, PresetRegi
 from mangaka_engine.providers.embedding import MockEmbeddingProvider
 from mangaka_engine.store.db import Database
 from mangaka_engine.store.models import KnowledgeChunk, KnowledgeCollection, KnowledgeDocument
-from tests.conftest import PRESETS_DIR, STYLE
+from tests.conftest import PRESETS_DIR, STYLE, start_script
 
 FIXTURE = Path(__file__).parent / "fixtures" / "knowledge_pack"
 SETTINGS = KnowledgeSettings(small_collection_tokens=0)
@@ -653,7 +653,7 @@ def test_scriptwriter_gets_the_chapter_outline_and_its_genre_curve(pack_client: 
         ),
         201,
     )
-    job = _ok(c.post(f"/chapters/{ch['id']}/script"), 202)
+    job = _ok(start_script(c, ch["id"]), 202)
     c.app.state.ctx.jobs.wait(job["id"])  # type: ignore[attr-defined]
     assert _ok(c.get(f"/jobs/{job['id']}"))["status"] == "succeeded"
     sources = _ok(c.get(f"/chapters/{ch['id']}/sources"))

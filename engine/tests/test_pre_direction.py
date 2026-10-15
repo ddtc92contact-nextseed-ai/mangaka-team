@@ -37,7 +37,7 @@ from mangaka_engine.presets import PresetRegistry
 from mangaka_engine.presets.schemas import PreDirectionSettings
 from mangaka_engine.providers.llm import MockLLMProvider
 from mangaka_engine.providers.llm.mock import mock_art_direction
-from tests.conftest import PRESETS_DIR, STYLE
+from tests.conftest import PRESETS_DIR, STYLE, start_script
 
 PRESETS = PresetRegistry.load(PRESETS_DIR)
 SETTINGS = PRESETS.pre_direction
@@ -473,7 +473,7 @@ def test_stored_direction_shows_the_charter_warnings(client: TestClient) -> None
         ),
         201,
     )
-    job = _ok(client.post(f"/chapters/{ch['id']}/script"), 202)
+    job = _ok(start_script(client, ch["id"]), 202)
     client.app.state.ctx.jobs.wait(job["id"])  # type: ignore[attr-defined]
     job = _ok(client.post(f"/chapters/{ch['id']}/direction", json={}), 202)
     client.app.state.ctx.jobs.wait(job["id"])  # type: ignore[attr-defined]
@@ -554,7 +554,9 @@ def test_series_dna_card_reads_and_adjusts_values(client: TestClient) -> None:
     assert fields["shots.wide.min"]["kind"] == "share" and fields["shots.wide.min"]["label"]
     assert (fields["panels.min_per_page"]["min"], fields["panels.min_per_page"]["max"]) == (1, 9)
     assert fields["rhythm.breath_after_peak"]["kind"] == "bool"
-    assert set(dna["groups"]) == {"panels", "shapes", "shots", "presence", "dialogue", "rhythm", "places"}
+    assert set(dna["groups"]) == {"panels", "shapes", "shots", "presence", "dialogue", "rhythm", "places"} | {
+        f"tempo.{t}" for t in ("calme", "dialogue", "combat", "poursuite", "sport_collectif", "revelation")
+    }
 
     tuned = _ok(
         client.put(
@@ -612,7 +614,7 @@ def test_script_brief_shows_the_charter_and_warns_on_an_empty_bible(client: Test
     empty = _ok(client.post("/projects", json={**STYLE, "title": "Vide"}), 201)
     ch2 = _ok(client.post(f"/projects/{empty['id']}/chapters", json={"title": "Un", "synopsis": "Une île."}), 201)
     assert _ok(client.get(f"/chapters/{ch2['id']}/script-brief"))["bible_empty"] is True
-    _ok(client.post(f"/chapters/{ch2['id']}/script"), 202)
+    _ok(start_script(client, ch2["id"]), 202)
     assert client.get("/chapters/999/script-brief").status_code == 404
 
 

@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from mangaka_engine.config import Settings
 from mangaka_engine.main import create_app
 from mangaka_engine.providers.llm import MockLLMProvider
-from tests.conftest import STYLE
+from tests.conftest import STYLE, start_script
 
 SECRET = "sk-test-ne-jamais-afficher-42"
 
@@ -44,7 +44,7 @@ def _save(c: TestClient, agent: str, values: dict[str, Any], project_id: int | N
 
 def _script(c: TestClient, series_id: int) -> dict[str, Any]:
     ch = c.post(f"/projects/{series_id}/chapters", json={"synopsis": "Aiko défie Ren.", "target_page_count": 1})
-    r = c.post(f"/chapters/{ch.json()['id']}/script")
+    r = start_script(c, ch.json()["id"])
     assert r.status_code == 202, r.text
     _ctx(c).jobs.wait(r.json()["id"])
     job = c.get(f"/jobs/{r.json()['id']}").json()
@@ -303,7 +303,7 @@ def test_provider_without_key_is_misconfigured(make_settings: Callable[..., Sett
         assert "DEEPSEEK_API_KEY" in scen["status"]["detail"]
         assert scen["model"] == "DeepSeek · deepseek-chat"
         ch = c.post(f"/projects/{_series(c)}/chapters", json={"synopsis": "Un duel."}).json()
-        r = c.post(f"/chapters/{ch['id']}/script")
+        r = start_script(c, ch["id"])
         assert r.status_code == 503 and "DEEPSEEK_API_KEY" in r.json()["detail"]
         secrets = c.get("/agents/scenariste").json()["secrets"]
         assert secrets[0]["present"] is False

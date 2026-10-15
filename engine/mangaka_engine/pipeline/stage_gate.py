@@ -3,6 +3,8 @@
 Un seul endroit calcule, pour un chapitre (ou une page), l'état de chaque étape vitale et le nombre
 d'éléments en faute :
 
+- **Scènes validées** (`scenes`) : la liste des scènes du chapitre (pipeline/scenes.py) est validée par l'auteur et la
+  somme de leurs pages vaut la cible du chapitre ; un chapitre déjà écrit sans scènes (« ancien mode ») est réglé ;
 - **Scénario complet** (`script`) : chaque case a une description ;
 - **Direction artistique appliquée** (`direction`) : chaque page de l'histoire a une direction appliquée (une
   page dont l'auteur a rejeté la direction est réglée : c'est une décision) ;
@@ -18,9 +20,9 @@ d'éléments en faute :
   croquis, rien à vérifier ;
 - **Lettrage** (`lettering`) : chaque réplique a un texte et tombe dans sa case.
 
-Chaque action du chapitre exige des étapes (`ACTIONS`) : scénario → mise en page ; scénario, direction, mise
-en page, références, prompts, name → génération et passage au propre ; cases approuvées → lettrage ; cases
-approuvées et lettrage →
+Chaque action du chapitre exige des étapes (`ACTIONS`) : scènes → écriture du scénario ; scénario → mise en page ;
+scénario, direction, mise en page, références, prompts, name → génération et passage au propre ; cases approuvées →
+lettrage ; cases approuvées et lettrage →
 export et passage à « prêt » / « publié ». Une étape manquante refuse l'action avec un message qui nomme
 l'étape, le chapitre et le compte (`StageBlocked`).
 
@@ -70,6 +72,15 @@ class StageDef:
 STAGES: dict[str, StageDef] = {
     s.key: s
     for s in (
+        StageDef(
+            "scenes",
+            "Scènes validées",
+            "Scènes non validées",
+            ("scène", "scènes"),
+            ("à valider", "à valider"),
+            "Valide la liste des scènes dans l'onglet Scènes",
+            "scenes",
+        ),
         StageDef(
             "script",
             "Scénario complet",
@@ -156,6 +167,7 @@ class ActionDef:
 ACTIONS: dict[str, ActionDef] = {
     a.key: a
     for a in (
+        ActionDef("script", "écrire le scénario", ("scenes",)),
         ActionDef("layout", "mettre en page", ("script",)),
         ActionDef("generation", "générer", ("script", "direction", "layout", "references", "prompts", "name")),
         ActionDef("clean", "passer au propre", ("script", "direction", "layout", "references", "prompts", "name")),
@@ -216,6 +228,8 @@ class StageState:
         """L'étape est réglée par le contenu du chapitre (sans passer-outre)."""
         if self.key == "script" and self.total == 0:
             return False  # rien à générer sans case
+        if self.key == "scenes" and self.total == 0:
+            return self.faults == 0  # ancien mode (chapitre écrit sans scènes) ; sinon aucune scène encore
         return self.faults <= self.tolerated
 
     @property
@@ -228,6 +242,10 @@ class StageState:
 
     def summary(self) -> str:
         """« 5 pages en attente sur 5 » ; « aucune case » pour un chapitre vide."""
+        if self.key == "scenes" and self.total == 0:
+            return "aucune scène" if self.faults else "chapitre écrit sans scènes (ancien mode)"
+        if self.key == "scenes" and self.faults and self.examples:
+            return self.examples[0]
         if self.total == 0:
             return f"aucune {self.stage.unit[0]}" if self.key == "script" else "rien à vérifier"
         if self.parts and self.faults:
@@ -283,6 +301,24 @@ def _references(
         if members
     ]
     return len(cast.counted), [n for _, names in parts for n in names], parts
+
+
+def _scenes(chapter: Chapter) -> tuple[int, int, list[str]]:
+    """(scènes, en faute, motif) : toutes en faute tant que la liste n'est pas validée (ou que la somme de leurs
+    pages ne vaut plus la cible) ; aucune scène : réglé en ancien mode, sinon une faute."""
+    from .scenes import is_legacy, is_validated, total_pages  # scenes importe script, qui ne dépend pas d'ici
+
+    n = len(chapter.scenes)
+    if n == 0:
+        return 0, 0 if is_legacy(chapter) else 1, []
+    if is_validated(chapter):
+        return n, 0, []
+    total = total_pages(chapter)
+    if chapter.scenes_validated_at is not None and total != chapter.target_page_count:
+        why = f"{total} pages pour une cible de {chapter.target_page_count}, à revalider"
+    else:
+        why = f"{n} scène{'s' if n > 1 else ''} pas encore validée{'s' if n > 1 else ''}"
+    return n, n, [why]
 
 
 def _check(session: Session, key: str, pages: Sequence[Page]) -> tuple[int, int, list[str]]:
@@ -381,6 +417,10 @@ def chapter_stages(
     keys = [k for k in STAGES if stages is None or k in set(stages)]
     out = []
     for key in keys:
+        if key == "scenes":
+            total, faults, examples = _scenes(chapter)
+            out.append(StageState(key, total, faults, examples, decisions.get(key), 0))
+            continue
         if key == "references":
             total, bad, parts = _references(session, chapter, pages)
             state = StageState(key, total, len(bad), bad[:20], decisions.get(key), settings.tolerated(key), parts)
@@ -407,6 +447,16 @@ def blocked_message(chapter: Chapter, action: ActionDef, state: StageState, *, p
     where = f"Chapitre {chapter.number}" + (f", page {page.number}" if page is not None else "")
     if state.key == "script" and state.total == 0:
         return f"{where} — aucune case : découpe d'abord le chapitre dans l'onglet Scénario {_before(action.label)}."
+    if state.key == "scenes" and state.total == 0:
+        return (
+            f"{where} — Scènes non validées : aucune scène. Propose ou ajoute les scènes du chapitre dans l'onglet "
+            f"Scènes, puis valide-les {_before(action.label)}, ou passe outre cette étape."
+        )
+    if state.key == "scenes":
+        return (
+            f"{where} — Scènes non validées : {state.summary()}. {state.stage.fix} {_before(action.label)}, "
+            "ou passe outre cette étape."
+        )
     detail = state.summary()
     shown = state.examples[:3]
     if state.parts:

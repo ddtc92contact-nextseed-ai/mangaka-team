@@ -80,6 +80,7 @@ def test_presets_endpoint(client: TestClient) -> None:
         "redacteur-image",
         "redacteur-image-dialogue",
         "resume-quatrieme",
+        "scenes",
         "script",
     ]
     assert data["workflows"][0]["id"] == "qwen-image-base"

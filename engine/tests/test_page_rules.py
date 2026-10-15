@@ -22,7 +22,7 @@ from mangaka_engine.presets import PresetRegistry
 from mangaka_engine.providers.llm import LLMError, MockLLMProvider
 from mangaka_engine.providers.llm.mock import mock_art_direction
 from mangaka_engine.store.models import Page, PageDirection
-from tests.conftest import PRESETS_DIR, STYLE
+from tests.conftest import PRESETS_DIR, STYLE, start_script
 
 PRESETS = PresetRegistry.load(PRESETS_DIR)
 PROMPT = PRESETS.prompt("direction-artistique")
@@ -347,7 +347,7 @@ def c(make_settings: Callable[..., Settings]) -> Iterator[TestClient]:
 def test_page_rule_warnings_are_stored_and_recomputed_on_edit(c: TestClient) -> None:
     sid = c.post("/projects", json={**STYLE, "title": "Vulcano"}).json()["id"]
     ch = c.post(f"/projects/{sid}/chapters", json={"synopsis": "Combat au volcan.", "target_page_count": 2}).json()
-    c.app.state.ctx.jobs.wait(c.post(f"/chapters/{ch['id']}/script").json()["id"])  # type: ignore[attr-defined]
+    c.app.state.ctx.jobs.wait(start_script(c, ch["id"]).json()["id"])  # type: ignore[attr-defined]
     job = c.post(f"/chapters/{ch['id']}/direction", json={}).json()
     c.app.state.ctx.jobs.wait(job["id"])  # type: ignore[attr-defined]
     assert c.get(f"/jobs/{job['id']}").json()["status"] == "succeeded"

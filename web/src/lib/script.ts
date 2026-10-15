@@ -68,6 +68,8 @@ export interface DraftPage {
   kind: PageKind;
   rythme: Rythme | null;
   panels: DraftPanel[];
+  /** Scène du chapitre (étape Scènes), gardée par le moteur tant que la page garde son id. */
+  sceneId?: number | null;
 }
 
 export function toDraft(pages: PageData[]): DraftPage[] {
@@ -76,6 +78,7 @@ export function toDraft(pages: PageData[]): DraftPage[] {
     id: p.id,
     kind: p.kind,
     rythme: p.rythme,
+    sceneId: p.scene_id ?? null,
     panels: p.panels.map((pa) => ({
       key: key(),
       id: pa.id,

@@ -3,7 +3,9 @@
 - `GET /projects/{id}/pre-direction` : valeurs héritées du genre, valeurs ajustées par la série, valeurs
   effectives, et les réglages (familles, libellés, types et bornes) pour la carte « ADN de la série » ;
 - `PUT /projects/{id}/pre-direction` : ajustements de la série (chemin → valeur ; `{}` : tout hériter du genre).
-  Une valeur égale à celle du genre n'est pas gardée : elle suit le genre s'il change ;
+  Une valeur égale à celle du genre n'est pas gardée : elle suit le genre s'il change. Famille « tempo » : les profils
+  de tempo des types de scène (presets/scene_types.yaml), chemins « tempo.<type>.<curseur> », gardés à part
+  (`Project.scene_tempo`) ; leur valeur héritée est celle du preset ;
 - `GET /chapters/{id}/script-brief` : charte envoyée au scénariste et au directeur artistique (`$pre_direction`,
   en clair), seuil de l'avertissement « trop de personnages » d'une case (`crowd_limit`) et alerte « bible vide » (bible de la série vide, personnages cités sans note) — un avertissement,
   jamais un blocage.
@@ -24,6 +26,7 @@ from ..pipeline.pre_direction import (
     GROUPS,
     DnaError,
     apply_overrides,
+    apply_tempo,
     art_text,
     clean_overrides,
     field_specs,
@@ -31,7 +34,10 @@ from ..pipeline.pre_direction import (
     inherited_dna,
     script_text,
     series_charter,
+    tempo_profile,
+    tempo_specs,
 )
+from ..presets.schemas import SceneTypesSettings, check_tempo_value
 from ..store.models import Chapter, Character, PageKind, Project
 from .deps import AppContext, get_ctx, get_session
 from .errors import FieldError
@@ -68,7 +74,7 @@ class PreDirectionOut(BaseModel):
 class PreDirectionIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    overrides: dict[str, DnaValue] = Field(default_factory=dict, max_length=100)
+    overrides: dict[str, DnaValue] = Field(default_factory=dict, max_length=200)
 
 
 class BibleCharacterRef(BaseModel):
@@ -85,6 +91,60 @@ class ScriptBriefOut(BaseModel):
     # Au-delà de N personnages présents, avertissement sur la case (`mentions.crowd_warning` d'image_prompt.yaml ;
     # 0 = jamais).
     crowd_limit: int = 0
+
+
+TEMPO = "tempo."
+
+
+def _tempo_groups(settings: SceneTypesSettings | None) -> dict[str, str]:
+    if settings is None:
+        return {}
+    return {f"tempo.{t}": f"Tempo — {st.name}" for t, st in settings.types.items()}
+
+
+def _tempo_values(settings: SceneTypesSettings | None, project: Project | None) -> dict[str, DnaValue]:
+    """Valeurs des profils de tempo, par chemin de l'écran (« tempo.combat.panels.max_per_page ») : celles du preset
+    (`project` None) ou ajustées par la série."""
+    if settings is None:
+        return {}
+    return {
+        f"tempo.{t}.{path}": value
+        for t in settings.types
+        for path, value in tempo_profile(settings, project, t).items()
+    }
+
+
+def _split_tempo(settings: SceneTypesSettings | None, base: Any, overrides: dict[str, DnaValue]) -> dict[str, DnaValue]:
+    """Ajustements de tempo de la série ({"combat.panels.max_per_page": 7}) ; `FieldError` sur une valeur refusée.
+    Une valeur égale à celle du preset n'est pas gardée."""
+    out: dict[str, DnaValue] = {}
+    for key, value in overrides.items():
+        if not key.startswith(TEMPO):
+            continue
+        type_id, _, path = key[len(TEMPO) :].partition(".")
+        if settings is None or type_id not in settings.types:
+            raise FieldError(key, f"type de scène inconnu : « {type_id} »")
+        preset = settings.types[type_id].tempo  # type: ignore[index]
+        if path not in preset:
+            raise FieldError(key, f"valeur inconnue du profil « {settings.types[type_id].name} » : « {path} »")  # type: ignore[index]
+        error = check_tempo_value(path, value)
+        if error:
+            raise FieldError(key, error)
+        if value != preset[path] and not (isinstance(value, float) and abs(value - preset[path]) < 1e-9):
+            out[f"{type_id}.{path}"] = value
+    if settings is not None and base is not None:
+        for type_id in settings.types:
+            profile = dict(settings.types[type_id].tempo)  # type: ignore[index]
+            profile.update({k.partition(".")[2]: v for k, v in out.items() if k.partition(".")[0] == type_id})
+            if profile.get("motion_lines.required") and profile.get("motion_lines.forbidden"):
+                raise FieldError(
+                    f"tempo.{type_id}.motion_lines.required", "lignes de mouvement à la fois imposées et interdites"
+                )
+            try:
+                apply_tempo(base, profile)
+            except DnaError as exc:
+                raise FieldError(f"tempo.{type_id}.{exc.path}", exc.message) from None
+    return out
 
 
 def pre_direction_out(ctx: AppContext, project: Project) -> PreDirectionOut:
@@ -105,16 +165,22 @@ def pre_direction_out(ctx: AppContext, project: Project) -> PreDirectionOut:
         )
     charter = series_charter(presets, project)
     effective = charter.dna if charter else base
+    tempo = presets.scene_types
+    adjusted = _tempo_values(tempo, project)
+    preset = _tempo_values(tempo, None)
     return PreDirectionOut(
         project_id=project.id,
         genre=project.style_genre,
         genre_name=genre.name if genre else None,
         available=True,
-        groups=GROUPS,
-        fields=[DnaField(**f) for f in field_specs()],
-        inherited=flatten(base),
-        overrides=clean_overrides(base, project.pre_direction or {}),
-        effective=flatten(effective),
+        groups={**GROUPS, **_tempo_groups(tempo)},
+        fields=[DnaField(**f) for f in [*field_specs(), *tempo_specs(tempo)]],
+        inherited={**flatten(base), **preset},
+        overrides={
+            **clean_overrides(base, project.pre_direction or {}),
+            **{k: v for k, v in adjusted.items() if v != preset.get(k)},
+        },
+        effective={**flatten(effective), **adjusted},
     )
 
 
@@ -136,11 +202,13 @@ def write_pre_direction(
     base = inherited_dna(ctx.agents.presets_for(project.id), project)
     if base is None:
         raise HTTPException(status_code=503, detail="presets/pre_direction.yaml absent ou invalide : ADN indisponible")
+    dna = {k: v for k, v in body.overrides.items() if not k.startswith(TEMPO)}
     try:
-        apply_overrides(base, body.overrides)
+        series = apply_overrides(base, dna)
     except DnaError as exc:
         raise FieldError(exc.path, exc.message) from None
-    project.pre_direction = clean_overrides(base, body.overrides)
+    project.scene_tempo = _split_tempo(ctx.agents.presets_for(project.id).scene_types, series, body.overrides)
+    project.pre_direction = clean_overrides(base, dna)
     session.commit()
     return pre_direction_out(ctx, project)
 

@@ -530,6 +530,8 @@ class PageOut(BaseModel):
     name_state: Literal["validated", "stale", "pending"] | None = None
     name_validated_at: datetime | None = None
     panels: list[PanelOut]
+    # Scène du chapitre (étape Scènes) ; None : page bonus, ou chapitre écrit sans scènes.
+    scene_id: int | None = None
 
 
 class PageLayoutIn(_In):
@@ -2012,7 +2014,7 @@ class StatsOut(BaseModel):
 
 
 # --- Garde d'étapes (pipeline/stage_gate.py) -------------------------------------------------
-StageName = Literal["script", "direction", "layout", "references", "prompts", "name", "approved", "lettering"]
+StageName = Literal["scenes", "script", "direction", "layout", "references", "prompts", "name", "approved", "lettering"]
 
 
 class StageDecisionOut(BaseModel):

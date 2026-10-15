@@ -31,7 +31,7 @@ from mangaka_engine.store.models import (
     SeriesAsset,
     SeriesAssetImage,
 )
-from tests.conftest import PRESETS_DIR, STYLE, png_bytes
+from tests.conftest import PRESETS_DIR, STYLE, png_bytes, start_script
 from tests.test_migrations import _drop_v16_style
 
 REG = PresetRegistry.load(PRESETS_DIR)
@@ -161,7 +161,7 @@ def test_mock_scenario_links_panels_to_decor_and_objects(c: TestClient) -> None:
     llm: MockLLMProvider = c.app.state.ctx.providers.llm  # type: ignore[attr-defined]
     ch = data["chapter"]
     _ok(c.patch(f"/chapters/{ch['id']}", json={"target_page_count": 2}))
-    job = _ok(c.post(f"/chapters/{ch['id']}/script"), 202)
+    job = _ok(start_script(c, ch["id"]), 202)
     assert _wait_job(c, job["id"])["status"] == "succeeded"
 
     # les agents reçoivent la bibliothèque (ids, noms, descriptions courtes)
@@ -184,7 +184,7 @@ def test_unknown_library_ids_are_retried_then_reported(c: TestClient, invalid: i
     data = _library_series(c)
     ch = data["chapter"]
     _ok(c.patch(f"/chapters/{ch['id']}", json={"synopsis": f"Le robot s'éveille. [mock:id-invalide:{invalid}]"}))
-    job = _wait_job(c, _ok(c.post(f"/chapters/{ch['id']}/script"), 202)["id"])
+    job = _wait_job(c, _ok(start_script(c, ch["id"]), 202)["id"])
     assert job["status"] == status
     if status == "failed":
         assert "invalide 3 fois de suite" in job["error"]

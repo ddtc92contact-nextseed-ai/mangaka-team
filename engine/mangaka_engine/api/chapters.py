@@ -194,6 +194,7 @@ def page_out(
         layout_style=page.layout_style,
         layout_seed=page.layout_seed,
         rythme=page.rythme,  # type: ignore[arg-type]
+        scene_id=page.scene_id,
         state=page.state.value,
         layout=layout,
         layout_stale=bool(page.panels) and is_stale(page),
@@ -454,6 +455,8 @@ def start_script(
     chapter = get_chapter_or_404(session, chapter_id)
     if not chapter.synopsis.strip():
         raise FieldError("synopsis", "écris d'abord le synopsis ou le script brut du chapitre")
+    # Étape Scènes : liste des scènes validée par l'auteur (un chapitre écrit sans scènes n'est pas bloqué).
+    gate(session, chapter, "script")
     # Réglages du scénariste (écran « L'équipe ») : série > profil global > presets.
     presets = ctx.agents.presets_for(chapter.project_id)
     llm, error = ctx.agents.llm_for_job("script", chapter.project_id)

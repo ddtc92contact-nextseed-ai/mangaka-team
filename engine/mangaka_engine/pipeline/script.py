@@ -19,7 +19,11 @@
 4. personnages de chaque case : « characters » = présents à l'image, « offscreen » = cités mais hors cadre ;
    un présent que la description ne cite pas passe hors cadre (`framing.settle_cast`) ;
 5. enregistrement en Pages + Panels + Bubbles (remplace les pages « story » du chapitre) et
-   du résumé du chapitre, puis découpage automatique des pages (étape 2).
+   du résumé du chapitre, puis découpage automatique des pages (étape 2) ;
+6. scènes validées (étape « Scènes », `pipeline/scenes.py`) : la liste arrive en clair dans le prompt (`$scenes` :
+   scène, type, pages, profil de tempo) ; chaque page rendue porte sa scène (`scene`), le nombre de pages de chaque
+   scène est contrôlé (relance, puis avertissement) et chaque page enregistrée est rattachée à sa scène. Sans scènes
+   validées (chapitre d'avant, ou étape passée outre), rien ne change.
 """
 
 from __future__ import annotations
@@ -68,6 +72,7 @@ from .locations import resolve_location
 from .names import CharacterMatcher, link_speakers, panel_ids
 from .pages import layout_pages
 from .pre_direction import Charter, dialogue_rules_for, panel_count_problems, script_text, series_charter
+from .scenes import assign_scenes, scene_page_problems, scenes_text, script_scenes
 from .style import NO_GUIDELINES, style_brief, style_names
 
 AGENT = "script"  # rôle de l'agent dans presets/knowledge.yaml
@@ -241,8 +246,18 @@ class ScriptPanel(_LLMModel):
 class ScriptPage(_LLMModel):
     panels: list[ScriptPanel] = Field(min_length=1, max_length=MAX_PANELS_PER_PAGE)
     rythme: RythmeName | None = None
+    # Numéro de la scène validée de la page (1 = première scène) ; None sans liste de scènes.
+    scene: int | None = Field(default=None, validation_alias=AliasChoices("scene", "scène"))
 
     _rythme = field_validator("rythme", mode="before")(_hint)
+
+    @field_validator("scene", mode="before")
+    @classmethod
+    def _scene(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            v = v.strip()
+            return int(v) if v.isdigit() else None
+        return v if isinstance(v, int) and not isinstance(v, bool) else None
 
 
 class ScriptOutput(_LLMModel):
@@ -312,11 +327,14 @@ class ScriptContext:
     knowledge: AgentKnowledge | None = None
     library: SeriesLibrary = field(default_factory=SeriesLibrary)
     charter: Charter | None = None  # ADN de la série (presets/pre_direction.yaml)
+    # Scènes validées (pipeline/scenes.py `script_scenes`) ; vide : découpage libre (ancien mode).
+    scenes: list[dict[str, Any]] = field(default_factory=list)
 
     def as_json(self) -> dict[str, Any]:
         return {
             "task": "script",
             "pre_direction": self.charter.as_json() if self.charter else None,
+            "scenes": self.scenes,
             "series": self.series,
             "characters": self.characters,
             **self.library.as_json(),
@@ -383,6 +401,7 @@ def build_context(
         else None,
         library=SeriesLibrary.load(session, series.id),
         charter=series_charter(presets, series),
+        scenes=script_scenes(presets, chapter),
     )
 
 
@@ -433,6 +452,8 @@ def render_messages(prompt: PromptPreset, ctx: ScriptContext) -> list[ChatMessag
         "dialogue_rules": dialogue_text(dialogue_rules_for(prompt.dialogue_rules, ctx.charter)),
         # Charte de la série (ADN) : cases par planche, dialogue par planche, courbe de rythme.
         "pre_direction": script_text(ctx.charter, int(ctx.chapter.get("target_pages") or 0)),
+        # Scènes validées par l'auteur (étape Scènes) : scène, type, pages, profil de tempo.
+        "scenes": scenes_text(ctx.scenes),
         "context_json": json.dumps(ctx.as_json(), ensure_ascii=False, indent=2),
         "savoir_faire": (ctx.knowledge.savoir_faire() if ctx.knowledge else "")
         or "(aucun savoir-faire pour cet agent)",
@@ -501,12 +522,17 @@ def run_script(
         try:
             output = parse_script(result.text, ctx.library)
             counts = panel_count_problems([len(p.panels) for p in output.pages], ctx.charter)
+            scene_pages = scene_page_problems([p.scene for p in output.pages], ctx.scenes)
             problems = check_dialogues(script_panels(output), dialogue_rules_for(prompt.dialogue_rules, ctx.charter))
             if check is not None:
                 problems += check(output)
-            if problems or counts:
-                fallback = ScriptRun(output=output, attempts=attempt, messages=messages, warnings=counts + problems)
+            if problems or counts or scene_pages:
+                fallback = ScriptRun(
+                    output=output, attempts=attempt, messages=messages, warnings=scene_pages + counts + problems
+                )
                 parts = []
+                if scene_pages:
+                    parts.append("pages par scène hors de la liste validée : " + " ; ".join(scene_pages[:8]))
                 if counts:
                     parts.append("cases par planche hors de la charte de la série : " + " ; ".join(counts[:8]))
                 if problems:
@@ -526,8 +552,12 @@ def run_script(
 
 
 # --- enregistrement -------------------------------------------------------------
-def save_script(session: Session, chapter: Chapter, output: ScriptOutput) -> list[Page]:
-    """Remplace les pages « story » du chapitre ; les pages bonus / de garde sont conservées à la suite."""
+def save_script(
+    session: Session, chapter: Chapter, output: ScriptOutput, scenes: list[dict[str, Any]] | None = None
+) -> list[Page]:
+    """Remplace les pages « story » du chapitre ; les pages bonus / de garde sont conservées à la suite. Avec
+    `scenes` (scènes validées), chaque page est rattachée à sa scène (`assign_scenes`)."""
+    scene_ids = assign_scenes([p.scene for p in output.pages], scenes or [])
     # Noms rapprochés des fiches (casse, accents, alias, nom partiel : pipeline/names.py) ; un nom sans
     # fiche reste dans `character_names` et l'API le signale à l'auteur.
     matcher = CharacterMatcher.for_project(session, chapter.project_id)
@@ -552,7 +582,13 @@ def save_script(session: Session, chapter: Chapter, output: ScriptOutput) -> lis
     created: list[Page] = []
     previous: Panel | None = None
     for p_index, sp in enumerate(output.pages):
-        page = Page(chapter_id=chapter.id, number=p_index + 1, kind=PageKind.story, rythme=sp.rythme)
+        page = Page(
+            chapter_id=chapter.id,
+            number=p_index + 1,
+            kind=PageKind.story,
+            rythme=sp.rythme,
+            scene_id=scene_ids[p_index],
+        )
         for i, sc in enumerate(sp.panels):
             cast_names, named_ids = split_named_objects(sc.characters, named)
             offscreen_names, _ = split_named_objects(sc.offscreen, named)
@@ -661,7 +697,7 @@ def script_job(
                 if chapter is None:
                     return []
                 try:
-                    pages = save_script(session, chapter, output)
+                    pages = save_script(session, chapter, output, ctx.scenes)
                     layout_pages(presets, pages)
                     return room_problems(presets, pages)
                 except LayoutError:
@@ -677,7 +713,7 @@ def script_job(
             chapter = session.get(Chapter, chapter_id)
             if chapter is None:
                 raise ScriptError("Chapitre introuvable (supprimé pendant le découpage ?)")
-            pages = save_script(session, chapter, run.output)
+            pages = save_script(session, chapter, run.output, ctx.scenes)
             layout_pages(presets, pages)
             session.commit()
             n_panels = sum(len(p.panels) for p in pages)
