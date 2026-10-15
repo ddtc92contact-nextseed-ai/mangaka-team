@@ -202,7 +202,7 @@ def test_create_card_for_the_guard_then_portrait_unblocks_generation(client: Tes
     serveuse = _ok(client.post(f"/projects/{project_id}/characters", json={"name": "La serveuse"}), 201)
     _image(client, serveuse["id"])
     _ok(client.post(f"/chapters/{chapter_id}/cast/crowds", json={"name": "des passants", "author": "Ouro"}))
-    force_stages(client, chapter_id, "direction")
+    force_stages(client, chapter_id, "direction", "name")
     _ok(client.post(f"/chapters/{chapter_id}/generate"), 202)
     _wait(client)
 

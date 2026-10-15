@@ -27,7 +27,7 @@ from mangaka_engine.pipeline.style import (
 from mangaka_engine.presets import PresetRegistry
 from mangaka_engine.presets.schemas import StyleOption
 from mangaka_engine.store.models import Chapter, Character, Page, Panel, Project
-from tests.conftest import LEAD, PRESETS_DIR, STYLE
+from tests.conftest import LEAD, PRESETS_DIR, STYLE, force_stages
 from tests.test_prompt_writer import Env, _generate, _ok, _setup, _wait, env  # noqa: F401 — fixture
 
 REG = PresetRegistry.load(PRESETS_DIR)
@@ -258,6 +258,7 @@ def test_every_tier_gets_the_finition_and_its_negative(env: Env, ai_prompt: bool
     assert panel["prompt_source"] == ("ia" if ai_prompt else "fragments")
     # passage au propre depuis le croquis validé
     _ok(c.post(f"/panels/{pid}/sketch/validate"))
+    force_stages(c, _ok(c.get(f"/panels/{pid}"))["chapter_id"], "name")  # name non relue ici
     _ok(c.post(f"/panels/{pid}/clean"), 202)
     _wait(c)
     clean = next(i for i in _ok(c.get(f"/panels/{pid}/images")) if i["params"].get("sketch_image_id"))

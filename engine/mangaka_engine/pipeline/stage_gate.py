@@ -13,10 +13,14 @@ d'éléments en faute :
 - **Prompts rédigés** (`prompts`) : aucune case au prompt final vide (une case décrite reçoit le sien à la mise en
   file : par fragments, ou rédigé par l'IA ; sans description ni prompt, l'image serait inutilisable) ;
 - **Cases approuvées** (`approved`) : chaque case a une version choisie ;
+- **Name validée** (`name`) : quand la série a le palier croquis activé, chaque page a sa name validée
+  (pipeline/name_board.py : planche brouillon relue ; une case modifiée depuis la dévalide) ; sans palier
+  croquis, rien à vérifier ;
 - **Lettrage** (`lettering`) : chaque réplique a un texte et tombe dans sa case.
 
 Chaque action du chapitre exige des étapes (`ACTIONS`) : scénario → mise en page ; scénario, direction, mise
-en page, références, prompts → génération ; cases approuvées → lettrage ; cases approuvées et lettrage →
+en page, références, prompts, name → génération et passage au propre ; cases approuvées → lettrage ; cases
+approuvées et lettrage →
 export et passage à « prêt » / « publié ». Une étape manquante refuse l'action avec un message qui nomme
 l'étape, le chapitre et le compte (`StageBlocked`).
 
@@ -24,7 +28,8 @@ L'auteur peut **passer outre** une étape précise (jamais « tout ») : la déc
 avec son auteur et sa date dans `chapter_stage_decisions`, et l'étape ne bloque plus jusqu'à ce que le
 passer-outre soit levé (`revoked`). Une étape franchie complète par une action est notée `validated`.
 
-Restent libres (jamais gardés ici) : les croquis, les essais d'une case isolée et l'atelier de références.
+Restent libres (jamais gardés ici) : les croquis, les essais d'une case isolée (hors passage au propre, gardé
+par la name de sa page) et l'atelier de références.
 
 Seuils : chaque vérification accepte aujourd'hui zéro faute. `StageSettings.max_faults` prévoit qu'ils
 viennent plus tard des réglages de la série (charte de série) sans changer les appelants.
@@ -111,6 +116,15 @@ STAGES: dict[str, StageDef] = {
             "atelier",
         ),
         StageDef(
+            "name",
+            "Name validée",
+            "Name non validée",
+            ("page", "pages"),
+            ("non validée", "non validées"),
+            "Relis la planche brouillon et valide la name de chaque page (onglet Croquis)",
+            "croquis",
+        ),
+        StageDef(
             "approved",
             "Cases approuvées",
             "Cases non approuvées",
@@ -143,7 +157,8 @@ ACTIONS: dict[str, ActionDef] = {
     a.key: a
     for a in (
         ActionDef("layout", "mettre en page", ("script",)),
-        ActionDef("generation", "générer", ("script", "direction", "layout", "references", "prompts")),
+        ActionDef("generation", "générer", ("script", "direction", "layout", "references", "prompts", "name")),
+        ActionDef("clean", "passer au propre", ("script", "direction", "layout", "references", "prompts", "name")),
         ActionDef("lettering", "lettrer", ("approved",)),
         ActionDef("export", "exporter", ("approved", "lettering")),
         ActionDef("ready", "passer le chapitre en « prêt »", ("approved", "lettering")),
@@ -318,6 +333,12 @@ def _check(session: Session, key: str, pages: Sequence[Page]) -> tuple[int, int,
             else set()
         )
         bad = [_panel_name(pa, p) for pa, p in panels if pa.id not in chosen]
+    elif key == "name":
+        from .name_board import is_validated  # name_board importe sketch, qui ne dépend pas d'ici
+
+        if pages and pages[0].chapter.project.sketch_enabled:
+            total = len(pages)
+            bad = [f"page {p.number}" for p in pages if not is_validated(p)]
     elif key == "lettering":
         for pa, p in panels:
             for b in pa.bubbles:
@@ -470,6 +491,8 @@ def blocked_actions(states: Sequence[StageState]) -> dict[str, list[str]]:
         if act.key == "published":
             continue  # même exigence que « prêt »
         for key in act.stages:
+            if act.key == "clean" and key != "name":
+                continue  # le passage au propre ne se signale que sur la name (sinon même exigence que « générer »)
             state = by_key.get(key)
             if state is not None and not state.passed:
                 out.setdefault(key, []).append(act.label)

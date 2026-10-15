@@ -132,6 +132,7 @@ def test_generate_chapter_refused_until_direction_is_applied(client: TestClient)
 
     _apply_direction(client, chapter_id)
     assert _stages(client, chapter_id)["direction"]["complete"]
+    _ok(client.post(f"/chapters/{chapter_id}/stages/name/override", json={}))  # palier croquis : name non relue
     out = _ok(client.post(f"/chapters/{chapter_id}/generate"), 202)
     assert len(out["panel_ids"]) == 3
     _wait(client)
@@ -151,6 +152,7 @@ def test_references_and_script_refusals_name_what_is_missing(client: TestClient)
     _apply_direction(client, chapter_id)
     message = _refused(client.post(f"/chapters/{chapter_id}/generate"), "stage.references")
     assert "Références manquantes : 1 fiche sans image (Kenji) sur 2 intervenants" in message
+    _ok(client.post(f"/chapters/{chapter_id}/stages/name/override", json={}))  # palier croquis : name non relue
     # Génération d'une page : la garde ne regarde que la page.
     _ok(client.post(f"/pages/{data['pages'][1]['id']}/generate"), 202)
     _refused(client.post(f"/pages/{data['pages'][0]['id']}/generate"), "stage.references")
@@ -241,6 +243,7 @@ def test_override_unblocks_only_that_stage_and_is_traced(client: TestClient) -> 
     assert client.post(f"/chapters/{chapter_id}/stages/tout/override", json={}).status_code == 422
 
     _ok(client.post(f"/chapters/{chapter_id}/stages/references/override", json={"author": "Ouro"}))
+    _ok(client.post(f"/chapters/{chapter_id}/stages/name/override", json={}))  # palier croquis : name non relue
     _ok(client.post(f"/chapters/{chapter_id}/generate"), 202)
     _wait(client)
     # Lever le passer-outre : l'étape bloque de nouveau.

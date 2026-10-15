@@ -8,7 +8,9 @@ from dataclasses import dataclass
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from ..pipeline import stage_gate as sg
 from ..pipeline.generation import panels_to_generate
+from ..pipeline.name_board import is_validated
 from ..pipeline.pages import is_stale
 from ..pipeline.sketch import enqueue_clean, enqueue_sketch, panels_to_clean, panels_to_sketch
 from ..store.models import Job, Page, PageKind, Panel
@@ -45,7 +47,10 @@ def _plan(session: Session, chapter_id: int) -> Plan:
 def _selection(session: Session, ctx: AppContext, plan: Plan) -> tuple[list[Panel], list[Panel]]:
     """(cases à croquer ou générer, cases à passer au propre)."""
     if plan.mode == "sketch":
-        return panels_to_sketch(session, plan.pages), panels_to_clean(session, plan.pages)
+        # Passage au propre : seulement les pages à la name validée (sauf étape « name » forcée).
+        [name] = sg.chapter_stages(session, plan.pages[0].chapter, stages=["name"])
+        cleanable = plan.pages if name.forced else [p for p in plan.pages if is_validated(p)]
+        return panels_to_sketch(session, plan.pages), panels_to_clean(session, cleanable)
     panels = [p for p in panels_to_generate(session, plan.pages, force=False) if lock_problem(ctx, p) is None]
     return panels, []
 
@@ -74,7 +79,7 @@ def produce_chapter(
 ) -> ChapterProductionOut:
     """Met en page les pages qui n'en ont pas, puis met en file (file unique, une génération à la fois) :
     - palier croquis activé : un croquis par case non validée, et le passage au propre des croquis
-      validés qui n'en ont pas encore ;
+      validés qui n'en ont pas encore, sur les pages à la name validée (ou étape « name » forcée) ;
     - sinon : une version de chaque case sans version choisie.
     Les cases déjà en file sont laissées telles quelles ; l'avancement se suit dans Production."""
     _require_comfyui(ctx)

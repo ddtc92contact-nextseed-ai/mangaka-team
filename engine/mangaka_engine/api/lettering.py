@@ -260,6 +260,28 @@ def delete_sfx(
     return _lettering(ctx, page)
 
 
+@router.delete("/bubbles/{bubble_id}/reply")
+def delete_reply(
+    bubble_id: int, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
+) -> dict[str, Any]:
+    """Supprime une réplique depuis la planche brouillon (name) ; les suivantes de la case se resserrent.
+    Renvoie le lettrage de la page."""
+    bubble = session.get(Bubble, bubble_id)
+    if bubble is None:
+        raise HTTPException(status_code=404, detail="Bulle introuvable")
+    if bubble.kind == BubbleKind.sfx:
+        raise FieldError("bubble", "une onomatopée se supprime avec DELETE /bubbles/{id}")
+    panel = bubble.panel
+    session.delete(bubble)
+    session.flush()
+    session.expire(panel, ["bubbles"])
+    for i, b in enumerate(panel.bubbles):
+        b.order = i
+    session.commit()
+    session.refresh(panel.page)
+    return _lettering(ctx, panel.page)
+
+
 @router.get("/lettering/sfx-fonts/{font_id}.ttf")
 def sfx_font(font_id: str, project_id: int | None = None, ctx: AppContext = Depends(get_ctx)) -> Response:
     """Police d'onomatopée (instance statique), pour l'aperçu de l'écran Lettrage."""
