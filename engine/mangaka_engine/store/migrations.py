@@ -75,6 +75,10 @@
   est un texte sans contrainte : rien ne change pour les fiches existantes (objets, décors, style gardés tels
   quels, ids, images et variantes compris). Une table `series_assets` créée avec une contrainte CHECK sur la
   sorte (ancien SQLAlchemy) est reconstruite sans elle, lignes et ids gardés.
+- 38 : scènes du chapitre (`chapter_scenes` : ordre, titre, résumé, type, pages, lieu), validation de la liste par
+  l'auteur et suite reportée (`chapters.scenes_validated_at`, `scenes_validated_by`, `scenes_deferred`), scène de
+  chaque page (`pages.scene_id`). Aucun chapitre existant n'a de scène : il reste en « ancien mode » (écrit sans
+  scènes, jamais bloqué par l'étape Scènes). Profils de tempo ajustés par la série (`projects.scene_tempo`) : aucun.
 
 Une base neuve est créée directement à la dernière version. Chaque migration tourne dans une
 transaction unique, clés étrangères désactivées (recette « 12 étapes » de SQLite pour reconstruire
@@ -97,6 +101,7 @@ from .models import (
     AgentProfileVersion,
     Base,
     Chapter,
+    ChapterScene,
     ChapterStageDecision,
     Character,
     CharacterImage,
@@ -127,7 +132,7 @@ from .slugs import RESERVED_ENTRIES, RESERVED_SERIES, slugify, unique_slug
 
 log = logging.getLogger("mangaka_engine")
 
-SCHEMA_VERSION = 37
+SCHEMA_VERSION = 38
 
 
 class MigrationError(RuntimeError):
@@ -581,6 +586,25 @@ def _v36_to_v37(cur: sqlite3.Cursor) -> None:
         _rebuild(cur, SeriesAsset.__table__)  # type: ignore[arg-type]
 
 
+def _v37_to_v38(cur: sqlite3.Cursor) -> None:
+    tables = {row[0] for row in cur.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if ChapterScene.__tablename__ not in tables:
+        for stmt in _ddl(ChapterScene.__table__):
+            cur.execute(stmt)
+    if "scene_tempo" not in {row[1] for row in cur.execute("PRAGMA table_info(projects)")}:
+        cur.execute("ALTER TABLE projects ADD COLUMN scene_tempo JSON NOT NULL DEFAULT '{}'")
+    chapters = {row[1] for row in cur.execute("PRAGMA table_info(chapters)")}
+    if "scenes_validated_at" not in chapters:
+        cur.execute("ALTER TABLE chapters ADD COLUMN scenes_validated_at DATETIME")
+    if "scenes_validated_by" not in chapters:
+        cur.execute("ALTER TABLE chapters ADD COLUMN scenes_validated_by VARCHAR(120) NOT NULL DEFAULT ''")
+    if "scenes_deferred" not in chapters:
+        cur.execute("ALTER TABLE chapters ADD COLUMN scenes_deferred JSON NOT NULL DEFAULT '[]'")
+    if "scene_id" not in {row[1] for row in cur.execute("PRAGMA table_info(pages)")}:
+        cur.execute("ALTER TABLE pages ADD COLUMN scene_id INTEGER REFERENCES chapter_scenes (id) ON DELETE SET NULL")
+        cur.execute("CREATE INDEX ix_pages_scene_id ON pages (scene_id)")
+
+
 MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     # version de départ → (version d'arrivée, fonction)
     0: (2, _v0_to_v2),
@@ -620,6 +644,7 @@ MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     34: (35, _v34_to_v35),
     35: (36, _v35_to_v36),
     36: (37, _v36_to_v37),
+    37: (38, _v37_to_v38),
 }
 
 

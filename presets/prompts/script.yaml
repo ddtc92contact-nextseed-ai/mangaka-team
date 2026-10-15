@@ -16,6 +16,8 @@
 #   $dialogue_rules (règles de dialogue ci-dessous, en clair : densité, brièveté, place, variété)
 #   $pre_direction  (charte chiffrée de la série, son ADN : cases par planche, dialogue par planche, courbe de
 #                    rythme — presets/pre_direction.yaml, réglable sur la fiche série)
+#   $scenes        (scènes validées par l'auteur à l'étape Scènes : scène, type, pages, profil de tempo en clair ;
+#                   « (pas de liste de scènes validée…) » pour un chapitre écrit sans scènes)
 #   $context_json  (le même contexte, en JSON)
 #   $bible         (bible de la série : univers, ton, personnages, règles, gags, résumés validés)
 #   $savoir_faire  (passages du savoir-faire de l'agent « script », avec leur source ; voir knowledge.yaml)
@@ -98,6 +100,11 @@ user: |
   Consignes du genre et du ton de la série (priment sur les valeurs indicatives ci-dessous) :
   $style_guidelines
 
+  Scènes du chapitre, validées par l'éditeur (vérifiées : chaque page porte le numéro de sa scène dans
+  « scene », les pages suivent l'ordre des scènes, et chaque scène a EXACTEMENT son nombre de pages ;
+  le tempo d'une scène précise la charte de la série pour ses pages) :
+  $scenes
+
   Contraintes :
   - environ $target_pages pages ; le nombre de cases par page suit la charte de la série ci-dessous ;
   - « kind » d'un dialogue vaut exactement l'une de ces valeurs : $bubble_kinds
@@ -151,7 +158,7 @@ user: |
   $dialogue_rules
 
   Format de réponse :
-  {"pages": [{"rythme": "normal", "panels": [{"description": "…", "setting": "…", "staging": "…",
+  {"pages": [{"scene": 1, "rythme": "normal", "panels": [{"description": "…", "setting": "…", "staging": "…",
      "characters": ["…"], "offscreen": [], "lieu": "La clairière", "decor": null, "objets": [],
      "importance": 2, "intensity": "normal",
      "dialogues": [{"speaker": "…", "text": "…", "kind": "speech"}, {"speaker": "…", "text": "…", "kind": "shout"}],

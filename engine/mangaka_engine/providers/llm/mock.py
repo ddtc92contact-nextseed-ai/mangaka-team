@@ -56,6 +56,14 @@ synopsis du chapitre ; `[mock:da-invalide:N]` pour la seule direction artistique
 n'installent pas les nouveaux lieux (pas de case d'établissement au changement de lieu).
 L'essai courant se déduit des messages : aucun état entre deux appels.
 
+Découpage en scènes (`"task": "scenes"`, pipeline/scenes.py) : une scène par phrase du synopsis, son type deviné d'après
+ses mots (combat, poursuite, match, révélation, dialogue, sinon calme) et ses pages d'après son type ; la somme des
+pages vaut toujours la cible du chapitre, et les phrases qui ne rentrent pas sont reportées au chapitre suivant
+(`mock_scenes`). `[mock:scenes-invalide:N]` dans le synopsis : les N premiers essais sont invalides (prose, puis type
+hors liste et somme fausse). Avec des scènes validées dans le contexte du scénario, chaque page du découpage porte sa
+scène et chaque scène a ses pages ; `[mock:scenes-pages:N]` : les N premiers essais rangent toutes les pages dans la
+première scène.
+
 Regroupement des lieux (`"task": "locations"`, pipeline/locations.py) : les variantes de même nom de lieu
 (« clairière », « clairière au centre de l'île ») vont ensemble (`heuristic_groups`).
 
@@ -96,6 +104,8 @@ _IDENTITY_INVALID_MARK = re.compile(r"\[mock:identite-invalide:(\d+)\]")
 _SUMMARY_INVALID_MARK = re.compile(r"\[mock:resume-invalide:(\d+)\]")
 _NO_ESTABLISHING_MARK = re.compile(r"\[mock:sans-etablissement:(\d+)\]")
 _CREATOR_INVALID_MARK = re.compile(r"\[mock:createur-invalide:(\d+)\]")
+_SCENES_INVALID_MARK = re.compile(r"\[mock:scenes-invalide:(\d+)\]")
+_SCENE_PAGES_MARK = re.compile(r"\[mock:scenes-pages:(\d+)\]")
 _ANY_MARK = re.compile(r"\s*\[mock:[a-z-]+:\d+\]\s*")
 UNKNOWN_ID = 999_999  # id de décor cité par `[mock:id-invalide:N]` (absent de toute bibliothèque)
 TASKS = (
@@ -110,6 +120,7 @@ TASKS = (
     "back_summary",
     "locations",
     "series_creation",
+    "scenes",
 )
 
 _PANELS_PER_PAGE = [5, 4, 6, 3, 5, 4]
@@ -146,6 +157,7 @@ def _task_context(messages: list[ChatMessage]) -> dict[str, Any] | None:
 def _sentences(text: str) -> list[str]:
     text = _ID_INVALID_MARK.sub("", _DA_INVALID_MARK.sub("", _INVALID_MARK.sub("", text)))
     text = _NO_ESTABLISHING_MARK.sub("", _SPARSE_MARK.sub("", text))
+    text = _SCENE_PAGES_MARK.sub("", _SCENES_INVALID_MARK.sub("", text))
     parts = [p.strip() for p in re.split(r"(?<=[.!?…])\s+|\n+", text) if p.strip()]
     return parts or ["La scène s'installe."]
 
@@ -189,6 +201,11 @@ def mock_script(ctx: dict[str, Any], *, sparse: bool = False) -> dict[str, Any]:
     names = [c["name"] for c in ctx.get("characters") or [] if c.get("name")] or ["Héros", "Rival"]
     beats = _sentences(str(chapter.get("synopsis") or ""))
     n_pages = max(1, min(40, int(chapter.get("target_pages") or 15)))
+    # Scènes validées : autant de pages que leur somme, chaque page dans sa scène.
+    scenes = [s for s in ctx.get("scenes") or [] if isinstance(s, dict) and int(s.get("pages") or 0) > 0]
+    page_scene = [int(s["number"]) for s in scenes for _ in range(int(s["pages"]))]
+    if page_scene:
+        n_pages = len(page_scene)
     previous = ctx.get("previous_chapters") or []
     decors = [d["id"] for d in ctx.get("decors") or [] if isinstance(d.get("id"), int)]
     objets = [o["id"] for o in ctx.get("objets") or [] if isinstance(o.get("id"), int)]
@@ -261,6 +278,8 @@ def mock_script(ctx: dict[str, Any], *, sparse: bool = False) -> dict[str, Any]:
                 }
             )
         pages.append({"rythme": _RYTHMES[p % len(_RYTHMES)], "panels": panels})
+        if page_scene:
+            pages[-1]["scene"] = page_scene[p]
     if charter and not sparse:
         _script_charter(pages, charter)
     recap = f" Suite du chapitre {previous[-1]['number']}." if previous else ""
@@ -823,6 +842,8 @@ class MockLLMProvider:
             return LLMResult(text=json.dumps(heuristic_groups(ctx), ensure_ascii=False), model="mock")
         if ctx is not None and ctx.get("task") == "art_direction":
             return LLMResult(text=self._direction_answer(messages, ctx), model="mock")
+        if ctx is not None and ctx.get("task") == "scenes":
+            return LLMResult(text=self._scenes_answer(messages, ctx), model="mock")
         if ctx is not None:
             return LLMResult(text=self._script_answer(messages, ctx), model="mock")
         last = next((m.content for m in reversed(messages) if m.role == "user"), "")
@@ -845,7 +866,12 @@ class MockLLMProvider:
             return json.dumps(out, ensure_ascii=False)
         mark = _SPARSE_MARK.search(str((ctx.get("chapter") or {}).get("synopsis") or ""))
         sparse = bool(mark) and attempt <= int(mark.group(1))  # type: ignore[union-attr]
-        return json.dumps(mock_script(ctx, sparse=sparse), ensure_ascii=False)
+        out = mock_script(ctx, sparse=sparse)
+        mark = _SCENE_PAGES_MARK.search(str((ctx.get("chapter") or {}).get("synopsis") or ""))
+        if mark and attempt <= int(mark.group(1)):
+            for page in out["pages"]:
+                page["scene"] = 1
+        return json.dumps(out, ensure_ascii=False)
 
     def _image_prompt_answer(self, messages: list[ChatMessage], ctx: dict[str, Any]) -> str:
         attempt = 1 + sum(1 for m in messages if m.role == "assistant")
@@ -918,6 +944,17 @@ class MockLLMProvider:
             return json.dumps({"dna": [{"path": "rythme.global", "value": 3}], "bible": {"world": ""}})
         return json.dumps(mock_series_creation(ctx), ensure_ascii=False)
 
+    def _scenes_answer(self, messages: list[ChatMessage], ctx: dict[str, Any]) -> str:
+        attempt = 1 + sum(1 for m in messages if m.role == "assistant")
+        mark = _SCENES_INVALID_MARK.search(str((ctx.get("chapter") or {}).get("synopsis") or ""))
+        invalid = int(mark.group(1)) if mark else self.invalid_attempts
+        if attempt <= invalid:
+            if attempt % 2:
+                return "Voici les scènes : une bagarre, puis un dialogue…"
+            target = int((ctx.get("chapter") or {}).get("target_pages") or 15)
+            return json.dumps({"scenes": [{"summary": "Tout le chapitre.", "type": "bagarre", "pages": target + 3}]})
+        return json.dumps(mock_scenes(ctx), ensure_ascii=False)
+
     def _direction_answer(self, messages: list[ChatMessage], ctx: dict[str, Any]) -> str:
         attempt = 1 + sum(1 for m in messages if m.role == "assistant")
         mark = _DA_INVALID_MARK.search(str((ctx.get("chapter") or {}).get("synopsis") or ""))
@@ -929,6 +966,69 @@ class MockLLMProvider:
         mark = _NO_ESTABLISHING_MARK.search(str((ctx.get("chapter") or {}).get("synopsis") or ""))
         establish = not (mark and attempt <= int(mark.group(1)))
         return json.dumps(mock_art_direction(ctx, establish=establish), ensure_ascii=False)
+
+
+# --- découpage en scènes ----------------------------------------------------------------------------------------
+# Type deviné d'après les mots de la phrase (dans cet ordre), et pages voulues par type.
+_SCENE_WORDS: list[tuple[str, str]] = [
+    ("combat", r"combat|se bat|frappe|attaqu|duel|affront|coup de poing|sabre|bagarre"),
+    ("poursuite", r"poursui|course|s'enfui|fuit|fuite|traqu|court après"),
+    ("sport_collectif", r"match|ballon|équipe|terrain|tournoi"),
+    ("revelation", r"révél|révèl|découvre|secret|vérité|apparaît|surgit"),
+    ("dialogue", r"\bdit\b|parle|discut|demande|explique|répond|avoue|«|\?"),
+]
+_SCENE_PAGES = {"calme": 2, "dialogue": 3, "combat": 4, "poursuite": 3, "sport_collectif": 4, "revelation": 1}
+_SCENE_MIN = {"combat": 2, "poursuite": 2, "sport_collectif": 2}
+
+
+def _scene_type(text: str) -> str:
+    low = text.lower()
+    return next((t for t, words in _SCENE_WORDS if re.search(words, low)), "calme")
+
+
+def mock_scenes(ctx: dict[str, Any]) -> dict[str, Any]:
+    """Liste de scènes factice (`"task": "scenes"`) : une scène par phrase du synopsis ; la somme des pages vaut la
+    cible, ce qui ne rentre pas (une scène qui n'aurait plus ses pages minimum) est reporté, jamais tassé."""
+    chapter = ctx.get("chapter") or {}
+    target = max(1, int(chapter.get("target_pages") or 15))
+    max_pages = int(ctx.get("max_pages_per_scene") or 12)
+    max_scenes = int(ctx.get("max_scenes") or 20)
+    allowed = {t.get("id") for t in ctx.get("scene_types") or []} or set(_SCENE_PAGES)
+    beats = _sentences(str(chapter.get("synopsis") or ""))
+    scenes: list[dict[str, Any]] = []
+    deferred: list[str] = []
+    used = 0
+    for beat in beats:
+        kind = _scene_type(beat)
+        kind = kind if kind in allowed else "calme"
+        want = min(_SCENE_PAGES.get(kind, 2), max_pages)
+        left = target - used
+        if deferred or len(scenes) >= max_scenes or left < _SCENE_MIN.get(kind, 1):
+            deferred.append(beat)
+            continue
+        pages = min(want, left)
+        title = " ".join(beat.rstrip(".!?…").split()[:5])
+        scenes.append({"title": title, "summary": beat, "type": kind, "pages": pages, "lieu": None})
+        used += pages
+    if not scenes:
+        scenes.append({"title": "Le chapitre", "summary": beats[0], "type": "calme", "pages": 0, "lieu": None})
+        deferred = deferred[1:]
+    # Pages restantes : réparties sur les scènes, sans dépasser le plafond d'une scène.
+    i = 0
+    while used < target:
+        room = [s for s in scenes if s["pages"] < max_pages]
+        if not room:
+            last = scenes[-1]["title"]
+            more = min(max_pages, target - used)
+            scenes.append(
+                {"title": "Suite", "summary": f"La suite de « {last} ».", "type": "calme", "pages": more, "lieu": None}
+            )
+            used += more
+            continue
+        room[i % len(room)]["pages"] += 1
+        used += 1
+        i += 1
+    return {"scenes": scenes, "deferred": deferred}
 
 
 # --- créateur de série ----------------------------------------------------------------------------------------

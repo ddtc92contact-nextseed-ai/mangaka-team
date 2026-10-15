@@ -572,6 +572,8 @@ export interface PageData {
   layout: PageLayout | null;
   layout_stale: boolean;
   panels: PanelData[];
+  /** Scène du chapitre (étape Scènes) ; null : page bonus, ou chapitre écrit sans scènes. */
+  scene_id?: number | null;
 }
 
 /** Découpage envoyé au moteur : `id` absent = nouvel élément. */
@@ -3039,13 +3041,64 @@ export interface Stats {
 }
 
 /** Étapes vitales d'un chapitre (garde d'étapes du moteur : pipeline/stage_gate.py). */
-export type StageKey = "script" | "direction" | "layout" | "references" | "prompts" | "approved" | "lettering";
+export type StageKey = "scenes" | "script" | "direction" | "layout" | "references" | "prompts" | "approved" | "lettering";
 
 export interface StageDecision {
   decision: "validated" | "forced" | "revoked";
   author: string;
   note: string;
   at: string;
+}
+
+// --- Étape « Scènes » (moteur : pipeline/scenes.py, api/scenes.py) ---------------------------------------
+export type SceneTypeId = "calme" | "dialogue" | "combat" | "poursuite" | "sport_collectif" | "revelation";
+
+export interface SceneType {
+  id: SceneTypeId;
+  name: string;
+  description: string;
+  /** Profil de tempo en clair (ADN de la série précisé par le profil, ajusté par la série). */
+  tempo: string;
+}
+
+export interface ChapterSceneItem {
+  id: number;
+  position: number;
+  title: string;
+  summary: string;
+  type: SceneTypeId;
+  pages: number;
+  location_id: number | null;
+  location_name: string | null;
+  /** Pages de l'histoire rattachées (après le scénario). */
+  page_numbers: number[];
+}
+
+export interface ChapterScenes {
+  chapter_id: number;
+  project_id: number;
+  target_page_count: number;
+  total_pages: number;
+  validated: boolean;
+  validated_at: string | null;
+  validated_by: string;
+  /** Chapitre écrit sans scènes (« ancien mode ») : jamais bloqué. */
+  legacy: boolean;
+  /** Pourquoi « Valider les scènes » est refusé, ou null. */
+  problem: string | null;
+  deferred: string[];
+  scenes: ChapterSceneItem[];
+  types: SceneType[];
+  available: boolean;
+}
+
+export interface SceneInput {
+  id?: number;
+  title: string;
+  summary: string;
+  type: SceneTypeId;
+  pages: number;
+  location_id: number | null;
 }
 
 export interface ChapterStage {
@@ -3266,6 +3319,12 @@ export const api = {
     request<Chapter[]>(`/projects/${projectId}/chapters/reorder`, json("POST", { chapter_ids: chapterIds })),
 
   startScript: (chapterId: number) => request<Job>(`/chapters/${chapterId}/script`, { method: "POST" }),
+  getScenes: (chapterId: number) => request<ChapterScenes>(`/chapters/${chapterId}/scenes`),
+  saveScenes: (chapterId: number, scenes: SceneInput[], deferred: string[]) =>
+    request<ChapterScenes>(`/chapters/${chapterId}/scenes`, json("PUT", { scenes, deferred })),
+  proposeScenes: (chapterId: number) => request<Job>(`/chapters/${chapterId}/scenes/propose`, { method: "POST" }),
+  validateScenes: (chapterId: number, author = "") =>
+    request<ChapterScenes>(`/chapters/${chapterId}/scenes/validate`, json("POST", { author })),
   linkCharacterName: (chapterId: number, name: string, characterId: number | null) =>
     request<CharacterLink>(
       `/chapters/${chapterId}/character-links`,

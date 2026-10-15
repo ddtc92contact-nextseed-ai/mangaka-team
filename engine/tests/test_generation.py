@@ -30,7 +30,7 @@ from mangaka_engine.providers.llm import MockLLMProvider
 from mangaka_engine.store import comfy_folders
 from mangaka_engine.store.comfy_folders import ComfyFolders
 from mangaka_engine.store.models import Job, JobStatus, Panel, PanelState
-from tests.conftest import COMFY_FIXTURES, PRESETS_DIR, force_stages, png_bytes
+from tests.conftest import COMFY_FIXTURES, PRESETS_DIR, force_stages, png_bytes, start_script
 
 # Packs de la série de test : seinen, N&B à trames, dark.
 SEINEN = {"style_genre": "seinen", "style_rendering": "nb-trames", "style_tone": "dark"}
@@ -541,7 +541,7 @@ def test_cancel_pending_llm_job_or_refuse_running(make_client: Callable[..., Tes
     c = make_client()
     data = setup_chapter(c)
     _ok(c.patch(f"/chapters/{data['chapter']['id']}", json={"synopsis": "Aiko arrive."}))
-    job = _ok(c.post(f"/chapters/{data['chapter']['id']}/script"), 202)
+    job = _ok(start_script(c, data["chapter"]["id"]), 202)
     c.app.state.ctx.jobs.wait(job["id"])  # type: ignore[attr-defined]
     assert c.post(f"/jobs/{job['id']}/cancel").status_code == 409
 

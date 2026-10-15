@@ -24,7 +24,7 @@ from mangaka_engine.providers.llm import MockLLMProvider
 from mangaka_engine.store.db import create_db_engine
 from mangaka_engine.store.migrations import SCHEMA_VERSION
 from mangaka_engine.store.models import AssetKind, Character, CharacterImage, SeriesAsset, SeriesAssetImage
-from tests.conftest import PRESETS_DIR, STYLE, png_bytes
+from tests.conftest import PRESETS_DIR, STYLE, png_bytes, start_script
 from tests.fixtures.islands import CRIQUE, PETITE_ILE, distinct, pages
 from tests.test_migrations import _columns, _version
 
@@ -221,7 +221,7 @@ def test_the_writer_attaches_every_panel_to_a_place_and_reuses_it_next_chapter(c
     for n in (1, 2):
         body = {"title": f"Ch {n}", "synopsis": "Urus retrouve Kaël.", "target_page_count": 4}
         ch = _ok(c.post(f"/projects/{s['id']}/chapters", json=body), 201)
-        job = _ok(c.post(f"/chapters/{ch['id']}/script"), 202)
+        job = _ok(start_script(c, ch["id"]), 202)
         assert _wait_job(c, job["id"])["status"] == "succeeded"
         ids.append(ch["id"])
     places = _ok(c.get(f"/projects/{s['id']}/locations"))
@@ -239,7 +239,7 @@ def _directed(c: TestClient, synopsis: str) -> dict[str, Any]:
         c.post(f"/projects/{s['id']}/chapters", json={"title": "Le vol", "synopsis": synopsis, "target_page_count": 7}),
         201,
     )
-    assert _wait_job(c, _ok(c.post(f"/chapters/{ch['id']}/script"), 202)["id"])["status"] == "succeeded"
+    assert _wait_job(c, _ok(start_script(c, ch["id"]), 202)["id"])["status"] == "succeeded"
     job = _ok(c.post(f"/chapters/{ch['id']}/direction", json={}), 202)
     assert _wait_job(c, job["id"])["status"] == "succeeded"
     return _ok(c.get(f"/chapters/{ch['id']}/direction"))

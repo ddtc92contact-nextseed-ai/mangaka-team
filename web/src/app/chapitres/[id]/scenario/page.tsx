@@ -45,12 +45,13 @@ import {
   type DraftPanel,
 } from "@/lib/script";
 import { useChapter } from "../chapter-context";
+import { StageBanner } from "../stages";
 import { StepAlert } from "../step-alert";
 
 const SYNOPSIS_FIRST = "Écris d'abord le synopsis ou le script brut du chapitre : le découpage part de lui.";
 
 export default function ScenarioPage() {
-  const { chapter, setChapter, reload: reloadChapter } = useChapter();
+  const { chapter, setChapter, reload: reloadChapter, reloadStages } = useChapter();
   const pages = useEngineData(() => api.listPages(chapter.id), [chapter.id]);
   const characters = useEngineData(() => api.listCharacters(chapter.project_id), [chapter.project_id]);
   const decors = useEngineData(() => api.listLibrary("decor", chapter.project_id), [chapter.project_id]);
@@ -67,6 +68,17 @@ export default function ScenarioPage() {
   const sources = useEngineData(() => api.chapterSources(chapter.id), [chapter.id]);
   const dialogues = useEngineData(() => api.chapterDialogues(chapter.id), [chapter.id]);
   const brief = useEngineData(() => api.scriptBrief(chapter.id), [chapter.id]);
+  // Scènes validées (étape Scènes) : « Scène 2 · Combat » en tête de chaque page qui s'y rattache.
+  const sceneList = useEngineData(() => api.getScenes(chapter.id), [chapter.id]);
+  const sceneLabels = useMemo(() => {
+    const names = new Map(sceneList.data?.types.map((t) => [t.id, t.name]) ?? []);
+    return new Map(
+      sceneList.data?.scenes.map((s, i) => [
+        s.id,
+        `Scène ${i + 1} · ${names.get(s.type) ?? s.type}${s.title ? ` — ${s.title}` : ""}`,
+      ]) ?? [],
+    );
+  }, [sceneList.data]);
 
   const [synopsis, setSynopsis] = useState(chapter.synopsis);
   const [startError, setStartError] = useState<string | null>(null);
@@ -96,7 +108,9 @@ export default function ScenarioPage() {
       pages.reload();
       places.reload(); // lieux créés par le scénariste
       dialogues.reload();
+      sceneList.reload();
       reloadChapter();
+      reloadStages();
     }
   });
   const running = job !== null && !isFinished(job);
@@ -172,6 +186,7 @@ export default function ScenarioPage() {
 
   return (
     <div className="space-y-6">
+      <StageBanner action="script" />
       <Card>
         <Field
           label="Synopsis ou script brut du chapitre"
@@ -294,6 +309,7 @@ export default function ScenarioPage() {
                 index={pi}
                 total={draft.length}
                 library={library}
+                sceneLabel={page.sceneId ? sceneLabels.get(page.sceneId) : undefined}
                 disabled={running}
                 onChange={(next) => edit((d) => d.map((p, i) => (i === pi ? next : p)))}
                 onMove={(delta) => edit((d) => moveItem(d, pi, delta))}
@@ -605,6 +621,7 @@ function PageEditor({
   index,
   total,
   library,
+  sceneLabel,
   disabled,
   onChange,
   onMove,
@@ -614,6 +631,7 @@ function PageEditor({
   index: number;
   total: number;
   library: SceneLibrary;
+  sceneLabel?: string;
   disabled: boolean;
   onChange: (p: DraftPage) => void;
   onMove: (delta: number) => void;
@@ -624,6 +642,11 @@ function PageEditor({
     <Card className="p-4" data-testid="page-editor">
       <div className="mb-3 flex flex-wrap items-center gap-3">
         <h3 className="font-semibold text-zinc-100">Page {index + 1}</h3>
+        {sceneLabel && (
+          <span className="rounded bg-zinc-800 px-2 py-0.5 text-xs text-zinc-300" data-testid="page-scene">
+            {sceneLabel}
+          </span>
+        )}
         <div className="flex w-60 items-center gap-1.5">
         <Select
           aria-label={`Type de la page ${index + 1}`}

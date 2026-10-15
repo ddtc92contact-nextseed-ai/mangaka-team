@@ -13,7 +13,7 @@ from mangaka_engine.pipeline.prompt import ReferenceSlot, build_prompt, characte
 from mangaka_engine.pipeline.script import ScriptOutput, save_script
 from mangaka_engine.presets import PresetRegistry
 from mangaka_engine.store.models import Chapter, Character
-from tests.conftest import PRESETS_DIR, STYLE, png_bytes
+from tests.conftest import PRESETS_DIR, STYLE, png_bytes, start_script
 
 REG = PresetRegistry.load(PRESETS_DIR)
 
@@ -247,7 +247,7 @@ def test_mock_scenario_of_a_two_character_story(client: TestClient) -> None:
     d = _dragons(client, images=False)
     jobs = client.app.state.ctx.jobs  # type: ignore[attr-defined]
     _ok(client.patch(f"/chapters/{d['chapter']['id']}", json={"target_page_count": 2}))
-    job = _ok(client.post(f"/chapters/{d['chapter']['id']}/script"), 202)
+    job = _ok(start_script(client, d["chapter"]["id"]), 202)
     jobs.wait(job["id"])
     assert _ok(client.get(f"/jobs/{job['id']}"))["status"] == "succeeded"
     panels = [p for page in _ok(client.get(f"/chapters/{d['chapter']['id']}/pages")) for p in page["panels"]]

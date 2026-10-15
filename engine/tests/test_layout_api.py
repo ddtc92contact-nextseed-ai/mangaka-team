@@ -13,7 +13,7 @@ from sqlalchemy import select
 from mangaka_engine.config import Settings
 from mangaka_engine.main import create_app
 from mangaka_engine.store.models import Panel, PanelImage
-from tests.conftest import STYLE
+from tests.conftest import STYLE, start_script
 
 
 @pytest.fixture
@@ -30,7 +30,7 @@ def _scripted(c: TestClient, **series: Any) -> tuple[dict, list[dict]]:
         f"/projects/{sid}/chapters",
         json={"synopsis": "Un duel sous la pluie. Le rival frappe.", "target_page_count": 6},
     ).json()
-    job = c.post(f"/chapters/{ch['id']}/script").json()
+    job = start_script(c, ch["id"]).json()
     c.app.state.ctx.jobs.wait(job["id"])  # type: ignore[attr-defined]
     assert c.get(f"/jobs/{job['id']}").json()["status"] == "succeeded"
     return project.json(), c.get(f"/chapters/{ch['id']}/pages").json()

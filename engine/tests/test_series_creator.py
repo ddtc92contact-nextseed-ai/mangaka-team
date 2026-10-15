@@ -28,7 +28,7 @@ from mangaka_engine.pipeline.series_creator import (
 from mangaka_engine.presets import PresetRegistry
 from mangaka_engine.providers.llm import MockLLMProvider
 from mangaka_engine.providers.llm.mock import mock_series_creation
-from tests.conftest import PRESETS_DIR, STYLE
+from tests.conftest import PRESETS_DIR, STYLE, start_script
 
 PRESETS = PresetRegistry.load(PRESETS_DIR)
 SETTINGS = PRESETS.series_creator
@@ -282,7 +282,7 @@ def test_create_answer_propose_then_save_dna_and_bible(client: TestClient) -> No
     ch = _ok(client.post(f"/projects/{pid}/chapters", json={"title": "Un", "synopsis": "Aiko et Kenji arrivent."}), 201)
     brief = _ok(client.get(f"/chapters/{ch['id']}/script-brief"))
     assert brief["bible_empty"] is False and brief["characters_without_note"] == []
-    job = _ok(client.post(f"/chapters/{ch['id']}/script"), 202)
+    job = _ok(start_script(client, ch["id"]), 202)
     client.app.state.ctx.jobs.wait(job["id"])  # type: ignore[attr-defined]
     user = client.app.state.ctx.providers.llm.calls[-1][1].content  # type: ignore[attr-defined]
     assert "Une île volcanique, corrigée par l'auteur." in user

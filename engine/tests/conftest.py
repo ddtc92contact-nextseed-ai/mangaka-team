@@ -100,3 +100,10 @@ def force_stages(client: TestClient, chapter_id: int, *stages: str) -> None:
         if (not stages or stage["key"] in stages) and not stage["passed"]:
             r = client.post(f"/chapters/{chapter_id}/stages/{stage['key']}/override", json={"author": "tests"})
             assert r.status_code == 200, r.text
+
+
+def start_script(client: TestClient, chapter_id: int) -> Any:
+    """`POST /chapters/{id}/script` après avoir passé outre l'étape « Scènes » : pour les tests du scénariste qui ne
+    portent pas sur les scènes (un chapitre neuf exige sinon une liste de scènes validée)."""
+    force_stages(client, chapter_id, "scenes")
+    return client.post(f"/chapters/{chapter_id}/script")

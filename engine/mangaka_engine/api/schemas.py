@@ -526,6 +526,8 @@ class PageOut(BaseModel):
     layout: dict[str, Any] | None
     layout_stale: bool
     panels: list[PanelOut]
+    # Scène du chapitre (étape Scènes) ; None : page bonus, ou chapitre écrit sans scènes.
+    scene_id: int | None = None
 
 
 class PageLayoutIn(_In):
@@ -1982,7 +1984,7 @@ class StatsOut(BaseModel):
 
 
 # --- Garde d'étapes (pipeline/stage_gate.py) -------------------------------------------------
-StageName = Literal["script", "direction", "layout", "references", "prompts", "approved", "lettering"]
+StageName = Literal["scenes", "script", "direction", "layout", "references", "prompts", "approved", "lettering"]
 
 
 class StageDecisionOut(BaseModel):

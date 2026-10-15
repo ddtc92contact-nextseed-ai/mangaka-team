@@ -12,7 +12,7 @@ from mangaka_engine.config import Settings
 from mangaka_engine.main import create_app
 from mangaka_engine.store.db import create_db_engine
 from mangaka_engine.store.migrations import SCHEMA_VERSION, MigrationError
-from tests.conftest import STYLE, png_bytes
+from tests.conftest import STYLE, png_bytes, start_script
 
 V1_SCHEMA = (Path(__file__).parent / "fixtures" / "schema_v1.sql").read_text()
 NOW = "2026-10-01 10:00:00.000000"
@@ -192,7 +192,7 @@ def test_v1_database_is_migrated(tmp_path: Path, make_settings: Callable[..., Se
         assert [ch["name"] for ch in c.get("/projects/1/characters").json()] == ["Aiko"]
         # le nouveau schéma fonctionne : chapitre + découpage
         ch = c.post("/projects/1/chapters", json={"synopsis": "Un duel.", "target_page_count": 1}).json()
-        job = c.post(f"/chapters/{ch['id']}/script").json()
+        job = start_script(c, ch["id"]).json()
         c.app.state.ctx.jobs.wait(job["id"])  # type: ignore[attr-defined]
         assert c.get(f"/jobs/{job['id']}").json()["status"] == "succeeded"
     assert _version(settings.database_path) == SCHEMA_VERSION

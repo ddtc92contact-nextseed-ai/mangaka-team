@@ -1828,6 +1828,109 @@ class PreDirectionSettings(_Strict):
             raise ValueError(f"genres.{genre_id} : {exc}") from None
 
 
+# --- Types de scène et profils de tempo (presets/scene_types.yaml) ----------------------
+# Liste fermée : le découpage en scènes (pipeline/scenes.py) ne propose que ces types, l'écran Scènes n'offre qu'eux.
+SceneTypeId = Literal["calme", "dialogue", "combat", "poursuite", "sport_collectif", "revelation"]
+SCENE_TYPES: tuple[SceneTypeId, ...] = ("calme", "dialogue", "combat", "poursuite", "sport_collectif", "revelation")
+# Valeurs d'un profil de tempo qui ne sont pas des curseurs de l'ADN : lignes de mouvement, encadrés de narration et
+# consignes de mise en scène (chemin → sorte : `bool`, ou `int` borné).
+TEMPO_EXTRAS: dict[str, tuple[str, int, int]] = {
+    "motion_lines.required": ("bool", 0, 1),
+    "motion_lines.forbidden": ("bool", 0, 1),
+    "narration.max_per_page": ("int", 0, 6),
+    "staging.no_repeated_shot": ("bool", 0, 1),
+    "staging.constant_direction": ("bool", 0, 1),
+    "staging.alternate_wide_tight": ("bool", 0, 1),
+    "staging.page_turn_reveal": ("bool", 0, 1),
+}
+
+
+def dna_leaf_kinds(model: type[BaseModel] | None = None, prefix: str = "") -> dict[str, str]:
+    """Curseurs de l'ADN (`PreDirection`) et leur sorte : {"panels.min_per_page": "int", "shots.wide.min": "share"}."""
+    out: dict[str, str] = {}
+    for name, info in (model or PreDirection).model_fields.items():
+        ann = info.annotation
+        if isinstance(ann, type) and issubclass(ann, BaseModel):
+            out.update(dna_leaf_kinds(ann, f"{prefix}{name}."))
+        else:
+            out[f"{prefix}{name}"] = "bool" if ann in (bool, "bool") else "int" if ann in (int, "int") else "share"
+    return out
+
+
+def _flat(data: Any, prefix: str = "") -> dict[str, Any]:
+    if not isinstance(data, dict):
+        return {prefix.rstrip("."): data}
+    out: dict[str, Any] = {}
+    for key, value in data.items():
+        out.update(_flat(value, f"{prefix}{key}."))
+    return out
+
+
+def check_tempo_value(path: str, value: Any) -> str | None:
+    """Erreur lisible d'une valeur de profil de tempo (chemin inconnu, mauvaise sorte, hors bornes), sinon None."""
+    kinds = dna_leaf_kinds()
+    if path in kinds:
+        kind, low, high = kinds[path], 0, 1
+    elif path in TEMPO_EXTRAS:
+        kind, low, high = TEMPO_EXTRAS[path]
+    else:
+        return f"valeur inconnue du profil de tempo : « {path} » (curseurs de l'ADN, ou {', '.join(TEMPO_EXTRAS)})"
+    if kind == "bool":
+        return None if isinstance(value, bool) else f"{path} : oui ou non attendu"
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return f"{path} : nombre attendu"
+    if kind == "int" and value != int(value):
+        return f"{path} : nombre entier attendu"
+    if kind == "share" and not 0 <= value <= 1:
+        return f"{path} : part entre 0 et 1 attendue"
+    if path in TEMPO_EXTRAS and not low <= value <= high:
+        return f"{path} : entre {low} et {high}"
+    return None
+
+
+class SceneType(_Strict):
+    """Un type de scène : nom affiché, aide, et profil de tempo (`tempo`, imbriqué dans le YAML, mis à plat ici :
+    {"panels.min_per_page": 6, "motion_lines.required": true}). Le profil précise ou resserre les valeurs héritées
+    du genre et de la série (pipeline/pre_direction.py `apply_tempo`), jamais en bloc."""
+
+    name: str = Field(min_length=1, max_length=60)
+    description: str = Field(default="", max_length=400)
+    tempo: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("tempo", mode="before")
+    @classmethod
+    def _tempo(cls, value: Any) -> dict[str, Any]:
+        flat = _flat(value or {}) if isinstance(value, dict) else value
+        if not isinstance(flat, dict):
+            raise ValueError("tempo : objet attendu")
+        for path, v in flat.items():
+            error = check_tempo_value(path, v)
+            if error:
+                raise ValueError(error)
+        if flat.get("motion_lines.required") and flat.get("motion_lines.forbidden"):
+            raise ValueError("lignes de mouvement à la fois imposées et interdites")
+        return {
+            p: int(v) if dna_leaf_kinds().get(p, TEMPO_EXTRAS.get(p, ("",))[0]) == "int" else v for p, v in flat.items()
+        }
+
+
+class SceneTypesSettings(_Strict):
+    """`presets/scene_types.yaml` : la liste fermée des types de scène et leurs profils de tempo."""
+
+    # Pages au plus par scène (une scène plus longue est à découper en deux).
+    max_pages_per_scene: int = Field(default=12, ge=1, le=60)
+    max_scenes: int = Field(default=20, ge=1, le=60)
+    types: dict[SceneTypeId, SceneType]
+
+    @model_validator(mode="after")
+    def _closed(self) -> SceneTypesSettings:
+        missing = [t for t in SCENE_TYPES if t not in self.types]
+        if missing:
+            raise ValueError(f"types : type absent : {', '.join(missing)}")
+        self.types = {t: self.types[t] for t in SCENE_TYPES}
+        return self
+
+
 class CreatorChoice(_Strict):
     """Réponse à cliquer d'une question du créateur de série, avec ses pistes d'ADN (données à l'agent, jamais
     appliquées seules) : `shift` = écart à ajouter à la valeur du genre, `set` = valeur à prendre."""

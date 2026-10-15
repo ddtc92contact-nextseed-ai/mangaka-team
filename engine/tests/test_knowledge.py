@@ -40,7 +40,7 @@ from mangaka_engine.store.models import (
     Project,
     SeriesBible,
 )
-from tests.conftest import PRESETS_DIR, STYLE
+from tests.conftest import PRESETS_DIR, STYLE, start_script
 
 FIXTURES = Path(__file__).parent / "fixtures"
 SETTINGS = KnowledgeSettings(small_collection_tokens=0)
@@ -332,7 +332,7 @@ def test_bible_is_always_included_for_its_series_and_never_leaks(client: TestCli
     calls = client.app.state.ctx.providers.llm.calls  # type: ignore[attr-defined]
     for series in (kyoto, autre):
         ch = client.post(f"/projects/{series['id']}/chapters", json={"synopsis": "Un duel.", "target_page_count": 1})
-        job = client.post(f"/chapters/{ch.json()['id']}/script").json()
+        job = start_script(client, ch.json()["id"]).json()
         client.app.state.ctx.jobs.wait(job["id"])  # type: ignore[attr-defined]
         assert client.get(f"/jobs/{job['id']}").json()["status"] == "succeeded"
     kyoto_prompt, autre_prompt = (call[1].content for call in calls[-2:])
@@ -419,7 +419,7 @@ def test_step1_mock_llm_request_contains_expected_passages(client: TestClient) -
         f"/projects/{series['id']}/chapters",
         json={"title": "Le théâtre de papier", "synopsis": "Un spectacle de kamishibai.", "target_page_count": 1},
     ).json()
-    job = client.post(f"/chapters/{ch['id']}/script").json()
+    job = start_script(client, ch["id"]).json()
     client.app.state.ctx.jobs.wait(job["id"])  # type: ignore[attr-defined]
     assert client.get(f"/jobs/{job['id']}").json()["status"] == "succeeded"
 
@@ -454,7 +454,7 @@ def test_image_prompt_gets_bible_notes_and_style_passages(make_settings: Callabl
         aiko = c.post(f"/projects/{series['id']}/characters", json={"name": "Aiko"}).json()
         c.put(f"/projects/{series['id']}/bible", json={"character_notes": {str(aiko["id"]): "cicatrice à la joue"}})
         ch = c.post(f"/projects/{series['id']}/chapters", json={"synopsis": "Aiko.", "target_page_count": 1}).json()
-        job = c.post(f"/chapters/{ch['id']}/script").json()
+        job = start_script(c, ch["id"]).json()
         c.app.state.ctx.jobs.wait(job["id"])  # type: ignore[attr-defined]
         page = c.get(f"/chapters/{ch['id']}/pages").json()[0]
         panel = next(p for p in page["panels"] if "Aiko" in p["characters"])
@@ -508,7 +508,7 @@ def test_image_prompt_never_carries_quoted_text_from_bible_or_knowledge(
         note = "Détective en herbe, têtue, dit « ça cloche ! ». Imperméable jaune."
         c.put(f"/projects/{series['id']}/bible", json={"character_notes": {str(lea["id"]): note}})
         ch = c.post(f"/projects/{series['id']}/chapters", json={"synopsis": "Léa.", "target_page_count": 1}).json()
-        job = c.post(f"/chapters/{ch['id']}/script").json()
+        job = start_script(c, ch["id"]).json()
         c.app.state.ctx.jobs.wait(job["id"])  # type: ignore[attr-defined]
         page = c.get(f"/chapters/{ch['id']}/pages").json()[0]
         panel = next(p for p in page["panels"] if "Léa" in p["characters"])

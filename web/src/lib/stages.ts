@@ -3,9 +3,10 @@
 import type { ChapterStage, StageKey } from "./api";
 
 /** Actions gardées, avec le verbe que le moteur met dans `blocks` (« générer », « lettrer »…). */
-export type StageAction = "layout" | "generation" | "lettering" | "export" | "ready";
+export type StageAction = "script" | "layout" | "generation" | "lettering" | "export" | "ready";
 
 export const ACTION_VERB: Record<StageAction, string> = {
+  script: "écrire le scénario",
   layout: "mettre en page",
   generation: "générer",
   lettering: "lettrer",
@@ -15,6 +16,7 @@ export const ACTION_VERB: Record<StageAction, string> = {
 
 /** Libellé du lien vers l'écran qui règle une étape. */
 const SCREEN_LABEL: Record<string, string> = {
+  scenes: "Aller aux Scènes",
   scenario: "Aller au Scénario",
   direction: "Aller à la Direction artistique",
   "mise-en-page": "Aller à la Mise en page",
@@ -65,4 +67,4 @@ export function decisionLabel(stage: Pick<ChapterStage, "decision">): string | n
 }
 
 /** Ordre des étapes (celui du moteur). */
-export const STAGE_ORDER: StageKey[] = ["script", "direction", "layout", "references", "prompts", "approved", "lettering"];
+export const STAGE_ORDER: StageKey[] = ["scenes", "script", "direction", "layout", "references", "prompts", "approved", "lettering"];
