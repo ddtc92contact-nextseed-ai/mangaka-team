@@ -867,8 +867,35 @@ mode » : jamais bloqué.
 **Scénariste.** Il reçoit la liste validée en clair (`$scenes` de `prompts/script.yaml` : scène, type, pages,
 tempo) ; chaque page rendue porte `scene`, le nombre de pages de chaque scène est contrôlé (relance, puis
 avertissement) et chaque page enregistrée est rattachée à sa scène (par sa déclaration si elle respecte la liste,
-sinon par sa place). Les profils de tempo ne sont pas encore vérifiés case par case : ce sera le « name par
-scène ».
+sinon par sa place).
+
+### Name scène par scène (`prompts/script-scene.yaml`, `pipeline/scene_name.py`)
+
+Avec des scènes validées, **chaque scène se développe comme une name** : une génération du scénariste PAR SCÈNE,
+dans l'ordre, avec la liste validée, le résumé des scènes déjà écrites (`$written_scenes`), le profil de la scène en
+clair (`$scene_tempo`) et les fiches du savoir-faire de son type (`fiches` de `scene_types.yaml`, `$scene_fiches` :
+FUND_001 partout, ACT_008 pour l'action, LAY_002 à LAY_005 selon le type). Les **règles de name** sont dans le
+preset, pas dans le code : une case = un moment, une seule action ; l'image raconte d'abord (une case muette est
+normale) ; bulles sous la moitié de la case ; un ou deux gros plans de visage par page au plus ; une grande case
+pour le moment important ; question en bas de la page de gauche, réponse après la tourne. Température, essais et
+règles de dialogue restent ceux de `prompts/script.yaml`, **aux valeurs du profil de la scène** (le profil prime à
+l'intérieur de la scène ; pensée / voix off / narration comptée sur le chapitre).
+
+Contrôles d'une scène (relance, puis avertissement) : nombre de pages de la scène, cases et répliques par planche,
+cases muettes, encadrés de narration (`narration.max_per_page`) et **une action par case** (`one_action` :
+mots de liaison « puis », « et ensuite »… ou plus de `max_verbs` verbes d'action de la liste).
+
+Direction artistique : une génération PAR SCÈNE (`$scene` de `prompts/direction-artistique.yaml`) ; les parts de
+plans de la charte de la scène sont vérifiées sur ses seules cases (au moins 50 % de gros plans en combat), les
+lignes de mouvement imposées ou interdites sont recopiées dans l'action et l'ambiance des cases, et la courbe de
+rythme du chapitre garde son rôle (pas de pics d'affilée, respiration après un pic, jonctions de scènes comprises).
+
+Une scène se réécrit seule — scénario (`POST /chapters/{id}/scenes/{scene_id}/script`) ou direction
+(`…/direction`) — sans toucher aux pages, cases, croquis et versions des autres. Les écrans Scénario et Direction
+affichent la **mesure par scène** (`GET /chapters/{id}/scenes/measure`) : cases, répliques, cases muettes et
+encadrés par planche, plans appliqués ou proposés, face au profil ; un écart reste un avertissement. Un chapitre
+sans scènes validées (ou dont des pages ne sont rattachées à aucune scène) s'écrit et se dirige comme avant, d'une
+seule génération.
 
 ## Créateur de série (`series_creator.yaml`, `agents/createur-serie.yaml`, `prompts/createur-serie.yaml`)
 

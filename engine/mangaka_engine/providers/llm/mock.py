@@ -64,6 +64,15 @@ hors liste et somme fausse). Avec des scènes validées dans le contexte du scé
 scène et chaque scène a ses pages ; `[mock:scenes-pages:N]` : les N premiers essais rangent toutes les pages dans la
 première scène.
 
+Name scène par scène (contexte du scénariste avec `scene` : la scène à écrire) : le découpage factice n'écrit que cette
+scène, dans son nombre de pages, d'après son résumé, et suit la charte de la scène (`pre_direction` : ADN de la série
+précisé par le profil) — cases, répliques et cases muettes par planche, aucun encadré de narration si le profil n'en
+veut pas ; une révélation finit sur une pleine page. `[mock:scenes-pages:N]` : les N premiers essais de chaque scène
+ont une page de trop ; `[mock:plusieurs-actions:N]` : la première case de chaque scène enchaîne plusieurs actions
+(« Il dégaine puis tire et s'enfuit. »). En direction artistique (contexte avec `scene`), la scène suit son profil
+(parts de plans, grande case sur chaque planche d'une révélation) et le rythme des pages d'avant (respiration après un
+pic) ; `[mock:da-sans-gros-plan:N]` : les N premiers essais n'ont aucun gros plan ni très gros plan.
+
 Regroupement des lieux (`"task": "locations"`, pipeline/locations.py) : les variantes de même nom de lieu
 (« clairière », « clairière au centre de l'île ») vont ensemble (`heuristic_groups`).
 
@@ -106,6 +115,9 @@ _NO_ESTABLISHING_MARK = re.compile(r"\[mock:sans-etablissement:(\d+)\]")
 _CREATOR_INVALID_MARK = re.compile(r"\[mock:createur-invalide:(\d+)\]")
 _SCENES_INVALID_MARK = re.compile(r"\[mock:scenes-invalide:(\d+)\]")
 _SCENE_PAGES_MARK = re.compile(r"\[mock:scenes-pages:(\d+)\]")
+_MULTI_ACTION_MARK = re.compile(r"\[mock:plusieurs-actions:(\d+)\]")
+_NO_CLOSE_UP_MARK = re.compile(r"\[mock:da-sans-gros-plan:(\d+)\]")
+MULTI_ACTION = "Il dégaine puis tire et s'enfuit."
 _ANY_MARK = re.compile(r"\s*\[mock:[a-z-]+:\d+\]\s*")
 UNKNOWN_ID = 999_999  # id de décor cité par `[mock:id-invalide:N]` (absent de toute bibliothèque)
 TASKS = (
@@ -158,6 +170,7 @@ def _sentences(text: str) -> list[str]:
     text = _ID_INVALID_MARK.sub("", _DA_INVALID_MARK.sub("", _INVALID_MARK.sub("", text)))
     text = _NO_ESTABLISHING_MARK.sub("", _SPARSE_MARK.sub("", text))
     text = _SCENE_PAGES_MARK.sub("", _SCENES_INVALID_MARK.sub("", text))
+    text = _NO_CLOSE_UP_MARK.sub("", _MULTI_ACTION_MARK.sub("", text))
     parts = [p.strip() for p in re.split(r"(?<=[.!?…])\s+|\n+", text) if p.strip()]
     return parts or ["La scène s'installe."]
 
@@ -190,9 +203,9 @@ def _staging(who: str, other: str, i: int) -> str:
     )
 
 
-def _short(text: str) -> str:
+def _short(text: str, limit: int = _MOCK_WORDS) -> str:
     words = text.split()
-    return " ".join(words[:_MOCK_WORDS]) + ("…" if len(words) > _MOCK_WORDS else "")
+    return " ".join(words[:limit]) + ("…" if len(words) > limit else "")
 
 
 def mock_script(ctx: dict[str, Any], *, sparse: bool = False) -> dict[str, Any]:
@@ -204,8 +217,18 @@ def mock_script(ctx: dict[str, Any], *, sparse: bool = False) -> dict[str, Any]:
     # Scènes validées : autant de pages que leur somme, chaque page dans sa scène.
     scenes = [s for s in ctx.get("scenes") or [] if isinstance(s, dict) and int(s.get("pages") or 0) > 0]
     page_scene = [int(s["number"]) for s in scenes for _ in range(int(s["pages"]))]
+    # Name scène par scène : seulement la scène demandée, d'après son résumé.
+    focus = ctx.get("scene") if isinstance(ctx.get("scene"), dict) else None
+    profile = (focus or {}).get("profile") or {}
+    offset = 0
+    if focus:
+        page_scene = [int(focus["number"])] * max(1, int(focus.get("pages") or 1))
+        offset = int(focus.get("first_page") or 1) - 1
+        beats = _sentences(str(focus.get("summary") or "")) or beats
     if page_scene:
         n_pages = len(page_scene)
+    # Une scène compte la moyenne de mots sur peu de répliques : répliques plus courtes.
+    words = 6 if focus else _MOCK_WORDS
     previous = ctx.get("previous_chapters") or []
     decors = [d["id"] for d in ctx.get("decors") or [] if isinstance(d.get("id"), int)]
     objets = [o["id"] for o in ctx.get("objets") or [] if isinstance(o.get("id"), int)]
@@ -226,9 +249,13 @@ def mock_script(ctx: dict[str, Any], *, sparse: bool = False) -> dict[str, Any]:
         counts = others if len(set(others)) >= 2 else [c for c in range(lo, min(hi, 7) + 1) if c != 5] or counts
     pages = []
     beat = 0
+    narration_max = profile.get("narration.max_per_page")
+    opening = (not focus or int(focus.get("number") or 1) == 1) and narration_max != 0
     for p in range(n_pages):
         panels = []
-        count = 1 if p == n_pages - 1 and n_pages > 2 else counts[p % len(counts)]
+        # Pleine page : la révélation finit sur sa grande case ; une autre scène garde ses cases par planche.
+        full = (focus.get("type") == "revelation" and p == n_pages - 1) if focus else (p == n_pages - 1 and n_pages > 2)
+        count = 1 if full else counts[p % len(counts)]
         for i in range(count):
             text = beats[beat % len(beats)]
             beat += 1
@@ -242,17 +269,17 @@ def mock_script(ctx: dict[str, Any], *, sparse: bool = False) -> dict[str, Any]:
             dialogues = []
             if sparse:
                 if (p + i) % 2 == 0 and intensity != "choc":
-                    dialogues.append({"speaker": who, "text": _short(text), "kind": "speech"})
+                    dialogues.append({"speaker": who, "text": _short(text, words), "kind": "speech"})
             else:
                 kind = "shout" if intensity == "choc" else _KINDS[(p + i) % len(_KINDS)]
-                first = _SHOUTS[(p + i) % len(_SHOUTS)] if intensity == "choc" else _short(text)
+                first = _SHOUTS[(p + i) % len(_SHOUTS)] if intensity == "choc" else _short(text, words)
                 dialogues.append({"speaker": who, "text": first, "kind": kind})
                 if count <= 4 or importance == 3:  # place : une seule réplique sur une page chargée
-                    reply = _REPLIES[(p + i) % len(_REPLIES)] if intensity != "choc" else _short(text)
+                    reply = _REPLIES[(p + i) % len(_REPLIES)] if intensity != "choc" else _short(text, words)
                     # Seul dans la case : il se parle à lui-même (pensée).
                     alone = len(cast) == 1 and kind != "thought"
                     dialogues.append({"speaker": cast[-1], "text": reply, "kind": "thought" if alone else "speech"})
-                if i == 0 and p == 0:
+                if i == 0 and p == 0 and opening:
                     dialogues.insert(
                         0, {"speaker": "", "text": f"Chapitre {chapter.get('number', '?')}.", "kind": "narration"}
                     )
@@ -261,10 +288,11 @@ def mock_script(ctx: dict[str, Any], *, sparse: bool = False) -> dict[str, Any]:
                 sfx.append({"text": _SFX[(p + i) % len(_SFX)], "intensity": "choc"})
             elif intensity == "calme" and p % 3 == 1:
                 sfx.append({"text": "tic… tac…", "intensity": "calme"})
-            place = (p // _PAGES_PER_PLACE) % len(_LIEUX)
+            place = ((p + offset) // _PAGES_PER_PLACE) % len(_LIEUX)
             panels.append(
                 {
-                    "description": f"{text} ({who}{' et ' + other if other != who else ''}, page {p + 1}, case {i + 1})",
+                    "description": f"{text} ({who}{' et ' + other if other != who else ''}, page {p + offset + 1}, "
+                    f"case {i + 1})",
                     "lieu": known.get(_LIEUX[place].casefold(), _LIEUX[place]),
                     "setting": _SETTINGS[place],
                     "staging": _staging(cast[0], cast[-1], i),
@@ -322,6 +350,13 @@ def _script_charter(pages: list[dict[str, Any]], charter: dict[str, Any]) -> Non
         for pa in reversed(panels):
             while len(pa["dialogues"]) > 1 and _replies(panels) > high:
                 pa["dialogues"].pop()
+        # Toujours trop (scène presque muette : poursuite, combat) : des cases calmes se taisent, jamais une case
+        # d'action.
+        for pa in reversed(panels):
+            if _replies(panels) <= high:
+                break
+            if pa["intensity"] != "choc" and not pa["sfx"]:
+                pa["dialogues"] = []
         for k, pa in enumerate(panels):
             cap = min(2, room + (1 if pa["importance"] >= 3 else 0))
             while pa["dialogues"] and pa["characters"] and len(pa["dialogues"]) < cap and _replies(panels) < low:
@@ -375,10 +410,10 @@ _RYTHME_PHRASES = {
 _BOLDNESS = {"sobre": 0, "equilibree": 1, "audacieuse": 2}
 
 
-def _establishing(pages: list[dict[str, Any]]) -> set[tuple[int, int]]:
-    """(page, case) des premières cases d'un nouveau lieu (unité de lieu `lieu` des cases), dans l'ordre."""
+def _establishing(pages: list[dict[str, Any]], previous: Any = None) -> set[tuple[int, int]]:
+    """(page, case) des premières cases d'un nouveau lieu (unité de lieu `lieu` des cases), dans l'ordre ; `previous` :
+    lieu de la dernière case d'avant (scène dirigée seule)."""
     out: set[tuple[int, int]] = set()
-    previous: Any = None
     for page in pages:
         for i, pa in enumerate(page.get("panels") or []):
             lieu = pa.get("lieu")
@@ -407,10 +442,13 @@ def mock_art_direction(ctx: dict[str, Any], *, establish: bool = True) -> dict[s
     out = []
     last = max((int(p["page"]) for p in pages), default=1)
     charter = ctx.get("pre_direction") or {}
-    whole = bool(charter) and len(pages) >= int(charter.get("min_pages") or 4)
-    curve = _curve(len(pages), charter) if whole else None
+    scene = ctx.get("scene") if isinstance(ctx.get("scene"), dict) else None
+    whole = bool(charter) and (len(pages) >= int(charter.get("min_pages") or 4) or scene is not None)
+    curve = _curve(len(pages), charter) if whole and scene is None else None
+    if scene is not None:
+        curve = _scene_curve(len(pages), charter, scene, ctx.get("before_rythmes") or [])
     places = (charter.get("places") or {}) if whole else {}
-    opening = _establishing(pages) if establish and places.get("establishing") else set()
+    opening = _establishing(pages, ctx.get("previous_location")) if establish and places.get("establishing") else set()
     for index, page in enumerate(pages):
         n = int(page["page"])
         seed = n * 7 + number * 3 + variant * 5
@@ -513,6 +551,28 @@ def mock_art_direction(ctx: dict[str, Any], *, establish: bool = True) -> dict[s
     return {"pages": out}
 
 
+def _scene_curve(n: int, charter: dict[str, Any], scene: dict[str, Any], before: list[Any]) -> list[str]:
+    """Rythmes d'une scène dirigée seule : une respiration juste après un pic (pages d'avant comprises), un pic en
+    fin de scène d'action ou de révélation, sinon calme ou montée selon le type."""
+    peaks = list(charter.get("peak_rythmes") or ["climax"])
+    breath = (charter.get("breath_rythmes") or ["respiration"])[0]
+    kind = str(scene.get("type") or "")
+    out: list[str] = []
+    previous = before[-1] if before else None
+    for i in range(n):
+        if previous in peaks:
+            r = breath
+        elif kind in ("combat", "poursuite", "revelation", "sport_collectif") and i == n - 1:
+            r = peaks[0]
+        elif kind == "calme":
+            r = "calme"
+        else:
+            r = "montée"
+        out.append(r)
+        previous = r
+    return out
+
+
 def _window(n: int, charter: dict[str, Any]) -> list[int]:
     first = (charter.get("rhythm") or {}).get("first_peak") or {}
     low, high = float(first.get("min", 0)), float(first.get("max", 1))
@@ -612,6 +672,8 @@ def _shapes(pages: list[dict[str, Any]], briefs: list[dict[str, Any]], charter: 
             p["template"] = before
 
 
+# Plans de rechange d'une famille (jamais deux plans identiques côte à côte : gros plan, puis très gros plan).
+_CLASS_PLANS = {"close_up": ["gros plan", "très gros plan"]}
 _CLASS_PLAN = {
     "wide": "plan large",
     "medium": "plan moyen",
@@ -665,7 +727,10 @@ def _shot_scale(
         )
 
     def move(donors: tuple[str | None, ...], target: str, done: Any) -> None:
-        plan = _CLASS_PLAN[target]
+        for plan in _CLASS_PLANS.get(target, [_CLASS_PLAN[target]]):
+            _move(donors, target, done, plan)
+
+    def _move(donors: tuple[str | None, ...], target: str, done: Any, plan: str) -> None:
         for calm_first in (True, False):
             for p in pages:
                 for i, pa in enumerate(p["panels"]):
@@ -867,10 +932,17 @@ class MockLLMProvider:
         mark = _SPARSE_MARK.search(str((ctx.get("chapter") or {}).get("synopsis") or ""))
         sparse = bool(mark) and attempt <= int(mark.group(1))  # type: ignore[union-attr]
         out = mock_script(ctx, sparse=sparse)
-        mark = _SCENE_PAGES_MARK.search(str((ctx.get("chapter") or {}).get("synopsis") or ""))
+        synopsis = str((ctx.get("chapter") or {}).get("synopsis") or "")
+        mark = _SCENE_PAGES_MARK.search(synopsis)
         if mark and attempt <= int(mark.group(1)):
-            for page in out["pages"]:
-                page["scene"] = 1
+            if ctx.get("scene"):
+                out["pages"].append(json.loads(json.dumps(out["pages"][-1])))  # une page de trop pour la scène
+            else:
+                for page in out["pages"]:
+                    page["scene"] = 1
+        mark = _MULTI_ACTION_MARK.search(synopsis)
+        if mark and attempt <= int(mark.group(1)) and out["pages"]:
+            out["pages"][0]["panels"][0]["description"] = MULTI_ACTION
         return json.dumps(out, ensure_ascii=False)
 
     def _image_prompt_answer(self, messages: list[ChatMessage], ctx: dict[str, Any]) -> str:
@@ -965,7 +1037,14 @@ class MockLLMProvider:
             return json.dumps({"pages": [{"page": 1, "rythme": "tempête", "panels": [{"panel": 1, "plan": "drone"}]}]})
         mark = _NO_ESTABLISHING_MARK.search(str((ctx.get("chapter") or {}).get("synopsis") or ""))
         establish = not (mark and attempt <= int(mark.group(1)))
-        return json.dumps(mock_art_direction(ctx, establish=establish), ensure_ascii=False)
+        out = mock_art_direction(ctx, establish=establish)
+        mark = _NO_CLOSE_UP_MARK.search(str((ctx.get("chapter") or {}).get("synopsis") or ""))
+        if mark and attempt <= int(mark.group(1)):
+            for page in out["pages"]:
+                for i, pa in enumerate(page["panels"]):
+                    if pa["plan"] in ("gros plan", "très gros plan"):
+                        pa["plan"] = "plan rapproché" if i % 2 else "plan moyen"
+        return json.dumps(out, ensure_ascii=False)
 
 
 # --- découpage en scènes ----------------------------------------------------------------------------------------

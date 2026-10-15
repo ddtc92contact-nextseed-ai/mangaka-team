@@ -18,7 +18,11 @@
 #   $variety_rules       (règles de mise en scène variée ci-dessous, en clair)
 #   $page_rules          (règles par planche ci-dessous, en clair)
 #   $pre_direction       (charte chiffrée de la série, son ADN : échelle des plans, présence, formes de planche,
-#                         courbe de rythme — presets/pre_direction.yaml, réglable sur la fiche série)
+#                         courbe de rythme — presets/pre_direction.yaml, réglable sur la fiche série ; pour une
+#                         scène dirigée seule, l'ADN de la série précisé par le profil de la scène)
+#   $scene               (name scène par scène : la scène dirigée — type, pages, profil de tempo, lignes de mouvement
+#                         imposées ou interdites, rythmes des pages d'avant ; « (chapitre dirigé d'un seul tenant…) »
+#                         sans scène validée)
 #   $context_json        (le même contexte, en JSON)
 #   $bible               (bible de la série) · $savoir_faire (passages du savoir-faire de l'agent « art_direction »)
 # Gabarit de relance après une réponse invalide : $error (erreurs de validation).
@@ -145,6 +149,9 @@ user: |
 
   Charte de la série (son ADN, chiffré et vérifié : ce qui s'en écarte te sera renvoyé pour correction) :
   $pre_direction
+
+  Scène dirigée (son type et son profil priment sur la charte de la série pour ses pages) :
+  $scene
 
   Scénario des pages :
   $pages

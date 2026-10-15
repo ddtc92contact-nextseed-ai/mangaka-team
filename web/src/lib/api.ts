@@ -3118,6 +3118,62 @@ export interface ChapterScenes {
   available: boolean;
 }
 
+/** Name scène par scène (moteur : pipeline/scene_name.py, api/scene_name.py) : mesure d'une planche. */
+export interface ScenePageMeasure {
+  page_id: number;
+  number: number;
+  panels: number;
+  /** Répliques (onomatopées à part). */
+  replies: number;
+  /** Cases sans réplique. */
+  silent: number;
+  /** Encadrés de narration. */
+  narration: number;
+  warnings: string[];
+}
+
+export type ShotClass = "close_up" | "medium_close" | "medium" | "wide" | "insert";
+
+export interface SceneMeasure {
+  scene_id: number;
+  number: number;
+  title: string;
+  type: SceneTypeId;
+  type_name: string;
+  tempo: string;
+  planned_pages: number;
+  /** Attendu par le profil de la scène (ADN de la série précisé par le profil). */
+  expected: {
+    panels_min?: number;
+    panels_max?: number;
+    replies_min?: number;
+    replies_max?: number;
+    silent_min?: number;
+    narration_max: number | null;
+    motion_lines: "required" | "forbidden" | null;
+    shots?: { class: ShotClass; label: string; min: number; max: number }[];
+    tight_max?: number;
+  };
+  pages: ScenePageMeasure[];
+  /** Plans : total des cases, plans appliqués aux cases et proposés par la direction, par famille. */
+  shots: {
+    total: number;
+    applied: number;
+    proposed: number;
+    applied_counts?: Record<ShotClass, number>;
+    proposed_counts?: Record<ShotClass, number>;
+  };
+  /** Écarts au profil : avertissements, jamais bloquants. */
+  warnings: string[];
+}
+
+export interface SceneMeasures {
+  chapter_id: number;
+  /** Chapitre écrit et dirigé scène par scène. */
+  scene_mode: boolean;
+  scenes: SceneMeasure[];
+}
+
 export interface SceneInput {
   id?: number;
   title: string;
@@ -3351,6 +3407,11 @@ export const api = {
   proposeScenes: (chapterId: number) => request<Job>(`/chapters/${chapterId}/scenes/propose`, { method: "POST" }),
   validateScenes: (chapterId: number, author = "") =>
     request<ChapterScenes>(`/chapters/${chapterId}/scenes/validate`, json("POST", { author })),
+  sceneMeasures: (chapterId: number) => request<SceneMeasures>(`/chapters/${chapterId}/scenes/measure`),
+  rewriteScene: (chapterId: number, sceneId: number) =>
+    request<Job>(`/chapters/${chapterId}/scenes/${sceneId}/script`, { method: "POST" }),
+  redirectScene: (chapterId: number, sceneId: number) =>
+    request<Job>(`/chapters/${chapterId}/scenes/${sceneId}/direction`, { method: "POST" }),
   linkCharacterName: (chapterId: number, name: string, characterId: number | null) =>
     request<CharacterLink>(
       `/chapters/${chapterId}/character-links`,

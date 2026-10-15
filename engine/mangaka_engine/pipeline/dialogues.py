@@ -281,8 +281,9 @@ def dialogue_text(rules: DialogueRules | None) -> str:
 
 
 # --- cases enregistrées -------------------------------------------------------------
-def page_panels(pages: Sequence[Page]) -> list[DialoguePanel]:
-    """Cases des pages « story » (dans l'ordre), vues par les règles de dialogue."""
+def page_panels(pages: Sequence[Page], *, numbers: bool = False) -> list[DialoguePanel]:
+    """Cases des pages « story » (dans l'ordre), vues par les règles de dialogue ; `numbers` : pages repérées par
+    leur numéro dans le chapitre (sinon 1, 2… dans l'ordre)."""
     out: list[DialoguePanel] = []
     story = [p for p in sorted(pages, key=lambda p: p.number) if p.kind == PageKind.story and p.panels]
     for n, page in enumerate(story, start=1):
@@ -290,7 +291,7 @@ def page_panels(pages: Sequence[Page]) -> list[DialoguePanel]:
             bubbles = sorted(panel.bubbles, key=lambda b: b.order)
             out.append(
                 DialoguePanel(
-                    page=n,
+                    page=page.number if numbers else n,
                     index=i,
                     panels_on_page=len(page.panels),
                     characters=list(panel.character_names or []),

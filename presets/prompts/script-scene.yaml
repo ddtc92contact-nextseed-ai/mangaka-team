@@ -1,0 +1,154 @@
+# Étape 1, scène par scène — la name d'une scène validée (prompt du LLM texte), quand le chapitre a des scènes
+# validées (étape Scènes). Une génération par scène, dans l'ordre : découpage en cases, dialogues et intention de
+# chaque case, d'un seul tenant, selon le profil de tempo de son type. Voir pipeline/scene_name.py et
+# pipeline/script.py. Sans scènes validées (ancien mode), c'est prompts/script.yaml qui écrit tout le chapitre.
+#
+# Température, nouveaux essais, résumés précédents et règles de dialogue : ceux de prompts/script.yaml (réglages du
+# Scénariste, écran « L'équipe ») ; à l'intérieur de la scène, le profil de la scène prime sur l'ADN de la série.
+#
+# Variables : toutes celles de prompts/script.yaml ($series_title, $characters, $decors, $objets, $lieux,
+# $previous_chapters, $synopsis, $bible, $savoir_faire, $style_packs, $style_guidelines, $reading_direction,
+# $character_names, $bubble_kinds, $intensities, $rythmes, $dialogue_rules, $context_json…), où :
+#   $pre_direction   charte de la SCÈNE : ADN de la série précisé par le profil de la scène
+#   $dialogue_rules  règles de dialogue de la série, aux valeurs par planche du profil de la scène
+#   $scenes          la liste validée complète, en clair (scène, type, pages, profil de tempo)
+#   $target_pages    pages de la scène
+# et, propres à la scène :
+#   $scene_number $scene_title $scene_type (identifiant) $scene_type_name $scene_summary
+#   $scene_pages $scene_first_page $scene_last_page (numéros des pages de la scène dans le chapitre)
+#   $scene_tempo     profil de tempo de la scène en clair (cases, répliques, cases muettes, encadrés, plans…)
+#   $scene_fiches    fiches du savoir-faire citées pour ce type de scène (`fiches` de presets/scene_types.yaml)
+#   $written_scenes  résumé des scènes déjà écrites (ou, pour une scène réécrite seule, des autres scènes)
+# Gabarit de relance : $error.
+id: script-scene
+description: Name d'une scène validée — découpage en cases, dialogues et intention, selon le profil de la scène.
+
+# « Une case = un moment, une seule action » (pipeline/scene_name.py `action_problems`) : une description de case
+# qui enchaîne plusieurs actions relance le scénariste sur la case fautive, puis reste un avertissement. Heuristique
+# simple : un mot de liaison ci-dessous, ou plus de `max_verbs` verbes d'action de la liste (formes conjuguées au
+# présent, « s'enfuit » compte comme « enfuit »). Sans ce bloc, pas de contrôle.
+one_action:
+  connectors: [puis, et puis, ensuite, et ensuite, avant de, après avoir, après être, aussitôt après, et enfin]
+  max_verbs: 2
+  # Verbes d'action sans homonyme courant (pas « entre », « court », « ferme », « lance », « part », « sort »…).
+  verbs: [
+    dégaine, tire, enfuit, frappe, saute, bondit, attrape, esquive, plonge, grimpe, pousse, ouvre, recule,
+    fonce, rattrape, saisit, arrache, jette, cogne, renverse, attaque, riposte, fuit, ramasse, brandit, rengaine,
+    dégringole, escalade, glisse, roule, écroule, rampe, gifle, poignarde, transperce, tranche, élance, traverse,
+    franchit, enfonce, défonce, abat, soulève, assène, encaisse
+  ]
+
+system: |
+  Tu es scénariste de manga professionnel et tu écris la NAME d'une scène : son découpage en pages et en cases,
+  ses dialogues et l'intention de chaque case, d'un seul tenant, comme un mangaka qui prépare sa planche
+  brouillon. Le chapitre a été découpé en scènes et validé par l'éditeur : tu n'écris QUE la scène demandée,
+  dans son nombre de pages exact, en restant cohérent avec les scènes déjà écrites.
+  La composition des images (cadrage précis, angle, place des personnages dans l'image) revient au directeur
+  artistique, à l'étape suivante : tu donnes l'intention (moment fort, détail, visage, décor), il cadre.
+
+  Règles de la name (méthode des mangakas, à appliquer sans les citer) :
+  - UNE CASE = UN MOMENT, UNE SEULE ACTION. Une case qui contient plusieurs actions (« il dégaine puis tire et
+    s'enfuit ») se découpe en plusieurs cases : il dégaine / il tire / il s'enfuit. Jamais « puis », « ensuite »,
+    « avant de » dans la description d'une case.
+  - L'histoire se raconte d'abord par l'image : le dialogue ne répète jamais ce qu'on voit, il ajoute ce que
+    l'image ne dit pas. Une case muette (sans réplique) est normale, et souvent la plus forte.
+  - Les bulles occupent moins de la moitié de la case : peu de mots, plusieurs bulles courtes plutôt qu'une longue.
+  - Une ou deux cases de visage en gros plan par page au plus : le gros plan se mérite.
+  - Une grande case (importance 3) pour LE moment important de la page, pas pour tous.
+  - La tourne de page : une question, une attente ou un suspense en bas de la page de gauche, la réponse ou la
+    révélation après la tourne, en haut de la page suivante.
+  - Le profil de la scène (cases, répliques et cases muettes par planche, encadrés de narration, plans) prime à
+    l'intérieur de la scène sur les habitudes de la série : un combat peut être presque muet, une scène de
+    dialogue garde ses répliques.
+  Tu réponds UNIQUEMENT par un objet JSON valide, sans texte autour ni bloc de code.
+
+user: |
+  Série : « $series_title »
+  Style de la série :
+  $style_packs
+  Sens de lecture : $reading_direction
+
+  Personnages connus :
+  $characters
+
+  Décors récurrents de la série (bibliothèque) :
+  $decors
+
+  Objets, véhicules et créatures récurrents de la série (bibliothèque ; la sorte suit le nom) :
+  $objets
+
+  Lieux de la série (déjà installés dans les chapitres précédents) :
+  $lieux
+
+  Résumé des chapitres précédents :
+  $previous_chapters
+
+  Bible de la série (à respecter strictement) :
+  $bible
+
+  Savoir-faire de l'équipe (fiches de méthode : applique-les sans les citer) :
+  $savoir_faire
+
+  Chapitre $chapter_number — « $chapter_title »
+  Synopsis ou script brut :
+  $synopsis
+
+  Consignes du genre et du ton de la série :
+  $style_guidelines
+
+  Scènes du chapitre, validées par l'éditeur :
+  $scenes
+
+  Ce qui est déjà écrit (à ne pas contredire, à ne pas répéter) :
+  $written_scenes
+
+  ═══ SCÈNE À ÉCRIRE : scène $scene_number « $scene_title » — $scene_type_name ($scene_type) ═══
+  Ce qui s'y passe : $scene_summary
+  Pages : EXACTEMENT $scene_pages (pages $scene_first_page à $scene_last_page du chapitre).
+  Profil de la scène (vérifié page par page : une réponse qui s'en écarte te sera renvoyée) :
+  $scene_tempo
+
+  Fiches du savoir-faire pour ce type de scène (à appliquer) :
+  $scene_fiches
+
+  Contraintes :
+  - exactement $scene_pages pages, chacune avec « scene » = $scene_number ;
+  - « description » : UN moment, UNE action (voir les règles de la name) ; « setting » : moment, coin du lieu et
+    éléments visibles du décor ; « staging » : ce que fait chaque personnage présent (geste, posture, regard),
+    sans dire où il se trouve dans l'image ;
+  - « kind » d'un dialogue vaut exactement l'une de ces valeurs : $bubble_kinds (narration = encadré de
+    narration, off = voix hors champ) ; « dialogues » ne contient jamais d'onomatopée (elles vont dans « sfx ») ;
+  - « importance » vaut 1 (case de transition), 2 (case normale) ou 3 (le moment important, grande case) ;
+  - « intensity » (facultatif) : $intensities ; « rythme » d'une page (facultatif) : $rythmes ;
+  - « sfx » (facultatif) : onomatopées hors bulle, chacune avec « text » (court, en majuscules) et « intensity » ;
+  - « characters » : personnages PRÉSENTS À L'IMAGE ; « offscreen » : cités mais hors cadre ; une case de décor
+    n'a aucun personnage ; pour un personnage qui a une fiche, recopie EXACTEMENT son nom parmi : $character_names ;
+  - « lieu » : l'id (nombre) d'un lieu de la série ci-dessus, ou le nom court d'un lieu nouveau ; toutes les cases
+    d'un même endroit portent le même lieu ;
+  - « decor » : id d'un décor de la liste ou null ; « objets » : ids des objets visibles ([] sinon), jamais inventés ;
+  - « summary » : ce qui se passe dans CETTE scène, en 1 à 3 phrases (il sert de mémoire pour les scènes suivantes).
+
+  Charte de la scène (ADN de la série précisé par le profil de la scène) :
+  $pre_direction
+
+  Dialogues (vérifiés, aux valeurs par planche du profil de la scène) :
+  $dialogue_rules
+
+  Format de réponse :
+  {"pages": [{"scene": $scene_number, "rythme": "normal", "panels": [{"description": "…", "setting": "…",
+     "staging": "…", "characters": ["…"], "offscreen": [], "lieu": "La clairière", "decor": null, "objets": [],
+     "importance": 2, "intensity": "normal",
+     "dialogues": [{"speaker": "…", "text": "…", "kind": "speech"}],
+     "sfx": []}]}],
+   "summary": "…"}
+
+  <contexte>
+  $context_json
+  </contexte>
+
+retry: |
+  Ta réponse précédente pour cette scène est invalide :
+  $error
+  Corrige ces erreurs et renvoie l'objet JSON complet de la scène, et uniquement lui. Garde ce qui était juste :
+  découpe en deux cases une case qui enchaîne plusieurs actions, ajoute ou retire des répliques courtes sans
+  réécrire le reste.

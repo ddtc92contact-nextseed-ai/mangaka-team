@@ -333,9 +333,11 @@ def test_wrong_pages_per_scene_are_retried_then_kept_with_a_warning(c: TestClien
     ch = _validated(c, SYNOPSIS + " [mock:scenes-pages:3]")
     job = _wait(c, _ok(c.post(f"/chapters/{ch['id']}/script"), 202))
     assert job["status"] == "succeeded" and "avertissement" in job["message"]
-    # Gardé quand même : chaque page rattachée à la scène que sa place lui donne.
+    # Gardé quand même (name scène par scène) : chaque page reste à la scène qui l'a écrite, l'écart est mesuré.
     scenes = _ok(c.get(f"/chapters/{ch['id']}/scenes"))["scenes"]
-    assert [len(s["page_numbers"]) for s in scenes] == [s["pages"] for s in scenes]
+    assert [len(s["page_numbers"]) for s in scenes] == [s["pages"] + 1 for s in scenes]
+    measure = _ok(c.get(f"/chapters/{ch['id']}/scenes/measure"))["scenes"]
+    assert all(any("écrites pour" in w for w in m["warnings"]) for m in measure)
 
 
 def test_scene_page_checks_and_assignment() -> None:

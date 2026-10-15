@@ -34,6 +34,7 @@ from ..pipeline.pages import (
 )
 from ..pipeline.pre_direction import dialogue_rules_for, panel_count_problems, series_charter
 from ..pipeline.render import crop_max_zoom, displayed_image, image_size
+from ..pipeline.scene_name import scene_dialogue_warnings, scene_frames, scene_mode
 from ..pipeline.script import normalize_shot_type, script_job
 from ..pipeline.sketch import cleaned_from, latest_sketch, validated_sketch
 from ..presets import PresetError, PresetRegistry
@@ -514,6 +515,11 @@ def chapter_dialogues(
     pages = _load_pages(session, chapter_id)
     report = chapter_report(presets, pages, rules)
     story = [p for p in sorted(pages, key=lambda p: p.number) if p.kind == PageKind.story and p.panels]
+    frames = scene_frames(presets, chapter)
+    if story and scene_mode(chapter, frames):
+        # Name scène par scène : chaque scène mesurée avec sa charte (le profil de la scène prime).
+        report.warnings = scene_dialogue_warnings(presets, pages, frames, rules)
+        return DialogueReportOut.model_validate(report.as_dict())
     report.warnings = panel_count_problems([len(p.panels) for p in story], charter) + report.warnings
     return DialogueReportOut.model_validate(report.as_dict())
 

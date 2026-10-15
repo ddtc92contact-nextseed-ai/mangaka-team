@@ -82,6 +82,7 @@ def test_presets_endpoint(client: TestClient) -> None:
         "resume-quatrieme",
         "scenes",
         "script",
+        "script-scene",
     ]
     assert data["workflows"][0]["id"] == "qwen-image-base"
     assert data["issues"] == []

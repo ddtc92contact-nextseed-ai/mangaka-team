@@ -20,12 +20,19 @@
 #
 # Parts (shots.*, shapes.*) : part des cases (ou des planches) de la scène, de 0 à 1 ; sur une planche de 6 cases,
 # 0.17 ≈ 1 case, 0.5 = 3 cases.
+#
+# Name scène par scène (pipeline/scene_name.py) : le scénariste écrit chaque scène d'un seul tenant, et le directeur
+# artistique la dirige, selon ce profil — cases, répliques, cases muettes et encadrés par planche (scénario, relance
+# puis avertissement), parts de plans de la scène (direction artistique), lignes de mouvement (recopiées dans
+# l'action et l'ambiance des cases). `fiches` : fiches du savoir-faire (ids des packs, presets/knowledge_packs/)
+# citées au scénariste pour une scène de ce type.
 
 max_pages_per_scene: 12   # une scène plus longue est à découper en deux
 max_scenes: 20            # scènes au plus par chapitre
 
 types:
   calme:
+    fiches: [FUND_001]
     name: Calme
     description: Installation, respiration, quotidien. On laisse vivre le décor et les personnages.
     tempo:
@@ -35,6 +42,7 @@ types:
       narration: { max_per_page: 2 }
 
   dialogue:
+    fiches: [FUND_001, LAY_003]
     name: Dialogue
     description: Échange entre personnages ; le texte porte la scène, l'image la rythme.
     tempo:
@@ -44,6 +52,7 @@ types:
       narration: { max_per_page: 1 }
 
   combat:
+    fiches: [FUND_001, ACT_008, LAY_005]
     name: Combat
     description: Affrontement ; l'image raconte, très peu de mots, des visages et des impacts.
     tempo:
@@ -58,6 +67,7 @@ types:
       narration: { max_per_page: 0 }
 
   poursuite:
+    fiches: [FUND_001, ACT_008, LAY_004]
     name: Poursuite
     description: Course, fuite, traque ; le lecteur suit le mouvement sans jamais se perdre.
     tempo:
@@ -67,6 +77,7 @@ types:
       motion_lines: { required: true }
 
   sport_collectif:
+    fiches: [FUND_001, ACT_008]
     name: Sport collectif
     description: Match, jeu d'équipe ; on alterne la vue d'ensemble du terrain et les visages.
     tempo:
@@ -77,6 +88,7 @@ types:
       staging: { alternate_wide_tight: true }
 
   revelation:
+    fiches: [FUND_001, LAY_002, LAY_004]
     name: Révélation
     description: Le secret tombe, le personnage apparaît ; une grande case ou une pleine page à la tourne.
     tempo:

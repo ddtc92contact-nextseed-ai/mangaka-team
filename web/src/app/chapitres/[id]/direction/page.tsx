@@ -5,6 +5,7 @@ import { useState, type ReactNode } from "react";
 import { InfoTip } from "@/components/info-tip";
 import { PassageList, formatTokens } from "@/components/knowledge";
 import { PageSvg } from "@/components/page-svg";
+import { SceneMeasurePanel } from "@/components/scene-measure";
 import { useToast } from "@/components/toast";
 import { Alert, Button, ButtonLink, Card, EmptyState, Input, Loading, ProgressBar, Select } from "@/components/ui";
 import {
@@ -55,6 +56,8 @@ export default function DirectionPage() {
   const lastJob = useEngineData(() => api.chapterJobs(chapter.id, STEP).then((j) => j[0] ?? null), [chapter.id]);
   // Ce que l'agent a reçu à son dernier passage : fiches du savoir-faire, cherchées page par page.
   const sources = useEngineData(() => api.chapterSources(chapter.id, STEP), [chapter.id]);
+  // Name scène par scène : plans proposés et appliqués de chaque scène face à son profil, rediriger une scène.
+  const measures = useEngineData(() => api.sceneMeasures(chapter.id), [chapter.id]);
   const [started, setStarted] = useState<Job | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [highlight, setHighlight] = useState<number | null>(null);
@@ -67,6 +70,7 @@ export default function DirectionPage() {
     if (done.status === "succeeded") {
       direction.reload();
       sources.reload();
+      measures.reload();
     }
   });
   const running = job !== null && !isFinished(job);
@@ -114,6 +118,7 @@ export default function DirectionPage() {
       reloadStages();
       // Valider applique la page (plans des cases, mise en page) ; rejeter rend le plan du scénario.
       if (body.accept || body.reject !== undefined) pages.reload();
+      measures.reload();
     }, editMessage(body));
 
   const apply = (pageIds?: number[]) =>
@@ -121,6 +126,7 @@ export default function DirectionPage() {
       const res = await api.applyDirection(chapter.id, pageIds);
       pages.setData(res.pages);
       direction.reload();
+      measures.reload();
       reloadStages();
       const skipped = res.skipped.map((s) => `page ${s.number} : ${s.reason}`).join(" · ");
       setNotice(`${capitalize(res.message)}.${skipped ? ` ${skipped}.` : ""}`);
@@ -205,6 +211,16 @@ export default function DirectionPage() {
           </div>
         )}
       </Card>
+
+      {measures.data && (
+        <SceneMeasurePanel
+          chapterId={chapter.id}
+          measures={measures.data}
+          kind="direction"
+          disabled={busy || running}
+          onStarted={(j) => setStarted(j)}
+        />
+      )}
 
       <div className="grid gap-6 lg:grid-cols-[13rem_minmax(0,1fr)]">
         <nav aria-label="Pages du chapitre">
