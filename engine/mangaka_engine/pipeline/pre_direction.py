@@ -213,6 +213,10 @@ def apply_overrides(base: PreDirection, overrides: Mapping[str, Any]) -> PreDire
             expected = {"bool": "oui ou non", "int": "un nombre entier", "share": "une part entre 0 et 1"}[kind]
             raise DnaError(path, f"{LABELS.get(path, (path,))[0]} : {expected} attendu")
     flat = {**flatten(base), **{p: (int(v) if _kind(p) == "int" else v) for p, v in overrides.items()}}
+    # Plafond de mots réglé par la série sous la moyenne héritée (réglé avant que les défauts passent à 22 / 14,
+    # 15/10) : la moyenne héritée suit le plafond, l'ajustement de la série reste valable.
+    if "dialogue.max_words" in overrides and "dialogue.max_mean_words" not in overrides:
+        flat["dialogue.max_mean_words"] = min(flat["dialogue.max_mean_words"], flat["dialogue.max_words"])
     try:
         return PreDirection.model_validate(_nest(flat))
     except ValidationError as exc:

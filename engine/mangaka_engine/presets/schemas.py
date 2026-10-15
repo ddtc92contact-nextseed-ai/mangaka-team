@@ -1474,6 +1474,9 @@ class LetteringSettings(_Strict):
     speech_shape: Literal["ellipse", "rounded"] = "ellipse"
     rounded_radius_mm: float = Field(default=3, ge=0)
     preferred_aspect: float = Field(default=1.5, gt=0, description="Rapport largeur/hauteur visé des bulles")
+    # Formes essayées ensuite (largeur / hauteur), à la même taille de texte, quand les bulles de la case ne
+    # tiennent pas avec `preferred_aspect` ; vide = on réduit tout de suite la taille.
+    fallback_aspects: list[PositiveFloat] = Field(default_factory=list, max_length=6)
     cloud: CloudShape = Field(default_factory=CloudShape)
     shout: ShoutShape = Field(default_factory=ShoutShape)
     tail: TailSettings = Field(default_factory=TailSettings)
@@ -1607,10 +1610,12 @@ class PageRules(_Strict):
 
 
 class DialogueRoom(_Strict):
-    """Répliques au plus dans une case d'une page d'au plus `max_panels` cases (place des bulles)."""
+    """Place des bulles dans une case d'une page d'au plus `max_panels` cases : répliques au plus, et mots au plus
+    pour toutes ses répliques (`words`, None = pas de budget en mots)."""
 
     max_panels: int = Field(ge=1, le=9)
     replies: int = Field(ge=0, le=12)
+    words: int | None = Field(default=None, ge=1, le=300)
 
 
 class DialogueRules(_Strict):
@@ -1630,9 +1635,9 @@ class DialogueRules(_Strict):
     max_per_page: int = Field(default=8, ge=1, le=30)
     min_silent_panels_per_page: int = Field(default=1, ge=0, le=9)
     silent_min_panels: int = Field(default=2, ge=1, le=9)
-    # Brièveté : mots au plus par réplique, et en moyenne sur le chapitre.
-    max_words: int = Field(default=12, ge=1, le=100)
-    max_mean_words: float = Field(default=7, ge=1, le=100)
+    # Longueur des répliques : mots au plus par réplique, et en moyenne sur le chapitre.
+    max_words: int = Field(default=22, ge=1, le=100)
+    max_mean_words: float = Field(default=14, ge=1, le=100)
     # Case d'action ou de combat (intensité de `action_intensities`, ou une onomatopée) : au moins une parole
     # d'un personnage présent (cri, ordre, réaction) en plus de l'onomatopée.
     action_needs_voice: bool = True
@@ -1640,13 +1645,16 @@ class DialogueRules(_Strict):
     # Au moins une réplique de ces types par chapitre (pensée, voix off, narration) ; false = l'auteur s'en passe.
     require_inner_voice: bool = True
     inner_voice_kinds: list[str] = Field(default_factory=lambda: ["thought", "off", "narration"])
-    # Place des bulles : répliques au plus par case selon le nombre de cases de la page (première ligne dont
-    # `max_panels` couvre la page) ; une case forte (importance 3) en reçoit `big_panel_bonus` de plus.
+    # Place des bulles : répliques et mots au plus par case selon le nombre de cases de la page (première ligne
+    # dont `max_panels` couvre la page) ; une case forte (importance 3) en reçoit `big_panel_bonus` réplique(s)
+    # et `big_panel_bonus_words` mots de plus.
     room: list[DialogueRoom] = Field(default_factory=list)
     big_panel_bonus: int = Field(default=1, ge=0, le=6)
+    big_panel_bonus_words: int = Field(default=0, ge=0, le=100)
     # Place réelle : après la mise en page, chaque bulle doit tenir dans la zone de bulles de sa case
-    # (lettrage simulé) ; sinon relance, puis avertissement.
+    # (lettrage simulé) et les bulles couvrir au plus `max_cover` de la case ; sinon relance, puis avertissement.
     check_room: bool = True
+    max_cover: float = Field(default=0.5, gt=0, le=1)
 
     @field_validator("inner_voice_kinds")
     @classmethod
@@ -1663,12 +1671,23 @@ class DialogueRules(_Strict):
             raise ValueError("min_per_page doit être ≤ max_per_page")
         return self
 
+    def _room_rule(self, panels_on_page: int) -> DialogueRoom | None:
+        return next((r for r in sorted(self.room, key=lambda r: r.max_panels) if panels_on_page <= r.max_panels), None)
+
     def room_for(self, panels_on_page: int, importance: int = 2) -> int | None:
         """Répliques au plus dans une case (None = pas de limite)."""
-        rule = next((r for r in sorted(self.room, key=lambda r: r.max_panels) if panels_on_page <= r.max_panels), None)
+        rule = self._room_rule(panels_on_page)
         if rule is None:
             return None
         return rule.replies + (self.big_panel_bonus if importance >= 3 else 0)
+
+    def room_words_for(self, panels_on_page: int, importance: int = 2) -> int | None:
+        """Mots au plus pour toutes les répliques d'une case (None = pas de budget en mots). Jamais sous
+        `max_words` : une réplique permise tient toujours seule dans sa case."""
+        rule = self._room_rule(panels_on_page)
+        if rule is None or rule.words is None:
+            return None
+        return max(rule.words, self.max_words) + (self.big_panel_bonus_words if importance >= 3 else 0)
 
 
 # --- ADN de la série (pré-direction, presets/pre_direction.yaml) ------------------------
@@ -1730,15 +1749,15 @@ class DnaPresence(_Strict):
 
 
 class DnaDialogue(_Strict):
-    """Dialogue compté par planche (onomatopées à part), brièveté des répliques, répliques visées par case et
-    parole exigée dans une case d'action. Remplace les valeurs de `dialogue_rules` (prompts/script.yaml) ; les
-    défauts sont ceux d'avant l'ADN (12 mots au plus, 7 en moyenne, 2 répliques visées, case d'action parlée)."""
+    """Dialogue compté par planche (onomatopées à part), longueur des répliques, répliques visées par case et
+    parole exigée dans une case d'action. Remplace les valeurs de `dialogue_rules` (prompts/script.yaml) ; défauts :
+    22 mots au plus, 14 en moyenne (15/10), 2 répliques visées, case d'action parlée."""
 
     min_per_page: int = Field(ge=0, le=30)
     max_per_page: int = Field(ge=1, le=30)
     min_silent_panels: int = Field(ge=0, le=9)
-    max_words: int = Field(default=12, ge=1, le=100)
-    max_mean_words: int = Field(default=7, ge=1, le=100)
+    max_words: int = Field(default=22, ge=1, le=100)
+    max_mean_words: int = Field(default=14, ge=1, le=100)
     target_per_panel: int = Field(default=2, ge=0, le=6)
     # false : une case d'action muette (onomatopée seule) est permise.
     action_needs_voice: bool = True

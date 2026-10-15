@@ -13,7 +13,7 @@
 #   ($shot_types : liste des plans, plus utilisée — la direction artistique cadre les cases ; gardée pour
 #    les prompts personnalisés)
 #   $intensities $rythmes  (indices de mise en page, cf. presets/README.md « Direction artistique »)
-#   $dialogue_rules (règles de dialogue ci-dessous, en clair : densité, brièveté, place, variété)
+#   $dialogue_rules (règles de dialogue ci-dessous, en clair : densité, longueur, place, variété)
 #   $pre_direction  (charte chiffrée de la série, son ADN : cases par planche, dialogue par planche, courbe de
 #                    rythme — presets/pre_direction.yaml, réglable sur la fiche série)
 #   $context_json  (le même contexte, en JSON)
@@ -40,22 +40,28 @@ dialogue_rules:
   max_per_page: 8
   min_silent_panels_per_page: 1
   silent_min_panels: 2
-  # Brièveté, répliques visées par case et parole d'une case d'action : valeurs par défaut aussi, remplacées par
-  # l'ADN de la série (famille « dialogue » : max_words, max_mean_words, target_per_panel, action_needs_voice).
-  max_words: 12             # mots au plus par réplique (la brièveté fait le rythme : on ajoute des bulles,
-  max_mean_words: 7         # on ne les allonge pas) ; au plus 7 mots en moyenne
+  # Longueur des répliques, répliques visées par case et parole d'une case d'action : valeurs par défaut aussi,
+  # remplacées par l'ADN de la série (famille « dialogue » : max_words, max_mean_words, target_per_panel,
+  # action_needs_voice).
+  max_words: 22             # mots au plus par réplique (une phrase entière, pas une tirade : elle se coupe en
+  max_mean_words: 14        # plusieurs bulles ou plusieurs cases) ; au plus 14 mots en moyenne
   action_needs_voice: true  # case d'action (choc ou onomatopée) : au moins un mot d'un personnage (false : muette permise)
   action_intensities: [choc]
   require_inner_voice: true # au moins une pensée, voix off ou narration par chapitre (false : l'auteur s'en passe)
   inner_voice_kinds: [thought, "off", narration]   # « off » entre guillemets (sinon YAML lit un booléen)
-  # Place des bulles (A4 à 300 DPI, répliques de 7 mots, zone de bulles de layout.yaml) : répliques au plus
-  # par case selon le nombre de cases de la page ; une case forte (importance 3) en reçoit une de plus.
+  # Place des bulles, selon le nombre de cases de la page : répliques au plus par case (`replies`) et mots au
+  # plus pour toutes les répliques de la case (`words`, la longueur réelle). Mesuré le 15/10 (A4 à 300 DPI,
+  # zone de bulles de layout.yaml, police à sa taille normale) : planche de 4 cases → trois répliques de 23,
+  # 15 et 8 mots ; de 6 cases → deux répliques de 23 mots ; de 9 cases → une réplique de 23 mots. Une case
+  # forte (importance 3) reçoit `big_panel_bonus` réplique et `big_panel_bonus_words` mots de plus.
   room:
-    - { max_panels: 4, replies: 3 }
-    - { max_panels: 6, replies: 2 }
-    - { max_panels: 9, replies: 1 }
+    - { max_panels: 4, replies: 3, words: 46 }
+    - { max_panels: 6, replies: 2, words: 36 }
+    - { max_panels: 9, replies: 1, words: 22 }
   big_panel_bonus: 1
-  check_room: true          # après la mise en page : chaque bulle tient dans la zone de bulles de sa case
+  big_panel_bonus_words: 14
+  check_room: true          # après la mise en page : chaque bulle tient dans la zone de bulles de sa case…
+  max_cover: 0.5            # …et les bulles couvrent au plus la moitié de la case (règle de la name)
 
 system: |
   Tu es scénariste de manga professionnel. Tu découpes un chapitre en pages puis en cases,
@@ -142,8 +148,9 @@ user: |
     pris UNIQUEMENT dans la liste ci-dessus ([] s'il n'y en a pas) ; n'invente jamais d'id. Un véhicule
     (le vaisseau, la moto) ou une créature (l'animal de compagnie, le monstre) qui a une fiche va dans
     « objets », jamais dans « characters » : une créature ne parle pas et n'est pas un personnage ;
-  - répliques courtes, en français, comme dans un vrai manga ; « dialogues » ne contient jamais
-    d'onomatopée (elles vont dans « sfx ») ;
+  - répliques en français, comme dans un vrai manga : une réplique peut porter une phrase entière, mais
+    l'image raconte d'abord ; une longue tirade se coupe en plusieurs bulles ou sur plusieurs cases ;
+    « dialogues » ne contient jamais d'onomatopée (elles vont dans « sfx ») ;
   - « summary » : résumé du chapitre en 3 à 6 phrases, pour assurer la continuité des chapitres suivants.
 
   Charte de la série (son ADN, chiffré et vérifié : une réponse qui s'en écarte te sera renvoyée) :
@@ -168,4 +175,4 @@ retry: |
   Ta réponse précédente est invalide :
   $error
   Corrige ces erreurs et renvoie l'objet JSON complet, et uniquement lui. Garde ce qui était juste :
-  pour les dialogues, ajoute ou retire des répliques courtes sans réécrire le reste du découpage.
+  pour les dialogues, ajoute, coupe ou retire des répliques sans réécrire le reste du découpage.
