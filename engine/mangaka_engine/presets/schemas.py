@@ -2581,6 +2581,10 @@ class QCToneSettings(_Strict):
     black_below: int = Field(ge=1, le=255)
     max_dark: float = Field(ge=0, le=1)
     max_black: float = Field(ge=0, le=1)
+    # Saturation moyenne maximale (canal S du HSV, part 0-1) d'un rendu noir et blanc : au-delà, un
+    # avertissement « couleur sur une série noir et blanc » (jamais de pénalité ni de rejet). Toujours
+    # limité aux rendus N&B, et vérifié même dans les scènes de nuit. Absent = jamais vérifié.
+    max_saturation: float | None = Field(default=None, ge=0, le=1)
     # Vrai : seulement pour les rendus noir et blanc (`monochrome` du pack de rendu de la série).
     monochrome_only: bool = True
     # Ambiance de la direction artistique qui marque une scène de nuit ou sombre (mots comparés sans

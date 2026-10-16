@@ -203,7 +203,8 @@ def evaluate_detections(
 # --- couche 1 : tonalité (papier blanc) ----------------------------------------------------------
 @dataclass
 class ToneResult:
-    """Tonalité d'une case : parts (0-1) de pixels sombres et de noir pur, ou pourquoi elle n'est pas vérifiée."""
+    """Tonalité d'une case : parts (0-1) de pixels sombres et de noir pur, ou pourquoi elle n'est pas vérifiée ;
+    saturation moyenne (0-1) d'un rendu noir et blanc, vérifiée à part (les scènes de nuit gardent la couleur)."""
 
     checked: bool
     dark: float | None = None
@@ -211,12 +212,25 @@ class ToneResult:
     max_dark: float | None = None
     max_black: float | None = None
     message: str | None = None  # non vérifiée : pourquoi
+    color_checked: bool = False
+    saturation: float | None = None
+    max_saturation: float | None = None
+    color_message: str | None = None  # couleur non vérifiée : pourquoi
 
     @property
     def too_dark(self) -> bool:
         return self.checked and (
             (self.dark is not None and self.max_dark is not None and self.dark > self.max_dark)
             or (self.black is not None and self.max_black is not None and self.black > self.max_black)
+        )
+
+    @property
+    def too_colorful(self) -> bool:
+        return (
+            self.color_checked
+            and self.saturation is not None
+            and self.max_saturation is not None
+            and self.saturation > self.max_saturation
         )
 
     def as_dict(self) -> dict[str, Any]:
@@ -228,6 +242,11 @@ class ToneResult:
             "max_black": self.max_black,
             "too_dark": self.too_dark,
             "message": self.message,
+            "color_checked": self.color_checked,
+            "saturation": None if self.saturation is None else round(self.saturation, 4),
+            "max_saturation": self.max_saturation,
+            "too_colorful": self.too_colorful,
+            "color_message": self.color_message,
         }
 
 
@@ -240,6 +259,21 @@ def tone_stats(data: bytes, *, dark_below: int, black_below: int) -> tuple[float
     return float(np.count_nonzero(gray < dark_below)) / gray.size, float(
         np.count_nonzero(gray < black_below)
     ) / gray.size
+
+
+def saturation_share(data: bytes) -> float:
+    """Saturation moyenne (canal S du HSV, 0-1) de l'image, transparence posée sur du papier blanc — la même
+    mesure que `saturation_pct` du journal."""
+    with Image.open(io.BytesIO(data)) as raw:
+        raw.load()
+        if raw.mode in ("RGBA", "LA", "P"):
+            rgba = raw.convert("RGBA")
+            rgb = Image.new("RGB", rgba.size, (255, 255, 255))
+            rgb.paste(rgba, mask=rgba.getchannel("A"))
+        else:
+            rgb = raw.convert("RGB")
+    sat = np.asarray(rgb.convert("HSV").getchannel("S"), dtype=np.float64)
+    return float(sat.mean()) / 255 if sat.size else 0.0
 
 
 def _plain(text: str) -> str:
@@ -262,20 +296,51 @@ def _words(text: str) -> str:
     return " ".join(re.findall(r"\w+", _plain(text)))
 
 
-def check_tone(data: bytes, cfg: QCToneSettings, *, skip: str | None = None) -> ToneResult:
-    """Mesure la tonalité d'une case (`skip` : raison de ne pas la vérifier — rendu couleur, scène de nuit)."""
-    limits = {"max_dark": cfg.max_dark, "max_black": cfg.max_black}
-    if skip:
-        return ToneResult(checked=False, message=skip, **limits)
+def check_tone(
+    data: bytes, cfg: QCToneSettings, *, skip: str | None = None, color_skip: str | None = None
+) -> ToneResult:
+    """Mesure la tonalité d'une case (`skip` : raison de ne pas vérifier le sombre — rendu couleur, scène de
+    nuit ; `color_skip` : raison de ne pas vérifier la couleur — rendu couleur, pas de seuil)."""
+    res = ToneResult(
+        checked=False,
+        message=skip,
+        max_dark=cfg.max_dark,
+        max_black=cfg.max_black,
+        max_saturation=cfg.max_saturation,
+        color_message=color_skip,
+    )
     try:
-        dark, black = tone_stats(data, dark_below=cfg.dark_below, black_below=cfg.black_below)
+        if not skip:
+            res.dark, res.black = tone_stats(data, dark_below=cfg.dark_below, black_below=cfg.black_below)
+            res.checked = True
+        if not color_skip:
+            res.saturation = saturation_share(data)
+            res.color_checked = True
     except (UnidentifiedImageError, OSError, ValueError) as exc:
-        return ToneResult(checked=False, message=f"image illisible ({exc.__class__.__name__})", **limits)
-    return ToneResult(checked=True, dark=dark, black=black, **limits)
+        unreadable = f"image illisible ({exc.__class__.__name__})"
+        res.checked, res.dark, res.black = False, None, None
+        res.message = res.message or unreadable
+        res.color_message = res.color_message or unreadable
+    return res
 
 
 def _pct(x: float) -> str:
     return f"{round(x * 100)} %"
+
+
+def _pct1(x: float) -> str:
+    """« 9,5 % » (une décimale, virgule française)."""
+    return f"{round(x * 100, 1):g} %".replace(".", ",")
+
+
+def color_reason(tone: ToneResult) -> str | None:
+    """« Couleur sur une série noir et blanc : 9,5 % de saturation, cible ≤ 3 % » (avertissement seul)."""
+    if not tone.too_colorful or tone.saturation is None or tone.max_saturation is None:
+        return None
+    return (
+        f"Couleur sur une série noir et blanc : {_pct1(tone.saturation)} de saturation, "
+        f"cible ≤ {_pct1(tone.max_saturation)}"
+    )
 
 
 def tone_reason(tone: ToneResult) -> str | None:
@@ -291,11 +356,15 @@ def tone_reason(tone: ToneResult) -> str | None:
 
 
 def apply_tone(res: LayerResult, tone: ToneResult | None, rule: QCRule | None) -> LayerResult:
-    """Ajoute la tonalité à la couche des détecteurs : mesures (`extra.tone`) et, si la case est trop
-    sombre, la règle `too_dark` (pénalité sur le score s'il y en a un, verdict minimal, raison lisible)."""
+    """Ajoute la tonalité à la couche des détecteurs : mesures (`extra.tone`) ; si la case est trop
+    sombre, la règle `too_dark` (pénalité sur le score s'il y en a un, verdict minimal, raison lisible) ;
+    si elle est en couleur sur une série noir et blanc, un avertissement (raison seule, jamais de rejet)."""
     if tone is None:
         return res
     res.extra["tone"] = tone.as_dict()
+    warning = color_reason(tone)
+    if warning is not None:
+        res.reasons.append(warning)
     reason = tone_reason(tone)
     if reason is None or rule is None:
         return res
@@ -562,6 +631,8 @@ class _Target:
     without_references: list[str]
     # Tonalité non vérifiée pour cette case : pourquoi (rendu couleur, scène de nuit de la DA) ; None = vérifiée.
     tone_skip: str | None = None
+    # Couleur (saturation) non vérifiée : pourquoi (rendu couleur, pas de seuil) ; None = vérifiée.
+    color_skip: str | None = None
 
 
 def describe_error(exc: Exception) -> str | None:
@@ -714,6 +785,7 @@ class QCExecutor:
             references=references,
             without_references=without,
             tone_skip=self._tone_skip(panel, cfg, presets or self.presets),
+            color_skip=self._color_skip(panel, cfg, presets or self.presets),
         )
 
     @staticmethod
@@ -729,6 +801,19 @@ class QCExecutor:
         keyword = dark_scene_keyword(ambiance if isinstance(ambiance, str) else None, tone.skip_ambiance_keywords)
         if keyword is not None:
             return f"scène de nuit ou sombre (ambiance de la direction artistique : « {ambiance} »)"
+        return None
+
+    @staticmethod
+    def _color_skip(panel: Panel, cfg: QCSettings, presets: PresetRegistry) -> str | None:
+        """Pourquoi la couleur de la case n'est pas vérifiée (None : elle l'est). Seulement les rendus noir et
+        blanc ; les scènes de nuit, exemptées pour le sombre, restent contrôlées pour la couleur."""
+        tone = cfg.detectors.tone
+        if tone is None or tone.max_saturation is None:
+            return "pas de seuil de saturation dans le preset"
+        rendering = series_rendering(presets, panel.page.chapter.project)
+        if rendering is None or not rendering.monochrome:
+            name = f" (« {rendering.name} »)" if rendering is not None else ""
+            return f"rendu couleur{name} : couleur non vérifiée"
         return None
 
     def _set_panel_qc_state(self, panel_id: int) -> None:
@@ -762,7 +847,7 @@ class QCExecutor:
         detections: Detections | None = None
         tone_cfg = cfg.detectors.tone
         # Tonalité : numpy sur l'image, même sans détecteurs (une couche indisponible garde son verdict minimal).
-        tone = check_tone(t.data, tone_cfg, skip=t.tone_skip) if tone_cfg is not None else None
+        tone = check_tone(t.data, tone_cfg, skip=t.tone_skip, color_skip=t.color_skip) if tone_cfg is not None else None
 
         # 1. détecteurs
         if p.detectors is None:

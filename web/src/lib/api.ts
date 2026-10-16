@@ -446,6 +446,12 @@ export interface QCTone {
   max_black: number | null;
   too_dark: boolean;
   message: string | null;
+  /** Saturation moyenne (0-1) d'un rendu noir et blanc, vérifiée même en scène de nuit (absente des anciens QC). */
+  color_checked?: boolean;
+  saturation?: number | null;
+  max_saturation?: number | null;
+  too_colorful?: boolean;
+  color_message?: string | null;
 }
 
 /** Détail du dernier QC d'une version. */
