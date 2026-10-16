@@ -1,11 +1,11 @@
 "use client";
 
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { Input, Select, Textarea } from "@/components/ui";
 import { api, type AgentSetting } from "@/lib/api";
 import { ORIGIN_LABEL, checkTemplate, displayValue, toFormValue } from "@/lib/agents";
 import { useEngineData } from "@/lib/hooks";
-import { envNote, isOtherModel, modelNotes, modelOptions, pickModel, selectValue } from "@/lib/models";
+import { chooseModel, envNote, inOtherMode, modelNotes, modelOptions, selectValue, typeModel, type ModelChoice } from "@/lib/models";
 
 const ORIGIN_TONE = {
   preset: "text-zinc-500 ring-zinc-700",
@@ -189,11 +189,18 @@ function ModelSelect({
 }) {
   const models = useEngineData(() => api.deepseekModels(), []);
   const list = models.data;
-  const other = isOtherModel(list, value);
+  const [choice, setChoice] = useState<ModelChoice | null>(null);
+  const other = inOtherMode(list, value, choice);
   const env = envNote(setting, value);
+
+  function apply(next: ModelChoice) {
+    setChoice(next);
+    onChange(next.value);
+  }
+
   return (
     <div className="space-y-2">
-      <Select {...props} value={selectValue(list, value)} onChange={(e) => onChange(pickModel(e.target.value))}>
+      <Select {...props} value={selectValue(list, value, choice)} onChange={(e) => apply(chooseModel(e.target.value))}>
         {modelOptions(list, value).map((o) => (
           <option key={o.value} value={o.value}>
             {o.text}
@@ -206,7 +213,7 @@ function ModelSelect({
           aria-label="Nom du modèle (autre)"
           disabled={props.disabled}
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => apply(typeModel(e.target.value))}
           placeholder="Nom du modèle chez DeepSeek"
         />
       )}

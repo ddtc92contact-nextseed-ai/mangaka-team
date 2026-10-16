@@ -75,7 +75,7 @@ class DeepSeekProvider:
             payload["response_format"] = {"type": "json_object"}
 
         resp = self._post(payload)
-        if resp.status_code == 400 and json_mode:
+        if resp.status_code == 400 and json_mode and _JSON_REFUSED.search(_api_message(resp)):
             # Mode JSON refusé par ce modèle : la consigne passe par le prompt.
             payload.pop("response_format")
             payload["messages"] = [*payload["messages"], {"role": "system", "content": JSON_INSTRUCTION}]
@@ -108,6 +108,11 @@ class DeepSeekProvider:
         self._client.close()
 
 
+# 400 « mode JSON refusé » (réessai sans response_format) et « modèle inconnu » (nom à vérifier).
+_JSON_REFUSED = re.compile(r"response_format|json", re.IGNORECASE)
+_MODEL_NOT_FOUND = re.compile(r"model.*(not.*(exist|found)|unknown|invalid)|(unknown|invalid).*model", re.IGNORECASE)
+
+
 def _api_message(resp: httpx.Response) -> str:
     try:
         err = resp.json().get("error")
@@ -122,7 +127,7 @@ def _map_status(resp: httpx.Response, model: str | None = None) -> LLMError:
     status = resp.status_code
     detail = _api_message(resp)
     suffix = f" ({detail})" if detail else ""
-    if model and status in (400, 404, 422):
+    if model and status in (400, 404, 422) and _MODEL_NOT_FOUND.search(detail):
         suffix += f" — modèle « {model} » : vérifie son nom dans L'équipe"
     if status in (401, 403):
         return LLMAuthError(f"clé DeepSeek refusée (HTTP {status}){suffix}")

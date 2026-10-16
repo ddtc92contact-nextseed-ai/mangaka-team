@@ -216,6 +216,15 @@ def test_unknown_model_error_is_readable(fake: FakeDeepSeek) -> None:
     assert SECRET not in str(info.value)
 
 
+def test_other_400_is_not_retried_nor_blamed_on_the_model(fake: FakeDeepSeek) -> None:
+    fake.chat = lambda body: (400, {"error": {"message": "messages: content is too long"}})
+    llm = DeepSeekProvider(api_key=SECRET, base_url=fake.url, model="deepseek-reasoner", reasoning=True)
+    with pytest.raises(Exception, match=r"content is too long") as info:
+        llm.complete(MESSAGES, json_mode=True)
+    assert len(fake.requests) == 1
+    assert "vérifie son nom" not in str(info.value)
+
+
 def test_reasoning_only_answer_is_an_error(fake: FakeDeepSeek) -> None:
     fake.chat = lambda body: _reply("")
     llm = DeepSeekProvider(api_key=SECRET, base_url=fake.url, model="deepseek-reasoner")

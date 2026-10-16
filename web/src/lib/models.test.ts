@@ -4,7 +4,19 @@ import { test } from "node:test";
 
 import type { AgentSetting, DeepSeekModels } from "./api.ts";
 import { fromFormValue, toFormValue } from "./agents.ts";
-import { OTHER_MODEL, envNote, isOtherModel, modelNotes, modelOptions, pickModel, selectValue } from "./models.ts";
+import {
+  OTHER_MODEL,
+  chooseModel,
+  envNote,
+  inOtherMode,
+  isOtherModel,
+  modelNotes,
+  modelOptions,
+  pickModel,
+  selectValue,
+  typeModel,
+  type ModelChoice,
+} from "./models.ts";
 
 function list(extra: Partial<DeepSeekModels> = {}): DeepSeekModels {
   return {
@@ -86,6 +98,56 @@ test("« Autre… » : champ libre pour un nom absent de la liste", () => {
   const live = list({ source: "live", source_label: "en direct", detail: null });
   assert.equal(modelNotes(live, "deepseek-chat")[0], "Liste en direct de DeepSeek.");
   assert.ok(modelNotes(live, "mon-modele").some((n) => n.includes("risque d'être refusé")));
+});
+
+// Rejoue le champ comme ModelSelect : chaque geste met à jour l'état local et la valeur du formulaire.
+function field(value: string) {
+  let choice: ModelChoice | null = null;
+  const apply = (next: ModelChoice) => {
+    choice = next;
+    value = next.value;
+  };
+  return {
+    pick: (option: string) => apply(chooseModel(option)),
+    type: (text: string) => apply(typeModel(text)),
+    get value() {
+      return value;
+    },
+    get other() {
+      return inOtherMode(list(), value, choice);
+    },
+    get select() {
+      return selectValue(list(), value, choice);
+    },
+  };
+}
+
+for (const name of ["deepseek-chat-v2", "deepseek-reasoner-2"]) {
+  test(`« Autre… » : « ${name} » se tape lettre par lettre sans revenir à la liste`, () => {
+    const f = field("deepseek-chat");
+    assert.equal(f.other, false);
+    f.pick(OTHER_MODEL);
+    assert.equal(f.value, "");
+    for (let i = 1; i <= name.length; i++) {
+      f.type(name.slice(0, i)); // passe par « deepseek-chat » / « deepseek-reasoner », ids de la liste
+      assert.equal(f.other, true, `champ libre démonté à « ${f.value} »`);
+      assert.equal(f.select, OTHER_MODEL);
+    }
+    assert.equal(f.value, name);
+  });
+}
+
+test("« Autre… » : seul un choix dans la liste referme le champ libre", () => {
+  const f = field("deepseek-chat");
+  f.pick(OTHER_MODEL);
+  f.type("deepseek-reasoner");
+  assert.equal(f.other, true);
+  f.pick("deepseek-reasoner");
+  assert.equal(f.other, false);
+  assert.equal(f.select, "deepseek-reasoner");
+  // Valeur changée hors du champ (réinitialisation) : le mode se déduit de nouveau de la valeur.
+  assert.equal(inOtherMode(list(), "deepseek-chat", typeModel("deepseek-chat-v")), false);
+  assert.equal(inOtherMode(list(), "mon-modele", chooseModel("deepseek-chat")), true);
 });
 
 test("d'où vient la liste, et la note des modèles qui raisonnent", () => {

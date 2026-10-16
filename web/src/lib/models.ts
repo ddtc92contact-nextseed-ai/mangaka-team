@@ -29,14 +29,43 @@ export function modelOptions(list: DeepSeekModels | null, value: string): ModelO
   return [...list.models.map((m) => ({ value: m.id, text: optionText(m, list.env_model) })), { value: OTHER_MODEL, text: "Autre…" }];
 }
 
+/**
+ * Dernier geste de l'utilisateur sur le champ : « Autre… » choisi (ou nom tapé dans le champ libre),
+ * ou un modèle pris dans la liste. `value` est la valeur que ce geste a produite.
+ */
+export interface ModelChoice {
+  other: boolean;
+  value: string;
+}
+
+/**
+ * « Autre… » est actif : décidé par le dernier geste tant que la valeur est celle qu'il a produite
+ * (taper « deepseek-chat-v2 » passe par « deepseek-chat » sans revenir à la liste), sinon déduit
+ * de la valeur (chargement, réinitialisation).
+ */
+export function inOtherMode(list: DeepSeekModels | null, value: string, choice: ModelChoice | null): boolean {
+  if (choice && choice.value === value) return choice.other;
+  return isOtherModel(list, value);
+}
+
 /** Valeur de la liste déroulante pour la valeur du formulaire. */
-export function selectValue(list: DeepSeekModels | null, value: string): string {
-  return isOtherModel(list, value) ? OTHER_MODEL : value.trim();
+export function selectValue(list: DeepSeekModels | null, value: string, choice: ModelChoice | null = null): string {
+  return inOtherMode(list, value, choice) ? OTHER_MODEL : value.trim();
 }
 
 /** Valeur du formulaire après un choix dans la liste (« Autre… » : champ libre vide à remplir). */
 export function pickModel(choice: string): string {
   return choice === OTHER_MODEL ? "" : choice;
+}
+
+/** Geste « choix dans la liste déroulante ». */
+export function chooseModel(option: string): ModelChoice {
+  return { other: option === OTHER_MODEL, value: pickModel(option) };
+}
+
+/** Geste « frappe dans le champ libre » : on reste sur « Autre… », même si le nom tapé est dans la liste. */
+export function typeModel(text: string): ModelChoice {
+  return { other: true, value: text };
 }
 
 /** Signale la valeur venue de .env (DEEPSEEK_MODEL) : null si .env ne remplace rien. */
