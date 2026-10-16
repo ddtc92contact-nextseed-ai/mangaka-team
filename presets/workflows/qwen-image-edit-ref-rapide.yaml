@@ -5,6 +5,7 @@
 # « Image Edit (Qwen Image 2.1) ») : mêmes chargeurs, mêmes options, même échantillonneur.
 # Voir presets/README.md (paliers Qualité / Rapide, ré-export).
 id: qwen-image-edit-ref-rapide
+engine: qwen-image
 name: "Qwen-Image 2.1 · Rapide — avec images de référence"
 description: >-
   Palier Rapide (int8 convrot, 25 étapes) guidé par jusqu'à 5 images de référence des personnages (une par emplacement, dans l'ordre), avec LoRA de style et d'identité.

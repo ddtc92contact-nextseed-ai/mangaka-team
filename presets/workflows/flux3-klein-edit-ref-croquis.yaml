@@ -1,0 +1,49 @@
+# FLUX 3 Image Klein · Croquis (avec images de référence) — brouillon de vignette en quelques secondes.
+# Écrit par Morigane le 16/10/2026. Même graphe que le croquis sans référence, plus le nœud
+# ReferenceMultiLatent (5 emplacements de fiches) : une vignette qui cite un personnage à fiche
+# passe par ici. Les fiches sont lues en pleine résolution ; pour aller plus vite, la voie mesurée
+# est de réduire les références plutôt que la sortie (resolution.megapixels du nœud 6).
+id: flux3-klein-edit-ref-croquis
+engine: flux3-klein
+name: "FLUX 3 Klein · Croquis — avec images de référence"
+description: >-
+  Palier croquis de FLUX 3 Image Klein guidé par jusqu'à 5 images de référence des fiches : ~512 px sur le grand côté, 6 étapes, cfg 1. Sert à trier les compositions d'une page quand la vignette cite des personnages. Aucun LoRA (licence).
+distilled: true   # à cfg 1, le négatif n'est pas lu
+workflow_file: flux3-klein-edit-ref-croquis.json
+output_node: "9"
+timeout_s: 300
+role: croquis
+tier:
+  name: Croquis
+estimated_s: 12
+long_side: 512
+mapping:
+  positive_prompt: { node: "4", input: text }
+  negative_prompt: { node: "5", input: text }
+  seed: { node: "7", input: seed }
+  steps: { node: "7", input: steps }
+  cfg: { node: "7", input: cfg }
+  width: { node: "12", input: width }
+  height: { node: "12", input: height }
+  filename_prefix: { node: "9", input: filename_prefix }
+reference_images:
+  - { node: "20", input: image }
+  - { node: "21", input: image }
+  - { node: "22", input: image }
+  - { node: "23", input: image }
+  - { node: "24", input: image }
+defaults:
+  negative_prompt: "text, letters, speech bubble, caption, watermark, signature, multiple panels, comic page layout, collage, split screen, character sheet, turnaround, model sheet, white background, duplicate character, extra people, extra limbs, deformed hands, blurry, low quality"
+  steps: 6
+  cfg: 1
+  width: 512
+  height: 512
+  filename_prefix: mangaka/croquis
+trial:
+  positive_prompt: >-
+    manga panel, black and white ink, screentone shading, a young swordswoman standing on a
+    rooftop at dusk, wind in her hair, dynamic angle
+  width: 512
+  height: 512
+  steps: 6
+  filename_prefix: mangaka/essai

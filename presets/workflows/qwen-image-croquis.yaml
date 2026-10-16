@@ -6,6 +6,7 @@
 # Graphe provisoire, À REMPLACER par l'export réel de Morigane (~/mangaka-comfy-exports/).
 # Voir presets/README.md (palier croquis, passage au propre).
 id: qwen-image-croquis
+engine: qwen-image
 name: "Qwen-Image 2.1 · Croquis — texte → image"
 description: >-
   Palier croquis : modèle Turbo distillé int8, ~512 px sur le grand côté, 6 étapes. Brouillon de la composition d'une case en quelques secondes (LoRA de la série conservés).

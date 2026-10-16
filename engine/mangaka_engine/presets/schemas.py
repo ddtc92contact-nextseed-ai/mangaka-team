@@ -235,6 +235,8 @@ REQUIRED_WORKFLOW_PARAMS = ("positive_prompt", "negative_prompt", "seed", "width
 # l'image est surexposée et trop contrastée. Un modèle distillé (Turbo) n'accepte que 1.
 MIN_CFG = 1.0
 MAX_CFG = 3.0
+# Nom affiché des moteurs d'image (`engine` des presets) ; un moteur absent s'affiche par son id.
+ENGINE_NAMES = {"qwen-image": "Qwen-Image", "flux3-klein": "FLUX 3 Klein"}
 WorkflowRole = Literal["generation", "croquis", "propre", "controle"]
 # Un preset de réparation (inpainting) part de l'image source : pas de taille, mais un débruitage partiel.
 REQUIRED_INPAINT_PARAMS = ("positive_prompt", "negative_prompt", "seed", "denoise")
@@ -360,6 +362,8 @@ class WorkflowPreset(_Strict):
     id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
     name: str
     description: str = ""
+    # Moteur d'image du graphe (`qwen-image`, `flux3-klein`) : affiché dans la fiche série et sur les jobs.
+    engine: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9-]*$")
     workflow_file: str = Field(description="Chemin du JSON API ComfyUI, relatif au fichier preset")
     output_node: str = Field(description="Nœud SaveImage dont on récupère les images")
     mapping: dict[str, NodeInput]
@@ -388,6 +392,10 @@ class WorkflowPreset(_Strict):
     source_image: NodeInput | None = None
     # Palier de série : workflow « propre depuis croquis » du même palier (« Passer au propre »).
     from_sketch: str | None = None
+    # Palier croquis (rôle `croquis`) et palier de « Régénérer en Qualité » (rôle `generation`) du même
+    # moteur ; absents = ceux de defaults.yaml (`workflow_sketch`, `workflow_quality`).
+    sketch: str | None = None
+    quality: str | None = None
     # Palier de série : workflow ControlNet du même palier (composition verrouillée, rôle `controle`).
     with_control: str | None = None
     # Présent = workflow ControlNet (rôle `controle`) : patch de modèle, image guide, prétraitements.
@@ -403,6 +411,16 @@ class WorkflowPreset(_Strict):
     @property
     def is_inpaint(self) -> bool:
         return self.inpaint is not None
+
+    @property
+    def engine_name(self) -> str | None:
+        """Nom affiché du moteur (« FLUX 3 Klein »), son id s'il est inconnu."""
+        return ENGINE_NAMES.get(self.engine, self.engine) if self.engine else None
+
+    @property
+    def supports_lora(self) -> bool:
+        """Le graphe a un point d'insertion LoRA (`lora_chain`) : sans lui, aucun LoRA n'est appliqué."""
+        return self.lora_chain is not None
 
     @property
     def cfg(self) -> float:
@@ -435,6 +453,8 @@ class WorkflowPreset(_Strict):
             raise ValueError("from_sketch ne peut pas désigner le workflow lui-même")
         if self.with_control == self.id:
             raise ValueError("with_control ne peut pas désigner le workflow lui-même")
+        if self.sketch == self.id:
+            raise ValueError("sketch ne peut pas désigner le workflow lui-même")
         if (self.role == "controle") != (self.control is not None):
             raise ValueError("un workflow « controle » déclare un bloc control, et lui seul")
         if self.role == "propre":

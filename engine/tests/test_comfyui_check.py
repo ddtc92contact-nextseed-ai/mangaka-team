@@ -46,8 +46,8 @@ def _recorded_object_info() -> dict[str, Any]:
 
 
 def _object_info() -> dict[str, Any]:
-    """Même ComfyUI, avec le patch ControlNet installé (voir `_with_control`)."""
-    return _with_control(_recorded_object_info())
+    """Même ComfyUI, avec le patch ControlNet et FLUX 3 Klein installés (`_with_control`, `_with_flux3`)."""
+    return _with_flux3(_with_control(_recorded_object_info()))
 
 
 def _report(object_info: dict[str, Any], loras: list[LoraUse] | None = None) -> dict[str, Any]:
@@ -103,7 +103,34 @@ def _with_control(info: dict[str, Any]) -> dict[str, Any]:
     return info
 
 
+def _with_flux3(info: dict[str, Any]) -> dict[str, Any]:
+    """ComfyUI mis à jour pour FLUX 3 Image Klein (16/10/2026, après l'enregistrement de la GX10) : ses nœuds,
+    son type d'encodeur et ses fichiers, lus dans les presets FLUX livrés."""
+    flux = REG.workflow("flux3-klein-edit-ref-qualite").workflow
+    for cls, name in (("UNETLoader", "unet_name"), ("CLIPLoader", "clip_name"), ("CLIPLoader", "type")):
+        node = next(n for n in flux.values() if n["class_type"] == cls)
+        choices = _choices(info, cls, name)
+        if node["inputs"][name] not in choices:
+            choices.append(node["inputs"][name])
+    info["CLIPTextEncode"] = {"input": {"required": {"text": ["STRING", {"multiline": True}], "clip": ["CLIP"]}}}
+    info["EmptyFlux2LatentImage"] = {
+        "input": {"required": {"width": ["INT", {}], "height": ["INT", {}], "batch_size": ["INT", {}]}}
+    }
+    info["ReferenceMultiLatent"] = {
+        "input": {
+            "required": {
+                "positive": ["CONDITIONING"],
+                "negative": ["CONDITIONING"],
+                "vae": ["VAE"],
+                "resolution": [["keep resolution", "1 megapixels"], {}],
+            }
+        }
+    }
+    return info
+
+
 CONTROL_PRESETS = {w.preset.id for w in REG.control_presets()}
+FLUX_PRESETS = {w.preset.id for w in REG.workflows.values() if w.preset.engine == "flux3-klein"}
 
 
 # --- vérification pure ----------------------------------------------------------------
@@ -145,7 +172,8 @@ def test_check_ok_with_recorded_object_info() -> None:
 def test_recorded_comfyui_without_controlnet_reports_it_clearly() -> None:
     """ComfyUI de la GX10 pas encore mis à jour : les presets ControlNet signalent le nœud absent, le test
     reste bon pour tout le reste, et le verrouillage est déclaré indisponible avec un message clair."""
-    report = _report(_recorded_object_info(), [LoraUse(_installed_lora(), "série « Les Lames », style")])
+    info = _with_flux3(_recorded_object_info())
+    report = _report(info, [LoraUse(_installed_lora(), "série « Les Lames », style")])
     assert report["ok"]  # presets ControlNet optionnels : les autres paliers marchent
     problems = _problems(report)
     assert {
@@ -235,6 +263,8 @@ def test_every_preset_file_name_is_known_to_the_recorded_comfyui() -> None:
     for wf in REG.workflows.values():
         if wf.preset.id in CONTROL_PRESETS:  # patch ControlNet : installation en attente du feu vert
             continue
+        if wf.preset.id in FLUX_PRESETS:  # FLUX 3 Klein : installé après l'enregistrement (voir `_with_flux3`)
+            continue
         for node in wf.workflow.values():
             for name, value in node["inputs"].items():
                 if name.endswith("_name") and isinstance(value, str):
@@ -270,7 +300,9 @@ def test_missing_turbo_file_names_the_file_and_the_folder() -> None:
     assert problems["qwen-image-turbo"] == [expected]
     assert problems["qwen-image-edit-ref-turbo"] == [expected]
     assert problems["qwen-image-croquis"] == [expected] and problems["qwen-image-turbo-from-sketch"] == [expected]
-    assert all(not v for k, v in problems.items() if "turbo" not in k and "croquis" not in k)
+    # Le croquis FLUX a son propre modèle : seuls les croquis Qwen (modèle Turbo) sont touchés.
+    assert all(not v for k, v in problems.items() if "turbo" not in k and not (k.startswith("qwen") and "croquis" in k))
+    assert all(not v for k, v in problems.items() if "croquis" in k and k.startswith("flux3"))
 
 
 def test_missing_encoder_and_vae_are_named() -> None:
@@ -292,7 +324,8 @@ def test_unknown_node_class() -> None:
     del info["QwenImage21Cache"]
     report = _report(info)
     for preset_id, problems in _problems(report).items():
-        expected = ["nœud inconnu : QwenImage21Cache (nœud 4)"] if preset_id in REG.workflows else []
+        qwen = preset_id in REG.workflows and preset_id not in FLUX_PRESETS  # FLUX n'a pas ce nœud
+        expected = ["nœud inconnu : QwenImage21Cache (nœud 4)"] if qwen else []
         assert problems == expected
     del info["LoraLoaderModelOnly"]
     assert "nœud inconnu : LoraLoaderModelOnly (chargeur de LoRA)" in _problems(_report(info))["qwen-image-base"]
@@ -346,7 +379,7 @@ def _http(handler: Callable[[httpx.Request], httpx.Response]) -> HttpComfyUIClie
 
 
 def test_run_check_against_recorded_server() -> None:
-    report = run_check(_http(_fixture_server()), REG, url="http://127.0.0.1:8188")
+    report = run_check(_http(_fixture_server(_with_flux3(_recorded_object_info()))), REG, url="http://127.0.0.1:8188")
     assert report["ok"] and report["system"]["devices"][0]["vram_free"] > 0
 
 
