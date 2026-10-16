@@ -989,6 +989,14 @@ def check_workflow_mapping(preset: WorkflowPreset | UpscalerPreset, workflow: An
         ):
             if node_id is not None and not isinstance(workflow.get(node_id), dict):
                 errors.append(f"control.{label} : nœud {node_id} absent du workflow")
+    layout = getattr(preset, "layout", None)
+    if layout is not None:
+        for label, target in (("boxes", layout.boxes), ("width", layout.width), ("height", layout.height)):
+            node = workflow.get(target.node)
+            if not isinstance(node, dict):
+                errors.append(f"layout.{label} : nœud {target.node} absent du workflow")
+            elif target.input not in node.get("inputs", {}):
+                errors.append(f"layout.{label} : entrée « {target.input} » absente du nœud {target.node}")
     chain = preset.lora_chain
     if chain is not None:
         for label, src in (("model_from", chain.model_from), ("clip_from", chain.clip_from)):

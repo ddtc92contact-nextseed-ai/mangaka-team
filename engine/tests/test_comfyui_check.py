@@ -126,6 +126,22 @@ def _with_flux3(info: dict[str, Any]) -> dict[str, Any]:
             }
         }
     }
+    # Grille de composition (presets `layout`) : définitions lues sur le ComfyUI de la GX10 (/object_info).
+    info["CreateBoundingBoxes"] = {
+        "input": {
+            "required": {
+                "width": ["INT", {"default": 1024, "min": 64, "max": 16384, "step": 16}],
+                "height": ["INT", {"default": 1024, "min": 64, "max": 16384, "step": 16}],
+                "editor_state": ["BOUNDING_BOXES", {"default": [], "socketless": False}],
+            },
+            "optional": {"background": ["IMAGE"], "bboxes": ["BOUNDING_BOX,ARRAY,STRING"]},
+        },
+        "output": ["IMAGE", "BOUNDING_BOX", "ARRAY"],
+    }
+    info["Flux3LayoutPrompt"] = {
+        "input": {"required": {"prompt": ["STRING", {"multiline": True}], "element": ["ARRAY"]}},
+        "output": ["STRING"],
+    }
     return info
 
 

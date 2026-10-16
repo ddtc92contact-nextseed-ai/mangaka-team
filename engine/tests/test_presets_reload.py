@@ -45,6 +45,7 @@ def test_added_workflow_appears_after_reload(make_client: Callable[..., TestClie
     c = make_client(mangaka_presets_dir=presets_copy)
     ctx = c.app.state.ctx  # type: ignore[attr-defined]
     before = len(ctx.presets.workflows)
+    flux_before = sum(1 for w in ctx.presets.workflows.values() if w.preset.engine == "flux3-klein")
     _add_workflow(presets_copy, "flux3-klein-essai")
     assert "flux3-klein-essai" not in _ids(c)  # rien ne change sans rechargement
 
@@ -52,7 +53,7 @@ def test_added_workflow_appears_after_reload(make_client: Callable[..., TestClie
     assert out["workflows"] == before + 1
     assert out["issues"] == []
     flux = next(e for e in out["engines"] if e["engine"] == "flux3-klein")
-    assert flux["name"] == "FLUX 3 Klein" and flux["workflows"] == 7
+    assert flux["name"] == "FLUX 3 Klein" and flux["workflows"] == flux_before + 1
     assert "flux3-klein-essai" in _ids(c)
     # Propagé partout : même registre pour les exécuteurs, presets effectifs des agents recalculés.
     assert "flux3-klein-essai" in ctx.agents.presets_for(None).workflows
