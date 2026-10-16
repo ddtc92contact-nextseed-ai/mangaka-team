@@ -1143,3 +1143,15 @@ class CoverCharter(TimestampMixin, Base):
     character_ids: Mapped[list[int]] = mapped_column(JSON, default=list)
 
     project: Mapped[Project] = relationship(back_populates="cover_charter")
+
+
+class AppSetting(TimestampMixin, Base):
+    """Réglage de l'atelier (écran Réglages), une ligne par clé — `author_name` : « Ton nom », auteur par défaut
+    des validations et décisions d'étape (voir pipeline/app_settings.py). L'appli est locale et sans compte : le
+    nom vit ici, pas seulement dans le navigateur. Table ajoutée sans migration de données (`create_all`)."""
+
+    __tablename__ = "app_settings"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    key: Mapped[str] = mapped_column(String(60), unique=True)
+    value: Mapped[str] = mapped_column(Text, default="")

@@ -346,7 +346,9 @@ def test_auto_qc_after_generation_ok(make_client: Callable[..., TestClient]) -> 
     _ok(c.post(f"/panels/{p1['id']}/generate"), 202)
     _wait(c)
     [img] = _images(c, p1["id"])
-    assert img["qc_verdict"] == "ok" and img["qc_score"] is not None and img["qc_reasons"] == ["Aucun défaut détecté"]
+    # Les cases factices sont teintées : sur une série N&B, seul l'avertissement de couleur (jamais un rejet).
+    assert img["qc_verdict"] == "ok" and img["qc_score"] is not None
+    assert [r.split(" :")[0] for r in img["qc_reasons"]] == ["Couleur sur une série noir et blanc"]
     qc = img["qc"]
     assert qc["source"] == "auto" and qc["layers"]["detectors"]["status"] == "done"
     assert qc["layers"]["identity"]["characters"][0]["name"] == "Aiko"

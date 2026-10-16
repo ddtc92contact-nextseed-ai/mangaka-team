@@ -32,7 +32,6 @@ import {
   type DraftScene,
 } from "@/lib/scenes";
 import { useChapter } from "../chapter-context";
-import { readAuthor, saveAuthor } from "../stages";
 import { StepAlert } from "../step-alert";
 
 const SYNOPSIS_FIRST = "écris d'abord le synopsis ou le script brut du chapitre (onglet Scénario) : les scènes partent de lui.";
@@ -142,9 +141,7 @@ export default function ScenesPage() {
     setBusy("validate");
     try {
       if (dirty && !(await save())) return;
-      const author = readAuthor();
-      const out = await api.validateScenes(chapter.id, author);
-      if (author) saveAuthor(author);
+      const out = await api.validateScenes(chapter.id); // signée par « Ton nom » des Réglages
       scenes.setData(out);
       reloadStages();
       toast("Scènes validées : le scénario peut être écrit");

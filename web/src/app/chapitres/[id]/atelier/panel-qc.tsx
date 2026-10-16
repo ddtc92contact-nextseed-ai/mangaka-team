@@ -6,7 +6,7 @@ import { DetectionLegend, DetectionOverlay, QCBadge } from "@/components/qc";
 import { Alert, Button, ProgressBar } from "@/components/ui";
 import { engineUrl, type PanelImage, type QCStatus, type QueueItem, type VisionMode } from "@/lib/api";
 import { isSketch, type RepairPreset } from "./repair-dialog";
-import { QC_LAYERS, QC_LAYER_STATUS, QC_SOURCE, QC_VERDICT, formatMs, toneSummary } from "@/lib/qc";
+import { QC_LAYERS, QC_LAYER_STATUS, QC_SOURCE, QC_VERDICT, colorSummary, formatMs, toneSummary } from "@/lib/qc";
 
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -140,6 +140,14 @@ export function PanelQC({
                         data-testid="qc-tone"
                       >
                         {toneSummary(layer.tone)}
+                      </dd>
+                    )}
+                    {colorSummary(layer.tone) && (
+                      <dd
+                        className={`text-[11px] ${layer.tone?.too_colorful ? "text-amber-300" : "text-zinc-500"}`}
+                        data-testid="qc-color"
+                      >
+                        {colorSummary(layer.tone)}
                       </dd>
                     )}
                     {layer.characters && layer.characters.length > 0 && (

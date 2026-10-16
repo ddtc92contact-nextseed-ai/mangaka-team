@@ -54,6 +54,20 @@ export function toneSummary(tone: QCTone | null | undefined): string | null {
   return `Tonalité : ${pct(tone.dark)} de pixels sombres${target(tone.max_dark)} · ${pct(tone.black)} de noir pur${target(tone.max_black)}`;
 }
 
+/** « 9,5 % » : une décimale (la saturation d'une case N&B tient en quelques points). */
+function pct1(x: number): string {
+  return `${(x * 100).toLocaleString("fr-FR", { maximumFractionDigits: 1 })} %`;
+}
+
+/** « Couleur sur une série noir et blanc : 9,5 % de saturation (cible ≤ 3 %) » ; null quand la couleur
+ * n'est pas vérifiée (rendu couleur, ancien QC). */
+export function colorSummary(tone: QCTone | null | undefined): string | null {
+  if (!tone?.color_checked || tone.saturation === null || tone.saturation === undefined) return null;
+  const target = tone.max_saturation === null || tone.max_saturation === undefined ? "" : ` (cible ≤ ${pct1(tone.max_saturation)})`;
+  const label = tone.too_colorful ? "Couleur sur une série noir et blanc" : "Couleur";
+  return `${label} : ${pct1(tone.saturation)} de saturation${target}`;
+}
+
 /** « 120 ms », « 1,4 s ». */
 export function formatMs(ms: number | null | undefined): string {
   if (ms === null || ms === undefined || !Number.isFinite(ms)) return "—";

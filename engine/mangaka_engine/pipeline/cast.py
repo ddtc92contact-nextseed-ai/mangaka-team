@@ -45,6 +45,7 @@ from ..providers.llm.base import ChatMessage, LLMError, LLMProvider
 from ..store.models import (
     Chapter,
     ChapterCrowdMark,
+    Character,
     CharacterImage,
     Page,
     Panel,
@@ -137,6 +138,8 @@ class CastMember:
     elsewhere: bool = False  # fiche présente dans un autre chapitre de la série
     crowd: bool = False
     mark: CrowdMark | None = None
+    lora_name: str | None = None  # LoRA de la fiche (None : aucun, son poids n'est pas montré)
+    lora_weight: float | None = None
 
     @property
     def panels(self) -> int:
@@ -309,8 +312,16 @@ def _references(session: Session, members: Sequence[CastMember]) -> None:
     ):
         if kept in images.get(entry_id, set()):
             full.add(entry_id)
+    loras = {
+        cid: (name, weight)
+        for cid, name, weight in session.execute(
+            select(Character.id, Character.lora_name, Character.lora_weight).where(Character.id.in_(ids))
+        )
+        if (name or "").strip()
+    }
     for m in members:
         assert m.character_id is not None
+        m.lora_name, m.lora_weight = loras.get(m.character_id, (None, None))
         n = len(images.get(m.character_id, ()))
         m.images = n
         m.references = NONE if n == 0 else SHEET if m.character_id in full or n >= 2 else PORTRAIT
