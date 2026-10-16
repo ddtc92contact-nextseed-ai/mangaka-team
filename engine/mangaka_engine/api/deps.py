@@ -55,6 +55,30 @@ class AppContext:
             )
         return self.control_catalog.get(client, self.presets, refresh=refresh)
 
+    def reload_presets(self) -> PresetRegistry:
+        """« Recharger les flux » : relit presets/ sans redémarrer le moteur.
+
+        Refusé (`PresetsBusy`) tant qu'un job de la file ComfyUI tourne : un flux ne change jamais sous une
+        génération. Le registre est remplacé sur place (exécuteurs, bibliothèque, QC… gardent la même référence),
+        puis ce qui en garde une copie est recalculé : presets effectifs des agents, réglages du savoir-faire,
+        cache du verrouillage de composition. Les jobs en attente partiront avec les nouveaux flux."""
+        running = self.generation.current_job_id
+        if running is not None:
+            raise PresetsBusy(running)
+        self.presets.reload()
+        self.agents.presets_reloaded()
+        self.knowledge.settings = self.presets.knowledge
+        self.control_catalog = ControlCatalog()
+        return self.presets
+
+
+class PresetsBusy(Exception):
+    """Rechargement des presets refusé : un job de la file ComfyUI est en cours."""
+
+    def __init__(self, job_id: int) -> None:
+        super().__init__(job_id)
+        self.job_id = job_id
+
 
 def get_ctx(request: Request) -> AppContext:
     return request.app.state.ctx

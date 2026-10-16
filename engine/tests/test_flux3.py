@@ -262,7 +262,7 @@ def test_workflow_presets_endpoints_expose_engine_and_lora_support(make_client: 
     )
     assert (
         presets["qwen-image-turbo"]["supports_lora"] is True
-        and presets["qwen-image-turbo"]["engine_name"] == "Qwen-Image"
+        and presets["qwen-image-turbo"]["engine_name"] == "Qwen-Image 2.1"
     )
 
 

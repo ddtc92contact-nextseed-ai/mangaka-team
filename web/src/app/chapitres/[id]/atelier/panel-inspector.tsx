@@ -36,7 +36,7 @@ import { dpiLabel, dpiTitle } from "@/lib/finishing";
 import { useJob } from "@/lib/jobs";
 import { LIBRARY_KINDS } from "@/lib/library";
 import { describeUsedReference, droppedReferencesNote } from "@/lib/used-references";
-import { workshopPresets } from "@/lib/workflow-list";
+import { engineLabel, groupByEngine, workshopPresets } from "@/lib/workflow-list";
 import { useChapter } from "../chapter-context";
 import { ABBlock } from "./ab-block";
 import { CastBlock } from "./cast-block";
@@ -550,13 +550,25 @@ export function PanelInspector({
               <Field label="Workflow" htmlFor="preset" help="atelier.workflow">
                 <Select id="preset" value={d.generation_preset ?? ""} onChange={(e) => setPreset(e.target.value)} disabled={busy || !presets}>
                   <option value="">Automatique ({resolvedName})</option>
-                  {workshopPresets(presets ?? [], d.generation_preset).map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                      {p.reference_slots ? ` · ${p.reference_slots} réf.` : ""}
-                    </option>
+                  {/* Groupés par moteur : « cette case passe mal, je la refais sur l'autre moteur ». */}
+                  {groupByEngine(workshopPresets(presets ?? [], d.generation_preset)).map((g) => (
+                    <optgroup key={g.engine ?? ""} label={g.label}>
+                      {g.items.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                          {p.reference_slots ? ` · ${p.reference_slots} réf.` : ""}
+                        </option>
+                      ))}
+                    </optgroup>
                   ))}
                 </Select>
+                {effective && (
+                  <p className="mt-1 text-xs text-zinc-400" data-testid="panel-engine">
+                    Moteur : <span className="font-medium text-zinc-200">{engineLabel(effective)}</span>
+                    {d.generation_preset ? "" : " (choix automatique)"} · changer de moteur ne touche pas aux
+                    versions déjà faites.
+                  </p>
+                )}
                 {effectiveCfg !== null && (
                   <p className="mt-1">
                     <NegativeBadge cfg={effectiveCfg} />
