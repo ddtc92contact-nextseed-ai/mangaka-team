@@ -276,7 +276,7 @@ def test_cover_prompt_written_by_ai_then_generated_at_the_format_ratio(
     assert vol["cover_prompt_source"] == "ai" and vol["cover_character_ids"] == [kaito["id"], rin["id"], nobody["id"]]
     prompt = vol["cover_prompt"]
     assert prompt.startswith(COVER.lead)  # type: ignore[union-attr]
-    assert "<image1>" in prompt and "<image2>" in prompt and "<image3>" not in prompt
+    assert "<image" not in prompt  # les phrases de rôle des images : ajoutées par le moteur à l'envoi
     assert "crimson" in prompt  # couleur gardée, série N&B ou pas
     sent = llm.requests[-1]["messages"]
     assert "Kaito de face" in sent[1].content and "cover_prompt" in sent[1].content
@@ -308,6 +308,10 @@ def test_cover_prompt_written_by_ai_then_generated_at_the_format_ratio(
     )
     assert first["upscaler_name"]
     assert "Embers drift" in first["prompt"] and "no text" in first["prompt"].casefold()
+    # une phrase de rôle par image envoyée (deux personnages avec image), écrite par le moteur
+    assert first["prompt"].count("<image1> is the identity reference for Kaito") == 1
+    assert first["prompt"].count("<image2> is the identity reference for Rin") == 1
+    assert first["prompt"].count(" is the identity reference") == 2 and "<image3>" not in first["prompt"]
 
     # Workflow envoyé : flux dédié, prompts, taille, seed, deux références (personnages avec image).
     wf = REG.workflow(COVER.workflow)  # type: ignore[union-attr]

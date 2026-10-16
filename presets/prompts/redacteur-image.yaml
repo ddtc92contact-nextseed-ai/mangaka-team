@@ -36,7 +36,8 @@
 #   $absent_characters (personnages de la série absents de la case, et ceux qu'elle cite hors cadre : à ne jamais nommer)
 #   $framing         (consigne de cadrage : vue subjective, case sans personnage, « seuls X dans le cadre »)
 #   $decor $objects  (fiches de la bibliothèque de la série vues dans la case)
-#   $references      (images envoyées et leur rôle : « - <image1> is the identity reference for Aiko… »)
+#   $references      (images envoyées et leur rôle : « - <image1> is the identity reference for Aiko… » ;
+#                     le moteur écrit seul ces phrases de rôle devant le paragraphe, le LLM ne les écrit plus)
 #   $image_tags      (« <image1>, <image2> » : les seules images à citer)
 #   $style           (mots-clés de style de la série : à recopier tels quels, en fin de paragraphe)
 #   $style_lead      (phrase de style de la série — rendu + genre, style_lead d'image_prompt.yaml — qui ouvre
@@ -67,12 +68,13 @@ system: |
   hand-drawn manga panel, never literary prose. The image is an ink drawing on paper: speak the language
   of the drawing board, never the language of a camera. Follow this order:
   0. Open the paragraph with the style sentence of the series, copied exactly as given ($style_lead).
-  1. Then the reference roles, one sentence per image that is sent, in slot order, citing it as <imageN>,
-     for example: "<image1> is the identity reference for Aiko: keep her face, hair and outfit; ignore
-     its pose, framing and background." Cite only the images listed ($image_tags) and never
-     re-describe what a reference image already shows: point to it with <imageN> instead. When reference
-     images are sent, say once that the whole panel is drawn in the same manga style as the reference
-     images.
+  1. Never write a reference role sentence such as "<image1> is the identity reference for Aiko: keep…":
+     the studio puts one role sentence per image that is sent in front of your paragraph itself (the
+     images and their role are listed below). Cite only the images listed ($image_tags), never another
+     one; you may point to a reference by its tag next to a name, and never re-describe what a reference
+     image already shows.
+     When reference images are sent, say once that the whole panel is drawn in the same manga style as
+     the reference images.
   2. The subject: each character of the panel by exact name, with a strong action verb and a precise
      body pose (weight, legs, arms, hands, motion, gesture). Place each one in the frame (left, right,
      centre, foreground, background). For each character, say where they look and their expression.
@@ -106,8 +108,8 @@ system: |
     show the whole body;
   - no text, speech bubble, letter, caption, title or sound effect in the image, and never copy a line
     of dialogue: all the lettering is added later;
-  - name each character at most $max_mentions times in the whole paragraph (the reference role sentence
-    counts): afterwards refer to them by a pronoun or by their place in the frame, never by name again.
+  - name each character at most $max_mentions times, counting the role sentence the studio adds for its
+    reference image: afterwards refer to them by a pronoun or by their place in the frame, never by name again.
     A repeated name makes the image model draw the same character twice;
   - between $min_words and $max_words words; no list, no heading, no quotation marks.
   $palette_rule
@@ -134,7 +136,8 @@ user: |
   Recurring setting: $decor
   Recurring objects: $objects
 
-  Reference images sent to the model with this prompt (define these roles first, in this order):
+  Reference images sent to the model with this prompt (the studio writes these role sentences in front of
+  your paragraph: never write them yourself):
   $references
 
   Series bible notes (to respect):

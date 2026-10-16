@@ -1272,13 +1272,11 @@ def _seed(text: str) -> int:
 
 
 def _mock_english(ctx: dict[str, Any]) -> list[str]:
-    """Phrases anglaises seulement (le mock ne traduit pas) : phrase de style, rôles des images, sujet et pose,
-    cadrage, décor, lumière, composition — jamais de vocabulaire photographique."""
+    """Phrases anglaises seulement (le mock ne traduit pas) : phrase de style, sujet et pose, cadrage, décor,
+    lumière, composition — jamais de vocabulaire photographique ni de phrase de rôle des images (le moteur
+    l'écrit seul, `prompt.frame_references`)."""
     panel = ctx.get("panel") or {}
-    lead = [str(ctx["style_lead"])] if ctx.get("style_lead") else []
-    sentences = lead + [
-        f"{r['tag']} is {r['role']}." for r in ctx.get("references") or [] if r.get("tag") and r.get("role")
-    ]
+    sentences = [str(ctx["style_lead"])] if ctx.get("style_lead") else []
     if ctx.get("references"):
         sentences.append("The whole panel is drawn in the same manga style as the reference images.")
     seed = _seed(str(panel.get("description") or "") + str(panel.get("action") or ""))
@@ -1307,8 +1305,8 @@ def _mock_english(ctx: dict[str, Any]) -> list[str]:
 
 
 def mock_image_prompt(ctx: dict[str, Any]) -> dict[str, Any]:
-    """Paragraphe déterministe : phrase de style → rôles des images → sujet et pose → cadrage → décor →
-    lumière → style."""
+    """Paragraphe déterministe : phrase de style → sujet et pose → cadrage → décor → lumière → style (aucune
+    phrase de rôle des images : le moteur l'écrit seul)."""
     lang = "en" if ctx.get("language") == "en" else "fr"
     panel = ctx.get("panel") or {}
     description = _ANY_MARK.sub(" ", str(panel.get("description") or "")).strip()
@@ -1322,7 +1320,6 @@ def mock_image_prompt(ctx: dict[str, Any]) -> dict[str, Any]:
             who = f"{name}, la personne de {refs[name]}" if refs.get(name) else name
             subjects.append(f"{who} ({details})" if details else who)
         sentences = [str(ctx["style_lead"])] if ctx.get("style_lead") else []
-        sentences += [f"{r['tag']} : {r['name']}." for r in ctx.get("references") or [] if r.get("tag")]
         if subjects:
             sentences.append("On voit " + ", ".join(subjects) + ".")
         if description:
@@ -1357,13 +1354,10 @@ def mock_image_prompt(ctx: dict[str, Any]) -> dict[str, Any]:
 
 
 def mock_cover_prompt(ctx: dict[str, Any]) -> dict[str, Any]:
-    """Prompt de couverture déterministe : phrase d'ouverture → rôles des images → personnages → intention →
-    décor en couleur → zone du logo → style (aucune règle de couleur : la couverture est toujours en couleur)."""
+    """Prompt de couverture déterministe : phrase d'ouverture → personnages → intention → décor en couleur →
+    zone du logo → style (aucune règle de couleur : la couverture est toujours en couleur ; aucune phrase de
+    rôle des images : le moteur l'écrit seul, `covers.finish_cover_prompt`)."""
     sentences = [str(ctx["style_lead"])] if ctx.get("style_lead") else []
-    sentences += [
-        f"{r['tag']} is the identity reference for {r['name']}: keep the face, hair and outfit."
-        for r in ctx.get("references") or []
-    ]
     names = [str(c.get("name")) for c in ctx.get("characters") or [] if c.get("name")]
     if names:
         sentences.append(f"{' and '.join(names)} stand in the lower two thirds of the cover in a bold heroic pose.")
