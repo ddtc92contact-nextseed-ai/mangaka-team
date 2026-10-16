@@ -7,7 +7,10 @@ import { formatMs } from "@/lib/qc";
 export function TrialView({ result }: { result: TrialResult }) {
   return (
     <div data-testid="trial-result">
-      <p className="mb-3 text-xs text-zinc-500">Essai terminé en {formatMs(result.duration_ms)} · rien n&apos;a été enregistré.</p>
+      <p className="mb-3 text-xs text-zinc-500">
+        Essai terminé en {formatMs(result.duration_ms)}
+        {result.llm_model ? ` · modèle ${result.llm_model}` : ""} · rien n&apos;a été enregistré.
+      </p>
       {result.error && (
         <p role="alert" className="mb-3 rounded-md border border-red-900/60 bg-red-950/40 px-3 py-2 text-sm text-red-200">
           {result.error}

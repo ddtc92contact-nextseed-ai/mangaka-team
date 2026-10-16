@@ -343,7 +343,8 @@ def test_auto_qc_after_generation_ok(make_client: Callable[..., TestClient]) -> 
     c = make_client(providers(detectors=det, identity=ScriptedIdentity(0.95), vision=RecordingVision()))
     data = setup_chapter(c)
     p1 = data["panels"][0]
-    _ok(c.post(f"/panels/{p1['id']}/generate"), 202)
+    # Graine fixe : au hasard, ~12 % des cases factices sont trop peu teintées pour l'avertissement de couleur.
+    _ok(c.post(f"/panels/{p1['id']}/generate", json={"seed": 42}), 202)
     _wait(c)
     [img] = _images(c, p1["id"])
     # Les cases factices sont teintées : sur une série N&B, seul l'avertissement de couleur (jamais un rejet).

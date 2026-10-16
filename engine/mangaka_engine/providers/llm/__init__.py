@@ -11,11 +11,12 @@ from .base import (
     LLMTimeoutError,
     LLMUnavailableError,
 )
-from .deepseek import DeepSeekProvider
+from .deepseek import DeepSeekModelCatalog, DeepSeekProvider
 from .mock import MockLLMProvider
 
 __all__ = [
     "ChatMessage",
+    "DeepSeekModelCatalog",
     "DeepSeekProvider",
     "LLMAuthError",
     "LLMBadRequestError",

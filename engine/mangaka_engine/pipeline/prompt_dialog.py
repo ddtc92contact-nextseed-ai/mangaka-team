@@ -39,7 +39,7 @@ from .prompt import camera_term
 from .prompt_writer import (
     PromptBrief,
     PromptValidationError,
-    clean_paragraph,
+    clean_written,
     finish_paragraph,
     load_json_object,
     paragraph_problems,
@@ -274,7 +274,7 @@ def parse_dialog(text: str, d: DialogBrief) -> DialogProposal:
         character_id = choices[0].character_id
         if d.current_image(character_id) != ref.image_id:
             references[character_id] = ref.image_id
-    paragraph = clean_paragraph(out.prompt)
+    paragraph = clean_written(out.prompt, len(d.brief.references))
     problems += paragraph_problems(paragraph, out.language, d.brief)
     if problems:
         raise PromptValidationError(" ; ".join(problems))

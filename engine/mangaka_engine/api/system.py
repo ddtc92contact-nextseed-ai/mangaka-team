@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
 from .. import __version__
 from ..pipeline.generation import ai_prompt_default
-from .deps import AppContext, get_ctx
+from ..presets import PresetRegistry
+from .deps import AppContext, PresetsBusy, get_ctx
+
+log = logging.getLogger("mangaka_engine")
 
 router = APIRouter(tags=["système"])
 
@@ -234,3 +238,36 @@ def list_presets(ctx: AppContext = Depends(get_ctx)) -> dict[str, Any]:
         ],
         "issues": [{"file": i.file, "message": i.message} for i in reg.issues],
     }
+
+
+@router.post("/presets/reload")
+def reload_presets(ctx: AppContext = Depends(get_ctx)) -> dict[str, Any]:
+    """« Recharger les flux » (Réglages) : relit presets/ sans redémarrer le moteur.
+
+    409 tant qu'une génération (ou un autre job de la file ComfyUI) tourne : rien n'est relu, on réessaie
+    après. Un preset invalide est écarté et listé dans `issues` sans empêcher les autres de se charger."""
+    try:
+        reg = ctx.reload_presets()
+    except PresetsBusy as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Une génération est en cours (job {exc.job_id}) : recharge les flux quand la file est vide.",
+        ) from None
+    for issue in reg.issues:
+        log.warning("preset ignoré — %s : %s", issue.file, issue.message)
+    log.info("presets rechargés : %s flux, %s problème(s)", len(reg.workflows), len(reg.issues))
+    return {
+        "workflows": len(reg.workflows),
+        "engines": _engine_counts(reg),
+        "issues": [{"file": i.file, "message": i.message} for i in reg.issues],
+    }
+
+
+def _engine_counts(reg: PresetRegistry) -> list[dict[str, Any]]:
+    """Flux par moteur (`engine` du preset ; sans moteur : « Autres »), dans l'ordre des presets."""
+    counts: dict[str | None, dict[str, Any]] = {}
+    for w in reg.workflows.values():
+        key = w.preset.engine
+        entry = counts.setdefault(key, {"engine": key, "name": w.preset.engine_name or "Autres", "workflows": 0})
+        entry["workflows"] += 1
+    return list(counts.values())

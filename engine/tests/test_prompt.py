@@ -6,9 +6,9 @@ from mangaka_engine.pipeline.prompt import (
     build_negative_prompt,
     build_prompt,
     camera_term,
-    defines_references,
     frame_references,
     image_tags,
+    role_tags,
     strip_quoted,
 )
 from mangaka_engine.presets import ImagePromptSettings, PresetRegistry
@@ -93,14 +93,13 @@ def test_reference_framing_is_skipped_when_the_prompt_defines_the_roles() -> Non
     written = "<image1> is Aiko. <image2> is the station. Aiko runs."
     framed = frame_references(written, slots, reg.image_prompt)
     assert framed.startswith(written) and "Use the reference images for identity" in framed
-    assert image_tags(framed) == [1, 2] and defines_references(written, 2)
+    assert image_tags(framed) == [1, 2] and role_tags(written) == {1, 2}
     # ancien prompt (français, ou sans <imageN>) : les rôles sont ajoutés en tête, dans l'ordre
     old = frame_references("Image 1 : Aiko court.", slots, reg.image_prompt)
     assert old.startswith("<image1> is the identity reference for Aiko: keep the face")
     assert "<image2> is the location reference for Gare" in old and "Image 1 : Aiko court." in old
-    # une image citée en trop, ou dans le désordre : les rôles sont redéfinis
-    assert not defines_references("<image1> <image3> Aiko.", 2)
-    assert not defines_references("<image2> <image1> Aiko.", 2)
+    # une image seulement citée (sans phrase de rôle) : son rôle est ajouté
+    assert role_tags("<image1> <image3> Aiko.") == set() and role_tags("Aiko (<image1>) court.") == set()
 
 
 def test_fragment_prompt_opens_on_the_style_sentence() -> None:
@@ -139,7 +138,7 @@ def test_reference_framing_is_skipped_after_the_style_sentence() -> None:
     slots = [ReferenceSlot("character", "Aiko")]
     written = "Black and white manga panel, seinen manga style. <image1> is Aiko. Aiko runs."
     framed = frame_references(written, slots, reg.image_prompt)
-    assert defines_references(written, 1) and framed.startswith(written)
+    assert role_tags(written) == {1} and framed.startswith(written)
     assert framed.count("<image1> is") == 1
     assert "drawn in the same manga style as the reference images" in framed
 

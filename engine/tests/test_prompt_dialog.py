@@ -352,7 +352,7 @@ def test_parse_dialog_keeps_only_what_changes() -> None:
         ({"references": [{"character": "Lucius", "image_id": 99}]}, "image 99 inconnue pour Lucius (images : 10, 11)"),
         ({"references": [{"character": "Stan", "image_id": 10}]}, "« Stan » n'a pas d'image à choisir"),
         ({"explanation": ""}, "explanation : ne doit pas être vide"),
-        ({"prompt": "Lucius alone in close-up."}, "images de référence non citées"),
+        ({"prompt": "<image3> is Lucius alone in close-up."}, "images citées qui ne sont pas envoyées : <image3>"),
     ],
 )
 def test_parse_dialog_refuses_invalid_values(change: dict[str, Any], message: str) -> None:

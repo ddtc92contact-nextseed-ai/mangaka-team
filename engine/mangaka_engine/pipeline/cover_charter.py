@@ -214,11 +214,14 @@ def charter_lines(charter: Charter, series: Project, *, kind: str, names: list[s
     return lines
 
 
+_DEFAULT_IDENTITY = str(CoverCharterSettings.model_fields["identity_prompt"].default)
+
+
 def identity_lines(charter: Charter | None, references: list[tuple[str, str]]) -> list[str]:
-    """Rôle de chaque image de référence envoyée (`(tag, nom)`), d'après `identity_prompt` du preset."""
-    if charter is None:
-        return []
-    return [_fill(charter.settings.identity_prompt, {"tag": tag, "name": name}) for tag, name in references]
+    """Rôle de chaque image de référence envoyée (`(tag, nom)`), d'après `identity_prompt` du preset (sans
+    charte : celui par défaut). Seule source de ces phrases : le rédacteur de couverture ne les écrit plus."""
+    template = charter.settings.identity_prompt if charter is not None else _DEFAULT_IDENTITY
+    return [_fill(template, {"tag": tag, "name": name}) for tag, name in references]
 
 
 def charter_summary(charter: Charter) -> str:

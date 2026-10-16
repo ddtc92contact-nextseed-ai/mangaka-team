@@ -269,17 +269,25 @@ def image_tags(text: str) -> list[int]:
     return list(dict.fromkeys(int(n) for n in _IMAGE_TAG.findall(text)))
 
 
-_FIRST_SENTENCE = re.compile(r"^[^<]*?[.!?…]\s+")
+# Phrase de rôle d'une image (« <image1> is the identity reference for Aiko: keep… », « <image2> : Gare. ») :
+# une phrase qui commence par la balise, suivie de « is » ou de « : », jusqu'à sa ponctuation finale.
+_ROLE_SENTENCE = re.compile(r"(?:^|(?<=[.!?…])\s)\s*<image(\d+)>\s*(?:is\b|:)[^.!?…<]*(?:[.!?…]+|$)", re.IGNORECASE)
 
 
-def defines_references(prompt: str, count: int) -> bool:
-    """Le prompt commence par le rôle des images (`<image1>` d'abord, éventuellement après la phrase de
-    style de la série) et cite exactement les `count` images envoyées, dans l'ordre : c'est le cas d'un
-    prompt rédigé par l'IA."""
-    head = prompt.lstrip().lower()
-    if not head.startswith("<image1>"):
-        head = _FIRST_SENTENCE.sub("", head, count=1)
-    return count > 0 and head.startswith("<image1>") and image_tags(prompt) == list(range(1, count + 1))
+def role_tags(text: str) -> set[int]:
+    """Numéros des images dont le texte donne déjà la phrase de rôle (prompt hérité d'un ancien rédacteur,
+    prompt édité à la main) : le moteur n'en ajoute pas une seconde."""
+    return {int(m.group(1)) for m in _ROLE_SENTENCE.finditer(text)}
+
+
+def strip_roles(text: str, count: int | None = None) -> str:
+    """Le texte sans ses phrases de rôle d'image : c'est le moteur qui les écrit (`frame_references`).
+    `count` : seules celles des `count` images envoyées sont retirées (une image en trop reste visible)."""
+
+    def drop(m: re.Match[str]) -> str:
+        return " " if count is None or 1 <= int(m.group(1)) <= count else m.group(0)
+
+    return _SPACES.sub(" ", _ROLE_SENTENCE.sub(drop, text)).strip()
 
 
 def frame_references(
@@ -292,21 +300,23 @@ def frame_references(
     """Prompt envoyé à un workflow avec références : le rôle de chaque image (« <image1> is the identity
     reference for Urus… ») avant le prompt de la case, la consigne « identité seulement » après.
 
-    Un prompt qui définit déjà le rôle de chaque image envoyée en tête (`defines_references` : prompt
-    rédigé par l'IA) ne reçoit que la consigne. Sans image de référence, le prompt est renvoyé tel quel.
-    `monochrome` : série en noir et blanc, lignes de `references.monochrome` (sans « colours »).
+    Le moteur est la seule source des phrases de rôle (le rédacteur de prompt n'en écrit plus) : une seule
+    par balise. Une image dont le prompt donne déjà le rôle (`role_tags` : paragraphe d'un ancien rédacteur,
+    prompt édité à la main) n'en reçoit pas une seconde. Sans image de référence, le prompt est renvoyé tel
+    quel. `monochrome` : série en noir et blanc, lignes de `references.monochrome` (sans « colours »).
     """
     if not slots:
         return prompt
     refs = (settings or ImagePromptSettings()).references.for_palette(monochrome)
-    lines = [reference_line(refs, slot, i) for i, slot in enumerate(slots, start=1)]
+    body = _sentence(prompt)
+    given = role_tags(body)
+    lines = [reference_line(refs, slot, i) for i, slot in enumerate(slots, start=1) if i not in given]
     values = {
         "images": refs.separator.join(line.strip() for line in lines if line.strip()),
         "count": str(len(slots)),
         "sorting": refs.separator.join(sorting_lines(slots, settings, monochrome=monochrome)),
     }
-    body = _sentence(prompt)
-    before = "" if defines_references(body, len(slots)) else _join(refs.before, values)
+    before = _join(refs.before, values) if lines else ""
     return " ".join(p for p in (before, body, _join(refs.after, values)) if p)
 
 

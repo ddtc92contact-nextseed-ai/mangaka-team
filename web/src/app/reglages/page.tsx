@@ -3,10 +3,19 @@
 import { useState } from "react";
 import { useToast } from "@/components/toast";
 import { Alert, Button, Card, Field, Input, PageHeader } from "@/components/ui";
-import { api, fullErrorMessage, type LibraryResult, type OrphansPreview, type ResetResult, type TidyResult } from "@/lib/api";
+import {
+  api,
+  fullErrorMessage,
+  type LibraryResult,
+  type OrphansPreview,
+  type PresetsReload,
+  type ResetResult,
+  type TidyResult,
+} from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
 import { RESET_WORD, isResetConfirmed, resetSummary } from "@/lib/reset";
 import { librarySummary, orphanLabel, orphansSummary, tidySummary } from "@/lib/storage";
+import { reloadSummary } from "@/lib/workflow-list";
 
 export default function SettingsPage() {
   return (
@@ -14,6 +23,7 @@ export default function SettingsPage() {
       <PageHeader title="Réglages" subtitle="Réglages de l'atelier." />
       <div className="space-y-6">
         <AuthorCard />
+        <PresetsReloadCard />
         <LibraryCard />
         <TidyCard />
         <ResetCard />
@@ -88,6 +98,66 @@ function AuthorCard() {
       )}
       {error && (
         <div className="mt-3">
+          <Alert>{error}</Alert>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+/** « Recharger les flux » : relit presets/ (flux ajoutés ou corrigés) sans redémarrer le moteur. Refusé pendant
+ * une génération : le message du moteur le dit. */
+function PresetsReloadCard() {
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<PresetsReload | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const toast = useToast();
+
+  async function reload() {
+    setBusy(true);
+    setError(null);
+    setResult(null);
+    try {
+      const out = await api.reloadPresets();
+      setResult(out);
+      toast(`${out.workflows} flux rechargés`);
+    } catch (err) {
+      setError(fullErrorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card data-testid="presets-reload-card">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="font-semibold text-zinc-100">Flux de génération</h2>
+        <Button variant="secondary" onClick={reload} disabled={busy} data-testid="presets-reload">
+          {busy ? "Rechargement…" : "Recharger les flux"}
+        </Button>
+      </div>
+      <p className="text-sm text-zinc-400">
+        Après avoir ajouté ou corrigé un flux dans <code>presets/workflows/</code> (Qwen-Image 2.1, FLUX 3 Klein…),
+        recharge-les ici : pas besoin de redémarrer le moteur. Refusé tant qu&apos;une génération tourne ; les
+        générations en attente partiront avec les nouveaux flux. Les pages déjà ouvertes les voient après
+        actualisation.
+      </p>
+      {result && (
+        <div className="mt-4 space-y-2" data-testid="presets-reload-result">
+          <Alert tone="info">{reloadSummary(result)}</Alert>
+          {result.issues.length > 0 && (
+            <ul className="space-y-1 text-sm text-amber-300">
+              {result.issues.map((issue, i) => (
+                <li key={`${issue.file}-${i}`}>
+                  <code className="text-amber-200">{issue.file}</code> : {issue.message}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+      {error && (
+        <div className="mt-4">
           <Alert>{error}</Alert>
         </div>
       )}
