@@ -389,7 +389,7 @@ def test_v37_database_keeps_its_chapters_in_the_old_mode(make_settings: Callable
         assert data["scenes"] == [] and data["legacy"] and data["deferred"] == []
         assert _stage(c, ch["id"])["complete"]
         assert _wait(c, _ok(c.post(f"/chapters/{ch['id']}/script"), 202))["status"] == "succeeded"
-    assert _version(settings.database_path) == SCHEMA_VERSION == 38
+    assert _version(settings.database_path) == SCHEMA_VERSION
     fresh = settings.database_path.parent / "fresh.db"
     create_db_engine(fresh).dispose()
     assert _columns(settings.database_path) == _columns(fresh)

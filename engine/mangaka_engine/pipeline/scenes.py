@@ -30,7 +30,15 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, field_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    ValidationError,
+    field_validator,
+)
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -43,7 +51,9 @@ from ..validation import format_errors
 from .framing import plain
 from .knowledge import AgentKnowledge, KnowledgeBase
 from .library import SeriesLibrary
+from .names import CharacterMatcher
 from .pre_direction import scene_dna, series_charter, tempo_profile, tempo_text
+from .scene_cast import cast_names, resolve_cast
 from .style import NO_GUIDELINES, style_brief
 
 AGENT = "script"  # savoir-faire du scénariste (presets/knowledge.yaml)
@@ -106,8 +116,21 @@ class SceneDraft(_LLMModel):
     type: str
     pages: int = Field(ge=1, le=60)
     lieu: int | None = None
+    # Distribution : fiches des personnages qui jouent dans la scène (noms tels que dans la liste, ou ids).
+    personnages: list[int | Annotated[str, StringConstraints(strip_whitespace=True, max_length=120)]] = Field(
+        default_factory=list, max_length=30, validation_alias=AliasChoices("personnages", "characters", "cast")
+    )
 
     _type = field_validator("type", mode="before")(type_key)
+
+    @field_validator("personnages", mode="before")
+    @classmethod
+    def _personnages(cls, v: Any) -> Any:
+        if v is None:
+            return []
+        if isinstance(v, str):
+            return [n for n in re.split(r"[,;]", v) if n.strip()]
+        return v
 
     @field_validator("lieu", mode="before")
     @classmethod
@@ -253,7 +276,10 @@ def build_context(
             "style_guidelines": brief.guidelines,
             "reading_direction": series.reading_direction.value,
         },
-        characters=[{"name": c.name, "description": c.visual_description} for c in characters],
+        characters=[
+            {"id": c.id, "name": c.name, "aliases": list(c.aliases or []), "description": c.visual_description}
+            for c in characters
+        ],
         previous_chapters=[
             {
                 "number": c.number,
@@ -291,8 +317,15 @@ def _render(template: str, values: dict[str, str], part: str) -> str:
         raise PresetError(f"presets/prompts/scenes.yaml : gabarit « {part} » invalide ({exc})") from None
 
 
+def _aliases(character: dict[str, Any]) -> str:
+    aliases = [a for a in character.get("aliases") or [] if a]
+    return f" (aussi appelé : {', '.join(aliases)})" if aliases else ""
+
+
 def render_messages(prompt: PromptPreset, ctx: ScenesContext) -> list[ChatMessage]:
-    chars = "\n".join(f"- {c['name']} : {c['description'] or '(sans description)'}" for c in ctx.characters)
+    chars = "\n".join(
+        f"- {c['name']}{_aliases(c)} : {c['description'] or '(sans description)'}" for c in ctx.characters
+    )
     prev = []
     for c in ctx.previous_chapters:
         line = f"- Chapitre {c['number']}{' — ' + c['title'] if c['title'] else ''} : {c['summary']}"
@@ -306,6 +339,8 @@ def render_messages(prompt: PromptPreset, ctx: ScenesContext) -> list[ChatMessag
         "style_guidelines": ctx.series.get("style_guidelines") or NO_GUIDELINES,
         "reading_direction": DIRECTION_LABELS.get(ctx.series["reading_direction"], ctx.series["reading_direction"]),
         "characters": chars or "(aucun personnage enregistré)",
+        # Noms exacts des fiches, à recopier tels quels dans « personnages ».
+        "character_names": ", ".join(f"« {c['name']} »" for c in ctx.characters) or "(aucune fiche personnage)",
         "lieux": ctx.library.text("lieux") or "(aucun lieu enregistré : « lieu » vaut null)",
         "previous_chapters": "\n".join(prev) or "(premier chapitre de la série)",
         "chapter_number": str(ctx.chapter["number"]),
@@ -377,6 +412,8 @@ class SceneData:
     page_count: int
     location_id: int | None = None
     id: int | None = None
+    # Distribution (ids des fiches) ; None : celle de la scène gardée telle quelle (vide pour une scène nouvelle).
+    character_ids: list[int] | None = None
 
 
 def replace_scenes(session: Session, chapter: Chapter, scenes: Sequence[SceneData], deferred: Sequence[str]) -> None:
@@ -401,6 +438,10 @@ def replace_scenes(session: Session, chapter: Chapter, scenes: Sequence[SceneDat
         scene.scene_type = data.scene_type
         scene.page_count = data.page_count
         scene.location_id = data.location_id
+        if data.character_ids is not None:
+            scene.character_ids = list(dict.fromkeys(data.character_ids))
+        elif scene.character_ids is None:
+            scene.character_ids = []
     chapter.scenes.sort(key=lambda s: s.position)
     chapter.scenes_deferred = [d for d in deferred if d.strip()]
     chapter.scenes_validated_at = None
@@ -409,11 +450,16 @@ def replace_scenes(session: Session, chapter: Chapter, scenes: Sequence[SceneDat
 
 
 def save_scenes(session: Session, chapter: Chapter, output: ScenesOutput) -> list[ChapterScene]:
-    """Proposition de l'agent : remplace toute la liste (non validée)."""
+    """Proposition de l'agent : remplace toute la liste (non validée). La distribution de chaque scène (noms ou ids)
+    est rapprochée des fiches de la série (`pipeline/names.py`) ; un nom sans fiche est ignoré."""
+    matcher = CharacterMatcher.for_project(session, chapter.project_id)
     replace_scenes(
         session,
         chapter,
-        [SceneData(s.title, s.summary, s.type, s.pages, s.lieu) for s in output.scenes],
+        [
+            SceneData(s.title, s.summary, s.type, s.pages, s.lieu, character_ids=resolve_cast(matcher, s.personnages))
+            for s in output.scenes
+        ],
         output.deferred,
     )
     return list(chapter.scenes)
@@ -433,6 +479,76 @@ def validation_problem(chapter: Chapter, settings: SceneTypesSettings | None) ->
         [(s.scene_type, s.page_count) for s in chapter.scenes], chapter.target_page_count, settings
     )
     return " ; ".join(problems) if problems else None
+
+
+@dataclass(frozen=True)
+class PeakWarning:
+    scene_id: int
+    message: str
+
+
+def _pct(x: float) -> str:
+    return f"{round(x * 100)} %"
+
+
+def peak_warnings(presets: PresetRegistry, chapter: Chapter) -> list[PeakWarning]:
+    """Pics du chapitre posés sur des scènes au profil calme (`calm` de presets/scene_types.yaml) : la courbe de rythme
+    de l'ADN de la série place le premier pic dans une fenêtre du chapitre (`rhythm.first_peak`) et le pic final dans
+    ses N dernières planches (`rhythm.final_peak_last_pages`). Quand toutes les scènes qui couvrent ces pages sont au
+    profil calme, chacune reçoit un avertissement (jamais bloquant)."""
+    settings = presets.scene_types
+    charter = series_charter(presets, chapter.project)
+    if settings is None or charter is None or not chapter.scenes:
+        return []
+    calm = {k for k, t in settings.types.items() if t.calm}
+    names = {k: t.name for k, t in settings.types.items()}
+    page_scene: list[ChapterScene] = [s for s in chapter.scenes for _ in range(max(0, s.page_count))]
+    n = len(page_scene)
+    if n == 0 or not calm:
+        return []
+    numbers = {s.id: i for i, s in enumerate(chapter.scenes, start=1)}
+
+    def label(scene: ChapterScene) -> str:
+        title = f" « {scene.title} »" if scene.title else ""
+        return f"Scène {numbers[scene.id]}{title} ({names.get(scene.scene_type, scene.scene_type).lower()})"
+
+    def span(pages: Sequence[int]) -> str:
+        return f"page {pages[0]}" if len(pages) == 1 else f"pages {pages[0]} à {pages[-1]}"
+
+    out: list[PeakWarning] = []
+    rhythm = charter.dna.rhythm
+    first = rhythm.first_peak
+    window = [i for i in range(n) if i / n <= first.max + 1e-9 and (i + 1) / n >= first.min - 1e-9]
+    covering = list(dict.fromkeys(page_scene[i] for i in window))
+    if covering and all(s.scene_type in calm for s in covering):
+        pages = [i + 1 for i in window]
+        for scene in covering:
+            out.append(
+                PeakWarning(
+                    scene.id,
+                    f"{label(scene)} : le premier pic du chapitre tombe entre {_pct(first.min)} et {_pct(first.max)} "
+                    f"({span(pages)}, courbe de rythme de l'ADN de la série), mais son type est au profil calme. "
+                    "Donne-lui un type qui porte un pic (combat, poursuite, révélation…) ou déplace le moment fort.",
+                )
+            )
+    last = rhythm.final_peak_last_pages
+    if last:
+        tail = list(range(max(0, n - last), n))
+        covering = list(dict.fromkeys(page_scene[i] for i in tail))
+        if covering and all(s.scene_type in calm for s in covering):
+            pages = [i + 1 for i in tail]
+            for scene in covering:
+                out.append(
+                    PeakWarning(
+                        scene.id,
+                        f"{label(scene)} : le pic final du chapitre tombe dans "
+                        f"{'ses ' + str(last) + ' dernières planches' if last > 1 else 'sa dernière planche'} "
+                        f"({span(pages)}, courbe de rythme "
+                        "de l'ADN de la série), mais son type est au profil calme. Si la scène porte le moment fort "
+                        "(coup final, révélation), donne-lui le type qui va avec.",
+                    )
+                )
+    return out
 
 
 def validate(chapter: Chapter, author: str = "") -> None:
@@ -460,6 +576,8 @@ def script_scenes(presets: PresetRegistry, chapter: Chapter) -> list[dict[str, A
     if not is_validated(chapter):
         return []
     types = {t["id"]: t for t in types_for(presets, chapter.project)}
+    characters = list(chapter.project.characters)
+    places = {loc.id: loc.name for loc in chapter.project.locations}
     out = []
     first = 1
     for number, scene in enumerate(chapter.scenes, start=1):
@@ -477,6 +595,9 @@ def script_scenes(presets: PresetRegistry, chapter: Chapter) -> list[dict[str, A
                 "last_page": first + scene.page_count - 1,
                 "tempo": t.get("tempo", ""),
                 "lieu": scene.location_id,
+                "lieu_name": places.get(scene.location_id) if scene.location_id is not None else None,
+                # Distribution validée (noms des fiches) : elle descend sur les cases (pipeline/scene_cast.py).
+                "cast": cast_names(scene, characters),
             }
         )
         first += scene.page_count
@@ -494,10 +615,15 @@ def scenes_text(scenes: Sequence[dict[str, Any]]) -> str:
     for s in scenes:
         span = f"page {s['first_page']}" if s["pages"] == 1 else f"pages {s['first_page']} à {s['last_page']}"
         title = f" « {s['title']} »" if s["title"] else ""
-        lines.append(
+        line = (
             f"- scène {s['number']}{title} — {s['type_name']} ({s['type']}), {s['pages']} page"
             f"{'s' if s['pages'] > 1 else ''} ({span}) : {s['summary']}\n  Tempo : {s['tempo']}."
         )
+        if s.get("cast"):
+            line += f"\n  Distribution : {', '.join(s['cast'])}."
+        if s.get("lieu_name"):
+            line += f"\n  Lieu : {s['lieu_name']}."
+        lines.append(line)
     return "\n".join(lines)
 
 

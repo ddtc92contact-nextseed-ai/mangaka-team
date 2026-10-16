@@ -72,6 +72,10 @@ class SceneFrame:
     profile: Mapping[str, Any] = field(default_factory=dict)
     charter: Charter | None = None
     fiches: tuple[str, ...] = ()
+    # Distribution validée (noms des fiches) et lieu de la scène (nom) : ils descendent sur ses cases
+    # (pipeline/scene_cast.py).
+    cast: tuple[str, ...] = ()
+    location: str | None = None
 
     @property
     def label(self) -> str:
@@ -91,7 +95,20 @@ class SceneFrame:
             "last_page": self.last_page,
             "tempo": self.tempo,
             "profile": dict(self.profile),
+            "cast": list(self.cast),
+            "location": self.location,
         }
+
+    @property
+    def cast_text(self) -> str:
+        """Distribution et lieu en clair, pour le scénariste ($scene_cast) et le directeur artistique ($scene)."""
+        who = (
+            ", ".join(self.cast) + " (déclare chacun dans « characters » quand il est à l'image, dans « offscreen » "
+            "quand il est seulement cité)"
+            if self.cast
+            else "(pas de distribution validée)"
+        )
+        return f"{who}{f' ; lieu : {self.location}' if self.location else ''}"
 
 
 def scene_charter(charter: Charter | None, profile: Mapping[str, Any]) -> Charter | None:
@@ -128,6 +145,8 @@ def scene_frames(presets: PresetRegistry, chapter: Chapter) -> list[SceneFrame]:
                 profile=profile,
                 charter=scene_charter(charter, profile),
                 fiches=tuple(scene_type.fiches) if scene_type is not None else (),
+                cast=tuple(s.get("cast") or ()),
+                location=s.get("lieu_name"),
             )
         )
     return out

@@ -26,12 +26,17 @@
 # puis avertissement), parts de plans de la scène (direction artistique), lignes de mouvement (recopiées dans
 # l'action et l'ambiance des cases). `fiches` : fiches du savoir-faire (ids des packs, presets/knowledge_packs/)
 # citées au scénariste pour une scène de ce type.
+#
+# `calm: true` : profil calme. Quand la courbe de rythme de l'ADN de la série place un pic du chapitre (premier pic,
+# `rhythm.first_peak` ; pic final, `rhythm.final_peak_last_pages`) sur des pages couvertes seulement par des scènes au
+# profil calme, l'écran Scènes avertit l'auteur avant la validation (jamais bloquant).
 
 max_pages_per_scene: 12   # une scène plus longue est à découper en deux
 max_scenes: 20            # scènes au plus par chapitre
 
 types:
   calme:
+    calm: true            # profil calme : ne porte pas un pic du chapitre (avertissement de l'écran Scènes)
     fiches: [FUND_001]
     name: Calme
     description: Installation, respiration, quotidien. On laisse vivre le décor et les personnages.

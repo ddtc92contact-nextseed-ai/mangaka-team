@@ -897,6 +897,32 @@ encadrés par planche, plans appliqués ou proposés, face au profil ; un écart
 sans scènes validées (ou dont des pages ne sont rattachées à aucune scène) s'écrit et se dirige comme avant, d'une
 seule génération.
 
+### Distribution par scène (`pipeline/scene_cast.py`)
+
+Chaque scène porte sa **distribution** (`chapter_scenes.character_ids` : les fiches qui y jouent), proposée par
+l'agent « Découpage en scènes » (`personnages` de chaque scène, noms exacts des fiches — `$character_names` de
+`prompts/scenes.yaml`), retouchée et validée par l'auteur dans l'écran Scènes. Le scénariste (`$scene_cast` de
+`prompts/script-scene.yaml`, et la liste `$scenes`) et la direction artistique (`$scene`) la reçoivent avec le lieu
+de la scène. Puis elle **descend sur les cases** de la scène, à l'écriture et à chaque validation de la liste :
+
+- un personnage de la distribution que la description ou la mise en scène nomme (nom ou alias) sans que la case le
+  déclare — ni dans l'image, ni hors cadre — est déclaré **dans l'image** : sa fiche part avec la case ;
+- une case sans lieu reçoit **le lieu de la scène**, donc sa fiche de décor quand elle existe.
+
+Un choix fait à la main sur la case n'est jamais écrasé : personnages corrigés (`panels.cast_manual`), lieu choisi
+ou retiré (`panels.location_manual`).
+
+**Hors cadre en action.** Une case qui déclare un personnage hors cadre alors que sa description ou sa mise en scène
+lui donne une action visible lève l'alerte « hors cadre en action » (`name_notes`) — sauf quand la phrase dit qu'il
+n'est pas vu (hors champ, voix, « on entend »…) ou qu'il est le spectateur d'une vue subjective (« le gorille
+regarde… »). L'atelier propose « Mettre dans l'image » (sa fiche part) ou « Laisser hors cadre » : le choix est
+retenu (`panels.offscreen_kept`, plus d'alerte) et les phrases qui le font agir sont retirées du prompt image (le
+texte de la case ne change pas). L'alerte « non déclaré » propose « Ajouter à la case ».
+
+**Pic du chapitre.** `calm: true` (type `calme`) marque un profil calme. Quand la courbe de rythme de l'ADN place un
+pic du chapitre — premier pic (`rhythm.first_peak`), pic final (`rhythm.final_peak_last_pages`) — sur des pages
+couvertes seulement par des scènes au profil calme, l'écran Scènes avertit avant la validation (jamais bloquant).
+
 ## Créateur de série (`series_creator.yaml`, `agents/createur-serie.yaml`, `prompts/createur-serie.yaml`)
 
 Septième agent, le seul qui intervient **avant** le premier synopsis : à la création d'une série (la fiche s'ouvre

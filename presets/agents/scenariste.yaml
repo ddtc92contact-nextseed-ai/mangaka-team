@@ -162,6 +162,7 @@ settings:
       - scene_last_page
       - scene_tempo
       - scene_fiches
+      - scene_cast
       - written_scenes
     help: Règles de name (une case = une action, l'image d'abord, la tourne de page…) appliquées à chaque scène.
   - key: scene_user

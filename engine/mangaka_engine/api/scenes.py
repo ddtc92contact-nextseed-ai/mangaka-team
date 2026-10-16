@@ -3,12 +3,17 @@ validation par l'auteur.
 
 - `GET /chapters/{id}/scenes` : scènes (type, pages, résumé, lieu, pages de l'histoire rattachées), total face à la
   cible, suite reportée, validation, et les types de scène permis avec leur tempo en clair ;
-- `PUT /chapters/{id}/scenes` : liste retouchée par l'auteur (changer le type, les pages, l'ordre, le résumé, ajouter,
-  supprimer, fusionner) — une scène gardée est repérée par son `id` ; la validation est retirée ;
+- `PUT /chapters/{id}/scenes` : liste retouchée par l'auteur (changer le type, les pages, l'ordre, le résumé, le lieu,
+  la distribution, ajouter, supprimer, fusionner) — une scène gardée est repérée par son `id` ; la validation est
+  retirée ;
 - `POST /chapters/{id}/scenes/propose` : « Proposer les scènes » (job en arrière-plan, progression via
   GET /jobs/{id}/events) ; remplace la liste ;
 - `POST /chapters/{id}/scenes/validate` : « Valider les scènes » (le rôle de l'éditeur) : refusé tant que la somme
-  des pages ne vaut pas la cible du chapitre.
+  des pages ne vaut pas la cible du chapitre. La distribution et le lieu de chaque scène descendent alors sur les
+  cases déjà écrites (pipeline/scene_cast.py), sans écraser un choix de l'auteur.
+
+Avertissements du pic (`peak_warnings`) : une scène au profil calme là où la courbe de rythme de l'ADN place un pic du
+chapitre — affichés avant la validation, jamais bloquants.
 """
 
 from __future__ import annotations
@@ -23,12 +28,13 @@ from sqlalchemy.orm import Session
 
 from ..pipeline import scenes as sc
 from ..pipeline import stage_gate as sg
+from ..pipeline.scene_cast import descend_chapter
 from ..presets import PresetError
-from ..store.models import Chapter, Job, JobStatus, PageKind, SeriesLocation
+from ..store.models import Chapter, Character, Job, JobStatus, PageKind, SeriesLocation
 from .deps import AppContext, get_ctx, get_session
 from .errors import FieldError
 from .jobs import job_out
-from .schemas import JobOut
+from .schemas import CardRef, JobOut
 from .stages import get_chapter_or_404
 
 router = APIRouter(tags=["scènes"])
@@ -50,7 +56,14 @@ class SceneOut(BaseModel):
     pages: int
     location_id: int | None
     location_name: str | None
+    # Distribution de la scène : fiches des personnages qui y jouent (id et nom), dans l'ordre.
+    characters: list[CardRef] = Field(default_factory=list)
     page_numbers: list[int]  # pages de l'histoire rattachées à la scène (après le scénario)
+
+
+class PeakWarningOut(BaseModel):
+    scene_id: int
+    message: str
 
 
 class ChapterScenesOut(BaseModel):
@@ -67,6 +80,8 @@ class ChapterScenesOut(BaseModel):
     scenes: list[SceneOut]
     types: list[SceneTypeOut]
     available: bool  # presets/scene_types.yaml chargé
+    # Scènes au profil calme qui portent un pic du chapitre (courbe de rythme de l'ADN) : avertissement seulement.
+    peak_warnings: list[PeakWarningOut] = Field(default_factory=list)
 
 
 class SceneIn(BaseModel):
@@ -78,6 +93,8 @@ class SceneIn(BaseModel):
     type: str
     pages: int = Field(ge=1, le=60)
     location_id: int | None = None
+    # Distribution (ids des fiches de la série) ; absente : celle de la scène gardée telle quelle.
+    characters: Annotated[list[int], Field(max_length=30)] | None = None
 
 
 class ScenesIn(BaseModel):
@@ -108,6 +125,9 @@ def scenes_out(session: Session, ctx: AppContext, chapter: Chapter) -> ChapterSc
         if page.kind == PageKind.story and page.scene_id is not None:
             pages.setdefault(page.scene_id, []).append(page.number)
     validated = sc.is_validated(chapter)
+    cards = dict(
+        session.execute(select(Character.id, Character.name).where(Character.project_id == chapter.project_id)).all()
+    )
     return ChapterScenesOut(
         chapter_id=chapter.id,
         project_id=chapter.project_id,
@@ -131,6 +151,7 @@ def scenes_out(session: Session, ctx: AppContext, chapter: Chapter) -> ChapterSc
                 pages=s.page_count,
                 location_id=s.location_id,
                 location_name=names.get(s.location_id) if s.location_id is not None else None,
+                characters=[CardRef(id=i, name=cards[i]) for i in s.character_ids or [] if i in cards],
                 page_numbers=sorted(pages.get(s.id, [])),
             )
             for s in chapter.scenes
@@ -140,6 +161,9 @@ def scenes_out(session: Session, ctx: AppContext, chapter: Chapter) -> ChapterSc
             for t in sc.types_for(presets, chapter.project)
         ],
         available=settings is not None,
+        peak_warnings=[
+            PeakWarningOut(scene_id=w.scene_id, message=w.message) for w in sc.peak_warnings(presets, chapter)
+        ],
     )
 
 
@@ -165,6 +189,7 @@ def write_scenes(
         raise FieldError("scenes", f"{len(body.scenes)} scènes : {settings.max_scenes} au plus")
     own = {s.id for s in chapter.scenes}
     places = set(session.scalars(select(SeriesLocation.id).where(SeriesLocation.project_id == chapter.project_id)))
+    cards = set(session.scalars(select(Character.id).where(Character.project_id == chapter.project_id)))
     seen: set[int] = set()
     data: list[sc.SceneData] = []
     for i, s in enumerate(body.scenes):
@@ -182,7 +207,19 @@ def write_scenes(
             seen.add(s.id)
         if s.location_id is not None and s.location_id not in places:
             raise FieldError(f"scenes.{i}.location_id", "lieu inconnu dans cette série")
-        data.append(sc.SceneData(s.title, s.summary, kind, s.pages, s.location_id, s.id))
+        if s.characters is not None and any(c not in cards for c in s.characters):
+            raise FieldError(f"scenes.{i}.characters", "personnage inconnu dans cette série")
+        data.append(
+            sc.SceneData(
+                s.title,
+                s.summary,
+                kind,
+                s.pages,
+                s.location_id,
+                s.id,
+                character_ids=s.characters if s.characters is not None else (None if s.id is not None else []),
+            )
+        )
     sc.replace_scenes(session, chapter, data, body.deferred)
     session.commit()
     session.refresh(chapter)
@@ -240,6 +277,8 @@ def validate_scenes(
     if problem:
         raise FieldError("scenes", problem)
     sc.validate(chapter, body.author)
+    # Distribution et lieu validés : ils descendent sur les cases déjà écrites (choix de l'auteur préservés).
+    descend_chapter(session, chapter)
     state = sg.chapter_stages(session, chapter, stages=["scenes"])[0]
     # Trace de la validation (étape, auteur, date) dans les décisions de la garde d'étapes.
     sg.record_decision(session, chapter, state, "validated", author=body.author)

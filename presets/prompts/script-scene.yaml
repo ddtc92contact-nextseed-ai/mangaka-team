@@ -18,6 +18,8 @@
 #   $scene_pages $scene_first_page $scene_last_page (numéros des pages de la scène dans le chapitre)
 #   $scene_tempo     profil de tempo de la scène en clair (cases, répliques, cases muettes, encadrés, plans…)
 #   $scene_fiches    fiches du savoir-faire citées pour ce type de scène (`fiches` de presets/scene_types.yaml)
+#   $scene_cast      distribution validée de la scène (noms des fiches) et son lieu : une case qui nomme un
+#                    personnage de la distribution sans le déclarer le reçoit à l'image (pipeline/scene_cast.py)
 #   $written_scenes  résumé des scènes déjà écrites (ou, pour une scène réécrite seule, des autres scènes)
 # Gabarit de relance : $error.
 id: script-scene
@@ -105,6 +107,7 @@ user: |
   ═══ SCÈNE À ÉCRIRE : scène $scene_number « $scene_title » — $scene_type_name ($scene_type) ═══
   Ce qui s'y passe : $scene_summary
   Pages : EXACTEMENT $scene_pages (pages $scene_first_page à $scene_last_page du chapitre).
+  Distribution de la scène : $scene_cast
   Profil de la scène (vérifié page par page : une réponse qui s'en écarte te sera renvoyée) :
   $scene_tempo
 
@@ -123,6 +126,8 @@ user: |
   - « sfx » (facultatif) : onomatopées hors bulle, chacune avec « text » (court, en majuscules) et « intensity » ;
   - « characters » : personnages PRÉSENTS À L'IMAGE ; « offscreen » : cités mais hors cadre ; une case de décor
     n'a aucun personnage ; pour un personnage qui a une fiche, recopie EXACTEMENT son nom parmi : $character_names ;
+    un personnage « offscreen » n'agit pas à l'image : si la description ou le « staging » décrit ce qu'il fait
+    (geste, coup, posture), il est dans « characters » ;
   - « lieu » : l'id (nombre) d'un lieu de la série ci-dessus, ou le nom court d'un lieu nouveau ; toutes les cases
     d'un même endroit portent le même lieu ;
   - « decor » : id d'un décor de la liste ou null ; « objets » : ids des objets visibles ([] sinon), jamais inventés ;

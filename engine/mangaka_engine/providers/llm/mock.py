@@ -59,7 +59,7 @@ L'essai courant se déduit des messages : aucun état entre deux appels.
 Découpage en scènes (`"task": "scenes"`, pipeline/scenes.py) : une scène par phrase du synopsis, son type deviné d'après
 ses mots (combat, poursuite, match, révélation, dialogue, sinon calme) et ses pages d'après son type ; la somme des
 pages vaut toujours la cible du chapitre, et les phrases qui ne rentrent pas sont reportées au chapitre suivant
-(`mock_scenes`). `[mock:scenes-invalide:N]` dans le synopsis : les N premiers essais sont invalides (prose, puis type
+(`mock_scenes`) ; la distribution d'une scène : les fiches nommées dans sa phrase. `[mock:scenes-invalide:N]` dans le synopsis : les N premiers essais sont invalides (prose, puis type
 hors liste et somme fausse). Avec des scènes validées dans le contexte du scénario, chaque page du découpage porte sa
 scène et chaque scène a ses pages ; `[mock:scenes-pages:N]` : les N premiers essais rangent toutes les pages dans la
 première scène.
@@ -1065,6 +1065,21 @@ def _scene_type(text: str) -> str:
     return next((t for t, words in _SCENE_WORDS if re.search(words, low)), "calme")
 
 
+def _words(text: str) -> str:
+    return " " + " ".join(re.findall(r"[\w-]+", text.lower())) + " "
+
+
+def _cast(ctx: dict[str, Any], text: str) -> list[str]:
+    """Distribution factice d'une scène : les fiches dont le nom (ou un alias) est écrit dans la phrase."""
+    low = _words(text)
+    out = []
+    for c in ctx.get("characters") or []:
+        names = [c.get("name") or "", *(c.get("aliases") or [])]
+        if any(n.strip() and _words(n) in low for n in names):
+            out.append(c["name"])
+    return out
+
+
 def mock_scenes(ctx: dict[str, Any]) -> dict[str, Any]:
     """Liste de scènes factice (`"task": "scenes"`) : une scène par phrase du synopsis ; la somme des pages vaut la
     cible, ce qui ne rentre pas (une scène qui n'aurait plus ses pages minimum) est reporté, jamais tassé."""
@@ -1087,7 +1102,16 @@ def mock_scenes(ctx: dict[str, Any]) -> dict[str, Any]:
             continue
         pages = min(want, left)
         title = " ".join(beat.rstrip(".!?…").split()[:5])
-        scenes.append({"title": title, "summary": beat, "type": kind, "pages": pages, "lieu": None})
+        scenes.append(
+            {
+                "title": title,
+                "summary": beat,
+                "type": kind,
+                "pages": pages,
+                "lieu": None,
+                "personnages": _cast(ctx, beat),
+            }
+        )
         used += pages
     if not scenes:
         scenes.append({"title": "Le chapitre", "summary": beats[0], "type": "calme", "pages": 0, "lieu": None})

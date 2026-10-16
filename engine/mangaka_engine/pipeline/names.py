@@ -25,7 +25,7 @@ désigne cette fiche exactement, sans arbitrage.
 
 Rien n'est perdu en silence : `name_notes` liste, par case, chaque nom lu (personnages présents ou hors
 cadre, locuteurs, et noms de fiches lus dans la description et la mise en scène) qui est ambigu, sans fiche,
-ou cité sans être déclaré ; l'API les renvoie (`name_notes`, `unmatched_characters`) et l'atelier les
+ou cité sans être déclaré, ou déclaré hors cadre alors que le texte lui donne une action visible ; l'API les renvoie (`name_notes`, `unmatched_characters`) et l'atelier les
 signale, avec de quoi corriger (rattacher le nom à une fiche, il en devient un alias ; mettre à l'image).
 """
 
@@ -347,6 +347,74 @@ def link_speakers(matcher: CharacterMatcher, panel: Any, previous: Any = _AUTO) 
 AMBIGUOUS = "ambigu"
 UNMATCHED = "sans fiche"
 UNDECLARED = "non déclaré"
+OFFSCREEN_ACTION = "hors cadre en action"  # déclaré hors cadre, mais le texte lui donne une action visible
+
+
+# --- action visible d'un personnage hors cadre ------------------------------------------------------------
+# Une phrase de la description ou de la mise en scène qui nomme un personnage déclaré hors cadre lui donne une
+# action visible (« Le gorille abat son poing sur la table »), sauf quand elle dit elle-même qu'il n'est pas vu
+# (`_UNSEEN` : hors champ, voix, « on entend »…) ou qu'il est le spectateur d'une vue subjective (sujet d'un verbe
+# de perception : « le gorille regarde la scène »). Formes comparées par `name_key` (sans accents ni casse).
+_SENTENCE_END = re.compile(r"(?<=[.!?;…])\s+|\n+")
+_UNSEEN = re.compile(
+    r"\b(hors (?:cadre|champ)|off|voix|on (?:l |les )?entend|on ne (?:le |la |les )?voit|invisible|invisibles|"
+    r"absent|absente|absents|absentes|au telephone|souvenir|souvenirs|evoque|evoquent|imagine|imaginent|"
+    r"(?:pense|pensent|songe|songent|reve|revent) (?:a|au|aux)|(?:parle|parlent) (?:de|du|des|d))\b"
+)
+_PERCEIVES = re.compile(
+    r"\b(voit|voient|regarde|regardent|apercoit|apercoivent|decouvre|decouvrent|assiste|assistent|observe|"
+    r"observent|contemple|contemplent|entend|entendent|ecoute|ecoutent|fixe|fixent)\b"
+)
+
+
+def sentences(text: str | None) -> list[str]:
+    """Phrases d'un texte libre, telles qu'écrites (ponctuation finale comprise)."""
+    return [s for s in (part.strip() for part in _SENTENCE_END.split(text or "")) if s]
+
+
+def visible_actions(
+    matcher: CharacterMatcher, text: str | None, ids: Iterable[int], context: Context = ()
+) -> dict[int, list[tuple[str, str]]]:
+    """Fiches de `ids` à qui `text` donne une action visible : {id: [(nom tel qu'écrit, phrase)]}."""
+    wanted = set(ids)
+    out: dict[int, list[tuple[str, str]]] = {}
+    if not wanted:
+        return out
+    for sentence in sentences(text):
+        key = name_key(sentence)
+        if _UNSEEN.search(key):
+            continue
+        seen = _PERCEIVES.search(key)
+        for r in matcher.resolve_all(matcher.read_names(sentence), context):
+            if seen and name_key(r.name) and name_key(r.name) in key[: seen.start()]:
+                continue  # le spectateur qui regarde : rien à dessiner de lui
+            for cid in r.ids:
+                if cid in wanted:
+                    out.setdefault(cid, []).append((r.name, sentence))
+    return out
+
+
+def without_actions(matcher: CharacterMatcher, text: str | None, ids: Iterable[int], context: Context = ()) -> str:
+    """`text` sans les phrases qui donnent une action visible aux fiches `ids` (« Laisser hors cadre » : le prompt
+    image ne décrit plus ce que fait le personnage hors cadre)."""
+    found = visible_actions(matcher, text, ids, context)
+    if not found:
+        return text or ""
+    drop = {sentence for hits in found.values() for _name, sentence in hits}
+    return " ".join(s for s in sentences(text) if s not in drop)
+
+
+def offscreen_ids(matcher: CharacterMatcher, panel: Any, context: Context | None = None) -> list[int]:
+    """Fiches déclarées hors cadre dans la case (et pas présentes à l'image)."""
+    context = panel_context(matcher, panel) if context is None else context
+    present = set(matcher.ids(panel.character_names or [], context))
+    return [i for i in matcher.ids(getattr(panel, "offscreen_names", None) or [], context) if i not in present]
+
+
+def kept_offscreen(matcher: CharacterMatcher, panel: Any) -> list[int]:
+    """Fiches laissées hors cadre par l'auteur malgré une action visible, encore hors cadre dans la case."""
+    kept = set(getattr(panel, "offscreen_kept", None) or [])
+    return [i for i in offscreen_ids(matcher, panel) if i in kept] if kept else []
 
 
 @dataclass(frozen=True)
@@ -355,7 +423,7 @@ class NameNote:
 
     name: str  # tel qu'écrit dans la case
     source: str  # image | hors cadre | bulle | description | mise en scène
-    kind: str  # ambigu | sans fiche | non déclaré
+    kind: str  # ambigu | sans fiche | non déclaré | hors cadre en action
     chosen: tuple[int, ...] = ()  # fiche(s) retenue(s) ; vide : aucune
     candidates: tuple[int, ...] = field(default=())  # fiches à égalité (nom ambigu)
 
@@ -372,7 +440,7 @@ def name_notes(matcher: CharacterMatcher, panel: Any, previous: Any = _AUTO) -> 
 
     def add(note: NameNote) -> None:
         # « les trafiquants » et « trafiquants » lus dans le texte : les mêmes fiches, une seule alerte.
-        key = (note.chosen if note.kind == UNDECLARED else name_key(note.name), note.kind)
+        key = (note.chosen if note.kind in (UNDECLARED, OFFSCREEN_ACTION) else name_key(note.name), note.kind)
         if key not in seen:
             seen.add(key)
             notes.append(note)
@@ -384,10 +452,18 @@ def name_notes(matcher: CharacterMatcher, panel: Any, previous: Any = _AUTO) -> 
             elif r.ambiguous:
                 add(NameNote(r.name, source, AMBIGUOUS, r.ids, r.candidates))
     declared = set(matcher.ids([*present, *offscreen], context))
-    for source, text in (("description", panel.description), ("mise en scène", getattr(panel, "staging", ""))):
+    texts = (("description", panel.description), ("mise en scène", getattr(panel, "staging", "")))
+    for source, text in texts:
         for r in matcher.resolve_all(matcher.read_names(text), [declared, *context]):
             if any(i not in declared for i in r.ids):
                 add(NameNote(r.name, source, UNDECLARED, r.ids, r.candidates if r.ambiguous else ()))
+    # Hors cadre, mais le texte lui donne une action visible : dessiné d'après la prose, sans sa référence. Sauf
+    # « Laisser hors cadre » (`offscreen_kept`) : l'action est alors retirée du prompt image.
+    kept = set(getattr(panel, "offscreen_kept", None) or [])
+    hidden = [i for i in offscreen_ids(matcher, panel, context) if i not in kept]
+    for source, text in texts:
+        for cid, hits in visible_actions(matcher, text, hidden, [declared, *context]).items():
+            add(NameNote(hits[0][0], source, OFFSCREEN_ACTION, (cid,)))
     return notes
 
 

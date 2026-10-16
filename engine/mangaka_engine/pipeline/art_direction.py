@@ -682,7 +682,8 @@ MOTION_TEXT = {
 
 
 def scene_text(ctx: DirectionContext) -> str:
-    """La scène dirigée en clair ($scene) : type, pages, profil de tempo, lignes de mouvement, rythmes d'avant."""
+    """La scène dirigée en clair ($scene) : type, pages, profil de tempo, distribution et lieu, lignes de mouvement,
+    rythmes d'avant."""
     f = ctx.scene
     if f is None:
         return NO_SCENE
@@ -690,6 +691,7 @@ def scene_text(ctx: DirectionContext) -> str:
     lines = [
         f"Tu diriges la {f.label}, {span} : {f.summary}",
         f"Profil de la scène (prime sur la charte de la série pour ces pages) : {f.tempo}.",
+        f"Distribution de la scène : {f.cast_text}.",
     ]
     rule = motion_rule(f.profile)
     if rule:

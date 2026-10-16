@@ -118,7 +118,7 @@ from .journal import PANEL_IMAGE, JournalEntry, failure_text, inherited_facts, p
 from .knowledge import KnowledgeBase, PanelKnowledge
 from .layout import target_size
 from .library import panel_assets, style_for
-from .names import CharacterMatcher, panel_context
+from .names import CharacterMatcher, kept_offscreen, panel_context, without_actions
 from .pages import applied_values
 from .prompt import (
     PromptCharacter,
@@ -330,7 +330,7 @@ def build_panel_prompt(
     savoir_faire, bible = notes
     da = applied_panel_direction(panel)
     return build_prompt(
-        description=panel.description,
+        description=panel_description(panel),
         setting=panel.setting,
         staging=panel_staging(panel, characters),
         shot_type=panel.shot_type,
@@ -355,8 +355,26 @@ def build_panel_prompt(
 def panel_staging(panel: Panel, characters: Sequence[Character] = ()) -> str:
     """Mise en scène envoyée au prompt image : aucune pour une case sans personnage à l'image (ni nom présent,
     ni fiche dessinée `characters`) (#167). Écrite pour des personnages devenus absents (« Seku et Angus
-    agenouillés »), elle ferait dessiner quelqu'un ; le texte reste dans la case, l'écran le signale."""
-    return (panel.staging or "") if panel.character_names or characters else ""
+    agenouillés »), elle ferait dessiner quelqu'un ; le texte reste dans la case, l'écran le signale. Sans l'action
+    visible des personnages laissés hors cadre par l'auteur (`without_kept_offscreen`)."""
+    return without_kept_offscreen(panel, panel.staging) if panel.character_names or characters else ""
+
+
+def panel_description(panel: Panel) -> str:
+    """Description envoyée au prompt image : celle de la case, sans l'action visible des personnages laissés hors
+    cadre par l'auteur (`without_kept_offscreen`)."""
+    return without_kept_offscreen(panel, panel.description)
+
+
+def without_kept_offscreen(panel: Panel, text: str | None) -> str:
+    """`text` sans les phrases qui donnent une action visible à un personnage que l'auteur a laissé hors cadre
+    (« Laisser hors cadre » de l'atelier, `Panel.offscreen_kept`, pipeline/names.py `without_actions`) : le modèle ne
+    dessine pas d'après la prose quelqu'un qui n'est pas dans l'image. Le texte de la case, lui, ne change pas."""
+    if not panel.offscreen_kept or not text:
+        return text or ""
+    matcher = CharacterMatcher(sorted(panel.page.chapter.project.characters, key=lambda c: c.id))
+    kept = kept_offscreen(matcher, panel)
+    return without_actions(matcher, text, kept, panel_context(matcher, panel)) if kept else text
 
 
 def panel_framing_sentence(presets: PresetRegistry, panel: Panel) -> str:
@@ -938,7 +956,7 @@ def panel_brief(
     da = applied_panel_direction(panel)
     hidden = list(panel.offscreen_names or [])
     return PromptBrief.build(
-        description=panel.description,
+        description=panel_description(panel),
         setting=panel.setting,
         staging=panel_staging(panel, cast.characters),
         shot_type=panel.shot_type,

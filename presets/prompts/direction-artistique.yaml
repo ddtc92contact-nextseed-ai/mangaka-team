@@ -20,7 +20,8 @@
 #   $pre_direction       (charte chiffrée de la série, son ADN : échelle des plans, présence, formes de planche,
 #                         courbe de rythme — presets/pre_direction.yaml, réglable sur la fiche série ; pour une
 #                         scène dirigée seule, l'ADN de la série précisé par le profil de la scène)
-#   $scene               (name scène par scène : la scène dirigée — type, pages, profil de tempo, lignes de mouvement
+#   $scene               (name scène par scène : la scène dirigée — type, pages, profil de tempo, distribution et lieu
+#                         validés de la scène, lignes de mouvement
 #                         imposées ou interdites, rythmes des pages d'avant ; « (chapitre dirigé d'un seul tenant…) »
 #                         sans scène validée)
 #   $context_json        (le même contexte, en JSON)
