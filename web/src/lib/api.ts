@@ -3253,7 +3253,14 @@ export function statsQuery(filter: StatsFilter, extra: Record<string, string> = 
   return s ? `?${s}` : "";
 }
 
+/** Réglages de l'atelier, stockés par le moteur : « Ton nom » signe par défaut les validations et décisions. */
+export interface AppSettings {
+  author_name: string;
+}
+
 export const api = {
+  getAppSettings: () => request<AppSettings>("/settings"),
+  saveAppSettings: (body: AppSettings) => request<AppSettings>("/settings", json("PUT", body)),
   health: async () => {
     const health = await request<Health>("/health");
     // Un autre service sur le port du moteur répondrait 200 sans ce contenu : on le traite comme hors ligne.

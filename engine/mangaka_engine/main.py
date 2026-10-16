@@ -16,6 +16,7 @@ from . import __version__
 from .agents import AgentService
 from .api import (
     agents,
+    app_settings,
     art_direction,
     assets,
     cast,
@@ -286,6 +287,7 @@ def create_app(settings: Settings | None = None, providers: Providers | None = N
     app.state.ctx = build_context(settings, providers)
     install_error_handlers(app)
     app.include_router(system.router)
+    app.include_router(app_settings.router)
     app.include_router(projects.router)
     app.include_router(storage.router)
     app.include_router(characters.router)

@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from ..pipeline import scenes as sc
 from ..pipeline import stage_gate as sg
+from ..pipeline.app_settings import author_or_default
 from ..presets import PresetError
 from ..store.models import Chapter, Job, JobStatus, PageKind, SeriesLocation
 from .deps import AppContext, get_ctx, get_session
@@ -239,9 +240,10 @@ def validate_scenes(
     problem = sc.validation_problem(chapter, ctx.agents.presets_for(chapter.project_id).scene_types)
     if problem:
         raise FieldError("scenes", problem)
-    sc.validate(chapter, body.author)
+    author = author_or_default(session, body.author)  # sinon « Ton nom » des Réglages
+    sc.validate(chapter, author)
     state = sg.chapter_stages(session, chapter, stages=["scenes"])[0]
     # Trace de la validation (étape, auteur, date) dans les décisions de la garde d'étapes.
-    sg.record_decision(session, chapter, state, "validated", author=body.author)
+    sg.record_decision(session, chapter, state, "validated", author=author)
     session.commit()
     return scenes_out(session, ctx, chapter)
