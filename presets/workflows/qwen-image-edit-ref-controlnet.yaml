@@ -6,6 +6,7 @@
 # feu vert du manager) — tant qu'ils manquent, « Tester la connexion » le signale et l'atelier masque
 # le verrouillage ; les autres paliers ne changent pas. Voir presets/README.md (verrouillage de composition).
 id: qwen-image-edit-ref-controlnet
+engine: qwen-image
 name: "Qwen-Image 2.1 · Qualité max — composition verrouillée (avec références)"
 description: >-
   Palier Qualité max (50 étapes) dont la composition (cadrage, poses) suit une image guide : croquis validé, version de la case ou image importée, guidé par jusqu'à 5 images de référence ; LoRA de la série conservés.

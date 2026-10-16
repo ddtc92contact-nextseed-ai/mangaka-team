@@ -1,8 +1,9 @@
 """Palier croquis : brouillon de page en quelques secondes, tri, passage au propre.
 
-1. **Croquer** (`enqueue_sketch`) : une version `kind = croquis` par case encore à faire, avec le workflow
-   `defaults.workflow_sketch` (ou son `with_references`) : même modèle que Turbo, petite image, peu
-   d'étapes, mêmes LoRA et mêmes références que la version propre. File ComfyUI habituelle.
+1. **Croquer** (`enqueue_sketch`) : une version `kind = croquis` par case encore à faire, avec le `sketch` du
+   preset de la case ou de la série, sinon `defaults.workflow_sketch` (puis son `with_references`) : même
+   modèle que le palier, petite image, peu d'étapes, mêmes LoRA (si le moteur en prend) et mêmes références
+   que la version propre. File ComfyUI habituelle.
 2. **Trier** : l'auteur valide la composition d'un croquis (`Panel.sketch_image_id`), en redemande un
    (nouvelle graine) ou modifie la description puis re-croque.
 3. **Passer au propre** (`enqueue_clean`) : version finale au palier de la série (`from_sketch` de son
@@ -34,6 +35,7 @@ from .generation import (
     LibraryEntry,
     control_variant,
     enqueue_panel,
+    linked_preset_id,
     panel_cast,
     scene_prompt,
 )
@@ -48,18 +50,10 @@ def require_sketch_enabled(panel: Panel) -> None:
         raise GenerationError("palier croquis désactivé pour cette série (fiche série)")
 
 
-def sketch_preset_id(presets: PresetRegistry, entries: Sequence[LibraryEntry]) -> str:
-    """Workflow des croquis : `defaults.workflow_sketch`, ou son pendant « avec références »."""
-    defaults = presets.defaults
-    sketch_id = defaults.workflow_sketch if defaults else None
-    loaded = presets.workflows.get(sketch_id) if sketch_id else None
-    if loaded is None:
-        raise GenerationError("aucun palier croquis configuré (workflow_sketch de presets/defaults.yaml)")
-    if any(e.reference_images for e in entries) and not loaded.preset.reference_images:
-        if not loaded.preset.with_references:
-            raise GenerationError(f"le workflow croquis {loaded.preset.id} ne déclare pas de with_references")
-        return loaded.preset.with_references
-    return loaded.preset.id
+def sketch_preset_id(presets: PresetRegistry, panel: Panel, entries: Sequence[LibraryEntry]) -> str:
+    """Workflow des croquis : le `sketch` du preset de la case ou de la série, sinon `defaults.workflow_sketch` ;
+    son pendant « avec références » si une fiche de la case en a une."""
+    return linked_preset_id(presets, panel, entries, "sketch")
 
 
 def clean_preset_id(presets: PresetRegistry, panel: Panel, entries: Sequence[LibraryEntry]) -> str:
@@ -163,7 +157,7 @@ def enqueue_sketch(
 ) -> Job:
     """Un croquis de la case (graine tirée au hasard sauf `seed`). Re-croquer annule la validation."""
     require_sketch_enabled(panel)
-    preset = sketch_preset_id(presets, panel_cast(session, panel, presets).entries)
+    preset = sketch_preset_id(presets, panel, panel_cast(session, panel, presets).entries)
     panel.sketch_image_id = None
     return enqueue_panel(
         session,

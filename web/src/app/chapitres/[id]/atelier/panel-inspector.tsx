@@ -905,6 +905,11 @@ function UsedReferences({ image, choices }: { image: PanelImage; choices?: Refer
           {dropped} — pas assez d&apos;emplacements dans le workflow (personnages servis en premier).
         </p>
       )}
+      {image.params.lora_warning && (
+        <p className="mt-1 text-amber-300" data-testid="lora-warning">
+          {image.params.lora_warning}
+        </p>
+      )}
     </div>
   );
 }

@@ -5,6 +5,7 @@
 # changent. Alternative bf16 documentée dans presets/README.md.
 # Voir presets/README.md (paliers Turbo / Rapide / Qualité, ré-export).
 id: qwen-image-turbo
+engine: qwen-image
 name: "Qwen-Image 2.1 · Turbo — texte → image"
 description: >-
   Palier Turbo (production) : modèle distillé officiel int8 « convrot », 8 étapes. Case générée à partir du prompt final, sans image de référence (LoRA possibles).

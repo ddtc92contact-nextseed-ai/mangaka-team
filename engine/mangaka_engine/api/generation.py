@@ -717,7 +717,7 @@ def regenerate_panel_quality(
     _require_lock_available(ctx, panel)
     try:
         presets = _presets(ctx, panel)
-        preset = quality_preset_id(presets, panel_cast(session, panel, presets).entries)
+        preset = quality_preset_id(presets, panel, panel_cast(session, panel, presets).entries)
     except GenerationError as exc:
         raise FieldError("preset", str(exc)) from None
     jobs = _enqueue(session, ctx, panel, count=1, preset=preset, extra_params={"regenerate": "quality"})
@@ -1242,9 +1242,11 @@ def list_workflow_presets(ctx: AppContext = Depends(get_ctx)) -> list[WorkflowPr
             id=w.preset.id,
             name=w.preset.name,
             description=w.preset.description,
+            engine=w.preset.engine,
+            engine_name=w.preset.engine_name,
             params=sorted(w.preset.mapping),
             reference_slots=len(w.preset.reference_images),
-            supports_lora=w.preset.lora_chain is not None,
+            supports_lora=w.preset.supports_lora,
             lora_loader=w.preset.lora_chain.class_type if w.preset.lora_chain else None,
             timeout_s=w.preset.timeout_s,
             is_default=bool(defaults and defaults.workflow == w.preset.id),

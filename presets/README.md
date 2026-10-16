@@ -1003,7 +1003,12 @@ Règles vérifiées au chargement :
 - chaque clé de `defaults` et de `trial` doit être mappée ;
 - `with_references` doit désigner un workflow chargé qui a des emplacements de référence (sinon
   avertissement dans `GET /presets`, et les cases avec références de ce palier échouent avec un
-  message clair : jamais de repli sur un autre palier).
+  message clair : jamais de repli sur un autre palier) ;
+- `sketch` doit désigner un workflow chargé de rôle `croquis`, `quality` un workflow de rôle `generation`
+  (voir « Second moteur : FLUX 3 Image Klein »).
+
+Chaque preset déclare aussi son moteur d'image, `engine: qwen-image` ou `engine: flux3-klein` (exposé par
+`GET /presets` et `GET /presets/workflows`, avec `engine_name` et `supports_lora`).
 
 Les noms de fichiers de modèles (`unet_name`, `clip_name`, `vae_name`) vivent
 **uniquement** dans le JSON. Le code Python ne connaît aucun nom de modèle.
@@ -1105,8 +1110,8 @@ estimated_s: 20                          # s / case tant qu'il y a moins de 3 g�
 ```
 
 **Régénérer en Qualité** (atelier, par case) : met en file une nouvelle version de cette seule case
-avec `defaults.workflow_quality` (ou son `with_references` si un personnage de la case a une planche
-de référence), même prompt, nouvelle seed. Les autres versions (et la version choisie) ne bougent pas.
+avec le `quality` du preset de la case ou de la série, sinon `defaults.workflow_quality` (puis son
+`with_references` si un personnage de la case a une planche de référence), même prompt, nouvelle seed. Les autres versions (et la version choisie) ne bougent pas.
 
 **Temps estimé** (en-tête du chapitre et de la série) : cases sans version choisie × durée par case de
 leur preset = médiane des 20 dernières générations réussies de ce preset dès qu'il y en a 3, sinon
@@ -1121,6 +1126,39 @@ Une case dont un personnage a une planche de référence prend donc `qwen-image-
 série Rapide, `qwen-image-edit-ref` dans une série Qualité. `defaults.yaml → workflow_with_references`
 ne sert plus qu'aux presets sans `with_references`. La taille de génération reste celle de la mise en page
 (≈ 1 Mpx, `layout.yaml`) pour tous les paliers, cases avec références comprises.
+
+### Second moteur : FLUX 3 Image Klein
+
+Six presets écrits et mesurés par Morigane (16/10/2026), à côté de Qwen-Image 2.1 (`engine: flux3-klein`) :
+
+| Preset | Rôle | Étapes | cfg | Réf. | Liens |
+| --- | --- | --- | --- | --- | --- |
+| `flux3-klein-croquis` | `croquis` | 6 | 1 | 0 | `with_references` → `flux3-klein-edit-ref-croquis` |
+| `flux3-klein-edit-ref-croquis` | `croquis` | 6 | 1 | 5 | — |
+| `flux3-klein-qualite` (palier de série « FLUX 3 Klein · Qualité ») | `generation` | 15 | 2,5 | 0 | `with_references`, `from_sketch`, `sketch`, `quality` |
+| `flux3-klein-edit-ref-qualite` | `generation` | 15 | 2,5 | 5 | `from_sketch`, `sketch`, `quality` |
+| `flux3-klein-qualite-from-sketch` | `propre` | 15 | 2,5 | 0 | `with_references`, `source_image`, `denoise` 0,65 |
+| `flux3-klein-edit-ref-qualite-from-sketch` | `propre` | 15 | 2,5 | 5 | `source_image`, `denoise` 0,65 |
+
+- **Les paliers suivent le preset.** Un preset peut déclarer son croquis (`sketch:`) et sa Qualité
+  (`quality:`). Croquis et « Régénérer en Qualité » d'une case : preset de la case (`generation_preset`),
+  sinon de la série ; puis son lien `sketch` / `quality` ; puis la variante `with_references` si une fiche
+  de la case a une image. Sans lien (presets Qwen) : `defaults.workflow_sketch` / `workflow_quality`,
+  comportement inchangé. « Passer au propre » suivait déjà la case (`from_sketch`). L'estimation des
+  croquis suit la même résolution. Une case FLUX dans une série Qwen croque et passe en Qualité sur FLUX ;
+  une case Qwen dans une série FLUX, sur Qwen.
+- **cfg 2,5 et `distilled: false` pour la Qualité.** Mesuré à case, prompt et graine identiques : cfg 1 =
+  score 68, rejeté (zone de texte parasite) ; cfg 2,5 = 96, ok. Le point de contrôle lit donc son négatif
+  au-dessus de 1 ; le croquis reste à cfg 1 (`distilled: true`).
+- **Pas de palier « Qualité max ».** 30 pas n'apportent rien (79 → 79, 63 → 52, mesuré) : `quality`
+  pointe sur la Qualité à 15 pas.
+- **Références** : `ReferenceMultiLatent` (nœud 6), entrées **pointées** `images.image0…4` (une forme
+  imbriquée `{"images": {…}}` est acceptée par ComfyUI et ignorée en silence). Un emplacement vide est
+  retiré avec son entrée. Le VAE FLUX 2 (nœud 3) est obligatoire : sans lui, les références sont ignorées.
+- **Aucun LoRA** (licence FLUX Kommunity v1.0 : pas de fine-tuning) : pas de `lora_chain`. Le moteur ne
+  passe alors aucun LoRA au graphe et inscrit sur le job et la version `lora_warning` (« LoRA ignorés : le
+  flux FLUX 3 Klein ne prend pas de LoRA (encre.safetensors (style), …) ») ; la fiche série et les fiches
+  de la bibliothèque affichent un avertissement et grisent leurs champs LoRA.
 
 ### Palier croquis et passage au propre
 
@@ -1152,9 +1190,9 @@ defaults:
 
 - **Croquer** (onglet **Croquis** du chapitre, ou `POST /pages/{id}/sketch`, `/chapters/{id}/sketch`,
   `/panels/{id}/sketch`) : un croquis par case **non encore validée** (ni version propre choisie, ni
-  croquis validé), avec `defaults.workflow_sketch` — ou son `with_references` si un personnage, le décor
-  ou un objet de la case a une image de référence. Mêmes LoRA (série, fiches) et mêmes références que la
-  version propre. File ComfyUI habituelle (une génération à la fois), progression en direct.
+  croquis validé), avec le `sketch` du preset de la case ou de la série, sinon `defaults.workflow_sketch` —
+  puis son `with_references` si un personnage, le décor ou un objet de la case a une image de référence.
+  Mêmes LoRA (série, fiches ; si le moteur en prend) et mêmes références que la version propre. File ComfyUI habituelle (une génération à la fois), progression en direct.
 - Un croquis est une version de case (`PanelImage`) marquée **`kind: croquis`** : jamais choisie (pas
   même la 1re version d'une case), jamais assemblée, lettrée, exportée, ni contrôlée par le QC
   automatique. Une case qui n'a que des croquis reste « à générer ».

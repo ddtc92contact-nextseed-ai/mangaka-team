@@ -5,6 +5,7 @@
 # Option prévue pour plus tard (pas en v1) : FaceDetailer (Impact Pack) + SAM sam_vit_b_01ec64.
 # Voir presets/README.md (« Réparation ciblée »).
 id: qwen-image-inpaint-turbo
+engine: qwen-image
 name: "Qwen-Image 2.1 · Turbo — réparation ciblée"
 description: >-
   Repeint seulement la zone masquée d'une version (distillé int8 convrot, 8 étapes), avec les LoRA de la série et du personnage concerné et jusqu'à 5 images de référence.

@@ -108,6 +108,8 @@ def test_every_reference_preset_declares_the_same_slots_wired_to_the_encoder() -
     accepted = info["input"]["required"]["images"][1]["template"]["names"]
     with_refs = {pid: lw for pid, lw in REG.workflows.items() if lw.preset.reference_images}
     assert {pid for pid in REG.workflows if "edit-ref" in pid} <= set(with_refs)
+    # FLUX 3 Klein : ses références passent par ReferenceMultiLatent (tests/test_flux3.py).
+    with_refs = {pid: lw for pid, lw in with_refs.items() if lw.preset.engine == "qwen-image"}
     assert {len(lw.preset.reference_images) for lw in with_refs.values()} == {len(SLOTS)}
     assert len(SLOTS) <= len(accepted)
     for pid, lw in with_refs.items():
@@ -207,8 +209,12 @@ def test_quality_tier_sends_true_cfg_steps_and_the_panel_negative(preset_id: str
 def test_every_preset_declares_distillation_and_cfg_one_means_negative_inactive() -> None:
     for wf_id, loaded in REG.workflows.items():
         preset = loaded.preset
-        is_turbo = "turbo" in loaded.workflow["1"]["inputs"].get("unet_name", "")
-        assert preset.distilled == is_turbo, wf_id  # Turbo et croquis : modèle distillé
+        if preset.engine == "flux3-klein":
+            # Croquis FLUX à cfg 1 ; Qualité déclarée non distillée pour lire son négatif à cfg 2,5 (mesuré).
+            assert preset.distilled == (preset.role == "croquis"), wf_id
+        else:
+            is_turbo = "turbo" in loaded.workflow["1"]["inputs"].get("unet_name", "")
+            assert preset.distilled == is_turbo, wf_id  # Turbo et croquis : modèle distillé
         assert preset.negative_active() == (preset.cfg > 1), wf_id
         if preset.distilled:
             assert preset.cfg == 1, wf_id

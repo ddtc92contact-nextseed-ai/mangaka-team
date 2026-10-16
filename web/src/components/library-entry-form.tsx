@@ -12,10 +12,11 @@ import {
 } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
 import { LIBRARY_KINDS } from "@/lib/library";
+import { loraUnsupportedNotice } from "@/lib/lora";
 import { angleLabel } from "./camera-angle";
 import { ImageDropzone } from "./image-dropzone";
 import { InfoTip } from "./info-tip";
-import { LoraPicker } from "./lora-picker";
+import { LoraPicker, LoraUnsupported } from "./lora-picker";
 import { Alert, Button, Field, Input, Textarea } from "./ui";
 
 function parseKeywords(raw: string): string[] {
@@ -54,6 +55,12 @@ export function LibraryEntryForm({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // Flux de la série sans point d'insertion LoRA (FLUX 3 Klein) : le LoRA de la fiche est signalé et grisé.
+  const project = useEngineData(() => api.getProject(projectId), [projectId]);
+  const presets = useEngineData(() => api.presets());
+  const loraNotice = loraUnsupportedNotice(
+    presets.data?.workflows.find((w) => w.id === project.data?.workflow_preset),
+  );
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -153,22 +160,25 @@ export function LibraryEntryForm({
           placeholder={info.keywordsPlaceholder}
         />
       </Field>
-      <LoraPicker
-        id="lora_name"
-        label={info.loraLabel}
-        placeholder={info.loraPlaceholder}
-        value={loraName}
-        onChange={setLoraName}
-        savedValue={initial?.lora_name}
-        error={errors.lora_name}
-        weight={loraWeight}
-        onWeightChange={setLoraWeight}
-        weightLabel="Poids du LoRA"
-        weightError={errors.lora_weight}
-        triggerWords={loraTriggers}
-        onTriggerWordsChange={setLoraTriggers}
-        triggerWordsError={errors.lora_trigger_words}
-      />
+      {loraNotice && <LoraUnsupported notice={loraNotice} />}
+      <div className={loraNotice ? "opacity-60" : undefined}>
+        <LoraPicker
+          id="lora_name"
+          label={info.loraLabel}
+          placeholder={info.loraPlaceholder}
+          value={loraName}
+          onChange={setLoraName}
+          savedValue={initial?.lora_name}
+          error={errors.lora_name}
+          weight={loraWeight}
+          onWeightChange={setLoraWeight}
+          weightLabel="Poids du LoRA"
+          weightError={errors.lora_weight}
+          triggerWords={loraTriggers}
+          onTriggerWordsChange={setLoraTriggers}
+          triggerWordsError={errors.lora_trigger_words}
+        />
+      </div>
       {!initial && (
         <div className="space-y-3">
           <p className="text-sm font-medium text-zinc-300">Images de référence</p>

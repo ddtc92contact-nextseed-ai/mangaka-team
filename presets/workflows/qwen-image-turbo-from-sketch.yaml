@@ -7,6 +7,7 @@
 # Graphe provisoire, À REMPLACER par l'export réel de Morigane (~/mangaka-comfy-exports/).
 # Voir presets/README.md (palier croquis, réglage du denoise).
 id: qwen-image-turbo-from-sketch
+engine: qwen-image
 name: "Qwen-Image 2.1 · Turbo — propre depuis croquis (sans référence)"
 description: >-
   Passage au propre au palier Turbo (8 étapes) à partir du croquis validé de la case (image → image, denoise réglable) ; LoRA de la série conservés.

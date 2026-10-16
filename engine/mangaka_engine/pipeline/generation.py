@@ -433,19 +433,38 @@ def resolve_preset_id(
     return series_id
 
 
-def quality_preset_id(presets: PresetRegistry, characters: Sequence[LibraryEntry]) -> str:
-    """Preset de « Régénérer en Qualité » : `defaults.workflow_quality`, ou son pendant « avec
-    références » (`with_references`) si un personnage de la case a une planche de référence."""
-    defaults = presets.defaults
-    quality_id = defaults.workflow_quality if defaults else None
-    quality = presets.workflows.get(quality_id) if quality_id else None
-    if quality is None:
-        raise GenerationError("aucun palier Qualité configuré (workflow_quality de presets/defaults.yaml)")
-    if any(c.reference_images for c in characters) and not quality.preset.reference_images:
-        if not quality.preset.with_references:
-            raise GenerationError(f"le workflow Qualité {quality.preset.id} ne déclare pas de with_references")
-        return quality.preset.with_references
-    return quality.preset.id
+def linked_preset_id(
+    presets: PresetRegistry,
+    panel: Panel,
+    characters: Sequence[LibraryEntry],
+    link: Literal["sketch", "quality"],
+) -> str:
+    """Palier croquis (`sketch`) ou de « Régénérer en Qualité » (`quality`) d'une case : le lien du preset de
+    la case (`generation_preset`), sinon de celui de la série ; sans lien, `defaults.workflow_sketch` /
+    `workflow_quality`. Puis son pendant « avec références » si une fiche de la case a une image de référence.
+    Une série (ou une case) FLUX croque et passe en Qualité sur FLUX ; Qwen garde les paliers de defaults.yaml."""
+    label, setting = ("croquis", "workflow_sketch") if link == "sketch" else ("Qualité", "workflow_quality")
+    base = presets.workflows.get(panel.generation_preset or panel.page.chapter.project.workflow_preset)
+    target_id = getattr(base.preset, link) if base is not None else None
+    if target_id is None:
+        defaults = presets.defaults
+        target_id = getattr(defaults, setting) if defaults else None
+    target = presets.workflows.get(target_id) if target_id else None
+    if target is None:
+        if target_id and base is not None and getattr(base.preset, link):
+            raise GenerationError(f"workflow {label} inconnu : « {target_id} » ({link} de {base.preset.id})")
+        raise GenerationError(f"aucun palier {label} configuré ({setting} de presets/defaults.yaml)")
+    if any(c.reference_images for c in characters) and not target.preset.reference_images:
+        if not target.preset.with_references:
+            raise GenerationError(f"le workflow {label} {target.preset.id} ne déclare pas de with_references")
+        return target.preset.with_references
+    return target.preset.id
+
+
+def quality_preset_id(presets: PresetRegistry, panel: Panel, characters: Sequence[LibraryEntry]) -> str:
+    """Preset de « Régénérer en Qualité » : le `quality` du preset de la case ou de la série, sinon
+    `defaults.workflow_quality` ; son pendant « avec références » si une fiche de la case en a une."""
+    return linked_preset_id(presets, panel, characters, "quality")
 
 
 def series_cfg(series: Project, loaded: LoadedWorkflow) -> float | None:
@@ -816,6 +835,16 @@ def collect_loras(panel: Panel, characters: Sequence[LibraryEntry]) -> list[Lora
         if c.lora_name and all(lo.name != c.lora_name for lo in loras):
             loras.append(LoraSpec(c.lora_name, c.lora_weight, c.name))
     return loras
+
+
+def usable_loras(loaded: LoadedWorkflow, loras: Sequence[LoraSpec]) -> tuple[list[LoraSpec], str | None]:
+    """LoRA envoyés à ce workflow et avertissement lisible : un graphe sans `lora_chain` (FLUX 3 Klein) n'en
+    reçoit aucun, et ceux de la série et des fiches sont alors signalés, jamais ignorés sans un mot."""
+    if not loras or loaded.preset.supports_lora:
+        return list(loras), None
+    engine = loaded.preset.engine_name or loaded.preset.name
+    names = ", ".join(f"{lo.name} ({lo.source})" if lo.source else lo.name for lo in loras)
+    return [], f"LoRA ignorés : le flux {engine} ne prend pas de LoRA ({names})"
 
 
 def panel_angle_target(presets: PresetRegistry, panel: Panel) -> AngleTarget | None:
@@ -1564,6 +1593,8 @@ class _Plan:
     control_data: bytes | None = None
     # LoRA de caméra et d'identité : angle demandé, LoRA non ajoutés et pourquoi (`CameraPlan.as_dict`).
     camera: dict[str, Any] = field(default_factory=dict)
+    # LoRA de la série et des fiches ignorés par un flux sans `lora_chain` (`usable_loras`).
+    lora_warning: str | None = None
     # Dossier de la page dans ComfyUI (`mangaka/<série>/chapitre-01/page-01`) : croquis, guide, source et
     # masque envoyés ; les images de référence vont dans le dossier de leur fiche (`subfolder` de chacune).
     upload_folder: str = UPLOAD_SUBFOLDER
@@ -1772,8 +1803,15 @@ class GenerationExecutor:
                         }
                     )
                     reference_data.append(path.read_bytes())
-            # « Références utilisées » (et non envoyées) : notées sur le job dès la préparation (atelier).
-            job.params = {**(job.params or {}), "references": references, "dropped_references": dropped}
+            # « Références utilisées » (et non envoyées) : notées sur le job dès la préparation (atelier), avec
+            # les LoRA que le flux ne prend pas (série FLUX 3 Klein : style et fiches signalés, jamais avalés).
+            loras, lora_warning = usable_loras(loaded, collect_loras(panel, entries))
+            job.params = {
+                **{k: v for k, v in (job.params or {}).items() if k != "lora_warning"},
+                "references": references,
+                "dropped_references": dropped,
+                **({"lora_warning": lora_warning} if lora_warning else {}),
+            }
             panel_prompt = prompt
             rendering = series_rendering(presets, chapter.project)
             monochrome = rendering is not None and rendering.monochrome
@@ -1862,7 +1900,8 @@ class GenerationExecutor:
                 references=references,
                 dropped_references=dropped,
                 reference_data=reference_data,
-                loras=merge_loras(collect_loras(panel, entries), camera.loras),
+                loras=merge_loras(loras, camera.loras),
+                lora_warning=lora_warning,
                 camera=camera.as_dict(),
                 folder=f"projects/{chapter.project_id}/chapters/{chapter.id}/panels/{panel.id}",
                 prompt=prompt,
@@ -2186,6 +2225,7 @@ class GenerationExecutor:
                     "height": built.params.get("height", stored.height),
                     "workflow_params": built.params,
                     "loras": [lo.as_dict() for lo in built.loras],
+                    **({"lora_warning": plan.lora_warning} if plan.lora_warning else {}),
                     **({"camera": plan.camera} if plan.camera else {}),
                     "reference_images": [
                         {

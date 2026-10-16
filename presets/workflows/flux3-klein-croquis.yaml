@@ -1,0 +1,48 @@
+# FLUX 3 Image Klein · Croquis — brouillon de vignette en quelques secondes (texte → image).
+# Écrit par Morigane le 16/10/2026. Palier croquis : même modèle que le palier Qualité, mais petite
+# image (long_side : grand côté en px, même ratio que la case, côtés multiples de 16) et 6 étapes.
+# Sert à trier les compositions d'une page avant de payer la version propre : les croquis sont des
+# versions de case marquées « croquis », jamais choisies, assemblées, lettrées ni exportées.
+#
+# cfg 1 ici, et c'est voulu : un croquis n'a pas besoin du négatif, et c'est le régime nominal du
+# point de contrôle distillé. Le palier Qualité, lui, tourne à cfg 2,5 (voir la note de ce preset-là).
+id: flux3-klein-croquis
+engine: flux3-klein
+name: "FLUX 3 Klein · Croquis — texte → image"
+description: >-
+  Palier croquis de FLUX 3 Image Klein : ~512 px sur le grand côté, 6 étapes, cfg 1. Brouillon de la composition d'une vignette en quelques secondes. Aucun LoRA (licence) : le style de la série n'est pas appliqué ici.
+distilled: true   # distillé au sens de l'appli : à cfg 1, le négatif n'est pas lu
+workflow_file: flux3-klein-croquis.json
+output_node: "9"
+timeout_s: 300
+role: croquis
+with_references: flux3-klein-edit-ref-croquis   # croquis des vignettes avec fiches
+tier:
+  name: Croquis
+estimated_s: 10
+# Grand côté du croquis (px) ; l'autre côté suit le ratio de la case (multiple de layout.yaml).
+long_side: 512
+mapping:
+  positive_prompt: { node: "4", input: text }
+  negative_prompt: { node: "5", input: text }
+  seed: { node: "7", input: seed }
+  steps: { node: "7", input: steps }
+  cfg: { node: "7", input: cfg }
+  width: { node: "12", input: width }
+  height: { node: "12", input: height }
+  filename_prefix: { node: "9", input: filename_prefix }
+defaults:
+  negative_prompt: "text, letters, speech bubble, caption, watermark, signature, multiple panels, comic page layout, collage, split screen, character sheet, turnaround, model sheet, white background, duplicate character, extra people, extra limbs, deformed hands, blurry, low quality"
+  steps: 6
+  cfg: 1
+  width: 512
+  height: 512
+  filename_prefix: mangaka/croquis
+trial:
+  positive_prompt: >-
+    manga panel, black and white ink, screentone shading, a young swordswoman standing on a
+    rooftop at dusk, wind in her hair, dynamic angle
+  width: 512
+  height: 512
+  steps: 6
+  filename_prefix: mangaka/essai

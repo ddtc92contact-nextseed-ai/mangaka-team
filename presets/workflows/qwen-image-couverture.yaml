@@ -6,6 +6,7 @@
 # DPI du format passe ensuite par l'agrandisseur de la finition d'impression (presets/upscalers/).
 # Jamais proposé comme palier de série (pas de `tier.choice`).
 id: qwen-image-couverture
+engine: qwen-image
 name: "Qwen-Image 2.1 · Qualité — couverture de tome"
 description: >-
   Illustration de couverture en couleur au palier Qualité (int8 convrot, 35 étapes, cfg 2,5 : négatif actif), guidée par les images de référence des personnages choisis, sans aucun texte dessiné.

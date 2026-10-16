@@ -4,6 +4,7 @@
 # « Image Edit (Qwen Image 2.1) ») : mêmes chargeurs, mêmes options, même échantillonneur.
 # Voir presets/README.md (paliers Qualité / Rapide, ré-export).
 id: qwen-image-base-qualite
+engine: qwen-image
 name: "Qwen-Image 2.1 · Qualité — texte → image"
 description: >-
   Palier Qualité : mêmes fichiers int8 « convrot » que Rapide, 35 étapes à cfg 2,5 (le prompt négatif est lu). Case générée à partir du prompt final, sans image de référence (LoRA possibles).

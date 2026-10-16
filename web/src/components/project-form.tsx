@@ -13,11 +13,12 @@ import {
 } from "@/lib/api";
 import { HELP, type HelpId } from "@/lib/help";
 import { useEngineData } from "@/lib/hooks";
+import { loraUnsupportedNotice } from "@/lib/lora";
 import { TierRestriction } from "./camera-angle";
 import { InfoTip } from "./info-tip";
 import { NegativeBadge, formatCfg } from "./negative-badge";
 import { Modal } from "./modal";
-import { LoraPicker } from "./lora-picker";
+import { LoraPicker, LoraUnsupported } from "./lora-picker";
 import { DIRECTIONS, DirectionPicker } from "./reading-direction";
 import { SERIES_STATUS } from "./status";
 import { useToast } from "./toast";
@@ -111,6 +112,8 @@ export function ProjectForm({
     .filter((w) => w.tier_choice)
     .sort((a, b) => (a.tier_order ?? 0) - (b.tier_order ?? 0));
   const currentWorkflow = presets.data?.workflows.find((w) => w.id === workflow);
+  // Flux sans point d'insertion LoRA (FLUX 3 Klein) : le LoRA de style est signalé, grisé, jamais avalé sans un mot.
+  const loraNotice = loraUnsupportedNotice(currentWorkflow);
   // Palier des nouvelles séries (Rapide) : proposé en un clic à une série restée sur un palier inférieur.
   const recommendedTier = tiers.find((w) => w.id === defaults?.workflow);
   const suggestRecommended =
@@ -398,23 +401,27 @@ export function ProjectForm({
             ))}
           </div>
         )}
-        <LoraPicker
-          id="style_lora_name"
-          label="LoRA de style (optionnel)"
-          help="serie.lora"
-          weightHelp="serie.lora_weight"
-          hint="Appliqué à toutes les cases de la série."
-          placeholder="encre-seinen-v2.safetensors"
-          value={form.style_lora_name ?? ""}
-          onChange={chooseLora}
-          savedValue={initial?.style_lora_name}
-          error={errors.style_lora_name}
-          weight={String(form.style_lora_weight ?? 0.8)}
-          onWeightChange={(v) => set("style_lora_weight", Number(v))}
-          weightLabel="Poids du LoRA de style"
-          weightError={errors.style_lora_weight}
-        />
-        {loraName ? (
+        {loraNotice && <LoraUnsupported notice={loraNotice} />}
+        <div className={loraNotice ? "opacity-60" : undefined}>
+          <LoraPicker
+            id="style_lora_name"
+            label="LoRA de style (optionnel)"
+            help="serie.lora"
+            weightHelp="serie.lora_weight"
+            hint="Appliqué à toutes les cases de la série."
+            placeholder="encre-seinen-v2.safetensors"
+            value={form.style_lora_name ?? ""}
+            onChange={chooseLora}
+            savedValue={initial?.style_lora_name}
+            error={errors.style_lora_name}
+            weight={String(form.style_lora_weight ?? 0.8)}
+            onWeightChange={(v) => set("style_lora_weight", Number(v))}
+            weightLabel="Poids du LoRA de style"
+            weightError={errors.style_lora_weight}
+          />
+        </div>
+        {/* Flux sans LoRA : ni mots déclencheurs ni LoRA conseillé, le bandeau ci-dessus suffit. */}
+        {loraNotice ? null : loraName ? (
           catalogLora ? (
             <p className="text-xs text-zinc-500" data-testid="style-lora-catalog">
               Mots déclencheurs (catalogue) : {catalogLora.trigger_words.join(", ") || "aucun"} · poids conseillé{" "}

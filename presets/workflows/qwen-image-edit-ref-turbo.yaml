@@ -6,6 +6,7 @@
 # changent. Alternative bf16 documentée dans presets/README.md.
 # Voir presets/README.md (paliers Turbo / Rapide / Qualité, ré-export).
 id: qwen-image-edit-ref-turbo
+engine: qwen-image
 name: "Qwen-Image 2.1 · Turbo — avec images de référence"
 description: >-
   Palier Turbo (distillé int8 convrot, 8 étapes) guidé par jusqu'à 5 images de référence des personnages (une par emplacement, dans l'ordre), avec LoRA de style et d'identité.

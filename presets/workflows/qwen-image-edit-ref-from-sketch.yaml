@@ -7,6 +7,7 @@
 # Graphe provisoire, À REMPLACER par l'export réel de Morigane (~/mangaka-comfy-exports/).
 # Voir presets/README.md (palier croquis, réglage du denoise).
 id: qwen-image-edit-ref-from-sketch
+engine: qwen-image
 name: "Qwen-Image 2.1 · Qualité max — propre depuis croquis (avec références)"
 description: >-
   Passage au propre au palier Qualité max (50 étapes) à partir du croquis validé de la case (image → image, denoise réglable), guidé par jusqu'à 5 images de référence ; LoRA de la série conservés.

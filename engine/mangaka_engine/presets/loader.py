@@ -309,18 +309,6 @@ class PresetRegistry:
         reg._check_reference_pairs()
         reg._check_sketch_pairs()
         reg._check_control_pairs()
-        # Ordre des listes déroulantes : paliers de série, puis croquis, puis « propre depuis croquis » ;
-        # texte → image d'abord, puis avec références ; par nom ensuite (« … · Qualité » avant « … · Rapide »).
-        reg.workflows = dict(
-            sorted(
-                reg.workflows.items(),
-                key=lambda kv: (
-                    ROLE_ORDER[kv[1].preset.role],
-                    bool(kv[1].preset.reference_images),
-                    kv[1].preset.name,
-                ),
-            )
-        )
 
         for path in sorted((root / "upscalers").glob("*.y*ml")):
             up = reg._load_upscaler(path)
@@ -469,6 +457,7 @@ class PresetRegistry:
                     reg.defaults = reg.defaults.model_copy(update={"workflow_library": None})
         else:
             reg.issues.append(PresetIssue(reg._rel(defaults_path), "fichier absent"))
+        reg._sort_workflows()
 
         for path in sorted((root / "agents").glob("*.y*ml")):
             agent = reg._parse(path, AgentPreset)
@@ -770,6 +759,24 @@ class PresetRegistry:
             else:
                 self.style_genres[genre_id] = genre
 
+    def _sort_workflows(self) -> None:
+        """Ordre des listes déroulantes : paliers de série, puis croquis, puis « propre depuis croquis » ; le
+        moteur des nouvelles séries (celui de `defaults.workflow`) avant les autres (FLUX 3 Klein) ; texte →
+        image d'abord, puis avec références ; par nom ensuite (« … · Qualité » avant « … · Rapide »)."""
+        main = self.workflows.get(self.defaults.workflow) if self.defaults else None
+        engine = main.preset.engine if main is not None else None
+        self.workflows = dict(
+            sorted(
+                self.workflows.items(),
+                key=lambda kv: (
+                    ROLE_ORDER[kv[1].preset.role],
+                    kv[1].preset.engine != engine,
+                    bool(kv[1].preset.reference_images),
+                    kv[1].preset.name,
+                ),
+            )
+        )
+
     def _check_reference_pairs(self) -> None:
         """`with_references` doit désigner un workflow chargé qui a des emplacements de référence.
 
@@ -803,8 +810,8 @@ class PresetRegistry:
         return wf is not None and wf.preset.is_inpaint
 
     def _check_sketch_pairs(self) -> None:
-        """`from_sketch` doit désigner un workflow « propre » chargé ; le `with_references` d'un workflow
-        croquis ou propre doit garder le même rôle. Le workflow reste chargé ; « Passer au propre » échoue
+        """`from_sketch` doit désigner un workflow « propre » chargé, `sketch` un « croquis », `quality` un palier
+        de génération ; le `with_references` d'un workflow croquis ou propre doit garder le même rôle. Le workflow reste chargé ; « Passer au propre » échoue
         avec un message clair (jamais de repli sur un autre palier)."""
         for wf in self.workflows.values():
             problems: list[str] = []
@@ -815,6 +822,16 @@ class PresetRegistry:
                     problems.append(f"from_sketch : workflow inconnu ou invalide : {target}")
                 elif other.preset.role != "propre":
                     problems.append(f"from_sketch : le workflow {target} n'a pas le rôle « propre »")
+            # Paliers croquis et Qualité du preset (case ou série) : sinon ceux de defaults.yaml.
+            for link, role in (("sketch", "croquis"), ("quality", "generation")):
+                target = getattr(wf.preset, link)
+                if target is None:
+                    continue
+                other = self.workflows.get(target)
+                if other is None:
+                    problems.append(f"{link} : workflow inconnu ou invalide : {target}")
+                elif other.preset.role != role or other.preset.is_inpaint:
+                    problems.append(f"{link} : le workflow {target} n'a pas le rôle « {role} »")
             refs = self.workflows.get(wf.preset.with_references or "")
             if refs is not None and wf.preset.role != "generation" and refs.preset.role != wf.preset.role:
                 problems.append(f"with_references : le workflow {refs.preset.id} n'a pas le rôle « {wf.preset.role} »")

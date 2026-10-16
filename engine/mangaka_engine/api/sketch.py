@@ -242,9 +242,7 @@ def _sketch_estimate(session: Session, ctx: AppContext, pages: list[Page]) -> Sk
         to_sketch=len(to_sketch),
         validated=sum(1 for page in pages for p in page.panels if validated_sketch(p) is not None),
         to_clean=len(to_clean),
-        sketch=_estimate_out(
-            estimate_panels(session, ctx.agents.presets_for, to_sketch, lambda r, _p, e: sketch_preset_id(r, e))
-        ),
+        sketch=_estimate_out(estimate_panels(session, ctx.agents.presets_for, to_sketch, sketch_preset_id)),
         clean=_estimate_out(estimate_panels(session, ctx.agents.presets_for, to_clean, clean_preset_id)),
     )
 
