@@ -236,7 +236,7 @@ REQUIRED_WORKFLOW_PARAMS = ("positive_prompt", "negative_prompt", "seed", "width
 MIN_CFG = 1.0
 MAX_CFG = 3.0
 # Nom affiché des moteurs d'image (`engine` des presets) ; un moteur absent s'affiche par son id.
-ENGINE_NAMES = {"qwen-image": "Qwen-Image", "flux3-klein": "FLUX 3 Klein"}
+ENGINE_NAMES = {"qwen-image": "Qwen-Image 2.1", "flux3-klein": "FLUX 3 Klein"}
 WorkflowRole = Literal["generation", "croquis", "propre", "controle"]
 # Un preset de réparation (inpainting) part de l'image source : pas de taille, mais un débruitage partiel.
 REQUIRED_INPAINT_PARAMS = ("positive_prompt", "negative_prompt", "seed", "denoise")

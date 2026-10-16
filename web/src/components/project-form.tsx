@@ -14,6 +14,7 @@ import {
 import { HELP, type HelpId } from "@/lib/help";
 import { useEngineData } from "@/lib/hooks";
 import { loraUnsupportedNotice } from "@/lib/lora";
+import { groupByEngine } from "@/lib/workflow-list";
 import { TierRestriction } from "./camera-angle";
 import { InfoTip } from "./info-tip";
 import { NegativeBadge, formatCfg } from "./negative-badge";
@@ -565,10 +566,14 @@ export function ProjectForm({
             aria-invalid={Boolean(errors.workflow_preset)}
             disabled={!presets.data}
           >
-            {tiers.map((w) => (
-              <option key={w.id} value={w.id}>
-                {w.tier_choice}
-              </option>
+            {groupByEngine(tiers).map((g) => (
+              <optgroup key={g.engine ?? ""} label={g.label}>
+                {g.items.map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.tier_choice}
+                  </option>
+                ))}
+              </optgroup>
             ))}
             {/* Série réglée sur un workflow qui n'est pas un palier (ou disparu) : on le garde visible. */}
             {workflow && presets.data && !tiers.some((w) => w.id === workflow) && (

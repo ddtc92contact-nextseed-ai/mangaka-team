@@ -598,6 +598,12 @@ class AgentService:
             self._cache.clear()
             self._llms.clear()
 
+    def presets_reloaded(self) -> None:
+        """Presets rechargés (« Recharger les flux ») : valeurs livrées et presets effectifs à recalculer."""
+        with self._lock:
+            self._file_data.clear()
+        self.invalidate()
+
     def presets_for(self, project_id: int | None = None) -> PresetRegistry:
         """Presets à utiliser pour une série (None : profil global seul)."""
         return self._effective(project_id).presets

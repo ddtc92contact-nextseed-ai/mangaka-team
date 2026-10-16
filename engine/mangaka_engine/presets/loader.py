@@ -45,7 +45,7 @@ l'erreur est exposée via `GET /presets` et `GET /health`.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
@@ -289,6 +289,17 @@ class PresetRegistry:
         return self.providers
 
     # --- chargement ------------------------------------------------------
+    def reload(self) -> PresetRegistry:
+        """Relit `root` et remplace le contenu de ce registre, sur place.
+
+        Les exécuteurs, la bibliothèque, le contrôle qualité… gardent tous une référence à ce même objet :
+        ils voient les nouveaux flux sans redémarrage. Le chargement complet a lieu avant le remplacement,
+        un preset invalide est écarté (dans `issues`) sans faire tomber les autres."""
+        fresh = type(self).load(self.root)
+        for f in fields(self):
+            setattr(self, f.name, getattr(fresh, f.name))
+        return self
+
     @classmethod
     def load(cls, root: Path) -> PresetRegistry:
         reg = cls(root=root)

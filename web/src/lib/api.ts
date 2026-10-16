@@ -1197,6 +1197,16 @@ export interface Estimate {
   }[];
 }
 
+/** Réponse de `POST /presets/reload` (« Recharger les flux », Réglages). */
+export interface PresetsReload {
+  /** Nombre de flux (workflows) chargés. */
+  workflows: number;
+  /** Flux par moteur ; `engine` null : sans moteur déclaré (« Autres »). */
+  engines: { engine: string | null; name: string; workflows: number }[];
+  /** Presets écartés ou à corriger : fichier (relatif à presets/) et message. */
+  issues: { file: string; message: string }[];
+}
+
 /** Rapport de `GET /comfyui/check` : nœuds et fichiers des presets face au ComfyUI réel. */
 export interface ComfyCheck {
   provider: string;
@@ -3314,6 +3324,7 @@ export const api = {
     return health;
   },
   presets: () => request<Presets>("/presets"),
+  reloadPresets: () => request<PresetsReload>("/presets/reload", { method: "POST" }),
 
   listProjects: () => request<Project[]>("/projects"),
   getProject: (id: number) => request<Project>(`/projects/${id}`),
