@@ -420,7 +420,8 @@ export function ProjectForm({
             weightError={errors.style_lora_weight}
           />
         </div>
-        {loraName ? (
+        {/* Flux sans LoRA : ni mots déclencheurs ni LoRA conseillé, le bandeau ci-dessus suffit. */}
+        {loraNotice ? null : loraName ? (
           catalogLora ? (
             <p className="text-xs text-zinc-500" data-testid="style-lora-catalog">
               Mots déclencheurs (catalogue) : {catalogLora.trigger_words.join(", ") || "aucun"} · poids conseillé{" "}
