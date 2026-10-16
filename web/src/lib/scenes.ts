@@ -1,5 +1,5 @@
 // Étape « Scènes » : brouillon de la liste des scènes d'un chapitre (moteur : pipeline/scenes.py) — retouches de
-// l'auteur (type, pages, ordre, résumé, ajout, suppression, fusion) et total des pages face à la cible.
+// l'auteur (type, pages, ordre, résumé, lieu, distribution, ajout, suppression, fusion) et total des pages face à la cible.
 import type { ChapterSceneItem, SceneInput, SceneTypeId } from "./api";
 
 export interface DraftScene {
@@ -11,6 +11,8 @@ export interface DraftScene {
   type: SceneTypeId;
   pages: number;
   location_id: number | null;
+  /** Distribution : ids des fiches des personnages qui jouent dans la scène. */
+  characters: number[];
 }
 
 let counter = 0;
@@ -25,6 +27,7 @@ export function toDraft(scenes: ChapterSceneItem[]): DraftScene[] {
     type: s.type,
     pages: s.pages,
     location_id: s.location_id,
+    characters: (s.characters ?? []).map((c) => c.id),
   }));
 }
 
@@ -36,11 +39,12 @@ export function fromDraft(draft: DraftScene[]): SceneInput[] {
     type: s.type,
     pages: s.pages,
     location_id: s.location_id,
+    characters: [...s.characters],
   }));
 }
 
 export function newScene(type: SceneTypeId = "calme", pages = 1): DraftScene {
-  return { key: localKey(), title: "", summary: "", type, pages, location_id: null };
+  return { key: localKey(), title: "", summary: "", type, pages, location_id: null, characters: [] };
 }
 
 /** Fusionne la scène `index` avec la suivante : la première garde son id, son type et son titre, les pages
@@ -55,6 +59,7 @@ export function mergeWithNext(list: DraftScene[], index: number): DraftScene[] {
     summary: [a.summary.trim(), b.summary.trim()].filter(Boolean).join(" "),
     pages: a.pages + b.pages,
     location_id: a.location_id ?? b.location_id,
+    characters: [...a.characters, ...b.characters.filter((id) => !a.characters.includes(id))],
   };
   return [...list.slice(0, index), merged, ...list.slice(index + 2)];
 }
@@ -65,6 +70,16 @@ export function moveScene(list: DraftScene[], index: number, delta: number): Dra
   const out = [...list];
   [out[index], out[target]] = [out[target], out[index]];
   return out;
+}
+
+/** Ajoute ou retire une fiche de la distribution d'une scène (l'ordre d'ajout est gardé). */
+export function toggleCast(characters: number[], id: number): number[] {
+  return characters.includes(id) ? characters.filter((c) => c !== id) : [...characters, id];
+}
+
+/** Avertissements du pic du chapitre d'une scène (par son id ; une scène nouvelle n'en a pas encore). */
+export function peakWarningsFor(warnings: { scene_id: number; message: string }[], id?: number): string[] {
+  return id === undefined ? [] : warnings.filter((w) => w.scene_id === id).map((w) => w.message);
 }
 
 export const totalPages = (list: { pages: number }[]) => list.reduce((n, s) => n + s.pages, 0);

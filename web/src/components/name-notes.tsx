@@ -11,6 +11,7 @@ const KIND_LABELS: Record<NameNote["kind"], string> = {
   ambigu: "ambigu",
   "sans fiche": "sans fiche",
   "non déclaré": "non déclaré",
+  "hors cadre en action": "hors cadre en action",
 };
 
 /** Alertes d'une case à montrer dans l'inspecteur (les noms présents sans fiche ont déjà leur bloc). */
@@ -21,8 +22,9 @@ export function inspectorNotes(notes: NameNote[] | undefined): NameNote[] {
 /**
  * Noms de personnages d'une case qui demandent l'avis de l'auteur (moteur : pipeline/names.py) : un nom
  * générique qui désigne plusieurs fiches (« trafiquant » → trafiquant 1 et trafiquant 2, la première est
- * retenue), un nom sans fiche, ou un personnage nommé par le texte sans être déclaré (dessiné sans sa
- * référence). Rien n'est perdu en silence : chaque alerte se corrige ici.
+ * retenue), un nom sans fiche, un personnage nommé par le texte sans être déclaré (dessiné sans sa
+ * référence), ou déclaré hors cadre alors que le texte lui donne une action visible. Rien n'est perdu en silence :
+ * chaque alerte se corrige ici, en un clic.
  */
 export function NameNotes({
   detail,
@@ -102,14 +104,28 @@ function NoteRow({
     }, `« ${note.name} » rattaché à ${card.name} (alias de la fiche, pour toute la série)`);
   }
 
+  // Nom envoyé à la case : celui de la fiche retenue quand il n'y en a qu'une (sa référence part à coup sûr).
+  const cardNames = note.chosen.length && note.candidates.length === 0 ? note.chosen.map((c) => c.name) : [note.name];
+  const label = cardNames.join(" et ");
+
   function declare(where: "image" | "offscreen") {
     const body =
       where === "image"
-        ? { characters: [...detail.characters, note.name] }
-        : { offscreen_characters: [...(detail.offscreen_characters ?? []), note.name] };
+        ? { characters: [...detail.characters, ...cardNames] }
+        : { offscreen_characters: [...(detail.offscreen_characters ?? []), ...cardNames] };
     void run(
       () => api.updatePanel(detail.id, body),
-      where === "image" ? `« ${note.name} » mis à l'image` : `« ${note.name} » déclaré hors cadre`,
+      where === "image" ? `${label} ajouté à la case (dans l'image)` : `${label} déclaré hors cadre`,
+    );
+  }
+
+  /** « Laisser hors cadre » : choix retenu (plus d'alerte), son action visible est retirée du prompt envoyé. */
+  function keepOffscreen() {
+    const ids = note.chosen.map((c) => c.id);
+    const kept = [...(detail.offscreen_kept ?? []), ...ids.filter((id) => !(detail.offscreen_kept ?? []).includes(id))];
+    void run(
+      () => api.updatePanel(detail.id, { offscreen_kept: kept }),
+      `${label} laissé hors cadre : son action est retirée du prompt`,
     );
   }
 
@@ -123,10 +139,36 @@ function NoteRow({
         {note.message}
       </p>
       <div className="flex flex-wrap items-center gap-2">
+        {note.kind === "hors cadre en action" && (
+          <>
+            <Button
+              className="!px-2 !py-1 text-xs"
+              onClick={() => declare("image")}
+              disabled={busy}
+              title="Le personnage passe dans l'image : sa fiche (image de référence) part avec la case"
+            >
+              Mettre dans l&apos;image
+            </Button>
+            <Button
+              variant="secondary"
+              className="!px-2 !py-1 text-xs"
+              onClick={keepOffscreen}
+              disabled={busy}
+              title="Il reste hors cadre : son action visible est retirée du prompt envoyé au modèle"
+            >
+              Laisser hors cadre
+            </Button>
+          </>
+        )}
         {note.kind === "non déclaré" && (
           <>
-            <Button className="!px-2 !py-1 text-xs" onClick={() => declare("image")} disabled={busy}>
-              Mettre à l&apos;image
+            <Button
+              className="!px-2 !py-1 text-xs"
+              onClick={() => declare("image")}
+              disabled={busy}
+              title="Le personnage est déclaré dans l'image : sa fiche (image de référence) part avec la case"
+            >
+              Ajouter à la case
             </Button>
             <Button
               variant="secondary"
@@ -139,7 +181,7 @@ function NoteRow({
             </Button>
           </>
         )}
-        {note.kind !== "non déclaré" || note.candidates.length > 0 ? (
+        {note.kind === "hors cadre en action" ? null : note.kind !== "non déclaré" || note.candidates.length > 0 ? (
           options.length > 0 ? (
             <>
               <label htmlFor={selectId} className="sr-only">
@@ -209,7 +251,7 @@ export function ChapterNameNotes({
       <summary className="cursor-pointer font-medium">
         <span aria-hidden>⚠ </span>
         {rows.length} nom{rows.length > 1 ? "s" : ""} de personnage à vérifier dans {panels} case{panels > 1 ? "s" : ""}
-        <span className="font-normal text-amber-200/80"> — ambigus, sans fiche ou non déclarés : ils seraient dessinés sans leur référence.</span>
+        <span className="font-normal text-amber-200/80"> — ambigus, sans fiche, non déclarés ou hors cadre en action : ils seraient dessinés sans leur référence.</span>
       </summary>
       <ul className="mt-2 space-y-1.5">
         {rows.map(({ page, panel, note }) => (
