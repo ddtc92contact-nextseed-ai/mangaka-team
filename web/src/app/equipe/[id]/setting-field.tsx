@@ -2,8 +2,10 @@
 
 import { useRef } from "react";
 import { Input, Select, Textarea } from "@/components/ui";
-import type { AgentSetting } from "@/lib/api";
+import { api, type AgentSetting } from "@/lib/api";
 import { ORIGIN_LABEL, checkTemplate, displayValue, toFormValue } from "@/lib/agents";
+import { useEngineData } from "@/lib/hooks";
+import { envNote, isOtherModel, modelNotes, modelOptions, pickModel, selectValue } from "@/lib/models";
 
 const ORIGIN_TONE = {
   preset: "text-zinc-500 ring-zinc-700",
@@ -165,8 +167,62 @@ function Control({
         />
       );
     default:
+      if (setting.options_from === "deepseek_models")
+        return <ModelSelect {...common} setting={setting} value={String(value ?? "")} onChange={onChange} />;
       return <Input {...common} value={String(value ?? "")} onChange={(e) => onChange(e.target.value)} />;
   }
+}
+
+/** « Modèle » d'un agent DeepSeek : liste des modèles (en direct ou livrée), « Autre… » pour un nom libre. */
+function ModelSelect({
+  setting,
+  value,
+  onChange,
+  ...props
+}: {
+  setting: AgentSetting;
+  value: string;
+  onChange: (value: unknown) => void;
+  id: string;
+  disabled: boolean;
+  "aria-invalid"?: boolean;
+}) {
+  const models = useEngineData(() => api.deepseekModels(), []);
+  const list = models.data;
+  const other = isOtherModel(list, value);
+  const env = envNote(setting, value);
+  return (
+    <div className="space-y-2">
+      <Select {...props} value={selectValue(list, value)} onChange={(e) => onChange(pickModel(e.target.value))}>
+        {modelOptions(list, value).map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.text}
+          </option>
+        ))}
+      </Select>
+      {other && (
+        <Input
+          id={`${props.id}-autre`}
+          aria-label="Nom du modèle (autre)"
+          disabled={props.disabled}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="Nom du modèle chez DeepSeek"
+        />
+      )}
+      {env && (
+        <p className="text-xs text-sky-300" data-testid="model-env">
+          ⚙ {env}
+        </p>
+      )}
+      {models.error && <p className="text-xs text-amber-300">Liste des modèles indisponible : {models.error}</p>}
+      {modelNotes(list, value).map((n) => (
+        <p key={n} className="text-xs text-zinc-500">
+          {n}
+        </p>
+      ))}
+    </div>
+  );
 }
 
 /** Grand éditeur de prompt : variables `$…` disponibles, insérées au curseur d'un clic. */

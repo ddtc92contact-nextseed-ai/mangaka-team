@@ -30,9 +30,12 @@ settings:
     label: Modèle
     group: Modèle
     type: text
+    options_from: deepseek_models
     source: providers.yaml#deepseek.model
     env_override: DEEPSEEK_MODEL
-    help: Nom du modèle chez le fournisseur (ex. deepseek-chat).
+    help: >-
+      Modèle DeepSeek de cet agent (liste lue chez DeepSeek, ou celle de providers.yaml) ; « Autre… » pour
+      taper un nom.
   - key: temperature
     label: Température
     group: Modèle

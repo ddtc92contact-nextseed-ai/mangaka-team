@@ -18,7 +18,10 @@ from sqlalchemy.orm import Session
 from ..agents import AgentService, ProfileInvalid, ResolvedSetting, SettingError
 from ..agents.profiles import KNOWLEDGE_KEY, to_text
 from ..agents.trials import TrialContext, TrialError, run_trial
+from ..presets import PresetError
 from ..presets.schemas import AgentPreset, AgentSetting
+from ..providers.factory import resolve_llm_name
+from ..providers.llm.deepseek import is_reasoning_model
 from ..store.models import AgentProfile, AgentProfileVersion, Job, JobStatus, Project
 from .deps import AppContext, get_ctx, get_session
 
@@ -154,6 +157,14 @@ def _source_label(setting: AgentSetting) -> str:
     return f"presets/{file} › {path}"
 
 
+def _env_value(service: AgentService, setting: AgentSetting) -> str | None:
+    """Valeur venue de .env (`env_override`) qui remplace la valeur livrée ; jamais un secret (cf. AgentSetting)."""
+    if not setting.env_override:
+        return None
+    raw = getattr(service.settings, setting.env_override.lower(), None)
+    return raw.strip() if isinstance(raw, str) and raw.strip() else None
+
+
 def _setting_out(service: AgentService, r: ResolvedSetting) -> dict[str, Any]:
     s = r.setting
     choices = service.choices(s) if s.type == "choice" else []
@@ -171,6 +182,9 @@ def _setting_out(service: AgentService, r: ResolvedSetting) -> dict[str, Any]:
         "max": s.max,
         "step": s.step,
         "global_only": s.global_only,
+        "options_from": s.options_from,
+        "env_override": s.env_override,
+        "env_value": _env_value(service, s),
         "source": _source_label(s),
         "value": to_text(s, r.value),
         "origin": r.origin,
@@ -244,6 +258,52 @@ def _version_out(service: AgentService, agent: AgentPreset, v: AgentProfileVersi
 
 
 # --- routes ---------------------------------------------------------------------------------------
+@router.get("/providers/deepseek/models")
+def deepseek_models(refresh: bool = False, ctx: AppContext = Depends(get_ctx)) -> dict[str, Any]:
+    """Modèles DeepSeek de la liste déroulante « Modèle » : en direct (GET {base_url}/models, cache court) ou,
+    sans clé, en mode mock ou en cas d'échec, la liste livrée (providers.yaml › deepseek.models).
+
+    Jamais la clé : seulement les identifiants, leur libellé et d'où vient la liste.
+    """
+    settings = ctx.settings
+    try:
+        cfg = ctx.presets.require_providers().deepseek
+    except PresetError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+    known = {m.id: m for m in cfg.models}
+    key = settings.deepseek_api_key.get_secret_value().strip() if settings.deepseek_api_key else ""
+    ids: list[str] | None = None
+    if resolve_llm_name(settings) == "mock":
+        detail = "mode mock (LLM_PROVIDER) : DeepSeek n'est pas interrogé"
+    elif not key:
+        detail = "DEEPSEEK_API_KEY absente de .env"
+    else:
+        ids, error = ctx.deepseek_models.get(
+            api_key=key, base_url=settings.deepseek_base_url or cfg.base_url, ttl_s=cfg.models_cache_s, refresh=refresh
+        )
+        detail = None if ids else f"liste DeepSeek indisponible : {error}"
+    live = ids is not None
+    models = [
+        {
+            "id": i,
+            "label": known[i].label if i in known else i,
+            "note": known[i].note if i in known else "",
+            "reasoning": known[i].reasoning if i in known else is_reasoning_model(i),
+        }
+        for i in (ids if ids is not None else list(known))
+    ]
+    env_model = settings.deepseek_model.strip() if settings.deepseek_model and settings.deepseek_model.strip() else None
+    return {
+        "source": "live" if live else "preset",
+        "source_label": "en direct" if live else "liste livrée",
+        "detail": detail,
+        "models": models,
+        "preset_model": cfg.model,
+        "env_model": env_model,
+        "default_model": env_model or cfg.model,
+    }
+
+
 @router.get("/agents")
 def list_agents(ctx: AppContext = Depends(get_ctx), session: Session = Depends(get_session)) -> list[dict[str, Any]]:
     comfy = _comfy(ctx)
@@ -354,16 +414,26 @@ def trial(
         resolved, _ = service.resolve(agent, service.stored(session, agent.id, None), values, editing="series")
     effective = {r.setting.key: r.value for r in resolved}
 
+    used: dict[str, str] = {}
+
     def llm() -> tuple[Any, str | None]:
         name, model, changed = service.llm_choice(resolved, agent)
-        return service.llm(name, model, changed, presets)
+        provider, error = service.llm(name, model, changed, presets)
+        if provider is not None:
+            used["llm_model"] = f"{provider.name} · {getattr(provider, 'model', '')}".rstrip(" ·")
+        return provider, error
 
     t0 = time.monotonic()
     try:
         result = run_trial(agent.trial, TrialContext(presets=presets, values=effective, llm=llm))
     except TrialError as exc:
         result = {"input": [], "output": [], "error": str(exc)}
-    return {"error": None, **result, "duration_ms": int((time.monotonic() - t0) * 1000)}
+    return {
+        "error": None,
+        **result,
+        "llm_model": used.get("llm_model"),
+        "duration_ms": int((time.monotonic() - t0) * 1000),
+    }
 
 
 @router.get("/agents/{agent_id}/export")

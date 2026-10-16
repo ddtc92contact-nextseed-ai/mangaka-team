@@ -2019,6 +2019,11 @@ export interface AgentSetting {
   max: number | null;
   step: number | null;
   global_only: boolean;
+  /** Champ texte proposé en liste déroulante (avec « Autre… ») : `deepseek_models` = api.deepseekModels(). */
+  options_from?: "deepseek_models" | null;
+  /** Variable de .env qui remplace la valeur livrée (ex. DEEPSEEK_MODEL) et sa valeur si elle est renseignée. */
+  env_override?: string | null;
+  env_value?: string | null;
   /** D'où vient la valeur livrée (« presets/prompts/script.yaml › temperature », « .env (LLM_PROVIDER) »). */
   source: string;
   value: unknown;
@@ -2069,7 +2074,30 @@ export interface TrialResult {
   input: TrialSection[];
   output: TrialSection[];
   error: string | null;
+  /** Fournisseur et modèle LLM réellement utilisés par l'essai (« deepseek · deepseek-reasoner »), null sans LLM. */
+  llm_model?: string | null;
   duration_ms: number;
+}
+
+export interface DeepSeekModel {
+  id: string;
+  label: string;
+  note: string;
+  /** Raisonne avant de répondre : plus lent, la température n'est pas envoyée. */
+  reasoning: boolean;
+}
+
+/** GET /providers/deepseek/models : liste en direct (GET /models chez DeepSeek) ou liste livrée (providers.yaml). */
+export interface DeepSeekModels {
+  source: "live" | "preset";
+  source_label: string;
+  /** Pourquoi la liste livrée est utilisée (mode mock, clé absente, panne). */
+  detail: string | null;
+  models: DeepSeekModel[];
+  preset_model: string;
+  /** DEEPSEEK_MODEL de .env, s'il est renseigné. */
+  env_model: string | null;
+  default_model: string;
 }
 
 export interface AgentProfileInput {
@@ -3671,6 +3699,8 @@ export const api = {
   tryAgent: (id: string, projectId: number | null, body: AgentProfileInput) =>
     request<TrialResult>(`/agents/${id}/trial${agentScope(projectId)}`, json("POST", body)),
   agentExportUrl: (id: string, projectId?: number | null) => engineUrl(`/agents/${id}/export${agentScope(projectId)}`),
+  deepseekModels: (refresh = false) =>
+    request<DeepSeekModels>(`/providers/deepseek/models${refresh ? "?refresh=true" : ""}`),
   seriesAgents: (projectId: number) => request<SeriesAgentOverride[]>(`/projects/${projectId}/agents`),
   knowledgeStatus: () => request<KnowledgeStatus>("/knowledge/status"),
   listCollections: (projectId?: number) =>

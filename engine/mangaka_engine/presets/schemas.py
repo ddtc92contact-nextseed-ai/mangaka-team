@@ -528,12 +528,28 @@ class UpscalerPreset(_Strict):
         return self
 
 
+class DeepSeekModelPreset(_Strict):
+    """Modèle DeepSeek proposé dans « L'équipe » (`providers.yaml › deepseek.models`)."""
+
+    id: str = Field(min_length=1)
+    label: str = Field(min_length=1)
+    note: str = ""
+    # Raisonne avant de répondre (reasoning_content) : pas de température envoyée.
+    reasoning: bool = False
+    timeout_s: float | None = Field(default=None, gt=0)
+
+
 class DeepSeekPreset(_Strict):
     base_url: str
     model: str
     timeout_s: float = Field(default=60, gt=0)
     temperature: float = Field(default=0.7, ge=0, le=2)
     supports_images: bool = False
+    models: list[DeepSeekModelPreset] = Field(default_factory=list)
+    models_cache_s: float = Field(default=300, ge=0)
+
+    def model_info(self, model_id: str) -> DeepSeekModelPreset | None:
+        return next((m for m in self.models if m.id == model_id), None)
 
 
 class OllamaPreset(_Strict):
@@ -2741,6 +2757,8 @@ class AgentSetting(_Strict):
     max: float | None = None
     step: float | None = None
     env_override: str | None = Field(default=None, pattern=r"^[A-Z][A-Z0-9_]*$")
+    # Champ texte proposé en liste déroulante (avec « Autre… ») : `deepseek_models` = GET /providers/deepseek/models.
+    options_from: Literal["deepseek_models"] | None = None
     fallback: Any = Field(default=None, description="Valeur livrée quand la source est vide")
     global_only: bool = Field(default=False, description="Réglage commun à toutes les séries")
 
@@ -2748,6 +2766,8 @@ class AgentSetting(_Strict):
     def _check(self) -> AgentSetting:
         if self.type == "choice" and not self.choices and self.choices_from is None:
             raise ValueError(f"{self.key} : « choices » ou « choices_from » obligatoire pour un choix")
+        if self.options_from is not None and self.type != "text":
+            raise ValueError(f"{self.key} : « options_from » ne vaut que pour un champ texte")
         for env in (self.source.removeprefix("env:") if self.source.startswith("env:") else None, self.env_override):
             if env and any(w in env for w in SECRET_WORDS):
                 raise ValueError(f"{self.key} : un secret ({env}) ne peut pas être un réglage")

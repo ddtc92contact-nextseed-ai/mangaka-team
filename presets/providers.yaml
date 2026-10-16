@@ -8,6 +8,21 @@ deepseek:
   # DeepSeek n'accepte pas encore d'images : le contrôle qualité visuel
   # passera par Ollama (Qwen3-VL 4B chargé à la demande, keep_alive 0).
   supports_images: false
+  # Modèles proposés dans « L'équipe » (liste déroulante « Modèle » de chaque agent DeepSeek). Le moteur
+  # interroge GET {base_url}/models (cache `models_cache_s`) ; cette liste sert quand la clé manque, en mode
+  # mock ou si l'appel échoue, et donne libellé et note aux modèles connus.
+  # `reasoning: true` : le modèle raisonne avant de répondre (reasoning_content) et refuse la température,
+  # qui n'est donc pas envoyée. `timeout_s` remplace le délai ci-dessus pour ce modèle.
+  models_cache_s: 300
+  models:
+    - id: deepseek-chat
+      label: DeepSeek Chat
+      note: rapide, sans raisonnement
+    - id: deepseek-reasoner
+      label: DeepSeek Reasoner
+      note: raisonne avant de répondre, plus lent
+      reasoning: true
+      timeout_s: 900   # le raisonnement s'ajoute à l'écriture d'un chapitre complet
 
 ollama:
   base_url: http://127.0.0.1:11434
