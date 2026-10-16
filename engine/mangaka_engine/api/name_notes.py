@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ..pipeline.names import AMBIGUOUS, UNMATCHED, CharacterMatcher, name_notes
+from ..pipeline.names import AMBIGUOUS, OFFSCREEN_ACTION, UNMATCHED, CharacterMatcher, name_notes
 from ..store.models import Panel
 from .schemas import CardRef, NameNoteOut
 
@@ -22,6 +22,11 @@ def name_notes_out(matcher: CharacterMatcher, panel: Panel) -> list[NameNoteOut]
             message = f"« {n.name} » ({where}) désigne plusieurs fiches : {names} retenu, pas {others}."
         elif n.kind == UNMATCHED:
             message = f"« {n.name} » ({where}) ne correspond à aucune fiche : ni référence, ni description."
+        elif n.kind == OFFSCREEN_ACTION:
+            message = (
+                f"{names} est déclaré hors cadre, mais la {n.source} lui donne une action visible : il serait dessiné "
+                "d'après le texte, sans sa référence."
+            )
         else:
             message = (
                 f"« {n.name} » ({where}) n'est pas déclaré dans la case : {names} serait dessiné sans sa référence."

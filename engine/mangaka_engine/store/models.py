@@ -432,6 +432,10 @@ class ChapterScene(TimestampMixin, Base):
     location_id: Mapped[int | None] = mapped_column(
         ForeignKey("series_locations.id", ondelete="SET NULL"), default=None, index=True
     )
+    # Distribution de la scène : fiches personnages qui y jouent (ids, dans l'ordre), proposée par l'agent et
+    # validée par l'auteur ; elle descend sur les cases de la scène (pipeline/scene_cast.py). Une fiche supprimée
+    # est ignorée.
+    character_ids: Mapped[list[int]] = mapped_column(JSON, default=list, server_default="[]")
 
     chapter: Mapped[Chapter] = relationship(back_populates="scenes")
 
@@ -571,6 +575,13 @@ class Panel(TimestampMixin, Base):
     # Personnages cités par la case mais HORS CADRE (« ils voient les trafiquants » : les spectateurs d'une
     # vue subjective) : jamais dessinés ni pourvus d'image de référence (pipeline/framing.py).
     offscreen_names: Mapped[list[str]] = mapped_column(JSON, default=list, server_default="[]")
+    # Choix de l'auteur sur la case, jamais écrasés par la descente de la scène (pipeline/scene_cast.py) :
+    # personnages (présents / hors cadre) corrigés à la main, lieu choisi (ou retiré) à la main, et fiches
+    # laissées hors cadre malgré une action visible dans le texte (« Laisser hors cadre » : plus d'alerte, et
+    # l'action est retirée du prompt image).
+    cast_manual: Mapped[bool] = mapped_column(default=False, server_default="0")
+    location_manual: Mapped[bool] = mapped_column(default=False, server_default="0")
+    offscreen_kept: Mapped[list[int]] = mapped_column(JSON, default=list, server_default="[]")
     # Point de vue d'un spectateur : {"mode": "reaction"|"subjective", "spectators": [noms],
     # "source": "direction"|"défaut"|"auteur"} ; None = case sans spectateur (ou choix pas encore fait).
     viewpoint: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)

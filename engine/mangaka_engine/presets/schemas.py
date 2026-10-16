@@ -1937,6 +1937,9 @@ class SceneType(_Strict):
     fiches: list[Annotated[str, StringConstraints(pattern=r"^[A-Z][A-Z0-9_]*$")]] = Field(
         default_factory=list, max_length=8
     )
+    # Profil calme : une scène de ce type ne porte pas un pic du chapitre (avertissement de l'écran Scènes quand la
+    # courbe de rythme de l'ADN y place un pic, pipeline/scenes.py `peak_warnings`).
+    calm: bool = False
 
     @field_validator("tempo", mode="before")
     @classmethod

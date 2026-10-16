@@ -3,6 +3,7 @@
 #
 # Variables disponibles ($nom ; écrire $$ pour un « $ » littéral) :
 #   $series_title $reading_direction $characters $previous_chapters
+#   $character_names (noms exacts des fiches, à recopier tels quels dans « personnages »)
 #   $style_packs $style_guidelines   (packs de style de la série et consignes du genre et du ton)
 #   $lieux          (lieux de la série : « - id N · nom : description », un par ligne)
 #   $chapter_number $chapter_title $synopsis
@@ -75,10 +76,13 @@ user: |
   - « type » vaut exactement l'un de : $type_ids ;
   - « pages » : nombre entier de 1 à $max_pages_per_scene ; $max_scenes scènes au plus ;
   - « summary » : une ou deux phrases, ce qui se passe et ce que la scène change ;
-  - « lieu » : l'id (nombre) d'un lieu de la série ci-dessus si la scène s'y passe, sinon null.
+  - « lieu » : l'id (nombre) d'un lieu de la série ci-dessus si la scène s'y passe, sinon null ;
+  - « personnages » : la distribution de la scène, chaque personnage connu qui y joue (présent, même
+    sans réplique), nom exact de sa fiche parmi : $character_names. Elle descend sur les cases de la
+    scène : un personnage oublié ici sera dessiné sans sa référence.
 
   Format de réponse :
-  {"scenes": [{"title": "…", "summary": "…", "type": "calme", "pages": 3, "lieu": null}],
+  {"scenes": [{"title": "…", "summary": "…", "type": "calme", "pages": 3, "lieu": null, "personnages": ["…"]}],
    "deferred": ["…"]}
 
   <contexte>

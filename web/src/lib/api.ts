@@ -249,7 +249,8 @@ export interface CardRef {
 export interface NameNote {
   name: string;
   source: "image" | "hors cadre" | "bulle" | "description" | "mise en scène";
-  kind: "ambigu" | "sans fiche" | "non déclaré";
+  /** « hors cadre en action » : déclaré hors cadre, mais la description ou la mise en scène lui donne une action visible. */
+  kind: "ambigu" | "sans fiche" | "non déclaré" | "hors cadre en action";
   /** Fiche(s) retenue(s) ; vide : aucune. */
   chosen: CardRef[];
   /** Fiches à égalité (nom ambigu). */
@@ -914,6 +915,8 @@ export interface PanelDetail {
   name_notes?: NameNote[];
   /** Cités par la case mais hors cadre : ni dessinés, ni image de référence. */
   offscreen_characters?: string[];
+  /** Fiches laissées hors cadre par l'auteur malgré une action visible (« Laisser hors cadre ») : action retirée du prompt. */
+  offscreen_kept?: number[];
   viewpoint?: Viewpoint | null;
   /** Personnages que le texte met en spectateur (« voient », « regarde »…) : la case attend un point de vue. */
   spectator_hints?: string[];
@@ -3105,8 +3108,16 @@ export interface ChapterSceneItem {
   pages: number;
   location_id: number | null;
   location_name: string | null;
+  /** Distribution de la scène : fiches des personnages qui y jouent (elle descend sur les cases). */
+  characters: CardRef[];
   /** Pages de l'histoire rattachées (après le scénario). */
   page_numbers: number[];
+}
+
+/** Scène au profil calme là où la courbe de rythme de l'ADN place un pic du chapitre (jamais bloquant). */
+export interface ScenePeakWarning {
+  scene_id: number;
+  message: string;
 }
 
 export interface ChapterScenes {
@@ -3125,6 +3136,7 @@ export interface ChapterScenes {
   scenes: ChapterSceneItem[];
   types: SceneType[];
   available: boolean;
+  peak_warnings: ScenePeakWarning[];
 }
 
 /** Name scène par scène (moteur : pipeline/scene_name.py, api/scene_name.py) : mesure d'une planche. */
@@ -3190,6 +3202,8 @@ export interface SceneInput {
   type: SceneTypeId;
   pages: number;
   location_id: number | null;
+  /** Distribution (ids des fiches) ; absente : gardée telle quelle. */
+  characters?: number[];
 }
 
 export interface ChapterStage {
@@ -3493,6 +3507,7 @@ export const api = {
       sketch_denoise?: number | null;
       characters?: string[];
       offscreen_characters?: string[];
+      offscreen_kept?: number[];
       viewpoint?: { mode: Viewpoint["mode"]; spectators: string[] } | null;
       shot_type?: string | null;
     },

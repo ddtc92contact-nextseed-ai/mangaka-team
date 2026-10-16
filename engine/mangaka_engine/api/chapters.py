@@ -621,7 +621,11 @@ def replace_pages(
                 panel.staging = cin.staging
             # Hors cadre absent : gardés, sauf ceux devenus présents.
             offscreen = cin.offscreen_characters if cin.offscreen_characters is not None else panel.offscreen_names
+            before = (list(panel.character_names or []), list(panel.offscreen_names or []))
             set_cast(panel, cin.characters, offscreen or [], matcher)
+            # Personnages retouchés à la main : jamais écrasés par la distribution de la scène (scene_cast.py).
+            if before != (list(panel.character_names or []), list(panel.offscreen_names or [])):
+                panel.cast_manual = True
             shot = normalize_shot_type(cin.shot_type) or None
             if panel.id is not None and shot and shot != panel.shot_type:
                 # Plan retouché à la main : choix verrouillé de la direction artistique de la page, jamais
@@ -634,6 +638,8 @@ def replace_pages(
             if "decor" in cin.model_fields_set:
                 panel.decor_id = cin.decor
             if "location" in cin.model_fields_set:
+                if cin.location != panel.location_id:
+                    panel.location_manual = True  # lieu choisi (ou retiré) à la main : prime sur celui de la scène
                 panel.location = session.get(SeriesLocation, cin.location) if cin.location is not None else None
             if cin.objets is not None:
                 panel.object_ids = list(dict.fromkeys(cin.objets))

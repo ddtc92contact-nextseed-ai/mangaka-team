@@ -78,6 +78,7 @@ from .locations import resolve_location
 from .names import CharacterMatcher, link_speakers, panel_ids
 from .pages import layout_pages
 from .pre_direction import Charter, dialogue_rules_for, panel_count_problems, script_text, series_charter
+from .scene_cast import descend_panel
 from .scene_name import (
     SCENE_PROMPT,
     SceneFrame,
@@ -509,6 +510,7 @@ def render_messages(
                 "scene_last_page": str(f.last_page),
                 "scene_tempo": f.tempo,
                 "scene_fiches": ctx.fiches or "(pas de fiche citée pour ce type de scène)",
+                "scene_cast": f.cast_text,
                 "written_scenes": ctx.written or "(rien encore : c'est la première scène écrite)",
             }
         )
@@ -703,6 +705,8 @@ def _new_pages(
     # Un véhicule ou une créature de la bibliothèque cité parmi les personnages (« Momo » le chat) : rattaché à
     # la case par son nom, comme un objet — une créature n'entre pas dans la distribution du chapitre.
     named = named_objects(session, chapter.project_id, {" ".join(key) for card in matcher.cards for key in card.keys})
+    # Distribution et lieu de la scène de chaque page, descendus sur ses cases (pipeline/scene_cast.py).
+    scenes = {s.id: s for s in chapter.scenes}
     created: list[Page] = []
     for p_index, sp in enumerate(output.pages):
         page = Page(
@@ -752,6 +756,7 @@ def _new_pages(
             # ou cité sans être déclaré est signalé à l'auteur par l'API (`name_notes`).
             panel.character_ids = panel_ids(matcher, panel, previous)
             link_speakers(matcher, panel, previous)
+            descend_panel(session, matcher, panel, scenes.get(page.scene_id) if page.scene_id else None, previous)
             page.panels.append(panel)
             previous = panel
         created.append(page)

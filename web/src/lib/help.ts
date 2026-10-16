@@ -204,7 +204,7 @@ export const HELP = {
   "direction.panel":
     "Intensité, plan, angle et cadre guident la taille de la case et le prompt de l'image ; l'ambiance décrit la lumière ; l'action dit le mouvement ou la pose du corps (pas « regarde » ni « est debout »), repris par le prompt de l'image. Le cadre et les onomatopées servent ensuite au lettrage.",
   "atelier.name-notes":
-    "« Ambigu » : un nom générique (« trafiquant ») désigne plusieurs fiches, la première est retenue ; rattache-le à la bonne fiche, il en devient l'alias pour toute la série. « Non déclaré » : le texte nomme un personnage que la case ne déclare ni à l'image ni hors cadre.",
+    "« Ambigu » : un nom désigne plusieurs fiches ; rattache-le à la bonne, il en devient l'alias. « Non déclaré » : le texte nomme un personnage absent de la case ; « Ajouter à la case » envoie sa fiche. « Hors cadre en action » : déclaré hors cadre mais le texte le fait agir ; mets-le dans l'image, ou laisse-le hors cadre (son action quitte le prompt).",
   "atelier.generate_missing":
     "Seulement la page affichée : met en file ses cases sans version choisie, en version finale. Pour tout le chapitre, utilise « Générer le chapitre ». Suis l'avancement dans la file en haut à droite ou dans l'onglet Production.",
   "atelier.finish":

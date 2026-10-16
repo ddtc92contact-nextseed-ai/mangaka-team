@@ -9,6 +9,7 @@ import {
   EngineError,
   fullErrorMessage,
   type ChapterScenes,
+  type Character,
   type Job,
   type SceneType,
   type SceneTypeId,
@@ -23,7 +24,9 @@ import {
   moveScene,
   newScene,
   pageSpans,
+  peakWarningsFor,
   toDraft,
+  toggleCast,
   totalPages,
   totalStatus,
   type DraftScene,
@@ -54,6 +57,7 @@ export default function ScenesPage() {
   const { chapter, reloadStages } = useChapter();
   const scenes = useEngineData(() => api.getScenes(chapter.id), [chapter.id]);
   const places = useEngineData(() => api.listLocations(chapter.project_id), [chapter.project_id]);
+  const cast = useEngineData(() => api.listCharacters(chapter.project_id), [chapter.project_id]);
   const lastJob = useEngineData(() => api.chapterJobs(chapter.id, "scenes").then((j) => j[0] ?? null), [chapter.id]);
 
   const [edited, setEdited] = useState<Draft | null>(null);
@@ -221,6 +225,8 @@ export default function ScenesPage() {
                 types={data.types}
                 tempo={types.get(scene.type)}
                 places={places.data ?? []}
+                characters={cast.data ?? []}
+                peakWarnings={dirty ? [] : peakWarningsFor(data.peak_warnings, scene.id)}
                 pageNumbers={scene.id !== undefined ? data.scenes.find((s) => s.id === scene.id)?.page_numbers ?? [] : []}
                 errors={fieldErrors}
                 disabled={blocked}
@@ -262,6 +268,10 @@ export default function ScenesPage() {
             />
           </Field>
         </Card>
+
+        {data.peak_warnings.length > 0 && (
+          <PeakWarnings count={data.peak_warnings.length} dirty={dirty} />
+        )}
 
         <ValidateBar
           data={data}
@@ -307,6 +317,8 @@ function SceneRow({
   types,
   tempo,
   places,
+  characters,
+  peakWarnings,
   pageNumbers,
   errors,
   disabled,
@@ -322,6 +334,8 @@ function SceneRow({
   types: SceneType[];
   tempo: SceneType | undefined;
   places: SeriesLocation[];
+  characters: Character[];
+  peakWarnings: string[];
   pageNumbers: number[];
   errors: Record<string, string>;
   disabled: boolean;
@@ -421,7 +435,112 @@ function SceneRow({
           </Select>
         </Field>
       </div>
+      <CastPicker
+        id={`${id}-cast`}
+        characters={characters}
+        value={scene.characters}
+        error={err("characters")}
+        disabled={disabled}
+        onToggle={(cid) => set({ characters: toggleCast(scene.characters, cid) })}
+      />
+      {peakWarnings.map((message) => (
+        <p
+          key={message}
+          role="status"
+          className="mt-3 rounded-lg border border-amber-600/50 bg-amber-950/30 px-3 py-2 text-xs text-amber-100"
+          data-testid="scene-peak-warning"
+        >
+          <span aria-hidden>⚠ </span>
+          {message}
+        </p>
+      ))}
     </li>
+  );
+}
+
+/**
+ * Distribution de la scène : les fiches de la série qui y jouent. Elle descend sur les cases : une case qui nomme un
+ * personnage de la distribution sans le déclarer le reçoit à l'image, avec sa fiche (un choix fait sur la case prime).
+ */
+function CastPicker({
+  id,
+  characters,
+  value,
+  error,
+  disabled,
+  onToggle,
+}: {
+  id: string;
+  characters: Character[];
+  value: number[];
+  error?: string;
+  disabled: boolean;
+  onToggle: (id: number) => void;
+}) {
+  const known = new Set(characters.map((c) => c.id));
+  const missing = value.filter((cid) => !known.has(cid));
+  return (
+    <fieldset className="mt-3" data-testid="scene-cast" aria-describedby={`${id}-hint`}>
+      <legend className="text-sm font-medium text-zinc-300">Distribution</legend>
+      <p id={`${id}-hint`} className="mb-2 text-xs text-zinc-500">
+        Personnages qui jouent dans la scène : le scénariste et la direction artistique les reçoivent, et une case qui
+        en nomme un sans le déclarer le met à l&apos;image avec sa fiche.
+      </p>
+      {characters.length === 0 ? (
+        <p className="text-xs text-zinc-500">Aucune fiche personnage dans la série.</p>
+      ) : (
+        <div className="flex flex-wrap gap-1.5">
+          {characters.map((c) => {
+            const on = value.includes(c.id);
+            return (
+              <button
+                key={c.id}
+                type="button"
+                aria-pressed={on}
+                onClick={() => onToggle(c.id)}
+                disabled={disabled}
+                data-testid="scene-cast-toggle"
+                className={`rounded-full border px-2.5 py-1 text-xs transition focus-visible:outline-2 focus-visible:outline-rose-400 disabled:opacity-50 ${
+                  on
+                    ? "border-rose-500/70 bg-rose-500/15 text-rose-100"
+                    : "border-zinc-700 bg-zinc-900 text-zinc-400 hover:border-zinc-500 hover:text-zinc-200"
+                }`}
+              >
+                {on ? "✓ " : "+ "}
+                {c.name}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {missing.length > 0 && (
+        <p className="mt-1 text-xs text-zinc-500">
+          {missing.length} fiche{missing.length > 1 ? "s" : ""} supprimée{missing.length > 1 ? "s" : ""} : ignorée
+          {missing.length > 1 ? "s" : ""}.
+        </p>
+      )}
+      {error && <p className="mt-1 text-xs text-red-300">{error}</p>}
+    </fieldset>
+  );
+}
+
+function PeakWarnings({ count, dirty }: { count: number; dirty: boolean }) {
+  return (
+    <div
+      role="status"
+      className="rounded-lg border border-amber-600/50 bg-amber-950/30 px-4 py-3 text-sm text-amber-100"
+      data-testid="scenes-peak-warnings"
+    >
+      <p className="font-medium">
+        <span aria-hidden>⚠ </span>
+        {count > 1 ? `${count} pics du chapitre tombent sur une scène calme` : "Un pic du chapitre tombe sur une scène calme"}
+      </p>
+      <p className="mt-1 text-xs text-amber-200/80">
+        La courbe de rythme de l&apos;ADN de la série place un moment fort là où la liste a une scène au profil calme (voir la
+        scène concernée). Simple avertissement : tu peux valider quand même.
+        {dirty ? " Enregistre tes retouches pour le recalculer." : ""}
+      </p>
+    </div>
   );
 }
 

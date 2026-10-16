@@ -79,6 +79,10 @@
   l'auteur et suite reportée (`chapters.scenes_validated_at`, `scenes_validated_by`, `scenes_deferred`), scène de
   chaque page (`pages.scene_id`). Aucun chapitre existant n'a de scène : il reste en « ancien mode » (écrit sans
   scènes, jamais bloqué par l'étape Scènes). Profils de tempo ajustés par la série (`projects.scene_tempo`) : aucun.
+- 39 : distribution de chaque scène (`chapter_scenes.character_ids`) et choix de l'auteur sur chaque case
+  (`panels.cast_manual`, `location_manual`, `offscreen_kept`). Les scènes existantes reçoivent la distribution
+  déclarée par leurs cases (fiches des personnages présents, hors cadre et locuteurs, sans perte) ; aucune case n'a
+  de choix manuel enregistré.
 
 Une base neuve est créée directement à la dernière version. Chaque migration tourne dans une
 transaction unique, clés étrangères désactivées (recette « 12 étapes » de SQLite pour reconstruire
@@ -132,7 +136,7 @@ from .slugs import RESERVED_ENTRIES, RESERVED_SERIES, slugify, unique_slug
 
 log = logging.getLogger("mangaka_engine")
 
-SCHEMA_VERSION = 38
+SCHEMA_VERSION = 39
 
 
 class MigrationError(RuntimeError):
@@ -605,6 +609,68 @@ def _v37_to_v38(cur: sqlite3.Cursor) -> None:
         cur.execute("CREATE INDEX ix_pages_scene_id ON pages (scene_id)")
 
 
+def _v38_to_v39(cur: sqlite3.Cursor) -> None:
+    # chapter_scenes créée par la v38 depuis le modèle courant : colonne déjà là (et vide).
+    if "character_ids" not in {row[1] for row in cur.execute("PRAGMA table_info(chapter_scenes)")}:
+        cur.execute("ALTER TABLE chapter_scenes ADD COLUMN character_ids JSON NOT NULL DEFAULT '[]'")
+    panels = {row[1] for row in cur.execute("PRAGMA table_info(panels)")}
+    for column, ddl in (
+        ("cast_manual", "BOOLEAN NOT NULL DEFAULT 0"),
+        ("location_manual", "BOOLEAN NOT NULL DEFAULT 0"),
+        ("offscreen_kept", "JSON NOT NULL DEFAULT '[]'"),
+    ):
+        if column not in panels:
+            cur.execute(f"ALTER TABLE panels ADD COLUMN {column} {ddl}")
+    # Distribution des scènes existantes : les personnages déclarés par leurs cases (présents rapprochés d'une
+    # fiche, puis hors cadre et locuteurs, rapprochés par leur nom exact ou un alias), dans l'ordre d'apparition.
+    _fill_scene_casts(cur)
+
+
+def _fill_scene_casts(cur: sqlite3.Cursor) -> None:
+    from ..pipeline.names import name_key  # le pipeline importe le store
+
+    scenes = cur.execute(
+        "SELECT s.id, c.project_id FROM chapter_scenes s JOIN chapters c ON c.id = s.chapter_id "
+        "WHERE s.character_ids IS NULL OR s.character_ids IN ('', '[]')"
+    ).fetchall()
+    keys: dict[int, dict[str, int]] = {}
+    for scene_id, project_id in scenes:
+        if project_id not in keys:
+            by_key: dict[str, int] = {}
+            for cid, name, aliases in cur.execute(
+                "SELECT id, name, aliases FROM characters WHERE project_id = ? ORDER BY id", (project_id,)
+            ).fetchall():
+                for n in [name, *_json_list(aliases)]:
+                    by_key.setdefault(name_key(str(n)), cid)
+            keys[project_id] = by_key
+        known = keys[project_id]
+        ids: list[int] = []
+        rows = cur.execute(
+            "SELECT pa.id, pa.character_ids, pa.character_names, pa.offscreen_names FROM panels pa JOIN pages p "
+            'ON p.id = pa.page_id WHERE p.scene_id = ? ORDER BY p.number, pa."index"',
+            (scene_id,),
+        ).fetchall()
+        for panel_id, character_ids, present, offscreen in rows:
+            speakers = [s for (s,) in cur.execute("SELECT speaker_name FROM bubbles WHERE panel_id = ?", (panel_id,))]
+            found = [i for i in _json_list(character_ids) if isinstance(i, int) and i in known.values()]
+            for n in [*_json_list(present), *_json_list(offscreen), *speakers]:
+                cid = known.get(name_key(str(n or "")))
+                if cid is not None:
+                    found.append(cid)
+            for i in found:
+                if i not in ids:
+                    ids.append(i)
+        cur.execute("UPDATE chapter_scenes SET character_ids = ? WHERE id = ?", (json.dumps(ids), scene_id))
+
+
+def _json_list(raw: object) -> list[object]:
+    try:
+        value = json.loads(raw) if isinstance(raw, str) else raw
+    except ValueError:
+        return []
+    return value if isinstance(value, list) else []
+
+
 MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     # version de départ → (version d'arrivée, fonction)
     0: (2, _v0_to_v2),
@@ -645,6 +711,7 @@ MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     35: (36, _v35_to_v36),
     36: (37, _v36_to_v37),
     37: (38, _v37_to_v38),
+    38: (39, _v38_to_v39),
 }
 
 

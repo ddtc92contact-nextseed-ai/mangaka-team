@@ -67,7 +67,7 @@ from ..pipeline.generation import (
 from ..pipeline.inpaint import MaskError, Region, decode_png
 from ..pipeline.journal import note_regenerated, record_event
 from ..pipeline.knowledge import Passage, estimate_tokens
-from ..pipeline.names import CharacterMatcher
+from ..pipeline.names import CharacterMatcher, kept_offscreen, offscreen_ids
 from ..pipeline.prompt_dialog import PromptDialogError
 from ..pipeline.prompt_writer import AGENT_ID as WRITER_AGENT
 from ..pipeline.qc_bench import STEP as BENCH_STEP
@@ -237,6 +237,7 @@ def panel_detail(session: Session, ctx: AppContext, panel: Panel) -> PanelDetail
         unmatched_characters=panel_unmatched(matcher, panel, active_marks(session, page.chapter_id)),
         name_notes=name_notes_out(matcher, panel),
         offscreen_characters=list(panel.offscreen_names or []),
+        offscreen_kept=kept_offscreen(matcher, panel),
         viewpoint=viewpoint_out(panel),
         spectator_hints=spect.viewers,
         perception=spect.verb,
@@ -492,7 +493,19 @@ def _update_cast(session: Session, ctx: AppContext, panel: Panel, body: PanelUpd
         # Un nom passé d'une liste à l'autre la quitte (sinon « présent » l'emporterait).
         if body.offscreen_characters is not None and body.characters is None:
             present = [n for n in present if not any(same_name(n, o) for o in offscreen)]
+        # Une fiche mise à l'image quitte le hors cadre, même écrite autrement (« le singe » → Gorille).
+        shown = set(matcher.ids(present))
+        offscreen = [n for n in offscreen if not (set(matcher.ids([n])) & shown)]
         set_cast(panel, present, offscreen, matcher)
+        # Choix de l'auteur : jamais écrasé par la distribution de la scène (pipeline/scene_cast.py).
+        panel.cast_manual = True
+    if "offscreen_kept" in changes and body.offscreen_kept is not None:
+        hidden = set(offscreen_ids(matcher, panel))
+        panel.offscreen_kept = [i for i in dict.fromkeys(body.offscreen_kept) if i in hidden]
+    elif panel.offscreen_kept:
+        # Une fiche remise à l'image (ou retirée) n'est plus « laissée hors cadre ».
+        hidden = set(offscreen_ids(matcher, panel))
+        panel.offscreen_kept = [i for i in panel.offscreen_kept if i in hidden]
     if "viewpoint" in changes:
         vp = body.viewpoint
         if vp is None:
@@ -544,7 +557,7 @@ def update_panel(
         if key in changes:
             setattr(panel, key, changes[key] or "")
             update_panel_prompt(_presets(ctx, panel), session, panel, ctx.knowledge, reset=True)
-    if {"characters", "offscreen_characters", "viewpoint"} & changes.keys():
+    if {"characters", "offscreen_characters", "viewpoint", "offscreen_kept"} & changes.keys():
         _update_cast(session, ctx, panel, body)
     if "shot_type" in changes:
         _set_shot_type(panel, changes["shot_type"])

@@ -330,8 +330,9 @@ class NameNoteOut(BaseModel):
     name: str  # tel qu'écrit dans la case
     source: Literal["image", "hors cadre", "bulle", "description", "mise en scène"]
     # ambigu : plusieurs fiches à égalité, la première retenue ; sans fiche : aucune ; non déclaré : nommé
-    # par le texte sans être ni présent ni hors cadre (dessiné sans sa référence).
-    kind: Literal["ambigu", "sans fiche", "non déclaré"]
+    # par le texte sans être ni présent ni hors cadre (dessiné sans sa référence) ; hors cadre en action : déclaré
+    # hors cadre alors que la description ou la mise en scène lui donne une action visible.
+    kind: Literal["ambigu", "sans fiche", "non déclaré", "hors cadre en action"]
     chosen: list[CardRef] = Field(default_factory=list)  # fiche(s) retenue(s) ; vide : aucune
     candidates: list[CardRef] = Field(default_factory=list)  # fiches à égalité (nom ambigu)
     message: str
@@ -825,6 +826,9 @@ class PanelUpdate(_In):
     # Point de vue d'un spectateur, choisi par l'auteur (jamais écrasé par la direction artistique) : range
     # les spectateurs hors cadre (vue subjective) ou à l'image (plan de réaction) ; null = aucun.
     viewpoint: ViewpointIn | None = None
+    # « Laisser hors cadre » : fiches (ids) gardées hors cadre malgré une action visible dans le texte (liste
+    # complète) ; leur action est retirée du prompt image et l'alerte disparaît.
+    offscreen_kept: Annotated[list[int], Field(max_length=20)] | None = None
     # Débruitage du passage au propre de cette case ; null = celui de la série (sinon du preset).
     sketch_denoise: Denoise | None = None
     # Plan de la case (planche brouillon : « changer le plan ») ; null = aucun. L'emporte sur celui de la
@@ -938,6 +942,9 @@ class PanelDetailOut(BaseModel):
     unmatched_characters: list[str] = Field(default_factory=list)  # voir PanelOut
     name_notes: list[NameNoteOut] = Field(default_factory=list)  # voir PanelOut
     offscreen_characters: list[str] = Field(default_factory=list)  # voir PanelOut
+    # Fiches laissées hors cadre par l'auteur malgré une action visible (« Laisser hors cadre ») : plus d'alerte,
+    # et l'action est retirée du prompt image.
+    offscreen_kept: list[int] = Field(default_factory=list)
     viewpoint: ViewpointOut | None = None
     # Personnages que le texte met en spectateur (« voient », « regarde »…) : la case attend un point de vue.
     spectator_hints: list[str] = Field(default_factory=list)
