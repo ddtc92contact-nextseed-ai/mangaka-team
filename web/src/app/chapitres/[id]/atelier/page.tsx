@@ -17,7 +17,7 @@ import { capitalize } from "@/lib/direction";
 import { useEngineData } from "@/lib/hooks";
 import { needsReview } from "@/lib/qc";
 import { PAGE_KINDS } from "@/lib/script";
-import { useChapter } from "../chapter-context";
+import { useChapter, useRememberPage, useWantedPage } from "../chapter-context";
 import { StepAlert } from "../step-alert";
 import { buildPanelViews, PageCanvas, type PageCanvasHandle } from "./page-canvas";
 import { PanelInspector } from "./panel-inspector";
@@ -61,12 +61,16 @@ function Workshop() {
   const list = useMemo(() => pages.data ?? [], [pages.data]);
   const panelParam = Number(params.get("case")) || null;
   const pageParam = Number(params.get("page")) || null;
+  // Sans `?page=` ni `?case=` : la planche courante du chapitre (celle laissée dans une autre section).
+  const wantedPage = useWantedPage(pageParam);
   const page =
     list.find((p) => p.id === pageParam) ??
     (panelParam ? list.find((p) => p.panels.some((pa) => pa.id === panelParam)) : undefined) ??
+    list.find((p) => p.id === wantedPage) ??
     list.find((p) => p.layout) ??
     list[0] ??
     null;
+  useRememberPage(page?.id);
   const openPanelId = page && panelParam && page.panels.some((p) => p.id === panelParam) ? panelParam : null;
 
   function navigate(pageId: number | null, panelId: number | null) {

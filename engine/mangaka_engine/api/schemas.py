@@ -922,6 +922,32 @@ class LibraryRef(BaseModel):
     name: str
 
 
+class ReferenceChoiceImageOut(BaseModel):
+    image_id: int
+    label: str  # « Portrait de face (image 1, principale) »
+    url: str
+
+
+class ReferenceChoiceOut(BaseModel):
+    """Images de référence d'un personnage de la case : `chosen_image_id`, l'image choisie pour la case
+    (None : automatique) ; `automatic_image_id`, celle que l'appli met en tête sans choix ; `current_image_id`,
+    celle qui passera en tête à la prochaine génération."""
+
+    character_id: int
+    name: str
+    images: list[ReferenceChoiceImageOut]
+    chosen_image_id: int | None = None
+    automatic_image_id: int | None = None
+    current_image_id: int | None = None
+
+
+class ReferenceChoiceIn(_In):
+    """Choix de la fiche d'un personnage pour la case ; `image_id` None : retour à « automatique »."""
+
+    character_id: int
+    image_id: int | None = None
+
+
 class PanelDetailOut(BaseModel):
     id: int
     page_id: int
@@ -979,6 +1005,8 @@ class PanelDetailOut(BaseModel):
     print_info: PrintInfoOut | None = None
     upscaler: str | None = None  # agrandisseur de la finition (nom), None si aucun configuré
     composition_lock: CompositionLockOut | None = None  # None : composition libre
+    # Sélecteur de fiche : images de chaque personnage à l'image et celle qui passera en tête de ses références.
+    reference_choices: list[ReferenceChoiceOut] = Field(default_factory=list)
 
 
 class QueueItemOut(BaseModel):
@@ -1031,6 +1059,7 @@ class WorkflowPresetOut(BaseModel):
     from_sketch: str | None = None  # workflow « propre depuis croquis » du même palier
     with_control: str | None = None  # workflow ControlNet (composition verrouillée) du même palier
     is_sketch: bool = False  # workflow des croquis (defaults.workflow_sketch)
+    is_cover: bool = False  # workflow des couvertures de tome (presets/cover.yaml) : jamais proposé pour une case
     steps: int | None = None
     cfg: float = 1.0
     distilled: bool = False  # modèle distillé (Turbo) : cfg 1 imposé

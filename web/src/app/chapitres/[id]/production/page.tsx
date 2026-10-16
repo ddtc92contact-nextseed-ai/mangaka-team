@@ -15,7 +15,7 @@ import { engineTime, formatDuration, formatEstimate, workshopHref } from "@/lib/
 import { useEngineData } from "@/lib/hooks";
 import { cssClipPath, panelPolygon } from "@/lib/layout";
 import { buildPanelViews, PageCanvas, runningLabel, type PanelView } from "../atelier/page-canvas";
-import { useChapter } from "../chapter-context";
+import { useChapter, useRememberPage, useWantedPage } from "../chapter-context";
 import { StepAlert } from "../step-alert";
 import { blockedReason } from "@/lib/stages";
 import { StageBanner } from "../stages";
@@ -113,14 +113,15 @@ function Production() {
   const running = queue?.running ?? null;
   const runningHere = running && running.chapter_id === chapter.id ? running : null;
 
-  const pageParam = Number(params.get("page")) || null;
-  // Sans choix explicite, l'aperçu suit la page de la case en cours.
+  // Sans choix explicite (adresse, planche courante du chapitre), l'aperçu suit la page de la case en cours.
+  const pageParam = useWantedPage(Number(params.get("page")) || null);
   const page =
     list.find((p) => p.id === pageParam) ??
     list.find((p) => p.id === runningHere?.page_id) ??
     list.find((p) => p.layout && p.panels.length) ??
     list[0] ??
     null;
+  useRememberPage(page?.id);
 
   function choosePage(id: number) {
     router.replace(`${pathname}?page=${id}`, { scroll: false });

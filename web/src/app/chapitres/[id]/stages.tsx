@@ -10,6 +10,7 @@ import {
   blockingMessage,
   blockingStages,
   decisionLabel,
+  hrefPath,
   stageHref,
   stageLinkLabel,
   type StageAction,
@@ -119,7 +120,7 @@ function OverrideDialog({ stage, onClose }: { stage: ChapterStage | null; onClos
 
 /** Liste des étapes vitales du chapitre : cochées / en attente, compteurs, lien vers l'écran qui les règle. */
 export function StageChecklist() {
-  const { chapter, stages, stagesError, setStages } = useChapter();
+  const { chapter, stages, stagesError, setStages, currentPageId } = useChapter();
   const [override, setOverride] = useState<ChapterStage | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -173,7 +174,7 @@ export function StageChecklist() {
                       <ButtonLink
                         variant="ghost"
                         className="!px-2 !py-1 text-xs"
-                        href={stageHref(s, chapter.id, chapter.project_id)}
+                        href={stageHref(s, chapter.id, chapter.project_id, currentPageId)}
                       >
                         {stageLinkLabel(s)}
                       </ButtonLink>
@@ -209,7 +210,7 @@ export function StageChecklist() {
  * sur 5. Applique-la avant de générer. »), avec un lien vers l'écran qui règle le problème et « Passer outre ».
  */
 export function StageBanner({ action }: { action: StageAction | StageAction[] }) {
-  const { chapter, stages } = useChapter();
+  const { chapter, stages, currentPageId } = useChapter();
   const pathname = usePathname();
   const [override, setOverride] = useState<ChapterStage | null>(null);
   const actions = Array.isArray(action) ? action : [action];
@@ -231,12 +232,12 @@ export function StageBanner({ action }: { action: StageAction | StageAction[] })
     >
       <p className="font-medium text-amber-100">Étape{rows.length > 1 ? "s" : ""} à régler d&apos;abord</p>
       {rows.map(({ stage, action: a }) => {
-        const href = stageHref(stage, chapter.id, chapter.project_id);
+        const href = stageHref(stage, chapter.id, chapter.project_id, currentPageId);
         return (
           <div key={stage.key} className="flex flex-wrap items-center justify-between gap-2">
             <p className="min-w-0 text-amber-200/90">{blockingMessage(stage, a)}</p>
             <div className="flex shrink-0 gap-2">
-              {href !== pathname && (
+              {hrefPath(href) !== pathname && (
                 <ButtonLink variant="secondary" className="!py-1 text-xs" href={href}>
                   {stageLinkLabel(stage)}
                 </ButtonLink>

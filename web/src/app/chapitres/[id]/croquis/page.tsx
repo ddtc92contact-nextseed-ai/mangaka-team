@@ -22,7 +22,7 @@ import { formatEstimate } from "@/lib/generation";
 import { useEngineData } from "@/lib/hooks";
 import { nameCounts } from "@/lib/name";
 import { buildPanelViews, type PanelView } from "../atelier/page-canvas";
-import { useChapter } from "../chapter-context";
+import { useChapter, useRememberPage, useWantedPage } from "../chapter-context";
 import { readAuthor, StageBanner } from "../stages";
 import { StepAlert } from "../step-alert";
 import { DraftBoard, NameBar } from "./draft-board";
@@ -79,12 +79,16 @@ function SketchTriage() {
   const sortable = list.filter((p) => p.layout && p.panels.length);
   const pageParam = Number(params.get("page")) || null;
   const panelParam = Number(params.get("case")) || null;
+  // Sans `?page=` ni `?case=` : la planche courante du chapitre (celle laissée dans une autre section).
+  const wantedPage = useWantedPage(pageParam);
   const page =
     list.find((p) => p.id === pageParam) ??
     (panelParam ? list.find((p) => p.panels.some((pa) => pa.id === panelParam)) : undefined) ??
+    list.find((p) => p.id === wantedPage) ??
     sortable[0] ??
     list[0] ??
     null;
+  useRememberPage(page?.id);
   const pageEst = useEngineData(
     () => (page ? api.pageSketchEstimate(page.id) : Promise.resolve(null)),
     [page?.id, finished, version],

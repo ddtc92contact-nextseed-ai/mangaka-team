@@ -951,6 +951,21 @@ export interface PanelDetail {
   upscaler?: string | null;
   /** Composition verrouillée (ControlNet) ; null : composition libre. */
   composition_lock?: CompositionLock | null;
+  /** Sélecteur de fiche : images de chaque personnage à l'image, et celle qui passera en tête. */
+  reference_choices?: ReferenceChoice[];
+}
+
+/** Images de référence d'un personnage de la case (sélecteur de fiche de l'atelier). */
+export interface ReferenceChoice {
+  character_id: number;
+  name: string;
+  images: { image_id: number; label: string; url: string }[];
+  /** Image choisie pour la case ; null : automatique. */
+  chosen_image_id: number | null;
+  /** Image que l'appli met en tête sans choix (vue la plus proche de l'angle, puis du plan). */
+  automatic_image_id: number | null;
+  /** Image qui passera en tête à la prochaine génération. */
+  current_image_id: number | null;
 }
 
 /** Un champ changé par une proposition du dialogue (plan, angle, action, ambiance, référence d'un personnage). */
@@ -1129,6 +1144,8 @@ export interface WorkflowPreset {
   /** Workflow ControlNet (composition verrouillée) du même palier. */
   with_control?: string | null;
   is_sketch?: boolean;
+  /** Workflow des couvertures de tome (presets/cover.yaml) : jamais proposé pour une case. */
+  is_cover?: boolean;
   steps?: number | null;
   /** CFG par défaut ; modèle distillé (Turbo) : toujours 1. */
   cfg?: number;
@@ -3484,6 +3501,9 @@ export const api = {
     request<PanelDetail>(`/panels/${id}`, json("PATCH", body)),
   // Prompt rédigé par l'IA : jusqu'à 2 appels au LLM (le proxy laisse 3 min à cette route).
   /** `instruction` : consigne passée au même pipeline que le dialogue sur la case (sans historique). */
+  /** Choix de la fiche d'un personnage pour la case ; `imageId` null : retour à « automatique ». */
+  setReferenceChoice: (id: number, characterId: number, imageId: number | null) =>
+    request<PanelDetail>(`/panels/${id}/reference-choice`, json("PUT", { character_id: characterId, image_id: imageId })),
   rebuildPrompt: (id: number, instruction?: string) =>
     request<PanelDetail>(`/panels/${id}/prompt/rebuild`, {
       ...json("POST", instruction ? { instruction } : {}),

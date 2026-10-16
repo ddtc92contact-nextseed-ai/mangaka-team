@@ -34,7 +34,7 @@ import {
 import type { HelpId } from "@/lib/help";
 import { useEngineData } from "@/lib/hooks";
 import { isFinished, useJob } from "@/lib/jobs";
-import { useChapter } from "../chapter-context";
+import { useChapter, useRememberPage, useWantedPage } from "../chapter-context";
 import { StepAlert } from "../step-alert";
 import { CastPanel } from "../cast-panel";
 import { StageBanner } from "../stages";
@@ -77,7 +77,10 @@ export default function DirectionPage() {
 
   const data = direction.data;
   const list = data?.pages ?? [];
-  const selected = list.find((p) => p.page_id === selectedId) ?? list[0] ?? null;
+  // Sans choix dans l'écran : la planche courante du chapitre (adresse `?page=`, ou celle laissée ailleurs).
+  const wanted = useWantedPage(selectedId);
+  const selected = list.find((p) => p.page_id === wanted) ?? list[0] ?? null;
+  useRememberPage(selected?.page_id);
   const pageData = pages.data?.find((p) => p.id === selected?.page_id) ?? null;
   const anyDirection = list.some((p) => p.has_direction);
   const pendingCount = list.filter((p) => p.has_direction && p.pending && !p.out_of_date && p.status !== "rejected").length;

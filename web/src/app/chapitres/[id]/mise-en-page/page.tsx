@@ -9,7 +9,7 @@ import { api, errorMessage, type FrameKind, type LayoutGutter, type LayoutPanel,
 import { useEngineData } from "@/lib/hooks";
 import { INTENSITIES, RYTHMES } from "@/lib/layout";
 import { PAGE_KINDS } from "@/lib/script";
-import { useChapter } from "../chapter-context";
+import { useChapter, useRememberPage, useWantedPage } from "../chapter-context";
 import { StepAlert } from "../step-alert";
 import { StageBanner } from "../stages";
 
@@ -25,7 +25,10 @@ export default function LayoutPreviewPage() {
   const toast = useToast();
 
   const list = pages.data ?? [];
-  const selected = list.find((p) => p.id === selectedId) ?? list.find((p) => p.layout) ?? list[0] ?? null;
+  // Sans choix dans l'écran : la planche courante du chapitre (adresse `?page=`, ou celle laissée ailleurs).
+  const wanted = useWantedPage(selectedId);
+  const selected = list.find((p) => p.id === wanted) ?? list.find((p) => p.layout) ?? list[0] ?? null;
+  useRememberPage(selected?.id);
 
   function replacePage(page: PageData) {
     pages.setData((list ?? []).map((p) => (p.id === page.id ? page : p)));

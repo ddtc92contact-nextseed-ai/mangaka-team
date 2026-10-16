@@ -106,10 +106,12 @@ from .camera import (
     CameraError,
     angle_distance,
     angle_prompt,
+    angle_vocabulary,
     camera_plan,
     direction_target,
     merge_loras,
     ordered_views,
+    strip_angle_terms,
 )
 from .framing import framing_sentence, viewpoint_of
 from .inpaint import png_bytes, recompose, soften_mask
@@ -1126,13 +1128,78 @@ def reference_options(session: Session, presets: PresetRegistry, panel: Panel) -
             continue
         chosen = next((img for img in images if img.id == preferred.get(character.id)), None)
         if chosen is None:
-            chosen = by_shot(ordered_views(images, presets.camera_loras, target), shots)[0]
+            chosen = automatic_view(presets, images, target, shots)
         labels = image_labels(session, presets, character)
         options += [
             ReferenceOption(character.id, character.name, img.id, labels[img.id], current=img is chosen)
             for img in images
         ]
     return options
+
+
+def automatic_view(
+    presets: PresetRegistry, images: Sequence[CharacterImage], target: AngleTarget | None, shots: dict[int, int]
+) -> CharacterImage:
+    """Image d'un personnage mise en tête sans choix de la case : la vue la plus proche de l'angle, puis le plan."""
+    return by_shot(ordered_views(images, presets.camera_loras, target), shots)[0]
+
+
+@dataclass
+class CharacterReferences:
+    """Images d'un personnage de la case (sélecteur de fiche de l'atelier) : `chosen_id`, l'image choisie pour
+    la case (`Panel.reference_choice`, None : automatique) ; `automatic_id`, celle que l'appli mettrait en tête
+    sans choix."""
+
+    character: Character
+    images: list[tuple[CharacterImage, str]]
+    chosen_id: int | None
+    automatic_id: int | None
+
+
+def reference_choices(session: Session, presets: PresetRegistry, panel: Panel) -> list[CharacterReferences]:
+    """Pour chaque personnage présent à l'image qui a des images de référence : ses images (nom lisible) et
+    celle qui passera en tête à la prochaine génération (choix de la case, sinon automatique)."""
+    target = panel_angle_target(presets, panel)
+    preferred = reference_preferences(panel)
+    characters = panel_characters(session, panel)
+    shots = panel_shot_ranks(session, presets, panel, characters)
+    out: list[CharacterReferences] = []
+    for character in characters:
+        images = list(character.reference_images)
+        if not images:
+            continue
+        labels = image_labels(session, presets, character)
+        chosen = preferred.get(character.id)
+        out.append(
+            CharacterReferences(
+                character=character,
+                images=[(img, labels[img.id]) for img in images],
+                chosen_id=chosen if any(img.id == chosen for img in images) else None,
+                automatic_id=automatic_view(presets, images, target, shots).id,
+            )
+        )
+    return out
+
+
+def set_reference_choice(session: Session, panel: Panel, character_id: int, image_id: int | None) -> None:
+    """Choix de la fiche d'un personnage pour la case (`Panel.reference_choice`) : l'image passe en tête de ce
+    personnage à la prochaine génération ; None la remet à « automatique ». `GenerationError` lisible si le
+    personnage n'est pas à l'image ou si l'image est celle d'un autre personnage."""
+    character = next((c for c in panel_characters(session, panel) if c.id == character_id), None)
+    if character is None:
+        raise GenerationError("ce personnage n'est pas à l'image dans cette case")
+    choice = {k: v for k, v in (panel.reference_choice or {}).items() if str(k) != str(character_id)}
+    if image_id is not None:
+        if not any(img.id == image_id for img in character.reference_images):
+            owner = session.get(CharacterImage, image_id)
+            other = session.get(Character, owner.character_id) if owner is not None else None
+            raise GenerationError(
+                f"cette image est une référence de {other.name}, pas de {character.name}"
+                if other is not None and other.id != character.id
+                else f"image de référence introuvable parmi celles de {character.name}"
+            )
+        choice[str(character_id)] = image_id
+    panel.reference_choice = choice or None
 
 
 def dialog_turns(panel: Panel) -> list[DialogTurnBrief]:
@@ -1302,6 +1369,16 @@ def enqueue_panel(
     if chapter.status in (ChapterStatus.draft, ChapterStatus.script, ChapterStatus.layout):
         chapter.status = ChapterStatus.generation
     return jobs
+
+
+def angle_scene(presets: PresetRegistry, scene: str) -> str:
+    """« Changer l'angle » : la scène de la version de départ sans son ancien angle ni son élévation
+    (`strip_angle_terms`, vocabulaire de camera_loras.yaml et des `camera_terms` d'image_prompt.yaml, phrase
+    « Camera angle: … » des morceaux d'image_prompt.yaml)."""
+    settings = presets.image_prompt
+    labels = [part.split("$angle")[0] for part in settings.parts if "$angle" in part]
+    vocabulary = angle_vocabulary(presets.camera_loras, settings.camera_terms)
+    return strip_angle_terms(scene, vocabulary, labels)
 
 
 def enqueue_angle(
@@ -1686,7 +1763,9 @@ class GenerationExecutor:
             single = presets.image_prompt.single_instance if panel.character_names else ""
             if angle_id:
                 # Mot déclencheur et vocabulaire de caméra en tête, puis la scène de la version de départ.
-                prompt = with_single_instance(angle_prompt(catalog.prompts.panel, camera, scene=prompt), single)
+                # L'ancien angle quitte la scène : il contredirait la nouvelle vue et le modèle garderait le cadrage.
+                scene = angle_scene(presets, prompt)
+                prompt = with_single_instance(angle_prompt(catalog.prompts.panel, camera, scene=scene), single)
             elif repair is None:
                 # Chaque image nommée dans l'ordre des emplacements + ce qu'il faut en prendre, puis
                 # « identité seulement, scène nouvelle », l'anti-doublon ; enfin la tonalité du rendu (papier blanc).

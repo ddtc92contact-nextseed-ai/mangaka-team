@@ -57,11 +57,13 @@ from ..pipeline.generation import (
     prompt_pending,
     prompt_request,
     quality_preset_id,
+    reference_choices,
     refresh_states,
     resolve_preset_id,
     rewritable_prompts,
     run_dialog_request,
     run_prompt_request,
+    set_reference_choice,
     update_panel_prompt,
 )
 from ..pipeline.inpaint import MaskError, Region, decode_png
@@ -92,6 +94,7 @@ from ..store.models import (
     Project,
 )
 from .chapters import get_chapter_or_404, get_page_or_404
+from .characters import image_url as character_image_url
 from .deps import AppContext, get_ctx, get_session
 from .errors import FieldError
 from .jobs import job_out
@@ -118,6 +121,9 @@ from .schemas import (
     QueueItemOut,
     QueueOut,
     RebuildPromptIn,
+    ReferenceChoiceImageOut,
+    ReferenceChoiceIn,
+    ReferenceChoiceOut,
     RepairCharacterOut,
     RepairIn,
     RepairInfoOut,
@@ -267,7 +273,25 @@ def panel_detail(session: Session, ctx: AppContext, panel: Panel) -> PanelDetail
         print_info=panel_print_info(presets, ctx.files, panel),  # type: ignore[arg-type]
         upscaler=upscaler,
         composition_lock=lock_out(session, presets, panel),
+        reference_choices=reference_choices_out(session, presets, panel),
     )
+
+
+def reference_choices_out(session: Session, presets: PresetRegistry, panel: Panel) -> list[ReferenceChoiceOut]:
+    return [
+        ReferenceChoiceOut(
+            character_id=r.character.id,
+            name=r.character.name,
+            images=[
+                ReferenceChoiceImageOut(image_id=img.id, label=label, url=character_image_url(img))
+                for img, label in r.images
+            ],
+            chosen_image_id=r.chosen_id,
+            automatic_image_id=r.automatic_id,
+            current_image_id=r.chosen_id if r.chosen_id is not None else r.automatic_id,
+        )
+        for r in reference_choices(session, presets, panel)
+    ]
 
 
 def prompt_sources_out(panel: Panel) -> PromptSourcesOut | None:
@@ -571,6 +595,22 @@ def update_panel(
         if text:
             panel.prompt_warning = None
         update_panel_prompt(_presets(ctx, panel), session, panel, ctx.knowledge, reset=not text)
+    session.commit()
+    return panel_detail(session, ctx, panel)
+
+
+@router.put("/panels/{panel_id}/reference-choice", response_model=PanelDetailOut)
+def put_reference_choice(
+    panel_id: int, body: ReferenceChoiceIn, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
+) -> PanelDetailOut:
+    """Sélecteur de fiche de l'atelier : l'image `image_id` passe en tête des références du personnage
+    `character_id` à la prochaine génération de la case (`Panel.reference_choice`) ; `image_id` null : retour
+    à « automatique ». 422 lisible pour un personnage absent de la case ou l'image d'un autre personnage."""
+    panel = get_panel_or_404(session, panel_id)
+    try:
+        set_reference_choice(session, panel, body.character_id, body.image_id)
+    except GenerationError as exc:
+        raise FieldError("image_id" if body.image_id is not None else "character_id", str(exc)) from None
     session.commit()
     return panel_detail(session, ctx, panel)
 
@@ -1207,6 +1247,7 @@ def list_workflow_presets(ctx: AppContext = Depends(get_ctx)) -> list[WorkflowPr
             from_sketch=w.preset.from_sketch,
             with_control=w.preset.with_control,
             is_sketch=bool(defaults and defaults.workflow_sketch == w.preset.id),
+            is_cover=bool(presets.cover and presets.cover.workflow == w.preset.id),
             steps=w.preset.defaults.get("steps"),
             cfg=w.preset.cfg,
             distilled=w.preset.distilled,

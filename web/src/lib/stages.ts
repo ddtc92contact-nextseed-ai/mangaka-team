@@ -27,10 +27,35 @@ const SCREEN_LABEL: Record<string, string> = {
   personnages: "Ouvrir les fiches de la série",
 };
 
-/** Lien vers l'écran qui règle l'étape (onglet du chapitre, ou fiches de la série pour les références). */
-export function stageHref(stage: Pick<ChapterStage, "screen">, chapterId: number, projectId: number): string {
+/**
+ * Lien vers une section du chapitre qui garde la planche courante (`?page=`, lu par Atelier, Croquis, Lettrage,
+ * Production, Mise en page et Direction ; ignoré ailleurs). Sans planche courante : le lien tel quel.
+ */
+export function withPage(href: string, pageId: number | null | undefined): string {
+  if (!pageId) return href;
+  const [path, query = ""] = href.split("?");
+  const q = new URLSearchParams(query);
+  q.set("page", String(pageId));
+  return `${path}?${q.toString()}`;
+}
+
+/** Chemin d'un lien sans sa requête (`/chapitres/3/atelier?page=5` → `/chapitres/3/atelier`). */
+export function hrefPath(href: string): string {
+  return href.split("?")[0];
+}
+
+/**
+ * Lien vers l'écran qui règle l'étape (onglet du chapitre, ou fiches de la série pour les références), qui
+ * garde la planche courante du chapitre (`pageId`).
+ */
+export function stageHref(
+  stage: Pick<ChapterStage, "screen">,
+  chapterId: number,
+  projectId: number,
+  pageId?: number | null,
+): string {
   if (stage.screen === "personnages") return `/projets/${projectId}`;
-  return `/chapitres/${chapterId}/${stage.screen}`;
+  return withPage(`/chapitres/${chapterId}/${stage.screen}`, pageId);
 }
 
 export function stageLinkLabel(stage: Pick<ChapterStage, "screen">): string {

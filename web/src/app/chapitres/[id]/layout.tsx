@@ -1,18 +1,36 @@
 "use client";
 
 import Link from "next/link";
-import { useParams, usePathname } from "next/navigation";
-import type { ReactNode } from "react";
+import { useParams, usePathname, useSearchParams } from "next/navigation";
+import { Suspense, useCallback, useEffect, useState, type ReactNode } from "react";
 import { EstimateLabel } from "@/components/estimate";
 import { ChapterStatusBadge, formatPlannedDate } from "@/components/status";
 import { Alert, Loading, PageHeader } from "@/components/ui";
 import { api } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
+import { hrefPath, withPage } from "@/lib/stages";
 import { ChapterContext } from "./chapter-context";
+
+/** Une adresse `?page=` explicite devient la planche courante du chapitre (elle prime toujours). */
+function PageParamSync({ onPage }: { onPage: (id: number) => void }) {
+  const page = Number(useSearchParams().get("page")) || null;
+  useEffect(() => {
+    if (page) onPage(page);
+  }, [page, onPage]);
+  return null;
+}
 
 export default function ChapterLayout({ children }: { children: ReactNode }) {
   const id = Number(useParams<{ id: string }>().id);
   const pathname = usePathname();
+  // Planche courante, propre à ce chapitre (un autre chapitre repart sans planche).
+  const [current, setCurrent] = useState<{ chapter: number; page: number | null }>({ chapter: id, page: null });
+  const currentPageId = current.chapter === id ? current.page : null;
+  const setCurrentPageId = useCallback(
+    (page: number | null) =>
+      setCurrent((prev) => (prev.chapter === id && prev.page === page ? prev : { chapter: id, page })),
+    [id],
+  );
   const chapter = useEngineData(() => api.getChapter(id), [id]);
   const projectId = chapter.data?.project_id;
   // Étapes vitales : relues à chaque changement d'onglet (une action d'un autre écran a pu les régler).
@@ -28,6 +46,7 @@ export default function ChapterLayout({ children }: { children: ReactNode }) {
   if (!series.data) return <Loading />;
 
   const c = chapter.data;
+  // Chaque onglet garde la planche courante (`?page=`) : Atelier planche 5 → Lettrage reste sur la planche 5.
   const tabs = [
     { href: `/chapitres/${id}`, label: "Infos" },
     { href: `/chapitres/${id}/scenes`, label: "Scènes" },
@@ -38,7 +57,7 @@ export default function ChapterLayout({ children }: { children: ReactNode }) {
     { href: `/chapitres/${id}/atelier`, label: "Atelier" },
     { href: `/chapitres/${id}/lettrage`, label: "Lettrage" },
     { href: `/chapitres/${id}/production`, label: "Production" },
-  ];
+  ].map((t) => ({ ...t, href: withPage(t.href, currentPageId) }));
 
   return (
     <ChapterContext.Provider
@@ -51,8 +70,13 @@ export default function ChapterLayout({ children }: { children: ReactNode }) {
         stagesError: stages.error,
         setStages: stages.setData,
         reloadStages: stages.reload,
+        currentPageId,
+        setCurrentPageId,
       }}
     >
+      <Suspense fallback={null}>
+        <PageParamSync onPage={setCurrentPageId} />
+      </Suspense>
       <PageHeader
         title={`Chapitre ${c.number}${c.title ? ` — ${c.title}` : ""}`}
         subtitle={
@@ -68,10 +92,10 @@ export default function ChapterLayout({ children }: { children: ReactNode }) {
       />
       <nav className="mb-6 flex flex-wrap gap-1 border-b border-zinc-800" aria-label="Étapes du chapitre">
         {tabs.map((t) => {
-          const active = pathname === t.href;
+          const active = pathname === hrefPath(t.href);
           return (
             <Link
-              key={t.href}
+              key={t.label}
               href={t.href}
               aria-current={active ? "page" : undefined}
               className={`-mb-px border-b-2 px-4 py-2 text-sm transition-colors ${
