@@ -78,13 +78,16 @@ def build_llm(
     except PresetError as exc:
         raise ProviderSelectionError(str(exc)) from exc
     key = settings.deepseek_api_key.get_secret_value().strip() if settings.deepseek_api_key else None
+    model = model or settings.deepseek_model or cfg.model
+    info = cfg.model_info(model)  # None : modèle tapé à la main (« Autre… »), raisonnement deviné d'après le nom
     try:
         return DeepSeekProvider(
             api_key=key,
             base_url=settings.deepseek_base_url or cfg.base_url,
-            model=model or settings.deepseek_model or cfg.model,
-            timeout_s=cfg.timeout_s,
+            model=model,
+            timeout_s=info.timeout_s if info and info.timeout_s else cfg.timeout_s,
             temperature=cfg.temperature,
+            reasoning=info.reasoning if info else None,
         )
     except LLMError as exc:
         raise ProviderSelectionError(str(exc)) from exc
