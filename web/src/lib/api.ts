@@ -1390,6 +1390,9 @@ export interface CastMember {
   fault: "sans fiche" | "sans image" | null;
   /** Conseil non bloquant (« planche conseillée… »). */
   advice: string | null;
+  /** LoRA de la fiche (null : aucun ; le poids n'a alors pas de sens). */
+  lora_name: string | null;
+  lora_weight: number | null;
 }
 
 export interface ChapterCast {

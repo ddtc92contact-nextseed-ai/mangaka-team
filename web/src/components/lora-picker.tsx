@@ -4,6 +4,7 @@ import { useId, useMemo, useState, type KeyboardEvent } from "react";
 import { api, type LoraCatalog } from "@/lib/api";
 import type { HelpId } from "@/lib/help";
 import { useEngineData } from "@/lib/hooks";
+import { hasLoraFile, NO_LORA } from "@/lib/lora";
 import { InfoTip } from "./info-tip";
 import { Field, Input } from "./ui";
 
@@ -26,7 +27,8 @@ function matches(entry: Entry, query: string): boolean {
 
 /**
  * Choix d'un LoRA parmi ceux que ComfyUI voit (`GET /comfyui/loras`), avec son poids et ses mots
- * déclencheurs. Recherche, groupes par sous-dossier ; saisie libre quand ComfyUI est hors ligne.
+ * déclencheurs. Recherche, groupes par sous-dossier ; saisie libre quand ComfyUI est hors ligne. Sans fichier
+ * choisi, le poids n'est ni montré ni réglable : « aucun LoRA ».
  * `savedValue` : valeur enregistrée, signalée si ComfyUI ne la voit plus. Sans `onTriggerWordsChange`,
  * pas de champ de mots déclencheurs (LoRA de style : ils viennent du catalogue des presets).
  */
@@ -275,18 +277,28 @@ export function LoraPicker({
             </p>
           )}
         </div>
-        <Field label={weightLabel} htmlFor={`${id}_weight`} help={weightHelp} error={weightError}>
-          <Input
-            id={`${id}_weight`}
-            type="number"
-            step="0.05"
-            min="0"
-            max="2"
-            value={weight}
-            onChange={(e) => onWeightChange(e.target.value)}
-            aria-invalid={Boolean(weightError)}
-          />
-        </Field>
+        {hasLoraFile(value) ? (
+          <Field label={weightLabel} htmlFor={`${id}_weight`} help={weightHelp} error={weightError}>
+            <Input
+              id={`${id}_weight`}
+              type="number"
+              step="0.05"
+              min="0"
+              max="2"
+              value={weight}
+              onChange={(e) => onWeightChange(e.target.value)}
+              aria-invalid={Boolean(weightError)}
+            />
+          </Field>
+        ) : (
+          // Sans fichier, aucun LoRA n'est appliqué : pas de poids à montrer ni à régler.
+          <div className="space-y-1.5">
+            <p className="text-sm font-medium text-zinc-300">{weightLabel}</p>
+            <p className="rounded-md border border-dashed border-zinc-700 px-3 py-2 text-sm text-zinc-500" data-testid={`${id}_none`}>
+              {NO_LORA}
+            </p>
+          </div>
+        )}
       </div>
       {onTriggerWordsChange && (
         <Field
