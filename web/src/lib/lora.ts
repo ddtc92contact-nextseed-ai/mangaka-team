@@ -19,3 +19,25 @@ export function loraSummary(name: string | null | undefined, weight: number | nu
     ? `LoRA ${file}`
     : `LoRA ${file} · poids ${frNumber(weight)}`;
 }
+
+/** Flux d'une série, vu par la fiche série ou une fiche de la bibliothèque. */
+export interface LoraWorkflow {
+  name: string;
+  engine?: string | null;
+  engine_name?: string | null;
+  supports_lora?: boolean;
+}
+
+/**
+ * Avertissement des champs LoRA quand le flux de la série n'en prend pas (FLUX 3 Klein : pas de
+ * `lora_chain`) ; null quand il en prend, ou tant que le flux est inconnu. Le moteur, lui, ignore alors
+ * ces LoRA et le note sur chaque génération.
+ */
+export function loraUnsupportedNotice(workflow: LoraWorkflow | null | undefined): string | null {
+  if (!workflow || workflow.supports_lora !== false) return null;
+  const engine = workflow.engine_name || workflow.name;
+  const license = workflow.engine?.startsWith("flux")
+    ? " La licence FLUX Kommunity interdit le fine-tuning : pas de LoRA possible sur ce moteur."
+    : "";
+  return `Le flux de cette série (${engine}) ne prend pas de LoRA : les LoRA de la série et des fiches sont ignorés à la génération, et chaque génération le signale.${license}`;
+}
