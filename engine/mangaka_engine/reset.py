@@ -89,6 +89,8 @@ SERIES_TABLES = (
 # Réglages globaux des agents (« L'équipe ») et savoir-faire : seules leurs lignes propres à une série partent
 # en mode « séries » ; vidées entièrement en mode « tout ».
 GLOBAL_TABLES = (
+    # Réglages de l'atelier (« Ton nom ») : gardés par le mode « séries ».
+    "app_settings",
     "agent_profile_versions",
     "agent_profiles",
     "knowledge_chunks",

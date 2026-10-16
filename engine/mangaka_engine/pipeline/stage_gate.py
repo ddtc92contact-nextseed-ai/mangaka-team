@@ -56,6 +56,7 @@ from ..store.models import (
     Panel,
     PanelImage,
 )
+from .app_settings import author_or_default
 
 
 @dataclass(frozen=True)
@@ -518,7 +519,7 @@ def record_decision(
         chapter_number=chapter.number,
         stage=state.key,
         decision=decision,
-        author=(author or "").strip()[:120],
+        author=author_or_default(session, author),
         note=(note or "").strip()[:2000],
         faults=state.faults,
         total=state.total,

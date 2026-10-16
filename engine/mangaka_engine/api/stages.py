@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..pipeline import stage_gate as sg
+from ..pipeline.app_settings import author_or_default
 from ..pipeline.journal import record_event
 from ..store.models import Chapter, Page
 from .deps import get_session
@@ -99,8 +100,9 @@ def override_stage(
         raise FieldError("stage", f"{state.stage.label} : étape déjà forcée")
     if state.complete:
         raise FieldError("stage", f"{state.stage.label} : étape déjà réglée, rien à forcer")
-    sg.record_decision(session, chapter, state, "forced", author=body.author, note=body.note)
-    who = f" par {body.author}" if body.author else ""
+    author = author_or_default(session, body.author)  # sinon « Ton nom » des Réglages
+    sg.record_decision(session, chapter, state, "forced", author=author, note=body.note)
+    who = f" par {author}" if author else ""
     record_event(
         session,
         verdict="validated",

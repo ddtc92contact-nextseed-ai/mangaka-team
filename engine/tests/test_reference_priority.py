@@ -261,3 +261,50 @@ def test_generation_records_dropped_references_tone_and_tonality(make_client: Ca
     tone = img["qc"]["layers"]["detectors"]["tone"]
     assert tone["checked"] is True and tone["too_dark"] is False
     assert 0 <= tone["dark"] < TONE.max_dark and tone["max_dark"] == TONE.max_dark
+
+
+# --- QC : couleur sur une série noir et blanc (#199) ------------------------------------------------
+def _sepia_line_art() -> bytes:
+    """Encrage clair sur papier légèrement doré (« sable doré ») : ~9 % de saturation moyenne."""
+    img = Image.open(io.BytesIO(_white_line_art())).convert("RGB")
+    tint = Image.new("RGB", img.size, (250, 232, 200))
+    return _png(Image.blend(img, tint, 0.9))
+
+
+def test_colour_on_a_black_and_white_series_is_a_warning_never_a_rejection() -> None:
+    assert TONE.max_saturation == 0.03
+    skip = QCExecutor._color_skip(_panel("nb-trames"), QC, REG)
+    assert skip is None
+    tone = check_tone(_sepia_line_art(), TONE, color_skip=skip)
+    assert tone.color_checked and tone.too_colorful and (tone.saturation or 0) > TONE.max_saturation
+    res = apply_tone(LayerResult("done", score=100), tone, QC.detectors.rules.too_dark)
+    assert res.score == 100 and res.at_least is None  # avertissement : ni pénalité ni verdict minimal
+    [warning] = res.reasons
+    assert warning.startswith("Couleur sur une série noir et blanc : ") and warning.endswith(
+        " de saturation, cible ≤ 3 %"
+    )
+    assert res.extra["tone"]["too_colorful"] is True and res.extra["tone"]["max_saturation"] == 0.03
+    # Gris neutre : sous le seuil, rien.
+    plain = check_tone(_white_line_art(), TONE)
+    assert plain.color_checked and not plain.too_colorful and plain.saturation == 0
+    assert apply_tone(LayerResult("done", score=100), plain, QC.detectors.rules.too_dark).reasons == []
+
+
+def test_colour_series_is_never_checked_for_saturation() -> None:
+    skip = QCExecutor._color_skip(_panel("couleur"), QC, REG)
+    assert skip is not None and "rendu couleur" in skip
+    tone = check_tone(_sepia_line_art(), TONE, skip=QCExecutor._tone_skip(_panel("couleur"), QC, REG), color_skip=skip)
+    assert not tone.color_checked and tone.saturation is None and not tone.too_colorful
+    assert apply_tone(LayerResult("done", score=100), tone, QC.detectors.rules.too_dark).reasons == []
+
+
+def test_night_scenes_keep_their_dark_exemption_but_not_the_colour_one() -> None:
+    panel = _panel("nb-encre", "Nuit sans lune, lumière chaude des lanternes")
+    tone = check_tone(
+        _sepia_line_art(),
+        TONE,
+        skip=QCExecutor._tone_skip(panel, QC, REG),
+        color_skip=QCExecutor._color_skip(panel, QC, REG),
+    )
+    assert not tone.checked and tone.dark is None  # sombre : exemptée
+    assert tone.color_checked and tone.too_colorful  # couleur : contrôlée

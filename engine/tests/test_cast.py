@@ -118,6 +118,25 @@ def test_cast_lists_every_speaker_present_offscreen_and_named(client: TestClient
     assert out["without_card"] == ["le garde", "des passants", "la serveuse"] and out["without_image"] == ["Mina"]
 
 
+def test_cast_shows_a_card_lora_only_when_it_has_a_file(client: TestClient) -> None:
+    """Sans fichier, le poids (0,8 par défaut) n'est pas transmis : la distribution dit « aucun LoRA » (#199)."""
+    d = _setup(client)
+    lora = "personnages/aiko_v1.safetensors"
+    _ok(client.patch(f"/characters/{d['mina']['id']}", json={"lora_name": lora, "lora_weight": 0.65}))
+    members = _cast(client, d["chapter"]["id"])
+    assert (members["Aiko"]["lora_name"], members["Aiko"]["lora_weight"]) == (None, None)
+    assert (members["Mina"]["lora_name"], members["Mina"]["lora_weight"]) == (lora, 0.65)
+    assert members["le garde"]["lora_name"] is None and members["le garde"]["lora_weight"] is None
+
+
+def test_crowd_mark_is_signed_by_the_default_author(client: TestClient) -> None:
+    d = _setup(client)
+    _ok(client.put("/settings", json={"author_name": "Ouro"}))
+    out = _ok(client.post(f"/chapters/{d['chapter']['id']}/cast/crowds", json={"name": "des passants"}))
+    [mark] = out["marks"]
+    assert mark["author"] == "Ouro"
+
+
 def test_crowds_are_plural_and_nameless() -> None:
     for crowd in ("des passants", "la foule", "Des passants", "les gardes", "le public", "une foule de badauds"):
         assert is_crowd(crowd), crowd

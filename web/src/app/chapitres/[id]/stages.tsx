@@ -6,6 +6,7 @@ import { Modal } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { Alert, Button, ButtonLink, Card, Field, Input, Loading, Textarea } from "@/components/ui";
 import { api, fullErrorMessage, type ChapterStage } from "@/lib/api";
+import { useEngineData } from "@/lib/hooks";
 import {
   blockingMessage,
   blockingStages,
@@ -16,24 +17,6 @@ import {
   type StageAction,
 } from "@/lib/stages";
 import { useChapter } from "./chapter-context";
-
-const AUTHOR_KEY = "mangaka.author";
-
-export function readAuthor(): string {
-  try {
-    return window.localStorage.getItem(AUTHOR_KEY) ?? "";
-  } catch {
-    return "";
-  }
-}
-
-export function saveAuthor(author: string) {
-  try {
-    window.localStorage.setItem(AUTHOR_KEY, author);
-  } catch {
-    // stockage indisponible : le nom sera redemandé
-  }
-}
 
 function StageIcon({ stage }: { stage: ChapterStage }) {
   if (stage.complete)
@@ -58,7 +41,10 @@ function StageIcon({ stage }: { stage: ChapterStage }) {
 /** « Passer outre » une étape précise : nom de l'auteur et raison, enregistrés dans le journal. */
 function OverrideDialog({ stage, onClose }: { stage: ChapterStage | null; onClose: () => void }) {
   const { chapter, setStages } = useChapter();
-  const [author, setAuthor] = useState(readAuthor);
+  // « Ton nom » des Réglages par défaut (le moteur l'applique aussi si le champ reste vide), modifiable ici.
+  const settings = useEngineData(() => api.getAppSettings(), []);
+  const [typed, setAuthor] = useState<string | null>(null);
+  const author = typed ?? settings.data?.author_name ?? "";
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -70,10 +56,10 @@ function OverrideDialog({ stage, onClose }: { stage: ChapterStage | null; onClos
     setError(null);
     try {
       const next = await api.overrideStage(chapter.id, stage.key, { author: author.trim(), note: note.trim() });
-      saveAuthor(author.trim());
       setStages(next);
       toast(`${stage.label} : étape forcée`, "info");
       setNote("");
+      setAuthor(null);
       onClose();
     } catch (e) {
       setError(fullErrorMessage(e));
@@ -106,7 +92,7 @@ function OverrideDialog({ stage, onClose }: { stage: ChapterStage | null; onClos
             le journal et visible dans les statistiques.
           </p>
           {error && <Alert>{error}</Alert>}
-          <Field label="Ton nom" htmlFor="stage-override-author" hint="Gardé sur ce navigateur pour la prochaine fois.">
+          <Field label="Ton nom" htmlFor="stage-override-author" hint="Par défaut, le nom saisi dans les Réglages.">
             <Input id="stage-override-author" value={author} maxLength={120} onChange={(e) => setAuthor(e.target.value)} />
           </Field>
           <Field label="Pourquoi (facultatif)" htmlFor="stage-override-note">

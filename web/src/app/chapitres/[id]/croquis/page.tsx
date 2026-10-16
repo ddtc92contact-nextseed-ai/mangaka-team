@@ -23,7 +23,7 @@ import { useEngineData } from "@/lib/hooks";
 import { nameCounts } from "@/lib/name";
 import { buildPanelViews, type PanelView } from "../atelier/page-canvas";
 import { useChapter, useRememberPage, useWantedPage } from "../chapter-context";
-import { readAuthor, StageBanner } from "../stages";
+import { StageBanner } from "../stages";
 import { StepAlert } from "../step-alert";
 import { DraftBoard, NameBar } from "./draft-board";
 import { NameReader } from "./name-reader";
@@ -197,7 +197,7 @@ function SketchTriage() {
   // --- name : validation par page et corrections rapides ---
   const validateName = (p: PageData) =>
     run(async () => {
-      await api.validateName(p.id, readAuthor());
+      await api.validateName(p.id); // signée par « Ton nom » des Réglages
       reloadStages();
       return { text: `Name de la page ${p.number} validée : ses croquis retenus serviront au propre.`, queued: false };
     });

@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { toneSummary } from "./qc.ts";
+import { colorSummary, toneSummary } from "./qc.ts";
 
 test("tonalité mesurée : les deux parts et leurs cibles", () => {
   assert.equal(
@@ -17,4 +17,18 @@ test("tonalité non vérifiée (rendu couleur) ou absente", () => {
     "Tonalité non vérifiée : rendu couleur",
   );
   assert.equal(toneSummary(undefined), null);
+});
+
+test("couleur sur une série N&B : saturation et cible, rien quand elle n'est pas vérifiée", () => {
+  const base = { checked: true, dark: 0.2, black: 0.1, max_dark: 0.45, max_black: 0.25, too_dark: false, message: null };
+  assert.equal(
+    colorSummary({ ...base, color_checked: true, saturation: 0.095, max_saturation: 0.03, too_colorful: true }),
+    "Couleur sur une série noir et blanc : 9,5 % de saturation (cible ≤ 3 %)",
+  );
+  assert.equal(
+    colorSummary({ ...base, color_checked: true, saturation: 0.012, max_saturation: 0.03, too_colorful: false }),
+    "Couleur : 1,2 % de saturation (cible ≤ 3 %)",
+  );
+  assert.equal(colorSummary({ ...base, color_checked: false, saturation: null, color_message: "rendu couleur" }), null);
+  assert.equal(colorSummary(base), null); // ancien QC, sans mesure de couleur
 });

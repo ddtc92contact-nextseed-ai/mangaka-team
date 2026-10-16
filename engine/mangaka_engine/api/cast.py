@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from ..pipeline import cast as ca
+from ..pipeline.app_settings import author_or_default
 from ..pipeline.art_direction import STEP as DIRECTION_STEP
 from ..pipeline.generation import GenerationError
 from ..pipeline.journal import record_event
@@ -72,6 +73,8 @@ def cast_out(chapter: Chapter, cast: ca.ChapterCast) -> ChapterCastOut:
                 mark=_mark_out(m.mark) if m.mark else None,
                 fault=m.fault,  # type: ignore[arg-type]
                 advice=m.advice,
+                lora_name=m.lora_name,
+                lora_weight=m.lora_weight,
             )
             for m in cast.members
         ],
@@ -117,6 +120,7 @@ def add_crowd_mark(session: Session, chapter: Chapter, name: str, author: str = 
         )
     if member.mark is not None:
         raise FieldError("name", f"« {member.name} » est déjà marqué « foule sans fiche »")
+    author = author_or_default(session, author)  # sinon « Ton nom » des Réglages
     session.add(
         ChapterCrowdMark(
             project_id=chapter.project_id,
@@ -158,7 +162,7 @@ def revoke_crowd(
         raise HTTPException(status_code=404, detail="Marque introuvable")
     if mark.revoked_at is not None:
         raise FieldError("mark", f"« {mark.name} » : marque déjà levée")
-    author = body.author if body else ""
+    author = author_or_default(session, body.author if body else "")
     mark.revoked_at = utcnow()
     mark.revoked_by = author
     record_event(

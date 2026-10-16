@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session
 
 from ..presets import PresetRegistry
 from ..store.models import Bubble, ImageKind, Page, PageNameValidation, Panel, utcnow
+from .app_settings import author_or_default
 from .pages import layout_page
 from .sketch import has_final, latest_sketch, validate_sketch, validated_sketch
 
@@ -90,7 +91,7 @@ def validate_page_name(session: Session, page: Page, *, author: str = "") -> Pag
         validation = PageNameValidation(page_id=page.id, key="")
         page.name_validation = validation
     validation.key = page_key(page)
-    validation.author = (author or "").strip()[:120]
+    validation.author = author_or_default(session, author)
     validation.created_at = utcnow()
     session.flush()
     return validation

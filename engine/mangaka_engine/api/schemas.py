@@ -2126,6 +2126,8 @@ class CastMemberOut(BaseModel):
     mark: CrowdMarkOut | None
     fault: Literal["sans fiche", "sans image"] | None
     advice: str | None
+    lora_name: str | None = None  # LoRA de la fiche ; None : aucun (poids non montré)
+    lora_weight: float | None = None
 
 
 class ChapterCastOut(BaseModel):
