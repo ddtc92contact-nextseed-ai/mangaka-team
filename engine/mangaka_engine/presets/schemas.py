@@ -1210,6 +1210,9 @@ class CameraLoraCatalog(_Strict):
     main_view: str | None = None
     direction_angles: dict[str, AngleTarget] = Field(default_factory=dict)
     prompts: CameraPrompts = Field(default_factory=CameraPrompts)
+    # « Changer l'angle » d'une case : termes d'angle ou d'élévation (anglais) retirés de la scène reprise, en
+    # plus du vocabulaire `angles` et des `camera_terms` (image_prompt.yaml) des `direction_angles`.
+    scene_angle_terms: list[str] = Field(default_factory=list)
     # « Nouvel angle » d'une fiche : négatif par sorte (character, object, decor, vehicle, creature), taille ≈
     # side × side.
     sheet_negatives: dict[LibraryKindName, str] = Field(default_factory=dict)

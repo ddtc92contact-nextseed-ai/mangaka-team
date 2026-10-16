@@ -10,7 +10,7 @@ import { Alert, Button, ButtonLink, Card, EmptyState, Loading, Select } from "@/
 import { api, fullErrorMessage, type BubbleUpdate, type Intensity, type SfxUpdate } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
 import { PAGE_KINDS } from "@/lib/script";
-import { useChapter } from "../chapter-context";
+import { useChapter, useRememberPage, useWantedPage } from "../chapter-context";
 import { StepAlert } from "../step-alert";
 import { BubbleEditor } from "./bubble-editor";
 import { ExportPanel } from "./export-panel";
@@ -35,8 +35,9 @@ function Lettering() {
   const params = useSearchParams();
   const pages = useEngineData(() => api.listPages(chapter.id), [chapter.id]);
   const list = useMemo(() => pages.data ?? [], [pages.data]);
-  const pageParam = Number(params.get("page")) || null;
+  const pageParam = useWantedPage(Number(params.get("page")) || null);
   const page = list.find((p) => p.id === pageParam) ?? list.find((p) => p.layout && p.panels.length) ?? list[0] ?? null;
+  useRememberPage(page?.id);
   const ready = Boolean(page && page.layout && page.panels.length);
   const lettering = useEngineData(
     () => (page && ready ? api.getLettering(page.id) : Promise.resolve(null)),

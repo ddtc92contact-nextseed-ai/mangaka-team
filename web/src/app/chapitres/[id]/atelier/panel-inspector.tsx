@@ -26,6 +26,7 @@ import {
   type PrintInfo,
   type QueueItem,
   type QCStatus,
+  type ReferenceChoice,
   type VisionMode,
   type WorkflowPreset,
 } from "@/lib/api";
@@ -35,6 +36,7 @@ import { dpiLabel, dpiTitle } from "@/lib/finishing";
 import { useJob } from "@/lib/jobs";
 import { LIBRARY_KINDS } from "@/lib/library";
 import { describeUsedReference, droppedReferencesNote } from "@/lib/used-references";
+import { workshopPresets } from "@/lib/workflow-list";
 import { useChapter } from "../chapter-context";
 import { ABBlock } from "./ab-block";
 import { CastBlock } from "./cast-block";
@@ -44,6 +46,7 @@ import { CropBlock } from "./crop-editor";
 import { DialogBlock } from "./dialog-block";
 import { PanelKnowledgeBlock } from "./knowledge-block";
 import { PromptSourcesBlock } from "./prompt-sources";
+import { ReferenceChooser } from "./reference-chooser";
 import type { PanelView } from "./page-canvas";
 import { PanelQC } from "./panel-qc";
 import { RepairDialog, type RepairPreset } from "./repair-dialog";
@@ -381,7 +384,15 @@ export function PanelInspector({
                 onChanged();
               }}
             />
-            {refsImage && <UsedReferences image={refsImage} />}
+            {refsImage && <UsedReferences image={refsImage} choices={d.reference_choices} />}
+            <ReferenceChooser
+              detail={d}
+              disabled={busy}
+              onSaved={(next) => {
+                detail.setData(next);
+                onChanged();
+              }}
+            />
           </div>
 
           {(running || pending.length > 0) && (
@@ -539,7 +550,7 @@ export function PanelInspector({
               <Field label="Workflow" htmlFor="preset" help="atelier.workflow">
                 <Select id="preset" value={d.generation_preset ?? ""} onChange={(e) => setPreset(e.target.value)} disabled={busy || !presets}>
                   <option value="">Automatique ({resolvedName})</option>
-                  {(presets ?? []).filter((p) => (p.role ?? "generation") === "generation").map((p) => (
+                  {workshopPresets(presets ?? [], d.generation_preset).map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.name}
                       {p.reference_slots ? ` · ${p.reference_slots} réf.` : ""}
@@ -863,8 +874,10 @@ function PrintSection({
 }
 
 /** Images de référence envoyées au workflow pour une version (personnages, puis décor, puis objets) et fiches écartées. */
-function UsedReferences({ image }: { image: PanelImage }) {
+function UsedReferences({ image, choices }: { image: PanelImage; choices?: ReferenceChoice[] }) {
   const refs = image.params.reference_images ?? [];
+  // Nom de la fiche d'un personnage (« portrait.png (image 2) ») : montre quelle image est partie en tête.
+  const labels = new Map((choices ?? []).flatMap((c) => c.images.map((i) => [i.image_id, i.label] as const)));
   const dropped = droppedReferencesNote(image.params.dropped_references, LIBRARY_KINDS);
   return (
     <div className="text-xs text-zinc-400" data-testid="used-references">
@@ -878,6 +891,9 @@ function UsedReferences({ image }: { image: PanelImage }) {
             return (
               <li key={`${r.image_id}-${i}`} className={`rounded px-2 py-0.5 ${d.badge}`} data-kind={r.kind ?? "character"}>
                 {r.slot ?? i + 1}. {d.name}
+                {(r.kind ?? "character") === "character" && labels.has(r.image_id) && (
+                  <span className="opacity-80"> — {labels.get(r.image_id)}</span>
+                )}
                 <span className="opacity-70"> · {d.kindLabel}</span>
               </li>
             );

@@ -3,7 +3,16 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import type { ChapterStage } from "./api.ts";
-import { blockedReason, blockingMessage, blockingStages, decisionLabel, stageHref, stageLinkLabel } from "./stages.ts";
+import {
+  blockedReason,
+  blockingMessage,
+  blockingStages,
+  decisionLabel,
+  hrefPath,
+  stageHref,
+  stageLinkLabel,
+  withPage,
+} from "./stages.ts";
 
 function stage(over: Partial<ChapterStage>): ChapterStage {
   return {
@@ -51,6 +60,16 @@ test("lien vers l'écran qui règle l'étape", () => {
   assert.equal(stageHref({ screen: "direction" }, 12, 3), "/chapitres/12/direction");
   assert.equal(stageHref({ screen: "personnages" }, 12, 3), "/projets/3");
   assert.equal(stageLinkLabel({ screen: "lettrage" }), "Aller au Lettrage");
+});
+
+test("le lien d'étape recopie la planche courante (Atelier planche 5 → Lettrage reste sur la planche 5)", () => {
+  assert.equal(stageHref({ screen: "lettrage" }, 12, 3, 5), "/chapitres/12/lettrage?page=5");
+  assert.equal(stageHref({ screen: "direction" }, 12, 3, null), "/chapitres/12/direction");
+  assert.equal(stageHref({ screen: "personnages" }, 12, 3, 5), "/projets/3"); // fiches de la série : pas de planche
+  assert.equal(withPage("/chapitres/12/atelier?case=9", 5), "/chapitres/12/atelier?case=9&page=5");
+  assert.equal(withPage("/chapitres/12/atelier?page=2", 5), "/chapitres/12/atelier?page=5");
+  assert.equal(withPage("/chapitres/12/scenario", undefined), "/chapitres/12/scenario");
+  assert.equal(hrefPath("/chapitres/12/lettrage?page=5"), "/chapitres/12/lettrage");
 });
 
 test("décision affichée : validée, forcée, levée", () => {

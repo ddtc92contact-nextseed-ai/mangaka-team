@@ -96,6 +96,28 @@ sheet_negatives:
   vehicle: "person, people, human, character, pilot, driver, passenger, face, hands, figure, crowd, scenery, text"
   # Une créature a un visage et un corps : seuls les humains et les autres créatures sont interdits.
   creature: "human, person, people, rider, owner, extra creatures, second animal, crowd, text"
+
+# « Changer l'angle » d'une case : la scène reprise de la version de départ garde son ancien angle (« low-angle
+# view looking up »), qui contredit la nouvelle vue mise en tête : le modèle gardait le cadrage (16/10/2026).
+# Avant l'envoi, la scène perd tout le vocabulaire d'angle et d'élévation : celui des `angles` ci-dessus (et
+# chacun de ses morceaux : « front view », « eye-level shot »), les termes de cadrage (`camera_terms`
+# d'image_prompt.yaml) des `direction_angles`, la phrase « Camera angle: … » des morceaux d'image_prompt.yaml,
+# et les termes ci-dessous. La nouvelle vue, elle, ouvre le prompt (mot déclencheur puis caméra).
+scene_angle_terms:
+  - bird's-eye view
+  - bird's eye view
+  - worm's-eye view
+  - worm's eye view
+  - aerial view
+  - overhead view
+  - overhead shot
+  - top-down view
+  - high-angle
+  - low-angle
+  - high angle
+  - low angle
+  - eye-level
+  - eye level
 # Taille de la nouvelle vue : même ratio que la vue de départ, environ side × side pixels (multiples de 16).
 sheet_side: 1024
 

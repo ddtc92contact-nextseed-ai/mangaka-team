@@ -6,6 +6,8 @@
   (`tiers`) n'est pas ajouté : la raison est rendue (« Disponible en palier Qualité »), jamais ignorée
   en silence ;
 - `angle_prompt` : prompt d'une génération d'angle, morceaux de `prompts` du catalogue ;
+- `angle_vocabulary` / `strip_angle_terms` : la scène reprise par « Changer l'angle » perd son ancien angle
+  (il contredirait la nouvelle vue mise en tête) ;
 - `direction_target` / `closest_view` : vue de référence d'une fiche la plus proche de l'angle de la
   direction artistique d'une case (vues étiquetées par leur angle ; repli : la vue principale).
 
@@ -14,8 +16,9 @@ Aucun nom de fichier ni mot déclencheur ici : tout vient du catalogue.
 
 from __future__ import annotations
 
+import re
 import string
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -153,6 +156,53 @@ def angle_prompt(parts: Sequence[str], plan: CameraPlan, **values: str) -> str:
     if prefix and not text.startswith(prefix):
         text = f"{prefix}. {text}".strip()  # gabarit sans $trigger $camera en tête : le préfixe ouvre quand même
     return text
+
+
+def angle_vocabulary(catalog: CameraLoraCatalog, camera_terms: Mapping[str, str]) -> list[str]:
+    """Termes d'angle et d'élévation (anglais) du catalogue, les plus longs d'abord : caméra de chaque angle et
+    ses morceaux (« front view », « high-angle shot »), termes de cadrage (`camera_terms` d'image_prompt.yaml)
+    des angles de la direction artistique (`direction_angles`), puis `scene_angle_terms`."""
+    terms = {_term_key(k): v for k, v in camera_terms.items()}
+    found: set[str] = set()
+    sources = [
+        *(a.camera for a in catalog.angles),
+        *(terms[k] for k in map(_term_key, catalog.direction_angles) if k in terms),
+        *catalog.scene_angle_terms,
+    ]
+    for source in sources:
+        for term in (source, *source.split(",")):
+            term = " ".join(term.split()).strip(" .;:")
+            if term:
+                found.add(term.casefold())
+    return sorted(found, key=lambda t: (-len(t), t))
+
+
+def _term_key(value: str) -> str:
+    return " ".join(value.strip().casefold().replace("’", "'").split())
+
+
+# Préposition et article qui partent avec le terme d'angle (« seen in a low-angle shot », « at eye level »).
+_LEAD = r"(?:(?:seen\s+|shot\s+|viewed\s+)?(?:in|from|at|with|as)\s+)?(?:(?:a|an|the)\s+)?"
+
+
+def strip_angle_terms(text: str, terms: Sequence[str], labels: Sequence[str] = ()) -> str:
+    """Retire d'une scène tout le vocabulaire d'angle (« Changer l'angle » : la nouvelle vue est mise en tête,
+    l'ancienne la contredirait) : les phrases ouvertes par un des `labels` (« Camera angle: »), puis chaque
+    terme (`angle_vocabulary`), et la ponctuation laissée orpheline. Sans casse."""
+    out = text
+    for label in labels:
+        if label.strip():
+            out = re.sub(re.escape(label.strip()) + r"[^.]*\.?", " ", out, flags=re.IGNORECASE)
+    for term in sorted({t for t in terms if t.strip()}, key=len, reverse=True):
+        pattern = r"(?<![\w-])" + _LEAD + r"\s*".join(re.escape(w) for w in term.split()) + r"(?![\w-])"
+        out = re.sub(pattern, " ", out, flags=re.IGNORECASE)
+    out = re.sub(r"\s+", " ", out)
+    out = re.sub(r"\s+([,.;:])", r"\1", out)  # « Aiko , » → « Aiko, »
+    out = re.sub(r"([,;:])(?:\s*[,;:])+", r"\1", out)  # « , , » → « , »
+    out = re.sub(r"[,;:]+\s*\.", ".", out)  # « , . » → « . »
+    out = re.sub(r"(^|\.)\s*[,;:]+\s*", r"\1 ", out)  # « . , Aiko » → « . Aiko »
+    out = re.sub(r"\.(?:\s*\.)+", ".", out)  # « . . » → « . »
+    return out.strip(" ,;:").lstrip(". ").strip()
 
 
 # --- vue de référence la plus proche de l'angle de la case --------------------------------
