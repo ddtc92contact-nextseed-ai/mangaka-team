@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Alert, Button, Card, PageHeader } from "@/components/ui";
+import { useToast } from "@/components/toast";
+import { Alert, Button, Card, Field, Input, PageHeader } from "@/components/ui";
 import { api, fullErrorMessage, type LibraryResult, type OrphansPreview, type ResetResult, type TidyResult } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
 import { RESET_WORD, isResetConfirmed, resetSummary } from "@/lib/reset";
@@ -12,11 +13,85 @@ export default function SettingsPage() {
     <>
       <PageHeader title="Réglages" subtitle="Réglages de l'atelier." />
       <div className="space-y-6">
+        <AuthorCard />
         <LibraryCard />
         <TidyCard />
         <ResetCard />
       </div>
     </>
+  );
+}
+
+/** « Ton nom » : stocké par le moteur, il signe par défaut les validations et décisions d'étape (garde d'étapes,
+ * scènes, name, foules sans fiche). Toujours modifiable dans la boîte de dialogue « Passer outre ». */
+function AuthorCard() {
+  const settings = useEngineData(() => api.getAppSettings(), []);
+  const [typed, setTyped] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const toast = useToast();
+  const saved = settings.data?.author_name ?? "";
+  const value = typed ?? saved;
+  const dirty = value.trim() !== saved;
+
+  async function save() {
+    setBusy(true);
+    setError(null);
+    try {
+      const out = await api.saveAppSettings({ author_name: value.trim() });
+      settings.setData(out);
+      setTyped(null);
+      toast(out.author_name ? `Nom enregistré : ${out.author_name}` : "Nom effacé");
+    } catch (err) {
+      setError(fullErrorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card data-testid="author-card">
+      <h2 className="mb-2 font-semibold text-zinc-100">Ton nom</h2>
+      <form
+        className="flex flex-wrap items-end gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void save();
+        }}
+      >
+        <div className="min-w-56 flex-1">
+          <Field label="Nom affiché sur les validations" htmlFor="settings-author">
+            <Input
+              id="settings-author"
+              value={value}
+              maxLength={120}
+              placeholder="Ex. David"
+              disabled={settings.loading && !settings.data}
+              onChange={(e) => setTyped(e.target.value)}
+              data-testid="settings-author"
+            />
+          </Field>
+        </div>
+        <Button type="submit" disabled={busy || !dirty || !settings.data} data-testid="settings-author-save">
+          {busy ? "Enregistrement…" : "Enregistrer"}
+        </Button>
+      </form>
+      <p className="mt-2 text-sm text-zinc-400">
+        L&apos;atelier est local et sans compte : ce nom signe par défaut chaque validation et décision d&apos;étape
+        (scènes, name, foules sans fiche, passer-outre). Il reste modifiable au cas par cas dans la boîte de dialogue
+        « Passer outre ».
+      </p>
+      {settings.error && (
+        <div className="mt-3">
+          <Alert>Réglages illisibles : {settings.error}</Alert>
+        </div>
+      )}
+      {error && (
+        <div className="mt-3">
+          <Alert>{error}</Alert>
+        </div>
+      )}
+    </Card>
   );
 }
 

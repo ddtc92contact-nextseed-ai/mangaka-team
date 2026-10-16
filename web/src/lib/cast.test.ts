@@ -21,6 +21,8 @@ function member(name: string, over: Partial<CastMember> = {}): CastMember {
     mark: null,
     fault: "sans fiche",
     advice: null,
+    lora_name: null,
+    lora_weight: null,
     ...over,
   };
 }

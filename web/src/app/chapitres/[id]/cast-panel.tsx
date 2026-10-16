@@ -17,10 +17,10 @@ import {
   type CharacterDraft,
 } from "@/lib/api";
 import { castCounts, castFaultLabel, REFERENCE_LABELS } from "@/lib/cast";
+import { loraSummary } from "@/lib/lora";
 import { useEngineData } from "@/lib/hooks";
 import { entryHref } from "@/lib/library";
 import { useChapter } from "./chapter-context";
-import { readAuthor } from "./stages";
 
 const CHIP = "inline-flex items-center rounded px-1.5 py-0.5 text-[11px] leading-4";
 
@@ -170,13 +170,13 @@ function CastRow({
     });
   const mark = () =>
     onRun(async () => {
-      onChanged(await api.markCrowd(chapter.id, m.name, readAuthor()));
+      onChanged(await api.markCrowd(chapter.id, m.name));
       toast(`« ${m.name} » : foule sans fiche`);
     });
   const unmark = () =>
     onRun(async () => {
       if (!m.mark) return;
-      onChanged(await api.revokeCrowd(chapter.id, m.mark.id, readAuthor()));
+      onChanged(await api.revokeCrowd(chapter.id, m.mark.id));
       toast(`« ${m.name} » redevient un intervenant à régler`);
     });
 
@@ -198,6 +198,11 @@ function CastRow({
             <span className={`${CHIP} bg-sky-500/15 text-sky-200`}>foule sans fiche</span>
           ) : (
             <span className={`${CHIP} bg-amber-500/20 text-amber-200`}>⚠ sans fiche</span>
+          )}
+          {m.character_id !== null && (
+            <span className={`${CHIP} bg-zinc-800 text-zinc-400`} data-testid="cast-lora">
+              {loraSummary(m.lora_name, m.lora_weight)}
+            </span>
           )}
           {m.fault && (
             <span className="text-xs text-amber-300" data-testid="cast-fault">

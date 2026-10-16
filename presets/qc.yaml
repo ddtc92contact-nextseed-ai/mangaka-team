@@ -60,6 +60,9 @@ detectors:
     black_below: 32     # … et « noir pur »
     max_dark: 0.45      # part maximale de pixels sombres
     max_black: 0.25     # part maximale de noir pur
+    # Saturation moyenne maximale d'un rendu N&B (avertissement seul, même en scène de nuit). Relevé du
+    # 16/10/2026 (OSU, ch. 6) : médiane ~1 %, 20 images sur 102 au-delà de 3 % (pire : 9,5 %).
+    max_saturation: 0.03
     monochrome_only: true   # rendus noir et blanc seulement (pas les packs couleur)
     # Ambiance de la direction artistique d'une scène de nuit ou sombre : tonalité non vérifiée.
     skip_ambiance_keywords: [nuit, nocturne, night, sombre, obscur, obscurite, tenebres, penombre, dark, darkness]

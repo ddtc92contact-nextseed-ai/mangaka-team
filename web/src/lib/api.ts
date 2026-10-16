@@ -446,6 +446,12 @@ export interface QCTone {
   max_black: number | null;
   too_dark: boolean;
   message: string | null;
+  /** Saturation moyenne (0-1) d'un rendu noir et blanc, vérifiée même en scène de nuit (absente des anciens QC). */
+  color_checked?: boolean;
+  saturation?: number | null;
+  max_saturation?: number | null;
+  too_colorful?: boolean;
+  color_message?: string | null;
 }
 
 /** Détail du dernier QC d'une version. */
@@ -1384,6 +1390,9 @@ export interface CastMember {
   fault: "sans fiche" | "sans image" | null;
   /** Conseil non bloquant (« planche conseillée… »). */
   advice: string | null;
+  /** LoRA de la fiche (null : aucun ; le poids n'a alors pas de sens). */
+  lora_name: string | null;
+  lora_weight: number | null;
 }
 
 export interface ChapterCast {
@@ -3247,7 +3256,14 @@ export function statsQuery(filter: StatsFilter, extra: Record<string, string> = 
   return s ? `?${s}` : "";
 }
 
+/** Réglages de l'atelier, stockés par le moteur : « Ton nom » signe par défaut les validations et décisions. */
+export interface AppSettings {
+  author_name: string;
+}
+
 export const api = {
+  getAppSettings: () => request<AppSettings>("/settings"),
+  saveAppSettings: (body: AppSettings) => request<AppSettings>("/settings", json("PUT", body)),
   health: async () => {
     const health = await request<Health>("/health");
     // Un autre service sur le port du moteur répondrait 200 sans ce contenu : on le traite comme hors ligne.
