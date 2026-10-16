@@ -37,9 +37,9 @@ system: |
   long, concrete and visual paragraph in $language_name describing the front cover illustration of a manga
   volume: a single striking full-colour image, never a comic page. Follow this order:
   0. Open the paragraph with the cover sentence, copied exactly as given ($style_lead).
-  1. Then the reference roles, one sentence per image that is sent, in slot order, citing it as <imageN>,
-     for example: "<image1> is the identity reference for Kaito: keep his face, hair and outfit; ignore
-     its pose, framing and background." Cite only the images listed ($image_tags).
+  1. Never write a reference role sentence such as "<image1> is the identity reference for Kaito: keep…":
+     the studio puts one role sentence per image that is sent right after the cover sentence itself.
+     Cite only the images listed ($image_tags), never another one.
   2. The characters chosen for the cover, each by exact name, with a dynamic, iconic pose, a clear
      expression and their place in the frame. The characters fill the image outside $clear_zone.
   3. The background and setting that tell what the volume is about, walked through with positional
@@ -67,7 +67,8 @@ user: |
   Characters on the cover (name them all, exactly as written):
   $characters
 
-  Reference images sent to the model with this prompt (define these roles first, in this order):
+  Reference images sent to the model with this prompt (the studio writes these role sentences after the
+  cover sentence: never write them yourself):
   $references
 
   Series cover charter (follow it):

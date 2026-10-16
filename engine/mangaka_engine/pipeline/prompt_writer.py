@@ -6,12 +6,14 @@ en anglais) : le LLM reçoit les données structurées de la case (`PromptBrief`
 termes de cadrage anglais, action de la direction artistique, description, lieu, mise en scène,
 personnages et leurs traits, décor, objets, ambiance, repères de la bible, `$style`, images de
 référence et leur rôle) et rend UN long paragraphe mis en scène, traduit dans la langue du preset
-(`presets/prompts/redacteur-image.yaml`, anglais par défaut), qui cite chaque image de référence par
-`<imageN>` et définit leurs rôles en tête.
+(`presets/prompts/redacteur-image.yaml`, anglais par défaut). Les phrases de rôle des images
+(« <image1> is the identity reference for Aiko: keep… ») ne sont pas du rédacteur : le moteur les écrit
+seul, une par image, au moment de l'envoi (`prompt.frame_references`) ; une phrase de rôle écrite quand
+même par le LLM est retirée du paragraphe (`prompt.strip_roles`).
 
 Sortie JSON validée par Pydantic (`prompt`, `language`, `notes`) puis contre la case : chaque
-personnage de la case nommé, aucun personnage de la série absent de la case, chaque image envoyée citée
-(`<image1>`…) et aucune autre, paragraphe anglais sans phrases françaises ni vocabulaire photographique
+personnage de la case nommé, aucun personnage de la série absent de la case, aucune image citée
+(`<image1>`…) qui ne soit pas envoyée, paragraphe anglais sans phrases françaises ni vocabulaire photographique
 (`forbidden_photo_terms` d'image_prompt.yaml : « lens », « depth of field »… poussent Qwen-Image vers le
 photoréalisme), et pour une série en noir et blanc sans mot de couleur (`monochrome_forbidden_terms`,
 retirés aussi des données de la case et du rôle des images), longueur plausible ;
@@ -54,6 +56,7 @@ from .prompt import (
     reference_line,
     remove_terms,
     strip_quoted,
+    strip_roles,
 )
 from .script import _render
 
@@ -115,7 +118,8 @@ FRENCH_MIN_HITS, FRENCH_MAX_SHARE = 6, 0.04
 # Version des consignes du rédacteur, comprise dans l'empreinte d'une case (`PromptBrief.key`) : la changer
 # remet à rédiger chaque prompt rédigé par l'IA (jamais un prompt édité à la main) à la prochaine génération.
 # 2 : style manga en tête, plus de vocabulaire photographique (12/10/2026).
-WRITER_REVISION = 2
+# 3 : plus de phrase de rôle des images, le moteur l'écrit seul (16/10/2026 ; doublée dans 59 % des prompts).
+WRITER_REVISION = 3
 _FENCE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.DOTALL)
 _SPACES = re.compile(r"\s+")
 
@@ -432,24 +436,24 @@ def french_hits(text: str) -> int:
 
 
 def reference_problems(paragraph: str, count: int) -> list[str]:
-    """Chaque image envoyée citée par `<imageN>`, et aucune autre."""
-    cited = image_tags(paragraph)
-    missing = [image_tag(i) for i in range(1, count + 1) if i not in cited]
-    extra = [image_tag(i) for i in cited if i < 1 or i > count]
-    problems = []
-    if missing:
-        problems.append(
-            f"images de référence non citées (définis leur rôle en tête du paragraphe) : {', '.join(missing)}"
-        )
-    if extra:
-        sent = ", ".join(image_tag(i) for i in range(1, count + 1)) or "aucune"
-        problems.append(f"images citées qui ne sont pas envoyées : {', '.join(extra)} (envoyées : {sent})")
-    return problems
+    """Aucune image citée par `<imageN>` qui ne soit pas envoyée. Citer une image envoyée n'est pas exigé :
+    sa phrase de rôle est écrite par le moteur (`prompt.frame_references`)."""
+    extra = [image_tag(i) for i in image_tags(paragraph) if i < 1 or i > count]
+    if not extra:
+        return []
+    sent = ", ".join(image_tag(i) for i in range(1, count + 1)) or "aucune"
+    return [f"images citées qui ne sont pas envoyées : {', '.join(extra)} (envoyées : {sent})"]
 
 
 def clean_paragraph(text: str) -> str:
     """Un seul paragraphe, sans réplique ni guillemet."""
     return _SPACES.sub(" ", strip_quoted(text)).strip()
+
+
+def clean_written(text: str, count: int) -> str:
+    """Paragraphe rendu par le LLM : `clean_paragraph`, sans phrase de rôle des `count` images envoyées (le
+    moteur l'écrit seul)."""
+    return strip_roles(clean_paragraph(text), count)
 
 
 def _without(text: str, *fragments: str) -> str:
@@ -587,7 +591,7 @@ def parse_written(text: str, brief: PromptBrief) -> WrittenPrompt:
         out = WrittenPrompt.model_validate(data)
     except ValidationError as exc:
         raise PromptValidationError(format_errors(exc)) from None
-    paragraph = clean_paragraph(out.prompt)
+    paragraph = clean_written(out.prompt, len(brief.references))
     problems = paragraph_problems(paragraph, out.language, brief)
     if problems:
         raise PromptValidationError(" ; ".join(problems))

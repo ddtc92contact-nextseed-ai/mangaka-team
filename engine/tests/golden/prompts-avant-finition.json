@@ -1,285 +1,285 @@
 {
  "franco-belge/couleur-douce/humour/0": {
-  "brief_key": "5105cdea7dc830f4835ee383ae08d50e",
+  "brief_key": "5f55bfaec615e2e22ba8583401933d63",
   "fragments": "b1e40515f1ef6ab697f4c733485a9b1e0e48be3ce601e00dc19a490c6f2c31f3",
   "writer": "395440c139292e1a27b0f7ac93d583d7eec354012da3e915db0a33565a1533bd"
  },
  "franco-belge/couleur-douce/humour/1": {
-  "brief_key": "18776f513ed3d341bb9c09b4ffecbe20",
+  "brief_key": "1f346372e73bc63425c339b4fe5e8f6f",
   "fragments": "9af91c5bfb0546b17ae219512c61bc27fe1ef630a62c7e48d786a5b5bba9b6f8",
   "writer": "217e59073cea7e61d942be39f2896dc3c0fd06f63bddddab907e0ec79cdc8630"
  },
  "franco-belge/couleur/dark/0": {
-  "brief_key": "4500bceff743840fdfc34089e66ce028",
+  "brief_key": "862250c33a1d8c4bcab4095888a47e1d",
   "fragments": "956d988af9e548920b6a038653d1b59c676e6ef319886344c130b2b3529e35c1",
   "writer": "df86a9615009287abefd34deceb724cb1c17d8ca881e04adbcba33d0e4a808fc"
  },
  "franco-belge/couleur/dark/1": {
-  "brief_key": "ccad932c34f376c3023d7c81a467032a",
+  "brief_key": "3f4c69963f86bcf035bd73708817a410",
   "fragments": "8cad94532229fcc764991570f66629e44718b1f8e324ed83c0483fac101db6b6",
   "writer": "3985c8e37c9b76f0040dac2cb69115f19a964e110dd64dfe2aeb29af1e388e15"
  },
  "franco-belge/nb-encre/neutre/0": {
-  "brief_key": "7f5f5b6ffdcc9903160025388059e8d9",
+  "brief_key": "4847d53421c8182801298fd14676c716",
   "fragments": "9f0aac66ae7e42ae3e6da0ff9e803b8196884182cd060295ce1ba2e4f1e55baa",
   "writer": "47b8ff85aa7366abf5a237c83fca40227a8b904e0186c5cbcef4705f495796c5"
  },
  "franco-belge/nb-encre/neutre/1": {
-  "brief_key": "4ee3e739d326efc8dc724b93bf1c7c49",
+  "brief_key": "4b6ae1555e26dca81459b85c1b7d60f9",
   "fragments": "b92708635534c1659493e5b8b85fdc6eb3ac5becee959cc32f8ae7e603c46b42",
   "writer": "c80d8de869f6c91a9230329d3257ebdb9f3a87334b4ec4ee946096b8b1548607"
  },
  "franco-belge/nb-trames/lumineux/0": {
-  "brief_key": "c968dd88aa24119cb5d5aff3f405765f",
+  "brief_key": "71699be903f096fd0aca4cc1f9a7bccc",
   "fragments": "b586b2f640ed3dda03d84a0e48e11dd6552283dd42623daed112d3cbc9149327",
   "writer": "e1e79a905a7134f8c58db9abcf03a38dc0bc057a29b2a39c4e8b053ae42650a9"
  },
  "franco-belge/nb-trames/lumineux/1": {
-  "brief_key": "0babd937ab515e7cf15b3c9da15c9115",
+  "brief_key": "1e22571fcafc5e884c2423729b365454",
   "fragments": "f738816fc84569dc189dab438c72651fdaaa5ebc98739684cfc286cc2e68a2a3",
   "writer": "c668fa2611cd516f7db23c78633619df352f62060a5d3e6eaa42658e7593047a"
  },
  "jeunesse/couleur-douce/humour/0": {
-  "brief_key": "acf654851399eddff9636716bb1e4492",
+  "brief_key": "6a7176916b343d62ac22eaf6ac224aa9",
   "fragments": "ac391cbec734672546e6109d64394e2c853b041ae831d4f1bc386bb55ae47c46",
   "writer": "bc87acb9ce3ab11074ed72978e41a9e2f661cbe663b02f4ea39e15b517b1625f"
  },
  "jeunesse/couleur-douce/humour/1": {
-  "brief_key": "2297204540b1eb8c9ee9eb789d35b739",
+  "brief_key": "c649eece3cd24b73a21c6286594e467a",
   "fragments": "533afc46e5f44b6a15e5f1b1569729f0fa7d0b41db84dbbcd4f13fa024148a20",
   "writer": "d0034c93cad16a7875202d8ab0d2160856e2075f3e06ed8802b1fd4d99c27e9b"
  },
  "jeunesse/couleur/dark/0": {
-  "brief_key": "5885f3162f87f9c8154af2519ebf75b1",
+  "brief_key": "72c005586dfea95c3c57c5ce1fa2985b",
   "fragments": "42ce21f4602868c073f566743032e14d08c498d7c33f8668ed5400af2a57428f",
   "writer": "80e507ca9435aa631ca509d82db661351eb9f7f169095088a99ebd093e638f65"
  },
  "jeunesse/couleur/dark/1": {
-  "brief_key": "fe5e1243060414e7481a0e66ec4fb728",
+  "brief_key": "ae6ca54269893d19a0be13f0a9489bf1",
   "fragments": "8b09852b7bf4779a7c147ec7982018ece6e4b20949aacd80de27583c78f3a0a9",
   "writer": "372c246eb1cc4d107af2e862ef294a7063bfbc5296f5ed4c2c87346a72c06695"
  },
  "jeunesse/nb-encre/neutre/0": {
-  "brief_key": "5663e8e0297824a66d99ed9a52c70375",
+  "brief_key": "6ebcbda77a0672b224eab8fdb4bfa667",
   "fragments": "fe95a4f84fabce196f5aac61a2ce604a1fe45b32166367280cb696cb43985ce4",
   "writer": "a77a01b3ded1612bcd5a6ba40aff29586a07e95a0345b2191a44d427da9299f5"
  },
  "jeunesse/nb-encre/neutre/1": {
-  "brief_key": "444a0c82e4dbc9acd36d2e104f6a6b4e",
+  "brief_key": "8b7518a967fbfa559218a4ba0df7927a",
   "fragments": "5f47fd117f7344a5c4a834298fd4e41eb19780b709fb1cdb8f680c5e99751d8e",
   "writer": "ec29a5474dfc446be3e6b8f2edf9d9f7e5cb247ac98a30766cdb838e76b54d38"
  },
  "jeunesse/nb-trames/lumineux/0": {
-  "brief_key": "159ac15a6e42f69e06a683e228a34131",
+  "brief_key": "d6cc30c7d2e6e50d1cc931e88a662657",
   "fragments": "6524cba22dfe32a09db063a946b11be1d3cc5d065b66eb8e5169f7d235a7a9ae",
   "writer": "9aa4a913aeacb5f491d9be46b4b3dd1693aa87ed09ba0dc6160f12bf4e1a9a1b"
  },
  "jeunesse/nb-trames/lumineux/1": {
-  "brief_key": "d4657caa8c76f72bb5b9082ef7f52f16",
+  "brief_key": "c3b2ed72c155a869ec40b32226879ab8",
   "fragments": "793f8ff73f39102eb17bf35674cef251900477ef678e6550f84e49552a0e45b2",
   "writer": "43c9166b850113838bd1de5b5fe2bdd601055e08f45eca709e4fe85458c8d2dc"
  },
  "magical-girl/couleur-douce/humour/0": {
-  "brief_key": "6af5a3bb7bb4ca68938b1676ed5d94fb",
+  "brief_key": "dbd8b24f4dcfa6370ead4563fdd9cb22",
   "fragments": "8bd04ee81d8903cf6ab128f4ce0c657f612d8b162a63aef3edaf88aa33bfd925",
   "writer": "e96f9ccb10ec9c48e821b1f7a799c6c1594a0b68a712a206ef0f96bd049b07a8"
  },
  "magical-girl/couleur-douce/humour/1": {
-  "brief_key": "638bc95390e387ff966cb258ec1d290e",
+  "brief_key": "e77cd0e786edfa37de839ff786ae583e",
   "fragments": "192e919094a0dcc3672f9015d3daef82c39cbd95d21ad922ef3ef8235cfe0114",
   "writer": "346ffa20cf0c06623b3e685e47e6c71d6a0b336b9d0819af5ce26af414369dc7"
  },
  "magical-girl/couleur/dark/0": {
-  "brief_key": "e747ca37ab42c0cc68370e0b5de661b5",
+  "brief_key": "02be80e15dec578e4d92c36859cc5117",
   "fragments": "7e5b62f6c3558644f7c13989eceed60cdfb371f94fccdc4bd69da4bc9840b3e5",
   "writer": "ddc44e39ae45c1684862cb2733427da6fd828f9f56c778e79001b2452774a89a"
  },
  "magical-girl/couleur/dark/1": {
-  "brief_key": "6d9e354eedb9136a0ec23f4c90df1bb5",
+  "brief_key": "ea2a9e7dbfe9f0a0869c8c2b913aedfe",
   "fragments": "782cb80b52476170bbe0a39e6cbc22c07d3291013fab7364726eee354a61d714",
   "writer": "407c44070f131e4caa87c6a1fbdfc7d477517f8a88fa0e6b15da74ca970dd669"
  },
  "magical-girl/nb-encre/neutre/0": {
-  "brief_key": "59192a81e4fb2fb48f9a1120dd6437e4",
+  "brief_key": "1bae49fdea9ff0ed2adca95751aa6288",
   "fragments": "c88f0f0dd73881440d9ad6de6507a7642b916d7db67dd60f6086a48d4cfba861",
   "writer": "f1bb9d8aac1be22f938ce34a8e6087382d02eca187bf29e8bda5f685458caf97"
  },
  "magical-girl/nb-encre/neutre/1": {
-  "brief_key": "71a668f712888955e68ae95b2ed60a42",
+  "brief_key": "5af2d1e76b9c9e7227dab6c59fc90e05",
   "fragments": "88746f8343ca680b3994637cbc6f1bcbd4ca735daf260e99c4cdd05346273b7d",
   "writer": "d9aabf403b6405656568c693cfec6ef16519102f0399f2798eace2e08573ebd7"
  },
  "magical-girl/nb-trames/lumineux/0": {
-  "brief_key": "df9147f9a6fe665e09051b1a83d7d440",
+  "brief_key": "77a85f566c466f330cb04f9d5ed62114",
   "fragments": "ddeada963c38ea3df8215fdb67a23860a749f15da66290edbbff31afd50c0b5a",
   "writer": "7bf57b3d45db9a2f06f172f2897b527ee9b7efdaf5795f6a57ffe0cf396cd006"
  },
  "magical-girl/nb-trames/lumineux/1": {
-  "brief_key": "0c0b1b248eeab3dc0b154e2b2f211e64",
+  "brief_key": "ad95d28f3810d959cf9fc515df435a41",
   "fragments": "199d08d7b6cd61abcd103e19481e00e9508ada049b3089c7e01cbfe0429f6cbc",
   "writer": "5c3e71e9e5a1c2f3d42671577d7eb2329a8ff86943be282f8565c1a39046abd1"
  },
  "seinen/couleur-douce/humour/0": {
-  "brief_key": "28253a5817e5f922138f3f1100b7bf36",
+  "brief_key": "a00e805697b04c861be9da4a1ae0e637",
   "fragments": "e813e95e1113098ba8f822d145515a4f066e090eccb047bb51b6dc7a05492062",
   "writer": "5019c885e00f3410b9f5e277f40d4a3fd96b0c865384feebdac3cfdb35b7f42f"
  },
  "seinen/couleur-douce/humour/1": {
-  "brief_key": "15599b816d890c2ad801e614523b94ca",
+  "brief_key": "4c6dd17342f774d0ba94c33365966276",
   "fragments": "29214e9630d84a26324ec56a2c215c90754feb4f59b99c11a2b68d93398ad4e8",
   "writer": "4dcacc4d3eb760c439692d20717836c06b866c3cf1e3d267c2da258089a75161"
  },
  "seinen/couleur/dark/0": {
-  "brief_key": "607852b4b07b5af11a1cddc15929d882",
+  "brief_key": "34f9affbb213197ab41570ac13a5e4f1",
   "fragments": "6382427a23ae6f46cf8f5bc95f4d9edb7205b5aa69b8ade1fbc3313e501d7dd1",
   "writer": "0d69f4534ee918079bb1ed83d41f54fca5be6a1ba6ab8d071f91f026db001a38"
  },
  "seinen/couleur/dark/1": {
-  "brief_key": "918793b3555d734abf72ea959c6eee14",
+  "brief_key": "9de4e09bcb34dc1df642ee6aa611f647",
   "fragments": "bb51130f1b401de353116a4f08b6ae72c60591fd733e65bf9840228bf4bd4cf9",
   "writer": "ba52c9a6c7d46e620987e9cb462263c68b1fc12736aa12d341676c0eec46c99b"
  },
  "seinen/nb-encre/neutre/0": {
-  "brief_key": "f15459fa541c9266099fa61cc6ee13b2",
+  "brief_key": "6ddecacdc72f4ff161806f830baddb07",
   "fragments": "6e6d8a6caa6186980af203f38e1e2afc6943c0cee402e5a1882e64f96e554410",
   "writer": "e4a56c6c12b151a1410b55e2c4cf8c2c9abe96b09be40d05ed96c1271fa6c997"
  },
  "seinen/nb-encre/neutre/1": {
-  "brief_key": "4dd2a08bd6632d84ca42af9d1c682e6c",
+  "brief_key": "e5f8cc267b7a21c206f3df3d4efa6051",
   "fragments": "df41f699a274a245358697b7b3dfff1d039e9aca1a0fc8386b2e3e4d247336d8",
   "writer": "a50e31f87318b4f19ae3234e73cc050690c6d43cf1dd5766fa72f30754360c2f"
  },
  "seinen/nb-trames/lumineux/0": {
-  "brief_key": "cb2bdf86faeccdedb9fc758a9a7e4b8b",
+  "brief_key": "bf0f60ba59296fd642749dfe1cc502d5",
   "fragments": "29a090825da1b7c4cc632c1908620fe0df696dd7bd06d355f5058704cdd74e2e",
   "fragments_text": "Black and white manga panel, hand-drawn inked line art with halftone screentone shading, seinen manga style. Close-up, the face fills the frame, shoulders cut by the frame edge. Aiko esquive le sabre. Setting: ruelle sous la pluie. Staging: Aiko à gauche, le rival à droite. One character: Aiko (cheveux noirs, manteau long, red scarf). Series bible notes: Aiko est gauchère. Style: seinen manga, mature detailed ink style, black and white manga, halftone screentone dots, regular grey dot pattern, no cross-hatching, bright joyful atmosphere, warm light. Style notes: cadrage serré. A single continuous scene in one panel, no text or speech bubbles in the image.",
   "writer": "ba942c114810b8483150b106d6fb5ed56e41c0663c917fc944e45c97a8753044",
   "writer_text": "Black and white manga panel, hand-drawn inked line art with halftone screentone shading, seinen manga style. Aiko dodges the blade under the rain, her coat whipping behind her, the rival lunging from the left. seinen manga, mature detailed ink style, black and white manga, halftone screentone dots, regular grey dot pattern, no cross-hatching, bright joyful atmosphere, warm light."
  },
  "seinen/nb-trames/lumineux/1": {
-  "brief_key": "a35355b9e93e59f98f5615569b11463b",
+  "brief_key": "237c2972920acd929b3adc7b45a2810b",
   "fragments": "68070874145cb00788f1ba963dc10d56409980f46f6ae712f5c79606eff91cbc",
   "writer": "86fd2cd54663618801808816161524d6f5c265a45f6bc490a9befbb30dc2ad2b"
  },
  "shojo/couleur-douce/humour/0": {
-  "brief_key": "a0278975659e16839f053b35b5f32cf9",
+  "brief_key": "10ebef3ff584b120b73fd5b29722cfa7",
   "fragments": "5bd24e042c5860d780c409f6e16c33ab7857754a37d99229b1c45d699467b5b1",
   "writer": "f585779676f2ae6b023a875cf8e17c6b194d8d5b612c57a241894248f0d7aa51"
  },
  "shojo/couleur-douce/humour/1": {
-  "brief_key": "c2c63aa1829cfee1aeca317524717b36",
+  "brief_key": "f5b207e6a5fc4286eb7b19294dc03432",
   "fragments": "99930406905afaf43829347d5f0e8d44535407d2b02e6b1d1880d4489f2dc1c4",
   "writer": "679f273b5035fb13d715918d5655e607afbd42aacca1cddd7260fae209f0b96c"
  },
  "shojo/couleur/dark/0": {
-  "brief_key": "f8cf7b0757ce7f7284fef2c189f670b2",
+  "brief_key": "e985933b10b280c4f5dad66eb238bb98",
   "fragments": "6f0253adfcdb0ddfd2a74930016748695744a9761ef971aa4e77264f7da030e8",
   "writer": "6e7b1c52c6963d7f5ad90dfdacaf4a9994f9c64871c8d0f4e906450ad53a2418"
  },
  "shojo/couleur/dark/1": {
-  "brief_key": "d3bd4cfc4a4ebe4df16f32703e2c7595",
+  "brief_key": "4072021239f12ca6d79a4a76b4d29a84",
   "fragments": "ca84b407d071359f6dbc0acf0b347aff9ede1f2e69ca59814c5199fa860866a0",
   "fragments_text": "Colour comic panel, hand-drawn inked line art with flat cel-shaded colours, shojo manga style. Close-up, the face fills the frame, shoulders cut by the frame edge. Aiko esquive le sabre. Setting: ruelle sous la pluie. Staging: Aiko à gauche, le rival à droite. One character: Aiko (cheveux noirs, manteau long, red scarf). Series bible notes: Aiko est gauchère. Style: shojo manga, romantic style, large expressive eyes, color manga, cel shading, clean outlines, dark dramatic atmosphere, harsh lighting, strong shadows, thick bold linework, heavy inking, richly detailed background, many intricate details. Style notes: cadrage serré. A single continuous scene in one panel, no text or speech bubbles in the image.",
   "writer": "d522aa1ae0762efb070d79f8ab9e727e131c88c9ec05cceeabf2f33bb121b8d5",
   "writer_text": "Colour comic panel, hand-drawn inked line art with flat cel-shaded colours, shojo manga style. Aiko dodges the blade under the rain, her coat whipping behind her, the rival lunging from the left. shojo manga, romantic style, large expressive eyes, color manga, cel shading, clean outlines, dark dramatic atmosphere, harsh lighting, strong shadows, thick bold linework, heavy inking, richly detailed background, many intricate details."
  },
  "shojo/nb-encre/neutre/0": {
-  "brief_key": "e82a408ea0716989a40497276b62b2d5",
+  "brief_key": "63af9ec2675906a784a5e8e07e0b95a7",
   "fragments": "26074035886bff35d77b56dee18aed0711619fe6d100c07a96fb6bba2b39e8c6",
   "writer": "7c18db7a131b9f1068c1839c230c04efee7ba93beeb1f376b1870ecac09e40aa"
  },
  "shojo/nb-encre/neutre/1": {
-  "brief_key": "c3e1d25a7fa73e634c539b9ba8c1288a",
+  "brief_key": "fabd201237ccf8b80516d58dfac45155",
   "fragments": "ba3c23b975ea58eaf1c44c9a9987320776ae9a7af9440d5ddad1e902b40bce80",
   "writer": "a8931cd5a98057b202aab096a0332ac7e6abb4c322e5cce690857dddc341bf82"
  },
  "shojo/nb-trames/lumineux/0": {
-  "brief_key": "3ac6230f5ea3613b121507023c9e1035",
+  "brief_key": "0f40b423de8fa5427b8603b550b5a264",
   "fragments": "916f092a662693129679109fdb8d0d03037b906829bd20d33a6fe622a2eff5fd",
   "writer": "91f4b8c3bdd95582f7bc834f6e30d6485810e6de586c92a820f3f8cb8b7c512c"
  },
  "shojo/nb-trames/lumineux/1": {
-  "brief_key": "b213bfb1fcb1ed56526d22dfa6f4b563",
+  "brief_key": "c3cdd50081911d1624311e1463e739b6",
   "fragments": "5e9a054849ff446686489c153117bf4333491cfbc29a908b35cbb38881426d27",
   "writer": "a27076fe949e13e82efea10ef894966e58e23d97ffd9fa2280b50098fde2f358"
  },
  "shonen/couleur-douce/humour/0": {
-  "brief_key": "443a2fc84102666bdff893dab63a5d27",
+  "brief_key": "8e874910a5ec4d28a0c36f16fbcbd012",
   "fragments": "083c5a40888332384516c1aa0eecbba7fb63dd7eea008493b317a2f0503a68e6",
   "writer": "b7d8ad13dfb0ec3f982dcd26da7ecaf8454509e4d1106287879f3e6f3e4f271e"
  },
  "shonen/couleur-douce/humour/1": {
-  "brief_key": "f3894426358d1f7e3c91175a0678a8ba",
+  "brief_key": "1d2edd2be61dfefb2074043b53deff3c",
   "fragments": "96eac39c6d3e39104c1dfcde8076f0883e50aa7dc92b8c65ee945f7e8ae7a726",
   "writer": "99054040e9a1842bbae1351e8e92b95a2e56b0552a1e3524b5a8a2e9db2c9266"
  },
  "shonen/couleur/dark/0": {
-  "brief_key": "6a63150134f36cca987df11e1873bb75",
+  "brief_key": "75ba697f4dfeead365c47cd40893d5b7",
   "fragments": "0f2ca00c9239039ab651b5365f2148c2441172bb221024a18b3c86ffb08a8493",
   "writer": "437ecd474f947292f81372cf90394154a2aa5c8e913d09006a12cb24a6587c68"
  },
  "shonen/couleur/dark/1": {
-  "brief_key": "1f03496a8d4f7a7d09592c3084afa7e2",
+  "brief_key": "b7164df05b991002b1214dae634379d4",
   "fragments": "b0fda1119c2f4652800786d48b7105eb1df38b583e7d0259184bf8344398e98f",
   "writer": "1b399f6496ff76b7561fc9da755f940bc50ca12b225524b5b5c90cd6dbd2a30d"
  },
  "shonen/nb-encre/neutre/0": {
-  "brief_key": "f30cad336489990984ab77613504dd04",
+  "brief_key": "b299603b591f78a9d0441e4ad53a1621",
   "fragments": "b67d37866696a90c166d954240d9f804f0110857aa0459b06be1b18911d9c030",
   "writer": "6150ca65319baa93d2e2a3e34e88a47e4cbeb02d7cd627f13540649461f6aaff"
  },
  "shonen/nb-encre/neutre/1": {
-  "brief_key": "4e2b4cbce56caf9976926539fbb268c6",
+  "brief_key": "65187eae05bdc6d4940a7b5906fd1416",
   "fragments": "6a150568c70aa0c6b7c7ea64632dccde962f4da73c4896989a8bc7db28988969",
   "writer": "4b5e19db72cfc27a1799584ee260229bae8a99e3de90ae99d944ccbcde46de48"
  },
  "shonen/nb-trames/lumineux/0": {
-  "brief_key": "2a1525ae125d7a7fc59cb0ba65019d7d",
+  "brief_key": "97a44cb6a69dde0b49f14b21610a5fb7",
   "fragments": "3bf649d1c12a7b5af12b2a689ee150eb1fa3ca1de0bbbaa6a94df97cef7ec503",
   "writer": "a374e7ddb92de8d7c5bdf4f21976b31520ab016ea68f5aa61be3bad9e0137afc"
  },
  "shonen/nb-trames/lumineux/1": {
-  "brief_key": "0ac55e6c02dcb8722e42c047c7b2c416",
+  "brief_key": "00b69b54899f7124fd738fd95ad0d232",
   "fragments": "6c375e578563eb4ec97535c38c4d8b3dd4c794ba5cbac491155f5dbaa30be4d5",
   "writer": "59865096da4fd93ed60eb48af19f6cdc342e3990231f8182ec7974b93e5b7d04"
  },
  "tranche-de-vie/couleur-douce/humour/0": {
-  "brief_key": "437007d750cafa2d11450488b0ef5de3",
+  "brief_key": "ab70d5eead7e7d3a1f7cf9eaf1c1273d",
   "fragments": "51570e0f4afcee711fe2f554381b7ecb231a9f75dab241c4b53dea4f6137026c",
   "writer": "634bee4a1361200fcc3abf9745eb8a05db3e486bc9dbc31a75200d42b81247a6"
  },
  "tranche-de-vie/couleur-douce/humour/1": {
-  "brief_key": "a7140ccc5309858292278fad3a4ac597",
+  "brief_key": "2b1b45670b801c08dfacd27a8bbfcc95",
   "fragments": "0fcc0d5c8faaa55894d093ed6e681e3616b27b1bbf55cec1b76336bb2c6e105a",
   "writer": "8d0c723e38d3ba4065bdb5242ac035418f2513324e1aeb97bebb713096bac00f"
  },
  "tranche-de-vie/couleur/dark/0": {
-  "brief_key": "62bc4ee1c7bbd98f78b7c608bedc72c7",
+  "brief_key": "3e7389076735164c14db6ee14e8b4c80",
   "fragments": "0fc1e581c9047c92a2f48e2be37a589cdd878184b9cf8e31d08158d1f0d03173",
   "writer": "8fee5d7d673269a7d131edde6dcb95cc99c1c7a4e879ba71505f890f8f5b267c"
  },
  "tranche-de-vie/couleur/dark/1": {
-  "brief_key": "9229c57aa74ff450c13cb31a1a768674",
+  "brief_key": "22cdee8642ae7b32a85b1ed9d59c2411",
   "fragments": "fa4d10555ea7e6110ac468b48819fbb04abae8fb91e1b9a7f4192d04112eac94",
   "writer": "bcf07f157d21be0ace18e531f2c4446f85d35c6cbbe66697373ab8f0af536f9b"
  },
  "tranche-de-vie/nb-encre/neutre/0": {
-  "brief_key": "fc7d00f6a2acebfa0fb57de59e59acc1",
+  "brief_key": "264789b024f4cb3a2bafb652d645c791",
   "fragments": "2df96777cd62c817b41cb66ca6a635a65a8d4cedbf868f53076b672d638361f4",
   "writer": "dee892dd0c4b97b530263b2748c5eef97ec1f0082626a7e7618dd934f13ca280"
  },
  "tranche-de-vie/nb-encre/neutre/1": {
-  "brief_key": "7b15481fcf41a018d68d2bbf2a0e98f5",
+  "brief_key": "a62fe29c91e710e62252776173a45101",
   "fragments": "f663c4d7804afa9f494b3f051d5bf95da0dd603ae6757d0a74db536f1cba5dd4",
   "writer": "49446cf63a6d39c1c98c5af8a6359d71b9a663ab61e35090cb3f42c66b51f6ed"
  },
  "tranche-de-vie/nb-trames/lumineux/0": {
-  "brief_key": "93d13fa7d1f071bf272b30c29a36ad12",
+  "brief_key": "5ef7d863eb7e3f259c4bd2e97cecffa1",
   "fragments": "8266d92c2d8d56cb0d8d64969250eb32959e599397240cdfe04f6dc9fd477f4b",
   "writer": "8d6d5346bf6ce5849ec2ac6be84590ca25cf816544a984a49715b2b9a0dbf690"
  },
  "tranche-de-vie/nb-trames/lumineux/1": {
-  "brief_key": "3cd25702f9e1298dd058a28335b62c7e",
+  "brief_key": "736d47baa0d3ce544ab168c1a886b1f7",
   "fragments": "f5afab7cac89cf01532fd7e4e898e3eb4dbf5c453824ef5c2ca8dcd281947606",
   "writer": "aab3d26fd28eaa083ff5cd2f24ad07c49b3f59d4c6f7b0a3978c913ef4765031"
  }

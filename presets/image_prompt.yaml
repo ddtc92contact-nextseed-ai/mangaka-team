@@ -106,7 +106,9 @@ strip_quotes: true
 # ComfyUI au moment de la génération (le prompt final de la case ne change pas). Syntaxe de Qwen-Image
 # 2.1 Edit : chaque image est citée par <image1>, <image2>… et son rôle est défini en tête du prompt.
 # Sans ce cadrage, le modèle d'édition reprend l'image telle quelle : planche de poses, portrait de face
-# sur fond blanc. Un prompt rédigé par l'IA qui définit déjà ces rôles en tête ne reçoit que `after`.
+# sur fond blanc. Le moteur est la seule source de ces lignes (le rédacteur de prompt ne les écrit plus) :
+# une image dont le prompt donne déjà le rôle (ancien prompt rédigé, prompt édité à la main) n'en reçoit
+# pas une seconde.
 references:
   # Une ligne par image envoyée, dans l'ordre des emplacements : $slot (1, 2, 3), $name (nom de la fiche).
   character: "<image$slot> is the identity reference for $name: keep the face, hair, outfit and colours; ignore its pose, framing and background."

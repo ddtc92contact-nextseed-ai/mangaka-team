@@ -80,7 +80,7 @@ from .finishing import finish_plan
 from .generation import GenerationError, split_trigger_words
 from .jobs import JobReporter
 from .knowledge import render_bible
-from .prompt import build_negative_prompt
+from .prompt import build_negative_prompt, image_tags, role_tags
 from .prompt_writer import (
     LANGUAGE_NAMES,
     MAX_RATIO,
@@ -88,6 +88,7 @@ from .prompt_writer import (
     PromptValidationError,
     WrittenPrompt,
     clean_paragraph,
+    clean_written,
     image_tag,
     load_json_object,
     mentions,
@@ -196,8 +197,11 @@ def finish_cover_prompt(
     puis le texte, puis les consignes de la charte et les règles (zone du logo, aucun texte) qui manquent. Aucun
     filtre de couleur, même pour une série en noir et blanc."""
     out = with_lead(clean_paragraph(text), style.lead)
-    # Rôle des images de référence (`(tag, phrase)`) : ajouté après la phrase d'ouverture si l'image n'est pas citée.
-    missing = [line for tag, line in identity or [] if tag not in out]
+    # Rôle des images de référence (`(tag, phrase)`), écrit par le moteur seul : ajouté après la phrase
+    # d'ouverture, sauf pour une image dont le texte donne déjà la phrase de rôle (prompt d'un ancien rédacteur,
+    # édité à la main). Une image seulement citée (« Kaito (<image1>) ») reçoit la sienne.
+    given = role_tags(out)
+    missing = [line for tag, line in identity or [] if not given.issuperset(image_tags(tag))]
     if missing:
         lead = style.lead.strip()
         if lead and out.startswith(lead):
@@ -351,7 +355,7 @@ def parse_cover(text: str, brief: CoverBrief) -> WrittenPrompt:
         out = WrittenPrompt.model_validate(data)
     except ValidationError as exc:
         raise PromptValidationError(format_errors(exc)) from None
-    paragraph = clean_paragraph(out.prompt)
+    paragraph = clean_written(out.prompt, len(brief.references))
     problems: list[str] = []
     if out.language != brief.language:
         problems.append(f"language : « {out.language} » au lieu de « {brief.language} »")

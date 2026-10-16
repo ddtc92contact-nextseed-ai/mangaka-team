@@ -3,9 +3,9 @@
 #
 # L'auteur écrit une consigne en français (« plus serré, gros plan sur le visage de Lucius, en
 # contre-plongée », « Stan doit être en train de courir », « enlève le décor, fond blanc ») ; le LLM
-# réécrit le prompt de la case selon les conventions de redacteur-image.yaml (paragraphe anglais, rôles
-# des <imageN> en tête, phrase de caméra…) et peut changer, pour cette case seulement, son plan, son
-# angle, son action, son ambiance (valeurs permises de la direction artistique) et l'image de référence
+# réécrit le prompt de la case selon les conventions de redacteur-image.yaml (paragraphe anglais sans
+# phrase de rôle des <imageN> — le moteur l'écrit —, phrase de caméra…) et peut changer, pour cette
+# case seulement, son plan, son angle, son action, son ambiance (valeurs permises de la direction artistique) et l'image de référence
 # envoyée pour un personnage (parmi les images gardées de sa fiche). Tout est montré à l'auteur avant
 # « Appliquer ». Langue et longueur du paragraphe : celles de redacteur-image.yaml.
 # « Reconstruire le prompt » avec une consigne passe par ce même gabarit (sans historique).
@@ -36,8 +36,9 @@ system: |
   prompt: ONE long, concrete and visual paragraph in $language_name, staged like a hand-drawn manga
   panel (an ink drawing on paper). Follow the usual order:
   0. Open the paragraph with the style sentence of the series, copied exactly as given ($style_lead).
-  1. Then the reference roles, one sentence per image that is sent, in slot order, citing it as <imageN>.
-     Cite only the images listed ($image_tags) and never another one.
+  1. Never write a reference role sentence ("<image1> is the identity reference for…"): the studio puts
+     one role sentence per image that is sent in front of your paragraph itself. Cite only the images
+     listed ($image_tags) and never another one.
   2. The subject: each character of the panel by exact name, with a strong action verb and a precise
      body pose, placed in the frame, with their gaze and expression.
   3. The framing: one sentence with the shot size and angle in manga framing terms (use the camera
@@ -94,7 +95,8 @@ user: |
   Recurring setting: $decor
   Recurring objects: $objects
 
-  Reference images sent with this prompt (define these roles first, in this order):
+  Reference images sent with this prompt (the studio writes these role sentences in front of your
+  paragraph: never write them yourself):
   $references
 
   Reference images you may choose per character:

@@ -132,9 +132,9 @@ def test_written_prompt_is_stored_on_the_panel_and_used_for_generation(env: Env)
     prompt = panel["final_prompt"]
     assert panel["prompt_source"] == "ia" and panel["final_prompt_manual"] is False
     assert panel["prompt_pending"] is False and panel["prompt_warning"] is None
-    # la phrase de style de la série en tête, puis le rôle de la référence, par <image1> ; chaque
+    # la phrase de style de la série en tête, sans phrase de rôle (le moteur l'écrit à l'envoi) ; chaque
     # personnage de la case nommé
-    assert prompt.startswith(f"{LEAD}<image1> is the identity reference for Aiko: keep the face")
+    assert prompt.startswith(LEAD) and " is the identity reference" not in prompt
     assert "Aiko" in prompt and "Kenji" in prompt
     # aucun personnage hors de la case, aucune réplique entre guillemets
     assert "Ren" not in prompt.split() and "manteau gris" not in prompt
@@ -152,12 +152,13 @@ def test_written_prompt_is_stored_on_the_panel_and_used_for_generation(env: Env)
     assert "- <image1> is the identity reference for Aiko" in user and "Ren" in user  # Ren : absent
     assert "framing terms: wide shot" in user
 
-    # prompt envoyé à ComfyUI : le rédigé (qui définit déjà les rôles : pas de 2e ligne de rôle), puis la
-    # consigne « identité seulement » ; négatif « pas de texte »
+    # prompt envoyé à ComfyUI : la phrase de rôle du moteur (une seule), le rédigé, puis la consigne
+    # « identité seulement » ; négatif « pas de texte »
     [img] = panel["images"]
     assert img["params"]["panel_prompt"] == prompt
+    role = "<image1> is the identity reference for Aiko: keep the face, hair and outfit; ignore its pose, framing and background."
     assert img["params"]["prompt"].startswith(
-        prompt + " From <image1> take only the face, hair, body and outfit of Aiko; ignore its layout, pose grid,"
+        f"{role} {prompt} From <image1> take only the face, hair, body and outfit of Aiko; ignore its layout, pose grid,"
         " rules, labels and white background. Use the reference images for identity and design only"
     )
     assert img["params"]["prompt"].count("<image1> is the identity reference") == 1
@@ -332,7 +333,6 @@ def test_parse_strips_quotes_and_adds_missing_style_keywords() -> None:
         (_answer(f"<image1> is Aiko. Aiko and Ren {WORDS}."), "absents de la case nommés .à retirer. : Ren"),
         (_answer("<image1> is Aiko. Aiko runs."), "trop court"),
         (_answer(f"<image1> is Aiko. Aiko {WORDS}", "fr"), "« fr » au lieu de « en »"),
-        (_answer(f"Aiko {WORDS}."), "images de référence non citées .* <image1>"),
         (_answer(f"<image1> is Aiko, <image2> is Kenji. Aiko {WORDS}."), "pas envoyées : <image2>"),
         (
             _answer(
@@ -348,7 +348,6 @@ def test_parse_strips_quotes_and_adds_missing_style_keywords() -> None:
         "intrus",
         "trop-court",
         "langue",
-        "image-absente",
         "image-en-trop",
         "francais",
     ],
@@ -370,9 +369,7 @@ def test_french_preset_language_is_still_possible() -> None:
     reg = PresetRegistry.load(PRESETS_DIR)
     prompt = reg.prompt("redacteur-image").model_copy(update={"language": "fr", "min_words": 80, "max_words": 160})
     run = write_prompt(MockLLMProvider(), prompt, _brief(prompt=prompt))
-    assert run.output.language == "fr" and run.output.prompt.startswith(
-        "<image1> : Aiko. On voit Aiko, la personne de <image1>"
-    )
+    assert run.output.language == "fr" and run.output.prompt.startswith("On voit Aiko, la personne de <image1>")
     assert "halftone screentone dots" in run.output.prompt
 
 
@@ -475,7 +472,8 @@ def test_photographic_answer_is_refused_in_french_then_retried(photo: str) -> No
     retry = llm.calls[1][-1].content
     term = photo.split(" ", 1)[1] if photo.startswith("shallow") else "lens"
     assert "vocabulaire photographique interdit" in retry and term in retry
-    assert run.output.prompt.startswith("Black and white manga panel, seinen manga style. <image1> is Aiko.")
+    # la phrase de rôle écrite par le LLM est retirée : c'est le moteur qui l'écrit
+    assert run.output.prompt.startswith("Black and white manga panel, seinen manga style. Aiko leaps,")
     assert run.output.prompt.endswith("shonen manga, halftone screentone dots.")
     with pytest.raises(PromptValidationError, match="vocabulaire photographique interdit : (depth of field|lens)"):
         parse_written(bad, brief)
