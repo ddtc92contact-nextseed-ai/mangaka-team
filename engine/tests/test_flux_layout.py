@@ -22,6 +22,7 @@ from mangaka_engine.providers.comfyui import MockComfyUIClient
 from mangaka_engine.providers.factory import Providers
 from mangaka_engine.providers.llm import MockLLMProvider
 from mangaka_engine.providers.qc import MockDetectorProvider, MockIdentityProvider
+from mangaka_engine.providers.vision import MockVisionProvider
 from mangaka_engine.store.models import GenerationLog, Job, PanelImage
 from tests.conftest import PRESETS_DIR
 from tests.test_generation import _ok, _wait, make_client, setup_chapter  # noqa: F401 — fixture
@@ -297,7 +298,8 @@ def test_paragraph_panel_has_no_boxes(make_client: Callable[..., TestClient]) ->
 def _qc_providers(comfy: MockComfyUIClient) -> Providers:
     return Providers(
         llm=MockLLMProvider(),
-        vision=None,
+        # La vision attend qu'aucune génération ne soit en cours : le bras B n'existe pas encore pendant le QC de A.
+        vision=MockVisionProvider(),
         comfyui=comfy,
         detectors=MockDetectorProvider(),
         identity=MockIdentityProvider(),

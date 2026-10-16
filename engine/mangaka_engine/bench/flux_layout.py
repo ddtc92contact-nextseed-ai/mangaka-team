@@ -8,8 +8,8 @@ fiches : A sur le preset `paragraph` (`flux3-klein-qualite`, sa variante avec r�
 B sur son pendant `layout` (`flux3-klein-qualite-layout`). Ce sont des comparaisons A/B de l'atelier
 (`ab_mode` « layout » au journal) : les versions s'ajoutent aux cases et l'auteur peut y choisir son bras.
 
-Les jobs sont exécutés ici, l'un après l'autre (ils sont créés « en cours » : la file du moteur, s'il tourne,
-ne les prend pas), puis chaque version passe le contrôle qualité. Rapport : `report.html` (images côte à côte,
+Les jobs sont exécutés ici, l'un après l'autre (chacun créé « en cours » juste avant : la file du moteur, s'il
+tourne, ne le prend pas), puis chaque version passe le contrôle qualité. Rapport : `report.html` (images côte à côte,
 boîtes, verdict et score du QC, temps) et `report.json`, dans `data/bench/flux-layout/<date-heure>/` (ou
 `--out`).
 
@@ -176,10 +176,8 @@ def prepare_pairs(
     paragraph: str = PARAGRAPH_PRESET,
     layout: str = LAYOUT_PRESET,
     knowledge: KnowledgeBase | None = None,
-    create_jobs: bool = True,
 ) -> tuple[list[BenchPair], list[dict[str, Any]]]:
-    """Paires A/B des cases choisies (sans commit). `create_jobs` : met les deux jobs de chaque case en base,
-    « en cours » (exécutés par le banc, jamais par la file du moteur)."""
+    """Paires A/B des cases choisies, sans commit (le prompt de la case peut être reconstruit) ; aucun job."""
     for preset_id, fmt in ((paragraph, "paragraph"), (layout, "layout")):
         try:
             preset = presets.workflow(preset_id).preset
@@ -213,38 +211,36 @@ def prepare_pairs(
             boxes=boxes,
             arms=[BenchArm(arm=arm, prompt_format=fmt, preset=pid) for (arm, fmt), pid in zip(ARMS, ids, strict=True)],
         )
-        if create_jobs:
-            try:
-                _create_jobs(session, presets, panel, pair, knowledge)
-            except (GenerationError, PresetError) as exc:
-                skipped.append({"panel_id": panel.id, "label": label, "reason": str(exc)})
-                continue
         pairs.append(pair)
     return pairs, skipped
 
 
-def _create_jobs(
-    session: Session, presets: PresetRegistry, panel: Panel, pair: BenchPair, knowledge: KnowledgeBase | None
-) -> None:
-    pair.group = uuid.uuid4().hex[:12]
-    for arm in pair.arms:
-        extra = {
-            "ab": {"group": pair.group, "arm": arm.arm, "mode": AB_MODE},
-            "ab_prompt": pair.prompt,
-            "bench": "flux_layout",
-        }
+def create_job(
+    db: Database, presets: PresetRegistry, pair: BenchPair, arm: BenchArm, knowledge: KnowledgeBase | None
+) -> int:
+    """Job de génération d'un bras, créé « en cours » juste avant son exécution : la file du moteur (qui ne prend
+    que les jobs en attente) n'y touche pas, et le contrôle qualité du bras précédent n'attend pas celui-ci."""
+    pair.group = pair.group or uuid.uuid4().hex[:12]
+    extra = {
+        "ab": {"group": pair.group, "arm": arm.arm, "mode": AB_MODE},
+        "ab_prompt": pair.prompt,
+        "bench": "flux_layout",
+    }
+    with db.session_scope() as session:
+        panel = session.get(Panel, pair.panel_id)
+        if panel is None:
+            raise GenerationError("case introuvable (supprimée entre-temps ?)")
         [job] = enqueue_panel(
             session, presets, panel, count=1, seed=pair.seed, preset=arm.preset, extra_params=extra, knowledge=knowledge
         )
         if job.params.get("preset") != arm.preset:
             # Composition verrouillée : le pendant ControlNet remplacerait le bras, la comparaison n'aurait pas de sens.
             raise GenerationError("composition verrouillée : déverrouille la case pour la comparer")
-        # « En cours » d'emblée : la file du moteur ne prend que les jobs en attente.
         job.status = JobStatus.running
         job.started_at = utcnow()
         job.message = f"Banc FLUX layout : bras {arm.arm}"
-        session.flush()
-        arm.job_id = job.id
+        session.commit()
+        return job.id
 
 
 # --- exécution ------------------------------------------------------------------------------------
@@ -257,9 +253,10 @@ def run_pairs(
     out_dir: Path,
     *,
     folders: ComfyFolders | None = None,
+    knowledge: KnowledgeBase | None = None,
     log: Any = print,
 ) -> None:
-    """Exécute les jobs l'un après l'autre (bras A puis B), contrôle chaque version, copie les images."""
+    """Exécute les bras l'un après l'autre (A puis B), contrôle chaque version, copie les images."""
     if providers.comfyui is None:
         raise BenchError(f"ComfyUI indisponible : {providers.errors.get('comfyui') or 'client non configuré'}")
     executor = GenerationExecutor(db, presets, files, providers.comfyui, folders=folders)
@@ -269,9 +266,12 @@ def run_pairs(
     images.mkdir(parents=True, exist_ok=True)
     for pair in pairs:
         for arm in pair.arms:
-            if arm.job_id is None:
-                continue
             log(f"{pair.label} · bras {arm.arm} ({arm.prompt_format}, {arm.preset}, graine {pair.seed})…")
+            try:
+                arm.job_id = create_job(db, presets, pair, arm, knowledge)
+            except (GenerationError, PresetError) as exc:
+                arm.status, arm.error = "failed", str(exc)
+                continue
             reporter = JobReporter(db, arm.job_id)
             t0 = time.monotonic()
             try:
@@ -430,7 +430,6 @@ def run_bench(
             paragraph=paragraph,
             layout=layout,
             knowledge=knowledge,
-            create_jobs=not dry,
         )
         if dry:
             session.rollback()  # rien n'est gardé : ni prompt reconstruit, ni direction appliquée
@@ -441,7 +440,7 @@ def run_bench(
         f"{len(pairs)} case(s) à 2 personnages ou plus retenue(s)" + (f", {len(skipped)} écartée(s)" if skipped else "")
     )
     if not dry and pairs:
-        run_pairs(db, presets, files, providers, pairs, out_dir, folders=folders, log=log)
+        run_pairs(db, presets, files, providers, pairs, out_dir, folders=folders, knowledge=knowledge, log=log)
     path = write_report(report, out_dir)
     log(f"Rapport : {path}")
     return report
