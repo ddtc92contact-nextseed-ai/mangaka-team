@@ -31,11 +31,11 @@ def fail(msg: str) -> None:
     errors.append(msg)
 
 
-def load_data() -> dict:
+def load_data(name: str = "data.js", var: str = "TUTO") -> dict:
     script = (
         "const fs=require('fs');global.window={};"
-        f"eval(fs.readFileSync({json.dumps(str(TUTO / 'assets' / 'data.js'))},'utf8'));"
-        "process.stdout.write(JSON.stringify(window.TUTO));"
+        f"eval(fs.readFileSync({json.dumps(str(TUTO / 'assets' / name))},'utf8'));"
+        f"process.stdout.write(JSON.stringify(window.{var}));"
     )
     out = subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True).stdout
     return json.loads(out)
@@ -393,6 +393,38 @@ def check_prompts(d: dict) -> None:
     )
 
 
+def check_goulots(d: dict) -> None:
+    """goulots-data.js : chaque citation (fichier, ligne, extrait) colle au code ; étapes de job connues."""
+    g = load_data("goulots-data.js", "GOULOTS")
+    cites = [c for bloc in g["structure"] for item in bloc["items"] for c in item["src"]]
+    cites += [c for f in g["faiblesses"] for c in f["src"]]
+    for c in cites:
+        path = ROOT / c["f"]
+        if not path.is_file():
+            fail(f"goulots : fichier cité introuvable : {c['f']}")
+            continue
+        lines = path.read_text(encoding="utf-8").splitlines()
+        if not any(c["x"] in line for line in lines[c["l"] - 1 : c["l"] + 3]):
+            fail(f"goulots : « {c['x']} » absent de {c['f']}:{c['l']} (ou des 3 lignes suivantes)")
+    jobs = {q["step"] for q in d["queueSteps"]} | {p["step"] for p in d["poolSteps"]}
+    ids = {s["id"] for s in d["steps"]}
+    for job, step in g["jobToStep"].items():
+        if job not in jobs:
+            fail(f"goulots : étape de job inconnue {job!r}")
+        if step not in ids:
+            fail(f"goulots : étape de la carte inconnue {step!r}")
+    for step in g["logKindToStep"].values():
+        if step not in ids:
+            fail(f"goulots : étape de la carte inconnue {step!r}")
+    # mesurer.py range dans la file ComfyUI les mêmes étapes que la carte.
+    src = (TUTO / "mesurer.py").read_text(encoding="utf-8")
+    block = re.search(r"ETAPES_FILE_COMFY = \(([^)]*)\)", src)
+    comfy = set(re.findall(r'"(\w+)"', block.group(1))) if block else set()
+    if comfy != {q["step"] for q in d["queueSteps"]}:
+        fail(f"mesurer.py : ETAPES_FILE_COMFY {sorted(comfy)} ≠ file ComfyUI de data.js")
+    print(f"{len(cites)} citations de goulots-data.js vérifiées")
+
+
 def main() -> int:
     d = load_data()
     for check in (
@@ -403,6 +435,7 @@ def main() -> int:
         check_queue,
         check_gate,
         check_sources,
+        check_goulots,
         check_prompts,
     ):
         check(d)
