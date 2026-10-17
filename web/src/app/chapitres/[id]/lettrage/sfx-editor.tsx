@@ -3,7 +3,8 @@
 import { useState, type FormEvent } from "react";
 import { HelpLabel } from "@/components/info-tip";
 import { Alert, Button, Card, Field, Input, Select } from "@/components/ui";
-import type { BubbleUpdate, Intensity, LetteredSfx, LetteringWarning, PageLettering } from "@/lib/api";
+import { FontTilePicker } from "@/components/font-tiles";
+import { engineUrl, type BubbleUpdate, type Intensity, type LetteredSfx, type LetteringWarning, type PageLettering } from "@/lib/api";
 import { INTENSITIES } from "@/lib/layout";
 
 export const SFX_INTENSITIES: Record<Intensity, string> = {
@@ -78,21 +79,20 @@ export function SfxEditor({
         <Field label="Texte" htmlFor="sfx-text" hint="Écrit en majuscules sur la planche ; jamais dessiné par le modèle d'image.">
           <Input id="sfx-text" value={text} onChange={(e) => setText(e.target.value)} maxLength={60} required data-testid="sfx-text" />
         </Field>
+        <FontTilePicker
+          id="sfx-font"
+          label="Police"
+          kind="sfx"
+          value={font}
+          onChange={setFont}
+          fonts={Object.entries(fonts).map(([id, f]) => ({ id, name: f.name, url: engineUrl(f.url) }))}
+        />
         <div className="grid grid-cols-2 gap-3">
           <Field label="Intensité" htmlFor="sfx-intensity" help="lettrage.sfx_intensity">
             <Select id="sfx-intensity" value={intensity} onChange={(e) => setIntensity(e.target.value as Intensity)}>
               {(Object.keys(SFX_INTENSITIES) as Intensity[]).map((k) => (
                 <option key={k} value={k}>
                   {SFX_INTENSITIES[k]}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="Police" htmlFor="sfx-font">
-            <Select id="sfx-font" value={font} onChange={(e) => setFont(e.target.value)}>
-              {Object.entries(fonts).map(([id, f]) => (
-                <option key={id} value={id}>
-                  {f.name}
                 </option>
               ))}
             </Select>

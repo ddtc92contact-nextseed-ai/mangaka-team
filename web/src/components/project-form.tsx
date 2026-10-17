@@ -12,6 +12,7 @@ import {
   type StyleGenre,
 } from "@/lib/api";
 import { HELP, type HelpId } from "@/lib/help";
+import { fontSampleUrl, letteringDefaultFontUrl } from "@/lib/font-samples";
 import { useEngineData } from "@/lib/hooks";
 import { loraUnsupportedNotice } from "@/lib/lora";
 import { groupByEngine } from "@/lib/workflow-list";
@@ -20,6 +21,7 @@ import { InfoTip } from "./info-tip";
 import { NegativeBadge, formatCfg } from "./negative-badge";
 import { Modal } from "./modal";
 import { LoraPicker, LoraUnsupported } from "./lora-picker";
+import { FontTilePicker } from "./font-tiles";
 import { DIRECTIONS, DirectionPicker } from "./reading-direction";
 import { SERIES_STATUS } from "./status";
 import { useToast } from "./toast";
@@ -490,32 +492,27 @@ export function ProjectForm({
           )}
         </Select>
       </Field>
-      <div className="grid gap-5 md:grid-cols-2">
+      <div className="space-y-5">
         {(
           [
-            ["dialogue_font", "Police des dialogues", dialogueFont],
-            ["shout_font", "Police des cris", shoutFont],
+            ["dialogue_font", "Police des dialogues", "dialogue", dialogueFont],
+            ["shout_font", "Police des cris", "shout", shoutFont],
           ] as const
-        ).map(([key, label, value]) => (
-          <Field key={key} label={label} htmlFor={key} help="serie.fonts" error={errors[key]} hint="Pré-remplie par le genre.">
-            <Select
-              id={key}
-              value={value}
-              onChange={(e) => set(key, e.target.value)}
-              aria-invalid={Boolean(errors[key])}
-              disabled={!presets.data}
-            >
-              {!value && <option value="">Police du lettreur</option>}
-              {fonts.map((f) => (
-                <option key={f.id} value={f.id}>
-                  {f.name}
-                </option>
-              ))}
-              {value && presets.data && !fonts.some((f) => f.id === value) && (
-                <option value={value}>{value} (police introuvable)</option>
-              )}
-            </Select>
-          </Field>
+        ).map(([key, label, kind, value]) => (
+          <FontTilePicker
+            key={key}
+            id={key}
+            label={label}
+            kind={kind}
+            value={value}
+            onChange={(v) => set(key, v)}
+            fonts={fonts.map((f) => ({ id: f.id, name: f.name, url: fontSampleUrl(kind, f.id, initial?.id) }))}
+            ready={Boolean(presets.data)}
+            defaultUrl={letteringDefaultFontUrl(kind, initial?.id)}
+            help="serie.fonts"
+            hint="Pré-remplie par le genre. Chaque tuile montre le rendu réel de la police."
+            error={errors[key]}
+          />
         ))}
       </div>
       <div className="grid gap-5 md:grid-cols-3">
