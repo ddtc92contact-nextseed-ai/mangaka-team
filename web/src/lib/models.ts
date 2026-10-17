@@ -75,6 +75,9 @@ export function envNote(setting: Pick<AgentSetting, "env_override" | "env_value"
   return `${setting.env_override}=${setting.env_value} dans .env remplace la valeur livrée${used ? " : c'est le modèle sélectionné" : " ; ce profil choisit un autre modèle"}.`;
 }
 
+// Même repli par le nom que le moteur (`is_reasoning_model`) pour un modèle tapé à la main.
+const REASONING_NAME = /reasoner|(^|[-_])(r1|v4[-_]pro)($|[-_])/i;
+
 /** D'où vient la liste, et ce qu'il faut savoir du modèle choisi. Messages en français. */
 export function modelNotes(list: DeepSeekModels | null, value: string): string[] {
   if (!list) return [];
@@ -88,7 +91,7 @@ export function modelNotes(list: DeepSeekModels | null, value: string): string[]
   if (!id) out.push(`Vide : le modèle par défaut (${list.default_model}) est utilisé.`);
   else if (!model && list.source === "live") out.push(`« ${id} » n'est pas dans la liste de DeepSeek : l'appel risque d'être refusé.`);
   else if (!model) out.push(`« ${id} » n'est pas dans la liste livrée : vérifie son nom chez DeepSeek.`);
-  if (model?.reasoning || (!model && /reasoner/i.test(id)))
+  if (model?.reasoning || (!model && REASONING_NAME.test(id)))
     out.push("Modèle qui raisonne : plus lent, la température n'est pas envoyée.");
   return out;
 }

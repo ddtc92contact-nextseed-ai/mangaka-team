@@ -155,6 +155,11 @@ test("d'où vient la liste, et la note des modèles qui raisonnent", () => {
   assert.match(notes[0], /^Liste livrée \(presets\/providers\.yaml\) : mode mock/);
   assert.ok(notes.includes("Modèle qui raisonne : plus lent, la température n'est pas envoyée."));
   assert.equal(modelNotes(list(), "deepseek-chat").length, 1);
+  // Tapé à la main, absent de la liste : deviné d'après le nom, comme dans le moteur.
+  const reasons = (id: string) => modelNotes(list(), id).some((n) => n.startsWith("Modèle qui raisonne"));
+  assert.equal(reasons("deepseek-v4-pro-0925"), true);
+  assert.equal(reasons("maison-r1"), true);
+  assert.equal(reasons("deepseek-v4-preview"), false);
 });
 
 test("enregistrement par agent : chaque profil envoie son propre modèle, tel quel", () => {

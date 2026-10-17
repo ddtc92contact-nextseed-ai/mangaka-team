@@ -1,6 +1,10 @@
 """Client DeepSeek (API compatible OpenAI : POST {base_url}/chat/completions, GET {base_url}/models).
 
-Modèles qui raisonnent (deepseek-reasoner) : la température n'est pas envoyée (refusée ou ignorée), seul
+Setup par classe de modèle (« rapide » ou « raisonnement », `providers.yaml › deepseek.models[].reasoning`,
+sinon deviné d'après le nom) : un court préambule propre à la classe (`deepseek.preambles`) est fondu en tête
+du premier message système ; le contrat de sortie des agents ne change pas.
+
+Modèles qui raisonnent (deepseek-reasoner, deepseek-v4-pro) : la température n'est pas envoyée (refusée ou ignorée), seul
 `content` est lu (`reasoning_content` est ignoré), et si le mode JSON est refusé (HTTP 400), la requête est
 refaite une fois sans `response_format`, la consigne JSON passant par le prompt ; la validation et les nouveaux
 essais des agents s'appliquent ensuite comme d'habitude.
@@ -42,6 +46,7 @@ class DeepSeekProvider:
         timeout_s: float = 60,
         temperature: float = 0.7,
         reasoning: bool | None = None,
+        preamble: str = "",
         transport: httpx.BaseTransport | None = None,
     ) -> None:
         if not api_key:
@@ -50,6 +55,8 @@ class DeepSeekProvider:
         self.temperature = temperature
         # None : deviné d'après le nom (modèle tapé à la main, absent de providers.yaml).
         self.reasoning = is_reasoning_model(model) if reasoning is None else reasoning
+        # Préambule de la classe du modèle (vide pour la classe rapide).
+        self.preamble = preamble.strip()
         self._client = httpx.Client(
             base_url=base_url.rstrip("/"),
             headers={"Authorization": f"Bearer {api_key}"},
@@ -66,7 +73,7 @@ class DeepSeekProvider:
     ) -> LLMResult:
         payload: dict[str, Any] = {
             "model": self.model,
-            "messages": [{"role": m.role, "content": m.content} for m in messages],
+            "messages": _with_preamble([{"role": m.role, "content": m.content} for m in messages], self.preamble),
             "stream": False,
         }
         if not self.reasoning:
@@ -154,10 +161,25 @@ def _unfence(text: str) -> str:
     return m.group(1) if m else text
 
 
+def _with_preamble(messages: list[dict[str, str]], preamble: str) -> list[dict[str, str]]:
+    """Préambule fondu en tête du premier message système (ajouté en tête s'il n'y en a pas), une seule fois."""
+    if not preamble:
+        return messages
+    first = next((i for i, m in enumerate(messages) if m["role"] == "system"), None)
+    if first is None:
+        return [{"role": "system", "content": preamble}, *messages]
+    content = messages[first]["content"]
+    if content.lstrip().startswith(preamble):
+        return messages
+    out = list(messages)
+    out[first] = {**messages[first], "content": f"{preamble}\n\n{content}" if content.strip() else preamble}
+    return out
+
+
 def is_reasoning_model(model: str) -> bool:
-    """Modèle qui raisonne d'après son nom (deepseek-reasoner, *-r1…)."""
+    """Modèle qui raisonne d'après son nom (deepseek-reasoner, deepseek-v4-pro, *-r1…)."""
     name = model.strip().lower()
-    return "reasoner" in name or bool(re.search(r"(^|[-_])r1($|[-_])", name))
+    return "reasoner" in name or bool(re.search(r"(^|[-_])(r1|v4[-_]pro)($|[-_])", name))
 
 
 # --- liste des modèles ---------------------------------------------------------------------------------
