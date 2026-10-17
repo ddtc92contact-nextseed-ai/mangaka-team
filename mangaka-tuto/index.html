@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mangaka Team — comprendre le pipeline</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Ccircle cx=%228%22 cy=%228%22 r=%226%22 fill=%22%23fb7185%22/%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<a class="skip" href="#contenu">Aller au contenu</a>
+<header class="top">
+  <a class="brand" href="index.html">mangaka<span>·</span>team <span class="muted small">— tuto</span></a>
+  <nav aria-label="Vues du tutoriel">
+    <a href="index.html" aria-current="page">Sommaire</a>
+    <a href="pipeline.html">Carte du pipeline</a>
+    <a href="voies.html">Les deux voies</a>
+    <a href="equipe.html">L'équipe</a>
+    <a href="case.html">Vie d'une case</a>
+  </nav>
+</header>
+
+<main id="contenu">
+  <h1>Comprendre Mangaka Team, de l'idée à la planche</h1>
+  <p class="lead">
+    Ce dossier montre qui fait quoi dans l'appli, avec quel outil et dans quel ordre : de la création d'une série
+    jusqu'à la planche exportée et à la couverture du tome. Tout est tiré du code du dépôt
+    (<code>engine/mangaka_engine</code>, <code>presets/</code>, <code>web/src</code>) et chaque bloc cite son fichier
+    source. Le but : repérer d'un coup d'œil les goulots d'étranglement et les points faibles.
+  </p>
+
+  <div class="legend" aria-label="Légende des couleurs">
+    <span class="who llm">Agent LLM (texte)</span>
+    <span class="who comfy">ComfyUI (images)</span>
+    <span class="who vision">Vision (Ollama)</span>
+    <span class="who code">Code déterministe</span>
+    <span class="who human">Humain (validation)</span>
+  </div>
+
+  <div class="views">
+    <a class="view" href="pipeline.html">
+      <span class="num">01</span>
+      <h2>Carte du pipeline</h2>
+      <p>Toutes les étapes dans l'ordre. Un clic sur une étape : ce qu'elle fait, qui la fait, ses entrées et
+        sorties, ses portes et son fichier source.</p>
+    </a>
+    <a class="view" href="voies.html">
+      <span class="num">02</span>
+      <h2>Les deux voies d'exécution</h2>
+      <p>Le pool LLM parallèle (4 workers) face à la file ComfyUI sérielle, partagée par dix sortes de jobs.
+        Animation : deux chapitres qui se croisent.</p>
+    </a>
+    <a class="view" href="equipe.html">
+      <span class="num">03</span>
+      <h2>L'équipe d'agents</h2>
+      <p>Une fiche par agent : rôle, modèle et classe, variables de prompt, étapes où il intervient.</p>
+    </a>
+    <a class="view" href="case.html">
+      <span class="num">04</span>
+      <h2>Vie d'une case</h2>
+      <p>Pas à pas, une case passe de la ligne de scénario à la case lettrée. À chaque étape, on voit ce qui
+        s'ajoute à sa fiche.</p>
+    </a>
+  </div>
+
+  <h2 id="glossaire">Glossaire</h2>
+  <p class="muted">Les mots de l'appli, tels qu'ils apparaissent dans les écrans et le code.</p>
+  <dl class="glossary" id="glossary"></dl>
+</main>
+
+<footer class="foot">Tutoriel statique — s'ouvre sans réseau. Données relevées dans le dépôt, voir <code>LISEZMOI.md</code>.</footer>
+
+<script src="assets/data.js"></script>
+<script src="assets/common.js"></script>
+<script>
+  (function () {
+    var T = window.Tuto;
+    var html = window.TUTO.glossary
+      .map(function (g) {
+        return "<dt id=\"g-" + T.esc(g.id) + "\">" + T.esc(g.term) + "</dt><dd>" + T.rich(g.def) + T.srcList(g.src) + "</dd>";
+      })
+      .join("");
+    document.getElementById("glossary").innerHTML = html;
+  })();
+</script>
+</body>
+</html>

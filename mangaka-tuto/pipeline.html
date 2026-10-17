@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Carte du pipeline — Mangaka Team</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Ccircle cx=%228%22 cy=%228%22 r=%226%22 fill=%22%23fb7185%22/%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<a class="skip" href="#contenu">Aller au contenu</a>
+<header class="top">
+  <a class="brand" href="index.html">mangaka<span>·</span>team <span class="muted small">— tuto</span></a>
+  <nav aria-label="Vues du tutoriel">
+    <a href="index.html">Sommaire</a>
+    <a href="pipeline.html" aria-current="page">Carte du pipeline</a>
+    <a href="voies.html">Les deux voies</a>
+    <a href="equipe.html">L'équipe</a>
+    <a href="case.html">Vie d'une case</a>
+  </nav>
+</header>
+
+<main id="contenu">
+  <h1>Carte du pipeline, de bout en bout</h1>
+  <p class="lead">
+    De la série à la couverture du tome : chaque étape, dans l'ordre. Clique sur une étape pour voir ce qu'elle fait,
+    qui la fait, ce qu'elle consomme et produit, et ce qui peut la bloquer.
+  </p>
+  <div class="legend" aria-label="Légende des couleurs">
+    <span class="who llm">Agent LLM</span>
+    <span class="who comfy">ComfyUI</span>
+    <span class="who vision">Vision (Ollama)</span>
+    <span class="who code">Code déterministe</span>
+    <span class="who human">Humain</span>
+    <span class="small muted"><span style="color:var(--human)">●</span> porte · <span style="color:var(--human)">⇢</span> garde d'étapes</span>
+  </div>
+
+  <div class="map-wrap">
+    <div>
+      <div class="map" id="map"></div>
+      <div class="step-list" id="step-list" aria-label="Étapes du pipeline"></div>
+    </div>
+    <aside class="panel" id="panel" aria-live="polite" aria-label="Détail de l'étape"></aside>
+  </div>
+
+  <h2 style="margin-top:36px" id="garde">La garde d'étapes en un tableau</h2>
+  <p class="muted">Chaque action d'un chapitre exige des étapes réglées. Sinon le moteur refuse avec un message qui
+    nomme l'étape et le nombre d'éléments en faute (erreur 422, champ <code>stage.&lt;étape&gt;</code>). L'auteur peut
+    « passer outre » une étape précise, jamais toutes : la décision est enregistrée avec son auteur et sa date.</p>
+  <div class="table-wrap card" style="padding:0">
+    <table class="steps" id="gate-table"></table>
+  </div>
+  <p class="src" style="margin-top:8px">engine/mangaka_engine/pipeline/stage_gate.py (STAGES, ACTIONS)</p>
+  <p class="src">engine/mangaka_engine/api/stages.py</p>
+  <p class="src">web/src/app/chapitres/[id]/stages.tsx</p>
+</main>
+
+<footer class="foot">Tutoriel statique — données relevées dans le dépôt. <a href="index.html#glossaire">Glossaire</a></footer>
+
+<script src="assets/data.js"></script>
+<script src="assets/common.js"></script>
+<script src="assets/pipeline.js"></script>
+<script>
+  (function () {
+    var G = window.TUTO.gate;
+    var T = window.Tuto;
+    var head = "<thead><tr><th scope=\"col\">Action</th>" + G.stages.map(function (s) {
+      return "<th scope=\"col\" title=\"" + T.esc(s.label) + "\">" + T.esc(s.label) + "</th>";
+    }).join("") + "</tr></thead>";
+    var body = "<tbody>" + G.actions.map(function (a) {
+      return "<tr><th scope=\"row\">" + T.esc(a.label) + "</th>" + G.stages.map(function (s) {
+        var on = a.stages.indexOf(s.key) >= 0;
+        return "<td aria-label=\"" + (on ? "exigée" : "non exigée") + "\" style=\"text-align:center;color:" + (on ? "var(--human)" : "var(--faint)") + "\">" + (on ? "●" : "·") + "</td>";
+      }).join("") + "</tr>";
+    }).join("") + "</tbody>";
+    document.getElementById("gate-table").innerHTML = head + body;
+  })();
+</script>
+</body>
+</html>
