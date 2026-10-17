@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>La chaîne des prompts — Mangaka Team</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Ccircle cx=%228%22 cy=%228%22 r=%226%22 fill=%22%23fb7185%22/%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<a class="skip" href="#contenu">Aller au contenu</a>
+<header class="top">
+  <a class="brand" href="index.html">mangaka<span>·</span>team <span class="muted small">— tuto</span></a>
+  <nav aria-label="Vues du tutoriel">
+    <a href="index.html">Sommaire</a>
+    <a href="pipeline.html">Carte du pipeline</a>
+    <a href="voies.html">Les deux voies</a>
+    <a href="equipe.html">L'équipe</a>
+    <a href="case.html">Vie d'une case</a>
+    <a href="prompts.html" aria-current="page">Chaîne des prompts</a>
+  </nav>
+</header>
+
+<main id="contenu">
+  <h1>La chaîne des prompts</h1>
+  <p class="lead">
+    Qui écrit quoi, à qui, et ce que chaque prompt change à l'image finale. Les gabarits affichés sont le texte réel des
+    presets, relevé par <code>extraire_prompts.py</code> ; le prompt tracé plus bas est construit par le vrai code du moteur
+    sur la case d'essai de l'appli, sans appel LLM.
+  </p>
+  <nav class="toc" aria-label="Sections de la page">
+    <a href="#graphe">1. Le graphe</a>
+    <a href="#fiches">2. Les fiches</a>
+    <a href="#tracage">3. D'où vient ce mot ?</a>
+    <a href="#constats">4. Les leviers</a>
+  </nav>
+
+  <section id="graphe" aria-labelledby="h-graphe">
+    <h2 id="h-graphe">1. Le graphe : qui écrit à qui</h2>
+    <p class="muted small" id="graph-intro"></p>
+    <div class="legend" id="graph-legend" aria-label="Légende des auteurs"></div>
+    <div class="chain-wrap">
+      <div>
+        <div class="map chain" id="chain-map"></div>
+        <div class="step-list chain-list" id="chain-list" aria-label="Auteurs de prompts, en liste"></div>
+      </div>
+      <aside class="panel" id="node-panel" aria-live="polite"></aside>
+    </div>
+  </section>
+
+  <section id="fiches" aria-labelledby="h-fiches">
+    <h2 id="h-fiches">2. Les fiches : un prompt, ses variables, ce qu'il contrôle</h2>
+    <p class="muted small">Une fiche par gabarit de <code>presets/prompts/</code>, plus la consigne de vision du contrôle qualité et les
+      points où le code assemble un prompt image. Choisis une fiche :</p>
+    <div class="fiche-picker" id="fiche-picker" role="tablist" aria-label="Fiches de prompt"></div>
+    <article class="card fiche" id="fiche" role="tabpanel" tabindex="-1" aria-live="polite"></article>
+  </section>
+
+  <section id="tracage" aria-labelledby="h-tracage">
+    <h2 id="h-tracage">3. D'où vient ce mot ?</h2>
+    <p class="muted small" id="trace-intro"></p>
+    <div class="legend" id="trace-legend" aria-label="Légende des sources"></div>
+    <div class="filter" role="tablist" aria-label="Étape du prompt" id="trace-tabs"></div>
+    <div class="trace-wrap">
+      <div class="card trace-text" id="trace-text" role="tabpanel"></div>
+      <aside class="panel trace-info" id="trace-info" aria-live="polite"></aside>
+    </div>
+  </section>
+
+  <section id="constats" aria-labelledby="h-constats">
+    <h2 id="h-constats">4. Les leviers : constats tirés du code</h2>
+    <p class="muted small">Des <strong>constats, pas des chantiers</strong> : chacun cite son fichier et sa ligne ; à toi de décider.
+      Classés par effet probable sur l'image. « À vérifier » : ce que le code seul ne permet pas de trancher (il faut une
+      mesure sur des images).</p>
+    <div class="filter" role="group" aria-label="Filtrer les constats" id="finding-filter"></div>
+    <ol class="findings" id="findings"></ol>
+  </section>
+</main>
+
+<footer class="foot">Tutoriel statique — gabarits relevés dans <code>presets/</code> par <code>extraire_prompts.py</code>, contrôlés par <code>verifier.py</code>. <a href="index.html#glossaire">Glossaire</a></footer>
+
+<script src="assets/data.js"></script>
+<script src="assets/common.js"></script>
+<script src="assets/prompts-gabarits.js"></script>
+<script src="assets/prompts-data.js"></script>
+<script src="assets/prompts.js"></script>
+</body>
+</html>

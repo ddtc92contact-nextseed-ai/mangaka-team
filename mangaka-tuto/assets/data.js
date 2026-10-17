@@ -436,6 +436,13 @@ window.TUTO = {
   ],
 
   // engine/mangaka_engine/pipeline/stage_gate.py — STAGES et ACTIONS, dans l'ordre du code.
+  // Lien de chaque étape de la carte vers la chaîne des prompts (prompts.html#node-<id>) ; null : aucun prompt.
+  stepPrompts: {
+    serie: "createur", identite: "identite", bibliotheque: "fiches", tomes: null, scenes: "scenes", scenario: "scenario",
+    distribution: "fiches", direction: "da", "mise-en-page": null, prompts: "brief", croquis: "envoi", name: null,
+    generation: "envoi", qc: "qc", choix: null, reparation: "autres", finition: null, lettrage: null, planches: null,
+    export: null, couvertures: "couverture",
+  },
   gate: {
     stages: [
       { key: "scenes", label: "Scènes validées" },
