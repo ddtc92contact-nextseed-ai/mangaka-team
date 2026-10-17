@@ -2,7 +2,7 @@
 # Les variables d'environnement DEEPSEEK_BASE_URL / DEEPSEEK_MODEL priment sur ces valeurs.
 deepseek:
   base_url: https://api.deepseek.com
-  model: deepseek-chat
+  model: deepseek-flash   # modèle rapide ; deepseek-v4-pro reste un choix volontaire par agent
   timeout_s: 300   # un chapitre complet en JSON peut prendre plusieurs minutes
   temperature: 0.7
   # DeepSeek n'accepte pas encore d'images : le contrôle qualité visuel
@@ -15,14 +15,6 @@ deepseek:
   # qui n'est donc pas envoyée. `timeout_s` remplace le délai ci-dessus pour ce modèle.
   models_cache_s: 300
   models:
-    - id: deepseek-chat
-      label: DeepSeek Chat
-      note: rapide, sans raisonnement
-    - id: deepseek-reasoner
-      label: DeepSeek Reasoner
-      note: raisonne avant de répondre, plus lent
-      reasoning: true
-      timeout_s: 900   # le raisonnement s'ajoute à l'écriture d'un chapitre complet
     - id: deepseek-flash
       label: DeepSeek Flash
       note: rapide, sans raisonnement
@@ -30,7 +22,16 @@ deepseek:
       label: DeepSeek V4 Pro
       note: raisonne avant de répondre, plus lent
       reasoning: true
-      timeout_s: 900   # comme deepseek-reasoner
+      timeout_s: 900   # le raisonnement s'ajoute à l'écriture d'un chapitre complet
+    # Anciens noms, gardés pour les agents déjà réglés dessus. DeepSeek résout deepseek-chat en deepseek-flash.
+    - id: deepseek-chat
+      label: DeepSeek Chat
+      note: ancien alias de deepseek-flash
+    - id: deepseek-reasoner
+      label: DeepSeek Reasoner
+      note: raisonne avant de répondre, plus lent
+      reasoning: true
+      timeout_s: 900   # comme deepseek-v4-pro
   # Setup par classe de modèle : court préambule fondu en tête du premier message système de chaque appel
   # (jamais en double). Les consignes des agents et leur format de sortie ne changent pas d'un modèle à
   # l'autre. `fast` : classe rapide (vide, les consignes sont réglées pour elle) ; `reasoning` : modèles

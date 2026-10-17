@@ -301,7 +301,7 @@ def test_provider_without_key_is_misconfigured(make_settings: Callable[..., Sett
         scen = next(a for a in c.get("/agents").json() if a["id"] == "scenariste")
         assert scen["status"]["state"] == "misconfigured"
         assert "DEEPSEEK_API_KEY" in scen["status"]["detail"]
-        assert scen["model"] == "DeepSeek · deepseek-chat"
+        assert scen["model"] == "DeepSeek · deepseek-flash"
         ch = c.post(f"/projects/{_series(c)}/chapters", json={"synopsis": "Un duel."}).json()
         r = start_script(c, ch["id"])
         assert r.status_code == 503 and "DEEPSEEK_API_KEY" in r.json()["detail"]

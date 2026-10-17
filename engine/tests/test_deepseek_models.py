@@ -29,7 +29,7 @@ MESSAGES = [ChatMessage("system", "Tu es scénariste."), ChatMessage("user", "É
 class FakeDeepSeek:
     """État du faux serveur : réponses à donner, requêtes reçues."""
 
-    models: list[str] = field(default_factory=lambda: ["deepseek-chat", "deepseek-reasoner", "deepseek-v4-preview"])
+    models: list[str] = field(default_factory=lambda: ["deepseek-flash", "deepseek-v4-pro", "deepseek-v4-preview"])
     models_status: int = 200
     chat: Callable[[dict[str, Any]], tuple[int, dict[str, Any]]] | None = None
     requests: list[dict[str, Any]] = field(default_factory=list)
@@ -95,18 +95,18 @@ def test_live_list_is_relayed_with_preset_labels_and_cached(
         assert r.status_code == 200, r.text
         body = r.json()
         assert body["source"] == "live" and body["source_label"] == "en direct" and body["detail"] is None
-        assert _ids(body) == ["deepseek-chat", "deepseek-reasoner", "deepseek-v4-preview"]
-        chat, reasoner, unknown = body["models"]
-        assert chat["note"] == "rapide, sans raisonnement" and not chat["reasoning"]
+        assert _ids(body) == ["deepseek-flash", "deepseek-v4-pro", "deepseek-v4-preview"]
+        flash, reasoner, unknown = body["models"]
+        assert flash["note"] == "rapide, sans raisonnement" and not flash["reasoning"]
         assert reasoner["note"] == "raisonne avant de répondre, plus lent" and reasoner["reasoning"]
         assert unknown == {"id": "deepseek-v4-preview", "label": "deepseek-v4-preview", "note": "", "reasoning": False}
         assert fake.requests[0]["auth"] == f"Bearer {SECRET}"  # la clé part seulement vers DeepSeek
 
         # Cache de quelques minutes : un second appel ne réinterroge pas DeepSeek ; `refresh` si.
-        fake.models = ["deepseek-chat"]
+        fake.models = ["deepseek-flash"]
         assert _ids(c.get("/providers/deepseek/models").json()) == _ids(body)
         assert len(fake.requests) == 1
-        assert _ids(c.get("/providers/deepseek/models?refresh=true").json()) == ["deepseek-chat"]
+        assert _ids(c.get("/providers/deepseek/models?refresh=true").json()) == ["deepseek-flash"]
         assert SECRET not in r.text
     assert SECRET not in caplog.text
 
@@ -122,7 +122,7 @@ def test_failure_falls_back_to_shipped_list_with_source(
     body = r.json()
     assert r.status_code == 200
     assert body["source"] == "preset" and body["source_label"] == "liste livrée"
-    assert _ids(body) == ["deepseek-chat", "deepseek-reasoner", "deepseek-flash", "deepseek-v4-pro"]
+    assert _ids(body) == ["deepseek-flash", "deepseek-v4-pro", "deepseek-chat", "deepseek-reasoner"]
     assert f"HTTP {status}" in body["detail"] and "panne simulée" in body["detail"]
     assert SECRET not in r.text and SECRET not in caplog.text
 
@@ -145,7 +145,7 @@ def test_missing_key_or_mock_mode_uses_shipped_list_without_calling(
     assert fake.requests == []
     assert no_key["source"] == mock["source"] == "preset"
     assert "DEEPSEEK_API_KEY absente" in no_key["detail"] and "mode mock" in mock["detail"]
-    assert _ids(mock) == ["deepseek-chat", "deepseek-reasoner", "deepseek-flash", "deepseek-v4-pro"]
+    assert _ids(mock) == ["deepseek-flash", "deepseek-v4-pro", "deepseek-chat", "deepseek-reasoner"]
     assert SECRET not in json.dumps(mock)
 
 
@@ -154,7 +154,7 @@ def test_env_model_is_reported(make_settings: Callable[..., Settings]) -> None:
         body = c.get("/providers/deepseek/models").json()
         model = next(s for s in c.get("/agents/scenariste").json()["settings"] if s["key"] == "model")
     assert body["env_model"] == "deepseek-reasoner" and body["default_model"] == "deepseek-reasoner"
-    assert body["preset_model"] == "deepseek-chat"
+    assert body["preset_model"] == "deepseek-flash"
     assert model["value"] == "deepseek-reasoner"
     assert model["options_from"] == "deepseek_models"
     assert model["env_override"] == "DEEPSEEK_MODEL" and model["env_value"] == "deepseek-reasoner"
@@ -164,7 +164,7 @@ def test_env_model_is_reported(make_settings: Callable[..., Settings]) -> None:
 def test_the_four_deepseek_agents_offer_the_model_list(client: TestClient, agent: str) -> None:
     model = next(s for s in client.get(f"/agents/{agent}").json()["settings"] if s["key"] == "model")
     assert model["type"] == "text" and model["options_from"] == "deepseek_models"
-    assert model["env_value"] is None and model["value"] == "deepseek-chat"
+    assert model["env_value"] is None and model["value"] == "deepseek-flash"
 
 
 # --- modèles qui raisonnent ----------------------------------------------------------------------
@@ -252,7 +252,7 @@ PREAMBLE = "Modèle qui raisonne : pèse les contraintes de la consigne"
 
 
 def _setup_llm(
-    make_settings: Callable[..., Settings], model: str, chat: Callable[[dict[str, Any]], httpx.Response]
+    make_settings: Callable[..., Settings], model: str | None, chat: Callable[[dict[str, Any]], httpx.Response]
 ) -> tuple[DeepSeekProvider, list[Any]]:
     """Fournisseur construit comme en vrai (presets livrés), transport httpx simulé : aucun appel réseau."""
     from mangaka_engine.presets import PresetRegistry
@@ -301,6 +301,25 @@ def test_flash_keeps_the_temperature_and_has_no_preamble(make_settings: Callable
     llm.complete(MESSAGES)
     assert sent[0]["temperature"] == 0.2 and sent[1]["temperature"] == 0.7
     assert sent[0]["messages"] == [{"role": m.role, "content": m.content} for m in MESSAGES]
+
+
+def test_agent_without_model_uses_flash_with_temperature_and_no_preamble(
+    make_settings: Callable[..., Settings],
+) -> None:
+    llm, sent = _setup_llm(make_settings, None, _ok)  # aucun modèle choisi : défaut de presets/providers.yaml
+    assert llm.model == "deepseek-flash" and not llm.reasoning and llm.preamble == ""
+    assert llm._client.timeout.read == 300
+    llm.complete(MESSAGES, json_mode=True, temperature=0.2)
+    assert sent[0]["model"] == "deepseek-flash" and sent[0]["temperature"] == 0.2
+    assert PREAMBLE not in json.dumps(sent, ensure_ascii=False)
+    assert sent[0]["messages"] == [{"role": m.role, "content": m.content} for m in MESSAGES]
+
+
+def test_agent_saved_on_the_old_deepseek_chat_alias_still_works(make_settings: Callable[..., Settings]) -> None:
+    llm, sent = _setup_llm(make_settings, "deepseek-chat", _ok)
+    assert not llm.reasoning and llm.preamble == ""
+    assert llm.complete(MESSAGES).text == '{"pages": []}'
+    assert sent[0]["model"] == "deepseek-chat" and sent[0]["temperature"] == 0.7
 
 
 @pytest.mark.parametrize("model", ["mon-deepseek-reasoner-x", "deepseek-v4-pro-0925", "maison-r1"])
@@ -363,7 +382,7 @@ def test_model_is_chosen_per_agent_and_used_by_the_trial(
         scenariste, _ = ctx.agents.llm_for("scenariste", None)
         artist, _ = ctx.agents.llm_for("directeur-artistique", None)
         assert scenariste.model == "deepseek-reasoner" and scenariste.reasoning
-        assert artist.model == "deepseek-chat"
+        assert artist.model == "deepseek-flash"
         assert c.get("/agents/scenariste").json()["model"] == "DeepSeek · deepseek-reasoner"
 
         # L'essai prend le modèle du formulaire, même non enregistré.
