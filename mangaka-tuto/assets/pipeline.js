@@ -103,7 +103,17 @@
       listHtml(step.inputs) + '</div><div><strong class="small">Sorties</strong>' + listHtml(step.outputs) + "</div></div></section>" +
       "<section><h3>Portes</h3>" + listHtml(step.gates, "gate-item") + "</section>" +
       (step.weak ? "<section><h3>À surveiller</h3>" + listHtml(step.weak) + "</section>" : "") +
-      "<section><h3>Fichiers source</h3>" + T.srcList(step.src) + "</section>";
+      "<section><h3>Fichiers source</h3>" + T.srcList(step.src) + "</section>" + promptLink(step);
+  }
+
+  // Lien vers la chaîne des prompts (prompts.html) : l'auteur de prompt de l'étape, ou le graphe entier.
+  function promptLink(step) {
+    var node = (window.TUTO.stepPrompts || {})[step.id];
+    return "<section><h3>Prompts</h3><p class=\"small\">" +
+      (node
+        ? '<a href="prompts.html#node-' + esc(node) + '">Voir les prompts de cette étape</a> : qui les écrit, leurs variables, leur effet sur l\'image.'
+        : 'Aucun prompt à cette étape. <a href="prompts.html#graphe">Voir la chaîne des prompts</a>.') +
+      "</p></section>";
   }
 
   // --- Disposition : une colonne par phase. ---

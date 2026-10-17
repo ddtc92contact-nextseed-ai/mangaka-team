@@ -35,6 +35,7 @@ copié n'importe où. Seul `verifier.py` a besoin du dépôt à côté de lui.
 | `equipe.html` | Une fiche par agent de `presets/agents/` : rôle, modèle, variables de prompt, étapes |
 | `case.html` | La vie d'une case pas à pas, de la ligne de scénario à la planche exportée |
 | `goulots.html` | Goulots et faiblesses : durées et attentes mesurées dans ta base, carte colorée par coût, constats tirés du code (fichier et ligne), faiblesses classées |
+| `prompts.html` | La chaîne des prompts : graphe de qui écrit quoi à qui, une fiche par gabarit (texte réel, variables et leur provenance, contrat de sortie, effet en aval), traçage « d'où vient ce mot ? » du prompt d'une case, constats « leviers » classés par effet probable sur l'image |
 
 Navigation au clavier partout (Tab, Entrée, flèches). Les animations s'arrêtent si le système demande moins de
 mouvement (`prefers-reduced-motion`).
@@ -50,7 +51,7 @@ python3 mangaka-tuto/verifier.py
 
 Il compare `data.js` aux presets et au code (modèle par défaut et modèle de vision de `providers.yaml`, flux et
 leur nom, défauts de `defaults.yaml`, agents et variables de prompt, étapes de la file ComfyUI, garde d'étapes),
-vérifie que chaque fichier source cité existe, et liste les écarts. Il demande PyYAML et Node.
+vérifie que chaque fichier source cité existe, et liste les écarts. Il demande PyYAML, Node et, pour la chaîne des prompts, le venv du moteur (`engine/.venv`).
 
 ## Goulots et faiblesses : mesurer ta base
 
@@ -90,3 +91,30 @@ Tests (lecture seule vérifiée avant/après, médiane, p90, attente en file, ba
 ```bash
 engine/.venv/bin/python -m pytest mangaka-tuto/tests -q
 ```
+
+## La chaîne des prompts (`prompts.html`)
+
+Deux fichiers de données :
+
+- `assets/prompts-gabarits.js` est **généré**, ne pas le modifier à la main. Il contient le texte réel des gabarits
+  (`presets/prompts/`, morceaux d'`image_prompt.yaml`, consigne de vision de `qc.yaml`) avec leurs lignes, les
+  variables déclarées par les agents, les modèles de `providers.yaml`, et le prompt de la case d'essai de l'appli
+  (`engine/mangaka_engine/agents/trials.py`) construit par le vrai code du moteur (`build_prompt`,
+  `frame_references`, `cite_boxes`…), découpé morceau par morceau. Aucun appel LLM, aucune base. Après un
+  changement de preset ou de code de prompt, depuis la racine du dépôt :
+
+  ```bash
+  engine/.venv/bin/python mangaka-tuto/extraire_prompts.py
+  ```
+
+- `assets/prompts-data.js` est écrit à la main : graphe, provenance des variables, effet de chaque champ en aval,
+  constats. Chaque bloc cite `fichier:ligne`.
+
+`verifier.py` contrôle aussi cette page : `prompts-gabarits.js` à jour, chaque agent de `presets/agents/` dans le
+graphe ou parmi les agents sans prompt, une fiche par gabarit, une provenance pour chaque variable utilisée ou
+déclarée (et aucune pour une variable disparue), chaque point du code qui assemble un prompt image cité par une
+fiche, chaque fichier et chaque ligne cités existants. Il affiche aussi la liste des variables déclarées mais
+absentes de leur gabarit. Lance-le avec le Python du moteur (`engine/.venv/bin/python mangaka-tuto/verifier.py`).
+
+Les constats sont des **constats, pas des chantiers** : « à vérifier » marque ce que le code seul ne tranche pas
+(il faut une mesure sur des images).
