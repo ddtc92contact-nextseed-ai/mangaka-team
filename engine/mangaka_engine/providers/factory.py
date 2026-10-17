@@ -27,6 +27,7 @@ from ..presets import PresetError, PresetRegistry
 from .comfyui import ComfyUIClient, HttpComfyUIClient, MockComfyUIClient
 from .embedding import EmbeddingProvider, MockEmbeddingProvider, OllamaEmbeddingProvider
 from .llm import DeepSeekProvider, LLMError, LLMProvider, MockLLMProvider
+from .llm.deepseek import is_reasoning_model
 from .qc import (
     CcipIdentityProvider,
     DetectorProvider,
@@ -80,6 +81,7 @@ def build_llm(
     key = settings.deepseek_api_key.get_secret_value().strip() if settings.deepseek_api_key else None
     model = model or settings.deepseek_model or cfg.model
     info = cfg.model_info(model)  # None : modèle tapé à la main (« Autre… »), raisonnement deviné d'après le nom
+    reasoning = info.reasoning if info else is_reasoning_model(model)
     try:
         return DeepSeekProvider(
             api_key=key,
@@ -87,7 +89,8 @@ def build_llm(
             model=model,
             timeout_s=info.timeout_s if info and info.timeout_s else cfg.timeout_s,
             temperature=cfg.temperature,
-            reasoning=info.reasoning if info else None,
+            reasoning=reasoning,
+            preamble=cfg.preambles.reasoning if reasoning else cfg.preambles.fast,
         )
     except LLMError as exc:
         raise ProviderSelectionError(str(exc)) from exc

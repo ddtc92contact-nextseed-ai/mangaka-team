@@ -23,6 +23,23 @@ deepseek:
       note: raisonne avant de répondre, plus lent
       reasoning: true
       timeout_s: 900   # le raisonnement s'ajoute à l'écriture d'un chapitre complet
+    - id: deepseek-flash
+      label: DeepSeek Flash
+      note: rapide, sans raisonnement
+    - id: deepseek-v4-pro
+      label: DeepSeek V4 Pro
+      note: raisonne avant de répondre, plus lent
+      reasoning: true
+      timeout_s: 900   # comme deepseek-reasoner
+  # Setup par classe de modèle : court préambule fondu en tête du premier message système de chaque appel
+  # (jamais en double). Les consignes des agents et leur format de sortie ne changent pas d'un modèle à
+  # l'autre. `fast` : classe rapide (vide, les consignes sont réglées pour elle) ; `reasoning` : modèles
+  # `reasoning: true` (ou devinés d'après le nom pour un modèle tapé à la main).
+  preambles:
+    fast: ""
+    reasoning: >-
+      Modèle qui raisonne : pèse les contraintes de la consigne, puis rends uniquement la réponse demandée,
+      dans le format exact spécifié, sans commentaire ni texte hors format.
 
 ollama:
   base_url: http://127.0.0.1:11434

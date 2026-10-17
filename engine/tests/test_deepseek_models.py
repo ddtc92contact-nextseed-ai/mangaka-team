@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -121,7 +122,7 @@ def test_failure_falls_back_to_shipped_list_with_source(
     body = r.json()
     assert r.status_code == 200
     assert body["source"] == "preset" and body["source_label"] == "liste livrée"
-    assert _ids(body) == ["deepseek-chat", "deepseek-reasoner"]
+    assert _ids(body) == ["deepseek-chat", "deepseek-reasoner", "deepseek-flash", "deepseek-v4-pro"]
     assert f"HTTP {status}" in body["detail"] and "panne simulée" in body["detail"]
     assert SECRET not in r.text and SECRET not in caplog.text
 
@@ -144,7 +145,7 @@ def test_missing_key_or_mock_mode_uses_shipped_list_without_calling(
     assert fake.requests == []
     assert no_key["source"] == mock["source"] == "preset"
     assert "DEEPSEEK_API_KEY absente" in no_key["detail"] and "mode mock" in mock["detail"]
-    assert _ids(mock) == ["deepseek-chat", "deepseek-reasoner"]
+    assert _ids(mock) == ["deepseek-chat", "deepseek-reasoner", "deepseek-flash", "deepseek-v4-pro"]
     assert SECRET not in json.dumps(mock)
 
 
@@ -244,6 +245,110 @@ def test_preset_timeout_and_reasoning_reach_the_provider(make_settings: Callable
     assert isinstance(reasoner, DeepSeekProvider) and isinstance(chat, DeepSeekProvider)
     assert reasoner.reasoning and not chat.reasoning
     assert reasoner._client.timeout.read == 900 and chat._client.timeout.read == 300
+
+
+# --- setup par classe de modèle (température, préambule) ---------------------------------------------
+PREAMBLE = "Modèle qui raisonne : pèse les contraintes de la consigne"
+
+
+def _setup_llm(
+    make_settings: Callable[..., Settings], model: str, chat: Callable[[dict[str, Any]], httpx.Response]
+) -> tuple[DeepSeekProvider, list[Any]]:
+    """Fournisseur construit comme en vrai (presets livrés), transport httpx simulé : aucun appel réseau."""
+    from mangaka_engine.presets import PresetRegistry
+    from mangaka_engine.providers.factory import build_llm
+    from tests.conftest import PRESETS_DIR
+
+    sent: list[Any] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        sent.append(body)
+        return chat(body)
+
+    s = make_settings(llm_provider="deepseek", deepseek_api_key=SECRET)
+    llm = build_llm(s, PresetRegistry.load(PRESETS_DIR), model=model)
+    assert isinstance(llm, DeepSeekProvider)
+    llm._client._transport = httpx.MockTransport(handler)
+    return llm, sent
+
+
+def _ok(body: dict[str, Any]) -> httpx.Response:
+    return httpx.Response(200, json=_reply('{"pages": []}')[1])
+
+
+def _system(body: dict[str, Any]) -> list[str]:
+    return [m["content"] for m in body["messages"] if m["role"] == "system"]
+
+
+def test_v4_pro_sends_no_temperature_and_the_preamble_once(make_settings: Callable[..., Settings]) -> None:
+    llm, sent = _setup_llm(make_settings, "deepseek-v4-pro", _ok)
+    assert llm.reasoning and llm._client.timeout.read == 900
+    llm.complete(MESSAGES, json_mode=True, temperature=0.2)
+    body = sent[0]
+    assert "temperature" not in body
+    first = body["messages"][0]
+    assert first["role"] == "system" and first["content"].startswith(PREAMBLE)
+    assert first["content"].endswith("\n\nTu es scénariste.")
+    assert json.dumps(body, ensure_ascii=False).count(PREAMBLE) == 1
+    assert len(body["messages"]) == len(MESSAGES)  # fondu, pas de message en plus
+
+
+def test_flash_keeps_the_temperature_and_has_no_preamble(make_settings: Callable[..., Settings]) -> None:
+    llm, sent = _setup_llm(make_settings, "deepseek-flash", _ok)
+    assert not llm.reasoning and llm.preamble == ""
+    llm.complete(MESSAGES, json_mode=True, temperature=0.2)
+    llm.complete(MESSAGES)
+    assert sent[0]["temperature"] == 0.2 and sent[1]["temperature"] == 0.7
+    assert sent[0]["messages"] == [{"role": m.role, "content": m.content} for m in MESSAGES]
+
+
+@pytest.mark.parametrize("model", ["mon-deepseek-reasoner-x", "deepseek-v4-pro-0925", "maison-r1"])
+def test_unknown_reasoning_name_gets_the_reasoning_setup(make_settings: Callable[..., Settings], model: str) -> None:
+    llm, sent = _setup_llm(make_settings, model, _ok)
+    llm.complete(MESSAGES)
+    assert llm.reasoning and "temperature" not in sent[0]
+    assert sent[0]["messages"][0]["content"].startswith(PREAMBLE)
+
+
+def test_unknown_plain_name_stays_fast(make_settings: Callable[..., Settings]) -> None:
+    llm, sent = _setup_llm(make_settings, "deepseek-v4-preview", _ok)
+    llm.complete(MESSAGES)
+    assert not llm.reasoning and sent[0]["temperature"] == 0.7 and PREAMBLE not in json.dumps(sent, ensure_ascii=False)
+
+
+def test_retry_and_json_fallback_keep_a_single_preamble(make_settings: Callable[..., Settings]) -> None:
+    def chat(body: dict[str, Any]) -> httpx.Response:
+        if "response_format" in body:
+            return httpx.Response(400, json={"error": {"message": "response_format is not supported"}})
+        return _ok(body)
+
+    llm, sent = _setup_llm(make_settings, "deepseek-v4-pro", chat)
+    llm.complete(MESSAGES, json_mode=True)
+    # Relance d'un agent : la conversation repart avec la réponse refusée et la correction demandée.
+    retry = [*MESSAGES, ChatMessage("assistant", "{}"), ChatMessage("user", "Corrige : champ manquant.")]
+    llm.complete(retry, json_mode=True)
+    # Messages déjà préfixés (relance qui réutilise la requête envoyée) : pas de doublon.
+    llm.complete([ChatMessage("system", f"{llm.preamble}\n\nTu es scénariste."), MESSAGES[1]], json_mode=True)
+    assert len(sent) == 6 and all("response_format" not in b for b in sent[1::2])
+    assert "JSON" in sent[1]["messages"][-1]["content"]
+    for body in sent:
+        assert json.dumps(body, ensure_ascii=False).count(PREAMBLE) == 1
+        assert _system(body)[0].startswith(PREAMBLE)
+
+
+def test_setup_follows_the_agent_model_without_restart(
+    make_settings: Callable[..., Settings], fake: FakeDeepSeek
+) -> None:
+    fake.chat = lambda body: _reply('{"oups": true}')
+    with _client(make_settings, llm_provider="deepseek", deepseek_api_key=SECRET, deepseek_base_url=fake.url) as c:
+        ctx = c.app.state.ctx  # type: ignore[attr-defined]
+        for model, reasoning in (("deepseek-v4-pro", True), ("deepseek-flash", False)):
+            r = c.put("/agents/scenariste/profile", json={"values": {"model": model}})
+            assert r.status_code == 200, r.text
+            llm, _ = ctx.agents.llm_for("scenariste", None)
+            assert llm.model == model and llm.reasoning is reasoning
+            assert llm.preamble.startswith(PREAMBLE) if reasoning else llm.preamble == ""
 
 
 # --- choix par agent, essai ----------------------------------------------------------------------

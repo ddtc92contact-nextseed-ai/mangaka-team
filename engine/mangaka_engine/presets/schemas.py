@@ -582,6 +582,13 @@ class DeepSeekModelPreset(_Strict):
     timeout_s: float | None = Field(default=None, gt=0)
 
 
+class DeepSeekPreamblesPreset(_Strict):
+    """Court préambule par classe de modèle, fondu en tête du premier message système de chaque appel."""
+
+    fast: str = ""
+    reasoning: str = ""
+
+
 class DeepSeekPreset(_Strict):
     base_url: str
     model: str
@@ -590,6 +597,7 @@ class DeepSeekPreset(_Strict):
     supports_images: bool = False
     models: list[DeepSeekModelPreset] = Field(default_factory=list)
     models_cache_s: float = Field(default=300, ge=0)
+    preambles: DeepSeekPreamblesPreset = Field(default_factory=DeepSeekPreamblesPreset)
 
     def model_info(self, model_id: str) -> DeepSeekModelPreset | None:
         return next((m for m in self.models if m.id == model_id), None)
