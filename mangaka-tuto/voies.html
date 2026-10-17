@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Les deux voies d'exécution — Mangaka Team</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Ccircle cx=%228%22 cy=%228%22 r=%226%22 fill=%22%23fb7185%22/%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<a class="skip" href="#contenu">Aller au contenu</a>
+<header class="top">
+  <a class="brand" href="index.html">mangaka<span>·</span>team <span class="muted small">— tuto</span></a>
+  <nav aria-label="Vues du tutoriel">
+    <a href="index.html">Sommaire</a>
+    <a href="pipeline.html">Carte du pipeline</a>
+    <a href="voies.html" aria-current="page">Les deux voies</a>
+    <a href="equipe.html">L'équipe</a>
+    <a href="case.html">Vie d'une case</a>
+  </nav>
+</header>
+
+<main id="contenu">
+  <h1>Les deux voies d'exécution</h1>
+  <p class="lead">
+    Le moteur fait tourner les tâches longues de deux façons. Le texte (scènes, scénario, direction artistique) et
+    l'export passent par un <strong>pool de 4 threads</strong> qui travaillent en parallèle. Tout ce qui touche
+    ComfyUI passe par <strong>une seule file sérielle</strong> : une tâche à la fois, dans l'ordre d'arrivée. Le
+    contrôle qualité y passe aussi, pour que le modèle de vision ne tourne jamais pendant une génération.
+  </p>
+
+  <div class="grid cols-2" style="margin-bottom:18px">
+    <div class="card">
+      <h2 style="color:var(--llm)">Pool JobRunner</h2>
+      <p class="small">Un <code>ThreadPoolExecutor</code> de 4 workers (<code>max_workers=4</code>). Un job en attente
+        peut être annulé ; un job démarré ne s'interrompt pas. Au redémarrage du moteur, les jobs restés « en cours »
+        passent en échec.</p>
+      <div class="src">engine/mangaka_engine/pipeline/jobs.py</div>
+    </div>
+    <div class="card">
+      <h2 style="color:var(--comfy)">File ComfyUI (SerialJobQueue)</h2>
+      <p class="small">Un seul thread lit la table <code>jobs</code> : les jobs <code>pending</code> de ses étapes, par
+        id croissant (FIFO). La base fait foi : un job ajouté après un autre passe après lui, quelle que soit son
+        étape. Un job en cours peut être interrompu (ComfyUI reçoit l'ordre d'arrêt).</p>
+      <div class="src">engine/mangaka_engine/pipeline/queue.py</div>
+      <div class="src">engine/mangaka_engine/main.py (build_context)</div>
+    </div>
+  </div>
+
+  <h2>Exemple animé : deux chapitres qui se croisent</h2>
+  <p class="muted small">Durées illustratives, non mesurées : seul l'ordre compte. Jaune = chapitre A, bleu =
+    chapitre B, violet = bibliothèque.</p>
+  <div class="controls" role="group" aria-label="Contrôles de l'animation">
+    <button class="btn primary" id="play" type="button" aria-pressed="false">▶ Lecture</button>
+    <button class="btn" id="restart" type="button">↺ Rejouer</button>
+    <button class="btn" id="end" type="button">⏭ Fin</button>
+    <label for="t" class="small muted">Instant</label>
+    <input id="t" type="range" min="0" max="100" step="1" value="0" style="flex:1;min-width:140px">
+    <span class="clock" id="clock" aria-hidden="true">t = 0</span>
+  </div>
+  <div class="narration" id="narration" aria-live="polite"></div>
+  <div class="lanes" id="lanes" style="margin-top:12px"></div>
+
+  <h2 style="margin-top:32px">Tout ce qui partage la file ComfyUI</h2>
+  <p class="muted">Neuf étapes de job (onze usages, croquis et réparations compris) passent par le même worker.
+    Le moindre essai de référence ou de couverture attend donc la fin des générations lancées avant lui, et
+    inversement.</p>
+  <div class="table-wrap card" style="padding:0"><table class="steps stack" id="queue-table"></table></div>
+
+  <h2 style="margin-top:32px">Ce qui tourne dans le pool</h2>
+  <div class="table-wrap card" style="padding:0"><table class="steps stack" id="pool-table"></table></div>
+  <p class="muted small" style="margin-top:10px">Le reste (créateur de série, identité, brouillons de fiche,
+    lieux, mise en page, lettrage, prompt par fragments) s'exécute pendant la requête HTTP elle-même, sans job. Le
+    paragraphe de prompt rédigé par l'IA, lui, s'écrit dans le job ComfyUI de la case : la file attend le LLM.</p>
+</main>
+
+<footer class="foot">Tutoriel statique — données relevées dans le dépôt. <a href="index.html#glossaire">Glossaire</a></footer>
+
+<script src="assets/data.js"></script>
+<script src="assets/common.js"></script>
+<script src="assets/voies.js"></script>
+</body>
+</html>
