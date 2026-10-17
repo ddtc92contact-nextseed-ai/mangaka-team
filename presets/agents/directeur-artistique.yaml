@@ -197,6 +197,7 @@ settings:
       - plans
       - angles
       - cadres
+      - points_de_vue
       - page_chocs
       - sfx_intensities
       - variety_rules
