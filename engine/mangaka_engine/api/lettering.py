@@ -304,6 +304,27 @@ def lettering_font(kind: str, project_id: int | None = None, ctx: AppContext = D
     )
 
 
+@router.get("/lettering/font-samples/{kind}/{font_id}.ttf")
+def font_sample(kind: str, font_id: str, project_id: int | None = None, ctx: AppContext = Depends(get_ctx)) -> Response:
+    """N'importe quelle police de fonts.yaml telle que le lettrage la poserait pour `kind` (type de bulle, ou
+    `sfx` pour une onomatopée) : graisse et italique du style, pour les tuiles d'aperçu de la fiche série.
+    Instance statique gardée en cache (lru) côté moteur, et par le navigateur une heure."""
+    fonts = _fonts(ctx, ctx.agents.presets_for(project_id))
+    if font_id not in fonts.preset.fonts:
+        raise HTTPException(status_code=404, detail="Police inconnue")
+    if kind == "sfx":
+        style = fonts.sfx_style(font_id)
+    elif kind in fonts.preset.styles:
+        style = fonts.style(kind).model_copy(update={"font": font_id})
+    else:
+        raise HTTPException(status_code=404, detail="Type de bulle inconnu")
+    try:
+        data = fonts.data(style)
+    except PresetError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from None
+    return Response(data, media_type="font/ttf", headers={"Cache-Control": "private, max-age=3600"})
+
+
 # --- rendu d'une page ------------------------------------------------------------------------
 @router.post("/pages/{page_id}/render")
 def render_page(

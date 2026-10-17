@@ -284,3 +284,22 @@ def test_resize_preview_endpoint_matches_the_size_after_release(client: TestClie
     assert client.post("/bubbles/99999/fit", json=double).status_code == 404
     sfx = _ok(client.post(f"/panels/{bubble['panel_id']}/sfx", json={"text": "BAM"}), 201)["sfx"][0]
     assert client.post(f"/bubbles/{sfx['id']}/fit", json=double).status_code == 422
+
+
+def test_font_sample_serves_any_preset_font_in_the_style_of_its_kind(client: TestClient) -> None:
+    """Tuiles de police de la fiche série : chaque police de fonts.yaml, graisse du style, jamais de substitut."""
+    from fontTools.ttLib import TTFont
+
+    for kind in ("speech", "shout", "sfx"):
+        for font_id in ("baloo2", "comic-neue", "bowlby-one"):
+            r = client.get(f"/lettering/font-samples/{kind}/{font_id}.ttf")
+            assert r.status_code == 200, (kind, font_id, r.text)
+            assert r.headers["content-type"] == "font/ttf"
+            assert "max-age" in r.headers["cache-control"]
+            cmap = TTFont(io.BytesIO(r.content)).getBestCmap()
+            assert all(ord(ch) in cmap for ch in "éèàçœÉÇ"), (kind, font_id)
+    # Graisse du style : les dialogues (speech, 600) prennent le fichier gras de Comic Neue, l'onomatopée le régulier.
+    speech = client.get("/lettering/font-samples/speech/comic-neue.ttf").content
+    assert speech != client.get("/lettering/font-samples/sfx/comic-neue.ttf").content
+    assert client.get("/lettering/font-samples/speech/inconnue.ttf").status_code == 404
+    assert client.get("/lettering/font-samples/bulle/baloo2.ttf").status_code == 404
