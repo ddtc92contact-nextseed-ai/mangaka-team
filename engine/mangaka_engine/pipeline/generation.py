@@ -120,7 +120,7 @@ from .journal import PANEL_IMAGE, JournalEntry, failure_text, inherited_facts, p
 from .knowledge import KnowledgeBase, PanelKnowledge
 from .layout import target_size
 from .library import panel_assets, style_for
-from .names import CharacterMatcher, kept_offscreen, name_key, panel_context, without_actions
+from .names import CharacterMatcher, kept_offscreen, panel_context, without_actions
 from .pages import applied_values
 from .prompt import (
     PromptCharacter,
@@ -128,7 +128,6 @@ from .prompt import (
     append_instruction,
     build_negative_prompt,
     build_prompt,
-    found_terms,
     frame_references,
     merge_negative,
     mood_dropped_terms,
@@ -146,7 +145,6 @@ from .prompt_dialog import (
     propose,
 )
 from .prompt_dialog import PROMPT_ID as DIALOG_PROMPT_ID
-from .prompt_layout import LayoutBox, LayoutSubject, cite_boxes, layout_boxes
 from .prompt_template import (
     MODE_DETAILED,
     MODE_TEMPLATE,
@@ -379,39 +377,6 @@ def panel_staging(panel: Panel, characters: Sequence[Character] = ()) -> str:
     return without_kept_offscreen(panel, panel.staging) if panel.character_names or characters else ""
 
 
-def layout_subjects(
-    presets: PresetRegistry, panel: Panel, characters: Sequence[Character], *, monochrome: bool = False
-) -> list[LayoutSubject]:
-    """Personnages dessinés dans la case, pour la grille de composition (`prompt_format: layout`) : les noms
-    présents à l'image dans l'ordre de la distribution, avec les mots-clés de leur fiche, puis les fiches de la
-    case qui n'y sont pas nommées. Série en noir et blanc : sans les mots-clés de couleur."""
-    forbidden = presets.image_prompt.monochrome_forbidden_terms if monochrome else ()
-    by_key = {name_key(c.name): c for c in characters}
-    names = [str(n) for n in panel.character_names or [] if str(n).strip()]
-    seen: set[str] = set()
-    out: list[LayoutSubject] = []
-    for name in [*names, *(c.name for c in characters)]:
-        key = name_key(name)
-        if not key or key in seen:
-            continue
-        seen.add(key)
-        fiche = by_key.get(key)
-        keywords = tuple(
-            k for k in (fiche.prompt_keywords or [] if fiche is not None else []) if k and not found_terms(k, forbidden)
-        )
-        out.append(LayoutSubject(fiche.name if fiche is not None else name, keywords))
-    return out
-
-
-def panel_layout_boxes(
-    presets: PresetRegistry, panel: Panel, characters: Sequence[Character], *, monochrome: bool = False
-) -> list[LayoutBox]:
-    """Boîtes de la grille de composition d'une case ([] à 0 ou 1 personnage) : positions de la mise en scène
-    envoyée au prompt (`panel_staging`), sinon réparties dans l'ordre de la distribution."""
-    subjects = layout_subjects(presets, panel, characters, monochrome=monochrome)
-    return layout_boxes(subjects, panel_staging(panel, characters))
-
-
 def panel_description(panel: Panel) -> str:
     """Description envoyée au prompt image : celle de la case, sans l'action visible des personnages laissés hors
     cadre par l'auteur (`without_kept_offscreen`)."""
@@ -492,7 +457,7 @@ def linked_preset_id(
     """Palier croquis (`sketch`) ou de « Régénérer en Qualité » (`quality`) d'une case : le lien du preset de
     la case (`generation_preset`), sinon de celui de la série ; sans lien, `defaults.workflow_sketch` /
     `workflow_quality`. Puis son pendant « avec références » si une fiche de la case a une image de référence.
-    Une série (ou une case) FLUX croque et passe en Qualité sur FLUX ; Qwen garde les paliers de defaults.yaml."""
+    Un preset qui déclare ses liens croque et passe en Qualité sur son propre moteur."""
     label, setting = ("croquis", "workflow_sketch") if link == "sketch" else ("Qualité", "workflow_quality")
     base = presets.workflows.get(panel.generation_preset or panel.page.chapter.project.workflow_preset)
     target_id = getattr(base.preset, link) if base is not None else None
@@ -888,7 +853,7 @@ def collect_loras(panel: Panel, characters: Sequence[LibraryEntry]) -> list[Lora
 
 
 def usable_loras(loaded: LoadedWorkflow, loras: Sequence[LoraSpec]) -> tuple[list[LoraSpec], str | None]:
-    """LoRA envoyés à ce workflow et avertissement lisible : un graphe sans `lora_chain` (FLUX 3 Klein) n'en
+    """LoRA envoyés à ce workflow et avertissement lisible : un graphe sans `lora_chain` n'en
     reçoit aucun, et ceux de la série et des fiches sont alors signalés, jamais ignorés sans un mot."""
     if not loras or loaded.preset.supports_lora:
         return list(loras), None
@@ -1795,8 +1760,6 @@ class _Plan:
     # Journal des générations : sorte (pipeline/journal.py, KINDS) et faits de la case (ids, plan, prompt…).
     kind: str = "panel"
     journal: dict[str, Any] = field(default_factory=dict)
-    # Grille de composition (preset `layout`) : boîtes en fractions de la case (`LayoutBox.as_dict`).
-    layout_boxes: list[dict[str, Any]] = field(default_factory=list)
     # Mode du prompt image de la série (« détaillé » ou « gabarit »), noté sur la version produite.
     prompt_mode: str = MODE_DETAILED
 
@@ -2001,7 +1964,7 @@ class GenerationExecutor:
                     )
                     reference_data.append(path.read_bytes())
             # « Références utilisées » (et non envoyées) : notées sur le job dès la préparation (atelier), avec
-            # les LoRA que le flux ne prend pas (série FLUX 3 Klein : style et fiches signalés, jamais avalés).
+            # les LoRA que le flux ne prend pas (flux sans `lora_chain` : style et fiches signalés, jamais avalés).
             loras, lora_warning = usable_loras(loaded, collect_loras(panel, entries))
             job.params = {
                 **{k: v for k, v in (job.params or {}).items() if k != "lora_warning"},
@@ -2043,12 +2006,6 @@ class GenerationExecutor:
                 monochrome=monochrome,
                 keep=[*(e.name for e in cast.entries), *(panel.character_names or [])],
             )
-            # Grille de composition (FLUX 3 Klein, `prompt_format: layout`) : une boîte par personnage, citée
-            # par <obj_N> dans le paragraphe ; jamais pour une réparation ni « Changer l'angle » (leur cadrage).
-            boxes: list[LayoutBox] = []
-            if loaded.preset.layout is not None and repair is None and not angle_id:
-                boxes = panel_layout_boxes(presets, panel, cast.characters, monochrome=monochrome)
-                prompt = cite_boxes(prompt, boxes)
             # Plan serré : termes contre le plein pied (sauf réparation et « Changer l'angle » : leur cadrage).
             negative = build_negative_prompt(
                 str(loaded.preset.defaults.get("negative_prompt", "")),
@@ -2127,7 +2084,6 @@ class GenerationExecutor:
                 control_data=control_data,
                 upload_folder=page_folder(chapter, page),
                 panel_label=panel_name(panel),
-                layout_boxes=[b.as_dict() for b in boxes],
                 prompt_mode=mode,
             )
             session.commit()  # prompt final éventuellement reconstruit
@@ -2324,7 +2280,6 @@ class GenerationExecutor:
             inpaint_images=inpaint_images,
             source_image=sketch_name,
             control=control,
-            layout_boxes=plan.layout_boxes,
         )
         entry.workflow(plan.loaded, built)
         if cancel.is_set():
@@ -2440,11 +2395,6 @@ class GenerationExecutor:
                     "width": built.params.get("width", stored.width),
                     "height": built.params.get("height", stored.height),
                     "workflow_params": built.params,
-                    **(
-                        {"prompt_format": preset.prompt_format, "layout_boxes": plan.layout_boxes}
-                        if preset.layout is not None
-                        else {}
-                    ),
                     "loras": [lo.as_dict() for lo in built.loras],
                     **({"lora_warning": plan.lora_warning} if plan.lora_warning else {}),
                     **({"camera": plan.camera} if plan.camera else {}),

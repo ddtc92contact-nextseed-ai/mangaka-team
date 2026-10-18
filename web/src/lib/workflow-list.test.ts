@@ -55,21 +55,19 @@ test("le workflow déjà imposé à la case reste listé", () => {
 });
 
 const ENGINES = [
-  preset("flux3-klein-edit-ref-qualite", { reference_slots: 5, engine: "flux3-klein", engine_name: "FLUX 3 Klein" }),
+  preset("sdxl-ref", { reference_slots: 1, engine: "sdxl" }), // moteur inconnu : son id, après Qwen
   preset("maison-ref", { reference_slots: 2 }), // sans `engine` : « Autres »
   preset("qwen-image-edit-ref-turbo", { reference_slots: 5, engine: "qwen-image", engine_name: "Qwen-Image 2.1" }),
-  preset("flux3-klein-croquis", { reference_slots: 5, engine: "flux3-klein", engine_name: "FLUX 3 Klein", role: "croquis" }),
-  preset("sdxl-ref", { reference_slots: 1, engine: "sdxl" }), // moteur inconnu : son id, avant « Autres »
+  preset("qwen-image-croquis", { reference_slots: 5, engine: "qwen-image", engine_name: "Qwen-Image 2.1", role: "croquis" }),
   preset("qwen-image-edit-ref-qualite", { reference_slots: 5, engine: "qwen-image", engine_name: "Qwen-Image 2.1" }),
 ];
 
-test("flux groupés par moteur : Qwen, FLUX, moteurs inconnus, puis « Autres »", () => {
+test("flux groupés par moteur : Qwen, moteurs inconnus, puis « Autres »", () => {
   const groups = groupByEngine(workshopPresets(ENGINES));
   assert.deepEqual(
     groups.map((g) => [g.label, g.items.map((p) => p.id)]),
     [
       ["Qwen-Image 2.1", ["qwen-image-edit-ref-turbo", "qwen-image-edit-ref-qualite"]],
-      ["FLUX 3 Klein", ["flux3-klein-edit-ref-qualite"]],
       ["sdxl", ["sdxl-ref"]],
       ["Autres", ["maison-ref"]],
     ],
@@ -78,9 +76,9 @@ test("flux groupés par moteur : Qwen, FLUX, moteurs inconnus, puis « Autres »
 });
 
 test("nom du moteur d'un flux", () => {
-  assert.equal(engineLabel(ENGINES[0]), "FLUX 3 Klein");
+  assert.equal(engineLabel(ENGINES[2]), "Qwen-Image 2.1");
   assert.equal(engineLabel(ENGINES[1]), OTHER_ENGINES);
-  assert.equal(engineLabel(ENGINES[4]), "sdxl");
+  assert.equal(engineLabel(ENGINES[0]), "sdxl");
   assert.equal(engineLabel(undefined), "Autres");
   assert.deepEqual(groupByEngine([]), []);
 });
@@ -88,11 +86,11 @@ test("nom du moteur d'un flux", () => {
 test("résumé du rechargement des flux", () => {
   const engines = [
     { engine: "qwen-image", name: "Qwen-Image 2.1", workflows: 30 },
-    { engine: "flux3-klein", name: "FLUX 3 Klein", workflows: 7 },
+    { engine: null, name: "Autres", workflows: 2 },
   ];
   assert.equal(
-    reloadSummary({ workflows: 37, engines, issues: [] }),
-    "37 flux rechargés (Qwen-Image 2.1 : 30, FLUX 3 Klein : 7). Aucun preset à corriger.",
+    reloadSummary({ workflows: 32, engines, issues: [] }),
+    "32 flux rechargés (Qwen-Image 2.1 : 30, Autres : 2). Aucun preset à corriger.",
   );
   assert.equal(
     reloadSummary({ workflows: 1, engines: [], issues: [{ file: "workflows/x.yaml", message: "invalide" }] }),

@@ -201,7 +201,7 @@ def test_tier_pairing_and_defaults() -> None:
             assert REG.workflow(preset_id).preset.trial["positive_prompt"]
     # ordre des listes
     assert list(REG.workflows)[:3] == ["qwen-image-base", "qwen-image-base-qualite", "qwen-image-base-rapide"]
-    # paliers proposés dans la fiche série, dans l'ordre Turbo, Rapide, Qualité, Qualité max, puis FLUX 3 Klein
+    # quatre paliers proposés dans la fiche série, dans l'ordre Turbo, Rapide, Qualité, Qualité max
     choices = sorted(
         (w.preset.tier.order, w.preset.tier.choice)
         for w in REG.workflows.values()
@@ -212,7 +212,6 @@ def test_tier_pairing_and_defaults() -> None:
         "Rapide (~1 min par case, négatif inactif)",
         "Qualité (recommandé, négatif actif, ~3 min par case)",
         "Qualité max (bf16, 50 étapes, finitions)",
-        "FLUX 3 Klein · Qualité (sans LoRA, ~1 min 30 par case)",  # second moteur, après les paliers Qwen
     ]
     # estimations des presets (s / case) : Turbo 20, Rapide 60, Qualité 168 (≈ 2× Rapide par étape, 35 étapes),
     # Qualité max 70, ×4 avec références

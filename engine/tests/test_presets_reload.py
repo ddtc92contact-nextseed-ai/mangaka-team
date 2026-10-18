@@ -29,9 +29,9 @@ def presets_copy(tmp_path: Path) -> Path:
 
 
 def _add_workflow(root: Path, new_id: str, **changes: Any) -> None:
-    """Nouveau flux FLUX 3 Klein, copié de flux3-klein-qualite (même JSON), sans palier ni liens."""
-    data = yaml.safe_load((root / WORKFLOWS / "flux3-klein-qualite.yaml").read_text(encoding="utf-8"))
-    for key in ("tier", "with_references", "from_sketch", "sketch", "quality"):
+    """Nouveau flux Qwen-Image, copié de qwen-image-base-qualite (même JSON), sans palier ni liens."""
+    data = yaml.safe_load((root / WORKFLOWS / "qwen-image-base-qualite.yaml").read_text(encoding="utf-8"))
+    for key in ("tier", "with_references", "from_sketch", "sketch", "quality", "with_control", "inpaint_with"):
         data.pop(key, None)
     data.update(id=new_id, name=f"Essai {new_id}", **changes)
     (root / WORKFLOWS / f"{new_id}.yaml").write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
@@ -45,18 +45,18 @@ def test_added_workflow_appears_after_reload(make_client: Callable[..., TestClie
     c = make_client(mangaka_presets_dir=presets_copy)
     ctx = c.app.state.ctx  # type: ignore[attr-defined]
     before = len(ctx.presets.workflows)
-    flux_before = sum(1 for w in ctx.presets.workflows.values() if w.preset.engine == "flux3-klein")
-    _add_workflow(presets_copy, "flux3-klein-essai")
-    assert "flux3-klein-essai" not in _ids(c)  # rien ne change sans rechargement
+    qwen_before = sum(w.preset.engine == "qwen-image" for w in ctx.presets.workflows.values())
+    _add_workflow(presets_copy, "qwen-image-essai")
+    assert "qwen-image-essai" not in _ids(c)  # rien ne change sans rechargement
 
     out = _ok(c.post("/presets/reload"))
     assert out["workflows"] == before + 1
     assert out["issues"] == []
-    flux = next(e for e in out["engines"] if e["engine"] == "flux3-klein")
-    assert flux["name"] == "FLUX 3 Klein" and flux["workflows"] == flux_before + 1
-    assert "flux3-klein-essai" in _ids(c)
+    qwen = next(e for e in out["engines"] if e["engine"] == "qwen-image")
+    assert qwen["name"] == "Qwen-Image 2.1" and qwen["workflows"] == qwen_before + 1
+    assert "qwen-image-essai" in _ids(c)
     # Propagé partout : même registre pour les exécuteurs, presets effectifs des agents recalculés.
-    assert "flux3-klein-essai" in ctx.agents.presets_for(None).workflows
+    assert "qwen-image-essai" in ctx.agents.presets_for(None).workflows
     assert ctx.knowledge.settings is ctx.presets.knowledge
 
 
@@ -65,16 +65,16 @@ def test_invalid_workflow_is_reported_without_dropping_others(
     presets_copy: Path,
 ) -> None:
     c = make_client(mangaka_presets_dir=presets_copy)
-    _add_workflow(presets_copy, "flux3-klein-bon")
-    _add_workflow(presets_copy, "flux3-klein-casse", workflow_file="introuvable.json")
+    _add_workflow(presets_copy, "qwen-image-bon")
+    _add_workflow(presets_copy, "qwen-image-casse", workflow_file="introuvable.json")
 
     out = _ok(c.post("/presets/reload"))
     assert len(out["issues"]) == 1
     issue = out["issues"][0]
-    assert issue["file"] == "workflows/flux3-klein-casse.yaml"
+    assert issue["file"] == "workflows/qwen-image-casse.yaml"
     assert "introuvable.json" in issue["message"]
     ids = _ids(c)
-    assert "flux3-klein-bon" in ids and "flux3-klein-casse" not in ids
+    assert "qwen-image-bon" in ids and "qwen-image-casse" not in ids
     assert "qwen-image-turbo" in ids and out["workflows"] == len(ids)
 
 
@@ -85,21 +85,21 @@ def test_reload_refused_while_a_generation_runs(make_client: Callable[..., TestC
     panel = data["panels"][0]
     _ok(c.post(f"/panels/{panel['id']}/generate", json={"count": 1}), 202)
     assert comfy.started.acquire(timeout=5)
-    _add_workflow(presets_copy, "flux3-klein-pendant")
+    _add_workflow(presets_copy, "qwen-image-pendant")
 
     r = c.post("/presets/reload")
     assert r.status_code == 409
     assert r.json()["detail"].startswith("Une génération est en cours")
-    assert "flux3-klein-pendant" not in _ids(c)  # rien n'a été relu
+    assert "qwen-image-pendant" not in _ids(c)  # rien n'a été relu
 
     comfy.gate.set()
     _wait(c)
     _ok(c.post("/presets/reload"))  # file vide : accepté
-    assert "flux3-klein-pendant" in _ids(c)
+    assert "qwen-image-pendant" in _ids(c)
 
 
-def test_switching_a_panel_engine_keeps_every_version(make_client: Callable[..., TestClient]) -> None:  # noqa: F811
-    """« Cette case passe mal, je la refais sur l'autre moteur » : seul le flux de la case change."""
+def test_switching_a_panel_workflow_keeps_every_version(make_client: Callable[..., TestClient]) -> None:  # noqa: F811
+    """« Cette case passe mal, je la refais sur un autre flux » : seul le flux de la case change."""
     c = make_client()
     data = setup_chapter(c)
     p1, p2 = data["panels"][0], data["panels"][1]
@@ -109,7 +109,7 @@ def test_switching_a_panel_engine_keeps_every_version(make_client: Callable[...,
     before = {p["id"]: _ok(c.get(f"/panels/{p['id']}/images")) for p in (p1, p2)}
     assert all(len(images) == 1 for images in before.values())
 
-    panel = _ok(c.patch(f"/panels/{p1['id']}", json={"generation_preset": "flux3-klein-edit-ref-qualite"}))
-    assert panel["generation_preset"] == "flux3-klein-edit-ref-qualite"
+    panel = _ok(c.patch(f"/panels/{p1['id']}", json={"generation_preset": "qwen-image-edit-ref-rapide"}))
+    assert panel["generation_preset"] == "qwen-image-edit-ref-rapide"
     assert {p["id"]: _ok(c.get(f"/panels/{p['id']}/images")) for p in (p1, p2)} == before
     assert _ok(c.get(f"/panels/{p2['id']}"))["generation_preset"] is None

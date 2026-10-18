@@ -320,7 +320,7 @@ export function LoraPicker({
   );
 }
 
-/** Le flux de la série ne prend pas de LoRA (FLUX 3 Klein) : bandeau au-dessus des champs LoRA, grisés. */
+/** Le flux de la série ne prend pas de LoRA (pas de `lora_chain`) : bandeau au-dessus des champs LoRA, grisés. */
 export function LoraUnsupported({ notice }: { notice: string }) {
   return (
     <p
