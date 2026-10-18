@@ -25,12 +25,13 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from dataclasses import field as dc_field
 from typing import Any
 
 from ..presets.schemas import BriefRules, count_panels
 from .layout import LayoutError, tree_from_json
-from .names import STOPWORDS, CharacterMatcher, _same_word, _singular, name_key
+from .names import _TOKEN, STOPWORDS, CharacterMatcher, _same_word, _singular, name_key
 
 # Sortes de défaut (`BriefNote.kind`).
 ABSENT = "personnage absent"
@@ -49,7 +50,7 @@ class BriefNote:
     field: str  # setting | staging | lieu | page
     kind: str  # personnage absent | plan | sans décor | lieu | emplacements
     message: str
-    names: tuple[str, ...] = field(default=())
+    names: tuple[str, ...] = dc_field(default=())
 
     def as_dict(self) -> dict[str, Any]:
         return {"field": self.field, "kind": self.kind, "message": self.message, "names": list(self.names)}
@@ -229,13 +230,42 @@ _LABEL = re.compile(r"^\s*[A-Za-z][\w ]{0,30}:\s*")  # « Staging: », « Settin
 _LEAD_WORDS = frozenset({"le", "la", "les", "l", "un", "une", "the", "a", "an", "and", "et"})
 
 
+def _full_forms(matcher: CharacterMatcher, text: str, written: str, card_id: int) -> list[str]:
+    """Le nom `written` (souvent le seul prénom lu par `read_names`) tel qu'écrit dans `text`, prolongé par la suite
+    du nom ou d'un alias de la fiche quand le texte la donne (« Ren » → « Ren Shiba », « Tora » → « Tora Oba », avec
+    ou sans accents) : les formes de `text`, les plus longues d'abord."""
+    tokens = list(_TOKEN.finditer(text))
+    keys = [name_key(m.group(0)) for m in tokens]
+    wk = name_key(written).split()
+    card_keys = next((c.keys for c in matcher.cards if c.id == card_id), ())
+    forms: list[str] = []
+    n = len(wk)
+    for i in range(len(tokens) - n + 1) if wk else ():
+        if not all(_same_word(k, w) for k, w in zip(keys[i : i + n], wk, strict=True)):
+            continue
+        end = best = i + n
+        for key in card_keys:
+            # Place du dernier mot écrit dans ce nom de fiche, puis les mots suivants du nom, s'ils suivent.
+            for j, word in enumerate(key):
+                if not _same_word(keys[end - 1], word):
+                    continue
+                stop, m = end, j + 1
+                while stop < len(tokens) and m < len(key) and _same_word(keys[stop], key[m]):
+                    stop, m = stop + 1, m + 1
+                best = max(best, stop)
+        forms.append(text[tokens[i].start() : tokens[best - 1].end()])
+    return sorted(dict.fromkeys(forms), key=len, reverse=True) or [written]
+
+
 def _absent_in(matcher: CharacterMatcher, text: str, present: set[int]) -> list[tuple[str, str]]:
-    """[(nom tel qu'écrit, nom de la fiche)] des absents que `text` nomme."""
-    return [
-        (r.name, matcher.names.get(r.ids[0], r.name))
-        for r in matcher.resolve_all(matcher.read_names(text), [present])
-        if r.ids and not set(r.ids) & present
-    ]
+    """[(nom tel qu'écrit en entier, nom de la fiche)] des absents que `text` nomme, les plus longs d'abord
+    (« Ren Shiba » se retire avant un « Ren » seul)."""
+    found: list[tuple[str, str]] = []
+    for r in matcher.resolve_all(matcher.read_names(text), [present]):
+        if r.ids and not set(r.ids) & present:
+            fiche = matcher.names.get(r.ids[0], r.name)
+            found += [(form, fiche) for form in _full_forms(matcher, text, r.name, r.ids[0])]
+    return sorted(dict.fromkeys(found), key=lambda f: len(f[0]), reverse=True)
 
 
 def _leads(text: str, written: str) -> bool:

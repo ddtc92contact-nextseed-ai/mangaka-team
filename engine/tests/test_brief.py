@@ -299,6 +299,15 @@ def test_strip_absent_removes_sentences_and_fragments() -> None:
     out, removed = strip_absent(MATCHER, "Haru, assis, serre les poings et fusille Ren du regard.", {1})
     assert out == "Haru, assis, serre les poings et fusille du regard."
     assert removed == [{"name": "Ren Shiba", "removed": "Ren"}]
+    # Le nom complet tel qu'écrit, pas seulement le prénom, avec ou sans accents.
+    out, removed = strip_absent(MATCHER, "Haru Kaneda regarde Ren Shiba avec colère.", {1})
+    assert out == "Haru Kaneda regarde avec colère."
+    assert removed == [{"name": "Ren Shiba", "removed": "Ren Shiba"}]
+    out, removed = strip_absent(MATCHER, "(Ren Shiba et Tora Ōba, page 1, case 2)", {2})
+    assert "Tora" not in out and "Ōba" not in out and "Ren Shiba" in out
+    assert removed == [{"name": "Tora Ōba", "removed": "Tora Ōba"}]
+    out, _ = strip_absent(MATCHER, "Haru Kaneda fixe Tora Oba, puis Tora.", {1})
+    assert "Tora" not in out and "Oba" not in out
     # Case de décor : plus aucun nom de fiche.
     out, _ = strip_absent(MATCHER, "No character in the frame. Staging: Tora et Ren courent.", set())
     assert out == "No character in the frame."
@@ -315,8 +324,9 @@ def test_generated_prompt_never_names_an_offscreen_character(client: TestClient)
                         {
                             "description": "Haru, assis, serre les poings, la mâchoire crispée.",
                             "setting": "plage, le sable autour, midi",
-                            "staging": "Haru, assis, serre les poings et fusille Ren du regard. Ren hausse un "
-                            "sourcil, amusé. Tora le regarde, étonné. Noix de coco penche la tête.",
+                            "staging": "Haru, assis, serre les poings et fusille Ren Shiba du regard. Ren hausse un "
+                            "sourcil, amusé. Tora le regarde, étonné. Noix de coco penche la tête, près de "
+                            "Haru et de Tora Ōba.",
                             "characters": ["Haru Kaneda"],
                             "offscreen": ["Ren Shiba", "Tora Ōba", "noix de coco"],
                         }
@@ -343,7 +353,7 @@ def test_generated_prompt_never_names_an_offscreen_character(client: TestClient)
     # … le prompt envoyé à ComfyUI, jamais.
     sent = image["params"]["prompt"]
     assert "Haru Kaneda" in sent
-    for name in ("Ren", "Tora", "coco"):
+    for name in ("Ren", "Shiba", "Tora", "Ōba", "coco"):
         assert name not in sent, name
     assert {g["name"] for g in image["params"]["prompt_guard"]} == {"Ren Shiba", "Tora Ōba", "noix de coco"}
     # Trace dans le journal de la case.
