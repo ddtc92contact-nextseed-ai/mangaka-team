@@ -10,13 +10,24 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from ..pipeline.names import relink_project
+from ..pipeline.prompt_template import ANCHOR_PROMPT_ID, AnchorError, propose_anchor
+from ..pipeline.prompt_writer import AGENT_ID as WRITER_AGENT
 from ..pipeline.reference_sheets import MAX_KEPT, delete_entry_variants, entry_folder, next_position
+from ..presets import PresetError
 from ..store.files import InvalidImageError, StoredImage, cache_headers, versioned_url
 from ..store.models import Character, CharacterImage, SeriesAsset, SeriesAssetImage
 from .deps import AppContext, get_ctx, get_session
 from .errors import FieldError
 from .projects import get_project_or_404
-from .schemas import CharacterCreate, CharacterOut, CharacterUpdate, EntryUpdate, ReferenceImageOut
+from .schemas import (
+    AnchorProposalOut,
+    AnchorProposeIn,
+    CharacterCreate,
+    CharacterOut,
+    CharacterUpdate,
+    EntryUpdate,
+    ReferenceImageOut,
+)
 from .storage import move_folders, remove_entry_folders, rename_entry, set_entry_slug
 
 router = APIRouter(tags=["personnages"])
@@ -56,6 +67,7 @@ def character_out(c: Character) -> CharacterOut:
         created_at=c.created_at,
         updated_at=c.updated_at,
         aliases=list(c.aliases or []),
+        visual_anchor=c.visual_anchor or "",
     )
 
 
@@ -71,6 +83,8 @@ def apply_changes(entry: Character | SeriesAsset, body: EntryUpdate) -> None:
         changes["lora_trigger_words"] = changes["lora_trigger_words"] or ""
     if "aliases" in changes:
         changes["aliases"] = changes["aliases"] or []
+    if "visual_anchor" in changes:
+        changes["visual_anchor"] = changes["visual_anchor"] or ""
     for key, value in changes.items():
         setattr(entry, key, value)
 
@@ -179,6 +193,40 @@ def update_character(
     session.commit()
     move_folders(ctx, move)
     return character_out(character)
+
+
+@router.post("/characters/{character_id}/visual-anchor/propose", response_model=AnchorProposalOut)
+def propose_visual_anchor(
+    character_id: int,
+    body: AnchorProposeIn | None = None,
+    session: Session = Depends(get_session),
+    ctx: AppContext = Depends(get_ctx),
+) -> AnchorProposalOut:
+    """« Proposer » l'ancre visuelle (prompt image « gabarit ») : le LLM du Dessinateur la tire de la description
+    visuelle (celle du formulaire si elle est envoyée, sinon celle de la fiche). Rien n'est enregistré : l'auteur
+    relit, retouche, puis enregistre la fiche."""
+    character = get_character_or_404(session, character_id)
+    presets = ctx.agents.presets_for(character.project_id)
+    try:
+        prompt = presets.prompt(ANCHOR_PROMPT_ID)
+    except PresetError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+    description = body.visual_description if body is not None and body.visual_description is not None else None
+    keywords = body.prompt_keywords if body is not None and body.prompt_keywords is not None else None
+    name, project_id = character.name, character.project_id
+    description = character.visual_description if description is None else description
+    keywords = list(character.prompt_keywords or []) if keywords is None else keywords
+    session.commit()  # aucune transaction ouverte pendant l'appel au LLM
+    llm, error = ctx.agents.llm_for(WRITER_AGENT, project_id)
+    if llm is None:
+        raise HTTPException(status_code=503, detail=f"LLM indisponible : {error or 'fournisseur LLM indisponible'}")
+    try:
+        anchor = propose_anchor(
+            llm, prompt, name=name, description=description, keywords=keywords, settings=presets.image_prompt
+        )
+    except AnchorError as exc:
+        raise FieldError("visual_anchor", f"Ancre non proposée : {exc}. Réessaie, ou écris-la à la main.") from None
+    return AnchorProposalOut(visual_anchor=anchor)
 
 
 @router.delete("/characters/{character_id}", status_code=204)

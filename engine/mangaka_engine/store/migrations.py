@@ -136,7 +136,7 @@ from .slugs import RESERVED_ENTRIES, RESERVED_SERIES, slugify, unique_slug
 
 log = logging.getLogger("mangaka_engine")
 
-SCHEMA_VERSION = 39
+SCHEMA_VERSION = 40
 
 
 class MigrationError(RuntimeError):
@@ -626,6 +626,15 @@ def _v38_to_v39(cur: sqlite3.Cursor) -> None:
     _fill_scene_casts(cur)
 
 
+def _v39_to_v40(cur: sqlite3.Cursor) -> None:
+    # Prompt image « gabarit » (#228) : mode choisi par série (NULL = `image_prompt_mode` de defaults.yaml) et
+    # ancre visuelle courte de chaque fiche personnage.
+    if "image_prompt_mode" not in {row[1] for row in cur.execute("PRAGMA table_info(projects)")}:
+        cur.execute("ALTER TABLE projects ADD COLUMN image_prompt_mode VARCHAR(20)")
+    if "visual_anchor" not in {row[1] for row in cur.execute("PRAGMA table_info(characters)")}:
+        cur.execute("ALTER TABLE characters ADD COLUMN visual_anchor TEXT NOT NULL DEFAULT ''")
+
+
 def _fill_scene_casts(cur: sqlite3.Cursor) -> None:
     from ..pipeline.names import name_key  # le pipeline importe le store
 
@@ -712,6 +721,7 @@ MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     36: (37, _v36_to_v37),
     37: (38, _v37_to_v38),
     38: (39, _v38_to_v39),
+    39: (40, _v39_to_v40),
 }
 
 

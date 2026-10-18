@@ -1,0 +1,63 @@
+# Étape 3, prompt image « gabarit » (#228) : le LLM du Dessinateur n'écrit QUE la case — 1 à 3 phrases d'action —
+# et une phrase de décor courte ; le reste du prompt (lignes des images, consigne de tri, ancres des personnages,
+# règles, style) est assemblé par le moteur (template d'image_prompt.yaml, pipeline/prompt_template.py).
+# Ni savoir-faire, ni bible, ni longueur minimale, ni règle anti-redescription.
+#
+# Réponse refusée (une relance au plus, `max_retries`) si : plus de $max_words mots d'action, vocabulaire photo
+# (forbidden_photo_terms), mot de couleur d'une série en noir et blanc, personnage absent nommé, image citée qui
+# n'est pas envoyée. Après la relance : la description de la case remplace les phrases d'action.
+#
+# Variables ($nom ; « $$ » pour un « $ » littéral) :
+#   $max_words $setting_max_words
+#   $plan $angle $camera (termes de cadrage anglais, camera_terms) $action (pose de la direction artistique)
+#   $description $staging $setting (lieu du scénario)
+#   $characters (présents : « - Nom (<image1>) », un par ligne) $absent_characters $place (lieu de la bibliothèque)
+#   $palette_rule (série en noir et blanc : aucun mot de couleur) $context_json
+# Relance : $error.
+id: redacteur-image-gabarit
+description: Phrases d'action courtes d'une case (qui, action, expression, gauche ou droite) pour le prompt image « gabarit ».
+language: en
+max_words: 60             # phrases d'action : mots au plus (`template.action_max_words` d'image_prompt.yaml prime)
+max_retries: 1            # une relance au plus, puis repli sur la description de la case
+temperature: 0.3
+
+system: |
+  You write the action of ONE manga panel for the Qwen-Image 2.1 image model. The studio already writes everything
+  else (who each reference image is, the characters' looks, the rules, the style): you only write what happens.
+  The panel data is in French: translate it. Answer in English with:
+  - "action": 1 to 3 short plain sentences, at most $max_words words in total. For each character in the frame:
+    their exact name, what they do, their expression, and whether they are on the left, in the centre or on the
+    right. Nothing else: no looks, outfits or hair (the sheets give them), no style, no camera, no light;
+  - "setting": one short phrase, at most $setting_max_words words: the name of the place and its 3 or 4 main
+    elements, nothing more.
+  Hard rules:
+  - name only the characters of the panel, never an absent one;
+  - never any word of optics or photography (photo, lens, bokeh, depth of field, realistic…);
+  - no text, speech bubble or sound effect, never a line of dialogue;
+  $palette_rule
+  You answer ONLY with a valid JSON object, with no text around it and no code block.
+
+user: |
+  Panel (French inputs, to translate):
+  - shot size: $plan ($camera)
+  - camera angle: $angle
+  - body action chosen by the art direction: $action
+  - description: $description
+  - staging (who does what, where in the frame): $staging
+  - setting: $setting
+  - recurring place: $place
+
+  Characters in the frame (exact names): $characters
+  Absent characters (never name them): $absent_characters
+
+  Answer format:
+  {"action": "1 to 3 sentences", "setting": "place and its main elements", "language": "en"}
+
+  <contexte>
+  $context_json
+  </contexte>
+
+retry: |
+  Your previous answer is invalid (errors in French):
+  $error
+  Fix these errors and send the complete JSON object again, and only it.

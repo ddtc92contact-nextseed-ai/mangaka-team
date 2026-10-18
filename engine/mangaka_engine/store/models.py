@@ -179,6 +179,9 @@ class Project(TimestampMixin, Base):
     # paragraphe (pipeline/prompt_writer.py) ; False = assemblage par fragments (image_prompt.yaml#parts).
     # Nouvelles séries : `enabled` de presets/prompts/redacteur-image.yaml ; séries d'avant la v21 : False.
     ai_prompt: Mapped[bool] = mapped_column(default=True)
+    # Prompt image (#228) : « détaillé » (fragments ou paragraphe du rédacteur, ci-dessus) ou « gabarit » (prompt
+    # court assemblé par le moteur, pipeline/prompt_template.py) ; None = `image_prompt_mode` de defaults.yaml.
+    image_prompt_mode: Mapped[str | None] = mapped_column(String(20), default=None)
     # « Cohérence anime » : LoRA d'identité (presets/camera_loras.yaml) ajouté aux générations de la série
     # dont le palier le permet (Qualité) ; désactivé par défaut.
     anime_consistency: Mapped[bool] = mapped_column(default=False)
@@ -236,6 +239,9 @@ class Character(TimestampMixin, Base):
     lora_trigger_words: Mapped[str] = mapped_column(Text, default="")  # ajoutés au prompt avec le LoRA
     # Autres noms du personnage (« le petit dragon », « Urus le dragon ») : reconnus par le scénario.
     aliases: Mapped[list[str]] = mapped_column(JSON, default=list, server_default="[]")
+    # Ancre visuelle (≈ 15 mots, anglais : cheveux, peau, tenue) du prompt image « gabarit » ; vide = résumé de
+    # la description visuelle.
+    visual_anchor: Mapped[str] = mapped_column(Text, default="", server_default="")
 
     project: Mapped[Project] = relationship(back_populates="characters")
     reference_images: Mapped[list[CharacterImage]] = relationship(
