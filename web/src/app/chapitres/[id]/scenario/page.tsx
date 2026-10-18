@@ -539,10 +539,13 @@ function JobProgress({ job, onRetry }: { job: Job; onRetry: () => void }) {
   }
   if (job.status === "succeeded") {
     return (
-      <p className="mt-4 text-sm text-emerald-300" role="status" data-testid="job-done">
-        Découpage enregistré automatiquement
-        {job.finished_at && ` à ${formatTime(job.finished_at)}`} ({job.message}).
-      </p>
+      <>
+        <p className="mt-4 text-sm text-emerald-300" role="status" data-testid="job-done">
+          Découpage enregistré automatiquement
+          {job.finished_at && ` à ${formatTime(job.finished_at)}`} ({job.message}).
+        </p>
+        <RejectedSfx job={job} />
+      </>
     );
   }
   return (
@@ -747,6 +750,32 @@ function PageEditor({
         </SmallButton>
       </div>
     </Card>
+  );
+}
+
+/** Onomatopées du scénariste hors de la bibliothèque (presets/sfx_library.yaml), retirées par le moteur. */
+function RejectedSfx({ job }: { job: Job }) {
+  const raw = job.params?.sfx_rejected;
+  const items = Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string") : [];
+  if (!items.length) return null;
+  return (
+    <div
+      className="mt-3 rounded border border-amber-800/60 bg-amber-950/30 px-3 py-2 text-xs text-amber-200"
+      data-testid="sfx-rejected"
+    >
+      <div className="mb-0.5 font-medium">
+        ⚠ {items.length > 1 ? `${items.length} onomatopées retirées` : "Onomatopée retirée"} : hors de la
+        bibliothèque d&apos;onomatopées
+      </div>
+      <ul className="list-disc space-y-0.5 pl-4">
+        {items.map((item, i) => (
+          <li key={`${i}-${item}`}>{item}</li>
+        ))}
+      </ul>
+      <p className="mt-1 text-amber-200/80">
+        Le scénariste ne choisit que dans la bibliothèque ; tu peux toujours en ajouter une à la main, au lettrage.
+      </p>
+    </div>
   );
 }
 

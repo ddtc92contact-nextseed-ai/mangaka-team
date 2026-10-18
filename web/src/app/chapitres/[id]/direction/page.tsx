@@ -852,6 +852,12 @@ function PanelRow({
               </form>
             )}
           </div>
+          {!!pa.sfx_rejected?.length && (
+            <p className="text-xs text-amber-300" role="note" data-testid="sfx-rejected">
+              ⚠ Hors de la bibliothèque d&apos;onomatopées, retirée{pa.sfx_rejected.length > 1 ? "s" : ""} :{" "}
+              {pa.sfx_rejected.map((t) => `« ${t} »`).join(", ")}
+            </p>
+          )}
         </div>
       </div>
       <p className="mt-2 text-[11px] text-zinc-600">Le cadre et les onomatopées seront utilisés par le lettrage.</p>
