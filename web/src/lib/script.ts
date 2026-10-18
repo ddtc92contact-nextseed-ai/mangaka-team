@@ -41,6 +41,8 @@ const key = () => `k${++seq}`;
 
 export interface DraftDialogue {
   key: string;
+  /** Bulle en base : renvoyée au moteur pour garder son lettrage (cadre, queue) ; absente = nouvelle réplique. */
+  id?: number;
   speaker: string;
   text: string;
   kind: BubbleKind;
@@ -99,7 +101,7 @@ export function toDraft(pages: PageData[]): DraftPage[] {
       shot_type: pa.shot_type,
       importance: pa.importance,
       intensity: pa.intensity,
-      dialogues: pa.dialogues.map((d) => ({ key: key(), speaker: d.speaker, text: d.text, kind: d.kind })),
+      dialogues: pa.dialogues.map((d) => ({ key: key(), id: d.id, speaker: d.speaker, text: d.text, kind: d.kind })),
     })),
   }));
 }
@@ -126,7 +128,7 @@ export function fromDraft(pages: DraftPage[]): PageInput[] {
       intensity: pa.intensity ?? null,
       dialogues: pa.dialogues
         .filter((d) => d.text.trim())
-        .map((d) => ({ speaker: d.speaker, text: d.text, kind: d.kind })),
+        .map((d) => ({ id: d.id, speaker: d.speaker, text: d.text, kind: d.kind })),
     })),
   }));
 }

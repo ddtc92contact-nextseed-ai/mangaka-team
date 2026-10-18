@@ -666,24 +666,25 @@ def replace_pages(
                 panel.location = session.get(SeriesLocation, cin.location) if cin.location is not None else None
             if cin.objets is not None:
                 panel.object_ids = list(dict.fromkeys(cin.objets))
-            # Les bulles sont recréées ; un cadre ou une queue ajustés à la main au lettrage suivent leur `id`.
+            # Une réplique renvoyée avec son `id` garde sa bulle (même id, cadre et queue ajustés au lettrage) ;
+            # les autres sont recréées.
             previous = {b.id: b for b in panel.bubbles} if panel.id is not None else {}
-            bubbles = [
-                Bubble(
-                    order=j,
-                    speaker_name=d.speaker,
-                    speaker_id=matcher.match(d.speaker),
-                    text=d.text,
-                    kind=BubbleKind(d.kind),
-                    position=previous[d.id].position if d.id in previous else None,
-                    # Bulle sans queue (ajoutée au lettrage sans locuteur) : la queue revient avec un locuteur.
-                    tail=previous[d.id].tail
-                    if d.id in previous and not (d.speaker and no_tail(previous[d.id].tail))
-                    else None,
-                )
-                for j, d in enumerate(cin.dialogues)
-                if not (d.id in previous and previous[d.id].kind == BubbleKind.sfx)
-            ]
+            bubbles: list[Bubble] = []
+            for j, d in enumerate(cin.dialogues):
+                old = previous.pop(d.id, None) if d.id is not None else None
+                if old is not None and old.kind == BubbleKind.sfx:
+                    previous[old.id] = old  # une onomatopée ne devient pas une réplique
+                    continue
+                bubble = old if old is not None else Bubble()
+                # Bulle sans queue (ajoutée au lettrage sans locuteur) : la queue revient avec un locuteur.
+                if d.speaker and no_tail(bubble.tail):
+                    bubble.tail = None
+                bubble.order = j
+                bubble.speaker_name = d.speaker
+                bubble.speaker_id = matcher.match(d.speaker)
+                bubble.text = d.text
+                bubble.kind = BubbleKind(d.kind)
+                bubbles.append(bubble)
             # Onomatopées : gardées telles quelles si la case n'en envoie pas ; sinon recréées, leurs réglages
             # de lettrage (centre, taille, angle, police) suivant leur `id`.
             old_sfx = [b for b in previous.values() if b.kind == BubbleKind.sfx]

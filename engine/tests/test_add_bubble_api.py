@@ -118,9 +118,14 @@ def test_added_bubble_survives_scenario_save_reset_and_delete(client: TestClient
     box = {"x": 1500, "y": 500, "w": 500, "h": 260}
     let = _ok(client.post(f"/panels/{panel['id']}/bubbles", json={"text": "Cache-misère", "position": box}), 201)
     added = _panel_bubbles(let, panel["id"])[-1]
-    _ok(client.post(f"/panels/{panel['id']}/bubbles", json={"text": "Et après ?", "speaker": "Ren"}), 201)
+    let = _ok(client.post(f"/panels/{panel['id']}/bubbles", json={"text": "Et après ?", "speaker": "Ren"}), 201)
+    # une réplique du Scénario déplacée à la main : son cadre doit lui aussi survivre
+    shout = _panel_bubbles(let, panel["id"])[0]
+    let = _ok(client.patch(f"/bubbles/{shout['id']}", json={"position": {"x": 300, "y": 600, "w": 420, "h": 240}}))
+    shout = next(b for b in let["bubbles"] if b["id"] == shout["id"])
 
-    # ré-enregistrer le Scénario (dialogues renvoyés par id) garde la bulle, son cadre et l'absence de queue
+    # ré-enregistrer le Scénario comme l'écran le fait (toDraft → fromDraft : dialogues renvoyés avec leur id),
+    # après retouche du texte de la bulle ajoutée : elle garde son cadre et son absence de queue
     body = {
         "pages": [
             {
@@ -134,16 +139,21 @@ def test_added_bubble_survives_scenario_save_reset_and_delete(client: TestClient
             for i, p in enumerate(data["pages"])
         ]
     }  # fmt: skip
+    sent = next(pa for pa in body["pages"][0]["panels"] if pa["id"] == panel["id"])["dialogues"]
+    assert sent[1]["text"] == "Cache-misère"
+    sent[1]["text"] = "Cache-misère !"
     pages = _ok(client.put(f"/chapters/{data['chapter']['id']}/pages", json=body))
     sc = next(p for p in pages[0]["panels"] if p["id"] == panel["id"])
-    assert [d["text"] for d in sc["dialogues"]] == ["Attention !", "Cache-misère", "Et après ?"]
+    assert [d["text"] for d in sc["dialogues"]] == ["Attention !", "Cache-misère !", "Et après ?"]
     let = _ok(client.get(f"/pages/{page['id']}/lettering"))
-    kept = next(b for b in _panel_bubbles(let, panel["id"]) if b["text"] == "Cache-misère")
-    assert kept["manual"] and kept["box"] == added["box"] and kept["tail"] is None
+    kept = next(b for b in _panel_bubbles(let, panel["id"]) if b["text"] == "Cache-misère !")
+    assert kept["id"] == added["id"] and kept["manual"] and kept["box"] == added["box"] and kept["tail"] is None
+    moved = next(b for b in _panel_bubbles(let, panel["id"]) if b["text"] == "Attention !")
+    assert moved["id"] == shout["id"] and moved["manual"] and moved["box"] == shout["box"]
 
     # « Recalculer le lettrage » : le cadre est oublié, la bulle reste sans queue
     let = _ok(client.post(f"/pages/{page['id']}/lettering/reset"))
-    kept = next(b for b in _panel_bubbles(let, panel["id"]) if b["text"] == "Cache-misère")
+    kept = next(b for b in _panel_bubbles(let, panel["id"]) if b["text"] == "Cache-misère !")
     assert not kept["manual"] and kept["tail"] is None
     # « Replacer automatiquement » non plus ; un locuteur lui rend sa queue
     let = _ok(client.patch(f"/bubbles/{kept['id']}", json={"position": None, "tail": None}))
