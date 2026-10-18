@@ -104,6 +104,7 @@ settings:
       - bubble_kinds
       - intensities
       - rythmes
+      - sfx_library
       - dialogue_rules
       - pre_direction
       - scenes
@@ -149,6 +150,7 @@ settings:
       - bubble_kinds
       - intensities
       - rythmes
+      - sfx_library
       - dialogue_rules
       - pre_direction
       - scenes

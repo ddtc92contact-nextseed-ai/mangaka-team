@@ -64,7 +64,9 @@ direction ; le plan du scénario ne sert plus que de repli sans direction appliq
 pages dont la mise en page change sont recalculées. Le cadre devient une option de cadre de la case (`Panel.frame` :
 sans bord, débordement sur les cases voisines — seulement sur une page choc ou une case choc —,
 incrustation) et les onomatopées des bulles `sfx` du lettrage — sans toucher
-à une option ou une onomatopée réglée par l'auteur. Un décor ou des objets proposés remplacent ceux
+à une option ou une onomatopée réglée par l'auteur. Les onomatopées de l'agent viennent de la bibliothèque
+(`presets/sfx_library.yaml`, `$sfx_library`) : une autre est retirée de sa réponse (`filter_sfx`), notée sur la
+case (`sfx_rejected`, avertissement de l'écran), et il en propose au plus `MAX_SFX` par case. Un décor ou des objets proposés remplacent ceux
 de la case seulement s'ils ont changé depuis la dernière application (une correction de l'auteur
 dans l'écran Scénario reste).
 """
@@ -76,7 +78,6 @@ import json
 import logging
 import math
 import re
-import unicodedata
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -89,6 +90,7 @@ from sqlalchemy.orm import Session, object_session
 
 from ..config import get_settings
 from ..presets import PageRules, PresetRegistry, PromptPreset, VarietyRules
+from ..presets.schemas import SfxLibrary, sfx_key
 from ..providers.llm import ChatMessage, LLMError, LLMProvider
 from ..store.db import Database
 from ..store.models import (
@@ -136,7 +138,7 @@ from .pre_direction import (
     shot_problems,
 )
 from .scene_name import SceneFrame, frame_of, motion_rule, scene_frames, scene_mode
-from .script import DIRECTION_LABELS, _render
+from .script import DIRECTION_LABELS, _render, sfx_library_text, sfx_note
 from .style import NO_GUIDELINES, style_brief
 
 AGENT = "art_direction"  # rôle de l'agent dans presets/knowledge.yaml
@@ -219,7 +221,8 @@ PointDeVueName = Literal["plan de réaction", "vue subjective"]
 
 PAGE_FIELDS = ("rythme", "layout_style", "template", "page_choc")
 PANEL_FIELDS = ("intensity", "plan", "angle", "cadre", "ambiance", "action", "sfx", "point_de_vue", "spectateurs")
-MAX_SFX = 4
+MAX_SFX = 2  # onomatopées proposées par l'agent, par case (au-delà : retirées)
+MAX_AUTHOR_SFX = 4  # onomatopées réglées par l'auteur dans l'écran Direction artistique
 
 # État d'une direction de page (`PageDirection.status`) : proposée par l'agent, appliquée aux cases (à la
 # validation de l'auteur, sur « Appliquer » ou d'office au lancement d'une génération), rejetée par
@@ -284,7 +287,10 @@ class DirectionPanel(_LLMModel):
     ambiance: Annotated[str, StringConstraints(strip_whitespace=True, max_length=300)] = ""
     # Mouvement ou pose du corps (français) : exigé par `variety_rules` (règle souple, voir `check_variety`).
     action: Annotated[str, StringConstraints(strip_whitespace=True, max_length=200)] = ""
-    sfx: list[DirectionSfx] = Field(default_factory=list, max_length=MAX_SFX)
+    # Plafond large à la lecture : hors bibliothèque et au-delà de MAX_SFX, retirées par `filter_sfx`.
+    sfx: list[DirectionSfx] = Field(default_factory=list, max_length=8)
+    # Onomatopées retirées par le moteur, hors de la bibliothèque (jamais lu dans une réponse du LLM).
+    sfx_rejected: list[str] = Field(default_factory=list, exclude=True)
     # Bibliothèque (facultatif) : null ou absent = garder le décor / les objets du scénario.
     decor: int | None = None
     objets: list[int] | None = Field(default=None, max_length=8)
@@ -390,6 +396,8 @@ class DirectionContext:
     scene: SceneFrame | None = None
     before: list[str | None] = field(default_factory=list)
     previous_location: Any = None
+    # Onomatopées permises (presets/sfx_library.yaml) ; None : bibliothèque absente, onomatopées libres.
+    sfx_library: SfxLibrary | None = None
 
     def as_json(self) -> dict[str, Any]:
         return {
@@ -443,6 +451,8 @@ class DirectionContext:
             "cadres": list(CADRES),
             "page_chocs": list(PAGE_CHOCS),
             "sfx_intensities": list(SFX_INTENSITIES),
+            "sfx_library": [e.text for e in self.sfx_library.entries()] if self.sfx_library is not None else None,
+            "max_sfx": MAX_SFX,
             "points_de_vue": list(POINTS_DE_VUE),
             "variety_rules": self.rules.model_dump() if self.rules is not None else None,
             "page_rules": self.page_rules.model_dump(exclude={"retry", "page_retry"})
@@ -627,6 +637,7 @@ def build_context(
         scene=scene,
         before=list(before),
         previous_location=previous_location,
+        sfx_library=presets.sfx_library,
     )
 
 
@@ -776,6 +787,7 @@ def render_messages(prompt: PromptPreset, ctx: DirectionContext) -> list[ChatMes
         "cadres": ", ".join(CADRES),
         "page_chocs": ", ".join(PAGE_CHOCS),
         "sfx_intensities": ", ".join(SFX_INTENSITIES),
+        "sfx_library": sfx_library_text(ctx.sfx_library),
         "points_de_vue": ", ".join(POINTS_DE_VUE),
         "variety_rules": variety_text(ctx.rules),
         "page_rules": page_rules_text(ctx.page_rules),
@@ -813,6 +825,29 @@ def parse_direction(text: str, ctx: DirectionContext | None = None) -> Direction
         problems = check_against(out, ctx)
         if problems:
             raise DirectionValidationError(" ; ".join(problems[:8]))
+        filter_sfx(out, ctx.sfx_library)
+    return out
+
+
+def filter_sfx(out: DirectionOutput, library: SfxLibrary | None) -> list[str]:
+    """Onomatopées de l'agent : celles hors de la bibliothèque sont retirées et notées sur la case
+    (`sfx_rejected`), puis au plus `MAX_SFX` par case. Renvoie les retirées (« page 2 › case 1 : « FROU » »)."""
+    rejected: list[str] = []
+    for dp in out.pages:
+        for pa in dp.panels:
+            kept = [s for s in pa.sfx if library is None or library.match(s.text) is not None]
+            pa.sfx_rejected = [s.text for s in pa.sfx if s not in kept]
+            pa.sfx = kept[:MAX_SFX]
+            rejected += [f"page {dp.page} › case {pa.panel} : « {t} »" for t in pa.sfx_rejected]
+    return rejected
+
+
+def rejected_sfx(pages: Sequence[Page]) -> list[str]:
+    """Onomatopées retirées de la dernière proposition de ces pages, sans doublon (message du job)."""
+    out: list[str] = []
+    for page in pages:
+        for pa in ((page.direction.values if page.direction else None) or {}).get("panels") or []:
+            out += [t for t in pa.get("sfx_rejected") or [] if t not in out]
     return out
 
 
@@ -1745,6 +1780,7 @@ def enforce_page_rules(
         allowed = {c for issue in issues for c in issue.cases}
         merged = _patched(run.output, patch, allowed) if patch is not None else None
         if merged is not None and not check_against(merged, ctx):
+            filter_sfx(merged, ctx.sfx_library)
             default_viewpoints(merged, ctx)
             after = output_page_issues(merged, ctx)
             variety = output_variety(merged, ctx.rules, ctx.charter, scene=ctx.scene is not None)
@@ -1806,6 +1842,7 @@ def to_values(dp: DirectionPage, page: Page) -> dict[str, Any]:
                 "ambiance": pa.ambiance,
                 "action": pa.action,
                 "sfx": [s.model_dump() for s in pa.sfx],
+                **({"sfx_rejected": list(pa.sfx_rejected)} if pa.sfx_rejected else {}),
                 **({"decor": pa.decor} if pa.decor is not None else {}),
                 **({"objets": pa.objets} if pa.objets is not None else {}),
                 **({"lieu": pa.lieu} if pa.lieu is not None else {}),
@@ -1835,7 +1872,10 @@ def public_values(values: dict[str, Any], page: Page) -> dict[str, Any]:
     index = {p.id: i for i, p in enumerate(page.panels, start=1)}
     out = {k: v for k, v in values.items() if k != "panels"}
     out["panels"] = [
-        {"panel": index.get(pa.get("panel_id"), 0), **{k: v for k, v in pa.items() if k != "panel_id"}}
+        {
+            "panel": index.get(pa.get("panel_id"), 0),
+            **{k: v for k, v in pa.items() if k not in ("panel_id", "sfx_rejected")},
+        }
         for pa in values.get("panels") or []
     ]
     return out
@@ -1874,6 +1914,8 @@ def merge_locked(new: dict[str, Any], old: dict[str, Any] | None, locks: Sequenc
             target = next((pa for pa in out["panels"] if str(pa.get("panel_id")) == pid), None)
             if source is not None and target is not None and name in source:
                 target[name] = copy.deepcopy(source[name])
+                if name == "sfx":
+                    target.pop("sfx_rejected", None)  # onomatopées de l'auteur : rien n'a été retiré
         elif key in old:
             out[key] = copy.deepcopy(old[key])
     return out
@@ -1958,7 +2000,7 @@ class PanelEdit(BaseModel):
     cadre: CadreName | None = None
     ambiance: Annotated[str, StringConstraints(strip_whitespace=True, max_length=300)] | None = None
     action: Annotated[str, StringConstraints(strip_whitespace=True, max_length=200)] | None = None
-    sfx: list[DirectionSfx] | None = Field(default=None, max_length=MAX_SFX)
+    sfx: list[DirectionSfx] | None = Field(default=None, max_length=MAX_AUTHOR_SFX)
     point_de_vue: PointDeVueName | None = None
     spectateurs: list[Name] | None = Field(default=None, max_length=12)
 
@@ -2012,6 +2054,7 @@ def edit_direction(
                 raise ArtDirectionError(f"{name} : ne peut pas être vide")
             if name == "sfx":
                 value = [s.model_dump() for s in value or []]
+                target.pop("sfx_rejected", None)  # l'auteur a repris les onomatopées de la case
             elif name in ("ambiance", "action"):
                 value = value or ""
             elif name == "spectateurs":
@@ -2263,17 +2306,6 @@ def _apply_library(panel: Panel, choice: dict[str, Any], before: dict[str, Any],
         panel.object_ids = [i for i in objets if i in known]
 
 
-_SFX_REPEATS = re.compile(r"(.)\1+")
-
-
-def sfx_key(text: str) -> str:
-    """Clé de comparaison d'une onomatopée : sans casse, accents, ponctuation ni espaces, lettres répétées
-    réduites à une (« GRAAA ! », « Graaaa », « graa » → « gra » ; « Bam… » → « bam »)."""
-    decomposed = unicodedata.normalize("NFKD", text.casefold())
-    letters = "".join(ch for ch in decomposed if ch.isalnum())
-    return _SFX_REPEATS.sub(r"\1", letters) or text.strip().casefold()
-
-
 def _apply_sfx(panel: Panel, sfx: Sequence[dict[str, Any]]) -> None:
     """Onomatopées de la DA : celles de l'application précédente (non retouchées) sont remplacées ;
     celles du scénario ou ajoutées à la main restent, et une onomatopée déjà présente n'est pas doublée
@@ -2392,6 +2424,7 @@ def direction_job(
                 charter=series_charter(presets, chapter.project),
                 frames=frames,
             )
+            dropped = rejected_sfx([p for p in targets if p.number in changed])
             session.commit()
         tries = f" en {run.attempts} essais" if run.attempts > 1 else ""
         if run.targeted:
@@ -2399,6 +2432,7 @@ def direction_job(
         warned = len(run.variety) + len(run.page_rules)
         if warned:
             tries += f", avec {warned} avertissement{'s' if warned > 1 else ''} de mise en scène"
+        tries += sfx_note(dropped)
         if page_id is not None:
             return f"Nouvelle proposition pour la page {changed[0] if changed else '?'}{tries}"
         kept = len(ctx.pages) - len(changed)
@@ -2511,6 +2545,7 @@ def _run_scenes(
             frames=frames,
             force=scene_id is not None,
         )
+        dropped = rejected_sfx([p for p in targets if p.number in changed])
         s3.commit()
     attempts = max(r.attempts for r in runs)
     tries = f" en {attempts} essais" if attempts > 1 else ""
@@ -2519,6 +2554,7 @@ def _run_scenes(
     warned = sum(len(r.variety) + len(r.page_rules) for r in runs)
     if warned:
         tries += f", avec {warned} avertissement{'s' if warned > 1 else ''} de mise en scène"
+    tries += sfx_note(dropped)
     n = len(changed)
     pages = f"{n} page{'s' if n > 1 else ''} dirigée{'s' if n > 1 else ''}"
     if scene_id is not None:

@@ -13,6 +13,7 @@
 #   ($shot_types : liste des plans, plus utilisée — la direction artistique cadre les cases ; gardée pour
 #    les prompts personnalisés)
 #   $intensities $rythmes  (indices de mise en page, cf. presets/README.md « Direction artistique »)
+#   $sfx_library    (onomatopées permises, par usage : presets/sfx_library.yaml ; les autres sont retirées)
 #   $dialogue_rules (règles de dialogue ci-dessous, en clair : densité, longueur, place, variété)
 #   $pre_direction  (charte chiffrée de la série, son ADN : cases par planche, dialogue par planche, courbe de
 #                    rythme — presets/pre_direction.yaml, réglable sur la fiche série)
@@ -179,9 +180,12 @@ user: |
     d'action ou de surprise, « calme » pour un moment posé ; la mise en page y place biais et grandes cases ;
   - « rythme » d'une page (facultatif) vaut l'une de ces valeurs : $rythmes — « rapide » pour une
     page d'action, « lent » pour une page d'ambiance ;
-  - « sfx » d'une case (facultatif) : onomatopées en lettrage hors bulle (« VROUM ! », « CLIC », « BIIIP ! »),
-    chacune avec « text » (court, en majuscules) et « intensity » ($intensities) ; jamais dans « description » :
-    le dessinateur ne dessine aucun texte, le lettreur les pose ;
+  - « sfx » d'une case (facultatif) : onomatopées en lettrage hors bulle, chacune avec « text » (en majuscules)
+    et « intensity » ($intensities). Choisis-les UNIQUEMENT dans cette bibliothèque (une variante aux lettres
+    étirées et/ou avec « ! » est permise : « BOUUUM ! » pour BOUM) ; si aucune ne convient, pas d'onomatopée
+    (« sfx » vide) — toute autre est retirée par le moteur :
+  $sfx_library
+    Jamais dans « description » : le dessinateur ne dessine aucun texte, le lettreur les pose ;
   - « characters » liste les personnages PRÉSENTS À L'IMAGE — ceux que le dessinateur dessine dans
     cette case, tous, sans en oublier ; « offscreen » liste ceux que la case CITE mais qui restent HORS
     DU CADRE (ils ne sont pas dessinés). Un personnage cité n'est pas forcément dans l'image :
@@ -244,7 +248,7 @@ user: |
      "characters": ["…"], "offscreen": [], "lieu": "La clairière", "decor": null, "objets": [],
      "importance": 2, "intensity": "normal",
      "dialogues": [{"speaker": "…", "text": "…", "kind": "speech"}, {"speaker": "…", "text": "…", "kind": "shout"}],
-     "sfx": [{"text": "VROUM !", "intensity": "choc"}]}]}],
+     "sfx": [{"text": "…", "intensity": "choc"}]}]}],
    "summary": "…"}
 
   <contexte>

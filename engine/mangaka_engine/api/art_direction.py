@@ -34,6 +34,8 @@ class DirectionPanelOut(BaseModel):
     ambiance: str = ""
     action: str = ""  # mouvement ou pose du corps (repris par le rédacteur de prompt)
     sfx: list[dict[str, str]] = Field(default_factory=list)
+    # Onomatopées de l'agent retirées par le moteur : hors de la bibliothèque (presets/sfx_library.yaml).
+    sfx_rejected: list[str] = Field(default_factory=list)
     # Bibliothèque proposée par l'agent (null : garder le décor / les objets du scénario).
     decor: int | None = None
     objets: list[int] | None = None
@@ -153,6 +155,7 @@ def direction_out(page: Page) -> PageDirectionOut:
                     ambiance=pa.get("ambiance") or "",
                     action=pa.get("action") or "",
                     sfx=list(pa.get("sfx") or []),
+                    sfx_rejected=list(pa.get("sfx_rejected") or []),
                     decor=pa.get("decor"),
                     objets=pa.get("objets"),
                     point_de_vue=pa.get("point_de_vue"),

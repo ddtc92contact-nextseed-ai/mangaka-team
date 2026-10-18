@@ -200,6 +200,7 @@ settings:
       - points_de_vue
       - page_chocs
       - sfx_intensities
+      - sfx_library
       - variety_rules
       - page_rules
       - pre_direction

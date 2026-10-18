@@ -2191,6 +2191,8 @@ export interface DaPanel {
   /** Mouvement ou pose du corps (français), repris par le rédacteur de prompt. */
   action: string;
   sfx: DaSfx[];
+  /** Onomatopées de l'agent retirées par le moteur : hors de la bibliothèque (presets/sfx_library.yaml). */
+  sfx_rejected?: string[];
   /** Bibliothèque proposée par l'agent (null ou absent : garder le décor / les objets du scénario). */
   decor?: number | null;
   objets?: number[] | null;
