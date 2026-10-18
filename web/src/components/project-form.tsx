@@ -6,6 +6,7 @@ import {
   EngineError,
   errorMessage,
   type CleanMode,
+  type ImagePromptMode,
   type Presets,
   type Project,
   type ProjectInput,
@@ -26,6 +27,22 @@ import { DIRECTIONS, DirectionPicker } from "./reading-direction";
 import { SERIES_STATUS } from "./status";
 import { useToast } from "./toast";
 import { Alert, Button, Field, Input, Select } from "./ui";
+
+// « Prompt image » de la série (#228) : `key` sert aux identifiants de test (sans accent).
+const PROMPT_MODES: { id: ImagePromptMode; key: string; label: string; hint: string }[] = [
+  {
+    id: "détaillé",
+    key: "detaille",
+    label: "Détaillé",
+    hint: "Paragraphe du rédacteur (ou fragments) : rôle et tri de chaque fiche, décor complet, savoir-faire.",
+  },
+  {
+    id: "gabarit",
+    key: "gabarit",
+    label: "Gabarit",
+    hint: "Prompt court assemblé par le moteur : fiches, ancres des personnages, règles, décor simple, 1 à 3 phrases d'action.",
+  },
+];
 
 const DIRECTION_REQUIRED = "Choisis le sens de lecture : manga (droite → gauche) ou BD (gauche → droite).";
 const STYLE_REQUIRED: Record<"style_genre" | "style_rendering" | "style_tone", string> = {
@@ -94,6 +111,7 @@ export function ProjectForm({
     upscaler: initial?.upscaler ?? null,
     cfg: initial?.cfg ?? null,
     ai_prompt: initial?.ai_prompt,
+    image_prompt_mode: initial?.image_prompt_mode,
     anime_consistency: initial?.anime_consistency ?? false,
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -130,6 +148,8 @@ export function ProjectForm({
   const sketchEnabled = form.sketch_enabled ?? defaults?.sketch_enabled ?? true;
   // Prompt rédigé par l'IA : réglage global du dessinateur (« L'équipe ») pour une nouvelle série.
   const aiPrompt = form.ai_prompt ?? presets.data?.ai_prompt_default ?? true;
+  // « Prompt image » : celui de la série, sinon celui de defaults.yaml (détaillé).
+  const promptMode: ImagePromptMode = form.image_prompt_mode ?? defaults?.image_prompt_mode ?? "détaillé";
   const animeConsistency = form.anime_consistency ?? false;
   const identityLora = camera.data?.loras.find((l) => l.role === "identity") ?? null;
   // Palier choisi hors de ceux où le LoRA a été testé : l'interrupteur reste, avec « Disponible en palier Qualité ».
@@ -243,6 +263,7 @@ export function ProjectForm({
       sketch_denoise: form.sketch_denoise ?? null,
       cfg: distilled ? null : (form.cfg ?? null),
       ai_prompt: aiPrompt,
+      image_prompt_mode: promptMode,
       anime_consistency: animeConsistency,
       style_lora_name: loraName || null,
     };
@@ -627,7 +648,37 @@ export function ProjectForm({
           Prompt des cases
           <InfoTip help="serie.ai_prompt" label="Prompt rédigé par l'IA" />
         </legend>
-        <label className="flex items-start gap-2 text-sm text-zinc-300">
+        <div role="radiogroup" aria-label="Prompt image" className="space-y-1.5" data-testid="image-prompt-mode">
+          <p className="flex items-center gap-1.5 text-sm text-zinc-300">
+            Prompt image
+            <InfoTip help="serie.image_prompt_mode" label="Prompt image : détaillé ou gabarit" />
+          </p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {PROMPT_MODES.map((m) => (
+              <label
+                key={m.id}
+                className={`flex cursor-pointer items-start gap-2 rounded-md border p-2 text-sm ${
+                  promptMode === m.id ? "border-rose-500/70 bg-rose-500/10 text-zinc-100" : "border-zinc-800 text-zinc-300 hover:border-zinc-600"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="image_prompt_mode"
+                  value={m.id}
+                  className="mt-0.5 accent-rose-500"
+                  checked={promptMode === m.id}
+                  onChange={() => set("image_prompt_mode", m.id)}
+                  data-testid={`image-prompt-mode-${m.key}`}
+                />
+                <span>
+                  {m.label}
+                  <span className="block text-xs text-zinc-500">{m.hint}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+        </div>
+        <label className={`flex items-start gap-2 text-sm text-zinc-300 ${promptMode === "gabarit" ? "opacity-60" : ""}`}>
           <input
             type="checkbox"
             className="mt-0.5 accent-rose-500"
@@ -641,6 +692,7 @@ export function ProjectForm({
               {aiPrompt
                 ? "Le LLM écrit le prompt de chaque case en un paragraphe (sujet, action, cadrage, décor, lumière, style), une fois par case. En cas d'échec, la case retombe sur l'assemblage par fragments."
                 : "Prompt assemblé par fragments (« Lieu : … », « Mise en scène : … », « Style : … »), sans appel au LLM."}
+              {promptMode === "gabarit" && " Ne sert qu'en mode détaillé."}
             </span>
           </span>
         </label>

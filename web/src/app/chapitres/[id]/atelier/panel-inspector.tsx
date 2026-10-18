@@ -22,6 +22,7 @@ import {
   type GenerateInput,
   type Job,
   type PanelDetail,
+  type ImagePromptMode,
   type PanelImage,
   type PrintInfo,
   type QueueItem,
@@ -251,6 +252,8 @@ export function PanelInspector({
   const qcImage = chosen ?? (finals.length ? finals[finals.length - 1] : null);
   // « Références utilisées » : celles de la version choisie, sinon de la plus récente.
   const refsImage = qcImage;
+  // « Prompt envoyé » : celui de la dernière génération de la case (croquis compris), tel que reçu par ComfyUI.
+  const sentImage = d?.images.reduce<PanelImage | null>((last, i) => (!last || i.version > last.version ? i : last), null) ?? null;
 
   const resolvedName = presets?.find((p) => p.id === d?.resolved_preset)?.name ?? d?.resolved_preset ?? "—";
   // Workflow effectif de la case : le prompt négatif n'est lu qu'au-dessus de cfg 1 (jamais en Turbo).
@@ -450,7 +453,15 @@ export function PanelInspector({
                       rédigé par l&apos;IA
                     </span>
                   )}
-                  {!d.final_prompt_manual && !promptDirty && d.prompt_source === "fragments" && d.ai_prompt && (
+                  {!d.final_prompt_manual && !promptDirty && d.prompt_source === "gabarit" && (
+                    <span
+                      className="ml-2 rounded bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-medium text-violet-300"
+                      data-testid="prompt-source"
+                    >
+                      gabarit
+                    </span>
+                  )}
+                  {!d.final_prompt_manual && !promptDirty && d.prompt_source === "fragments" && d.ai_prompt && d.prompt_mode !== "gabarit" && (
                     <span
                       className="ml-2 rounded bg-zinc-500/15 px-1.5 py-0.5 text-[10px] font-medium text-zinc-300"
                       data-testid="prompt-source"
@@ -467,7 +478,7 @@ export function PanelInspector({
                 disabled={busy}
                 className="text-xs text-zinc-400 underline-offset-2 hover:text-zinc-100 hover:underline focus-visible:outline-2 focus-visible:outline-rose-400 disabled:opacity-50"
               >
-                {rebuilding && d.ai_prompt ? "Rédaction…" : "Reconstruire le prompt"}
+                {rebuilding && (d.ai_prompt || d.prompt_mode === "gabarit") ? "Rédaction…" : "Reconstruire le prompt"}
               </button>
             </div>
             <Textarea
@@ -479,7 +490,12 @@ export function PanelInspector({
               placeholder="Construit automatiquement (case, personnages, style de la série) à la première génération — ou clique « Reconstruire le prompt » pour le voir et le retoucher."
               disabled={rebuilding}
             />
-            {rebuilding && d.ai_prompt && (
+            {rebuilding && d.prompt_mode === "gabarit" && (
+              <p className="text-[11px] text-sky-300" role="status" data-testid="prompt-writing">
+                Rédaction de l&apos;action par l&apos;IA… (2 essais au plus, puis repli sur la description)
+              </p>
+            )}
+            {rebuilding && d.ai_prompt && d.prompt_mode !== "gabarit" && (
               <p className="text-[11px] text-sky-300" role="status" data-testid="prompt-writing">
                 Rédaction du prompt par l&apos;IA… (2 essais au plus, puis repli par fragments)
               </p>
@@ -512,6 +528,8 @@ export function PanelInspector({
               </div>
             )}
           </div>
+
+          <SentPrompt image={sentImage} mode={d.prompt_mode ?? "détaillé"} />
 
           <PromptSourcesBlock panel={d} />
 
@@ -1075,5 +1093,28 @@ function FramingBadge({ d }: { d: PanelDetail }) {
     <span className="rounded bg-amber-500/15 px-2 py-0.5 text-amber-200" title={d.framing_note ?? undefined} data-testid="panel-framing">
       ⚠ {plan ? `Plan du scénario : ${plan}` : "Aucun plan"} — {d.framing_note ?? "pas de direction artistique appliquée"}
     </span>
+  );
+}
+
+/** Prompt réellement envoyé à ComfyUI par la dernière génération de la case, avec le mode du prompt image qui l'a
+ * construit ; le mode actuel de la série est rappelé s'il a changé depuis. */
+function SentPrompt({ image, mode }: { image: PanelImage | null; mode: ImagePromptMode }) {
+  const prompt = typeof image?.params.prompt === "string" ? image.params.prompt : null;
+  if (!image || !prompt) return null;
+  const used: ImagePromptMode = image.params.prompt_mode ?? "détaillé";
+  return (
+    <details className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-2 text-xs" data-testid="sent-prompt">
+      <summary className="cursor-pointer text-zinc-400 hover:text-zinc-200">
+        Prompt envoyé (v{image.version}) · mode{" "}
+        <span className="font-medium text-zinc-200" data-testid="sent-prompt-mode">
+          {used}
+        </span>{" "}
+        · {prompt.split(/\s+/).filter(Boolean).length} mots
+        {used !== mode && <span className="ml-1 text-amber-300">(la série est passée en {mode})</span>}
+      </summary>
+      <p className="mt-1 whitespace-pre-line break-words text-zinc-400" data-testid="sent-prompt-text">
+        {prompt}
+      </p>
+    </details>
   );
 }
