@@ -56,6 +56,7 @@ def test_presets_endpoint(client: TestClient) -> None:
         "finishing_tolerance": 0.9,
         "panel_references": "principale",
         "style_board": data["defaults"]["style_board"],
+        "image_prompt_mode": "détaillé",
     }
     board = data["defaults"]["style_board"]
     assert (board["trials"], board["reference_sheets"], board["panels"]) == (
@@ -70,6 +71,7 @@ def test_presets_endpoint(client: TestClient) -> None:
     assert formats["b4-300dpi"]["dpi"] == 300
     assert any(t["panel_count"] == 6 for t in data["layout_templates"])
     assert data["prompts"] == [
+        "ancre-visuelle",
         "createur-serie",
         "direction-artistique",
         "fiche-intervenant",
@@ -79,6 +81,7 @@ def test_presets_endpoint(client: TestClient) -> None:
         "redacteur-couverture",
         "redacteur-image",
         "redacteur-image-dialogue",
+        "redacteur-image-gabarit",
         "resume-quatrieme",
         "scenes",
         "script",

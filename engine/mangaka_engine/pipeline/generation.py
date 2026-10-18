@@ -145,9 +145,24 @@ from .prompt_dialog import (
     propose,
 )
 from .prompt_dialog import PROMPT_ID as DIALOG_PROMPT_ID
+from .prompt_template import (
+    MODE_DETAILED,
+    MODE_TEMPLATE,
+    MODES,
+    ActionRun,
+    TemplateBrief,
+    TemplateSource,
+    TemplateWriterError,
+    frame_template,
+    summarize,
+    template_body,
+    write_action,
+)
+from .prompt_template import PROMPT_ID as TEMPLATE_PROMPT_ID
 from .prompt_writer import PROMPT_ID as WRITER_PROMPT_ID
 from .prompt_writer import PromptBrief, PromptWriterError, WriteRun, write_prompt
 from .style import (
+    lora_triggers,
     series_finition,
     series_monochrome,
     series_rendering,
@@ -890,6 +905,18 @@ def update_panel_prompt(
     text = (panel.final_prompt or "").strip()
     if panel.final_prompt_manual and text:
         return panel.final_prompt or ""
+    if template_mode(presets, panel):
+        # Mode gabarit : prompt court du moteur ; les phrases d'action du LLM (une fois par case, à la génération)
+        # remplacent la description, gardée en attendant (et en repli).
+        if not reset and text and panel.prompt_source == MODE_TEMPLATE:
+            return panel.final_prompt or ""
+        panel.final_prompt = template_body(panel_template_brief(presets, session, panel), presets.image_prompt)
+        panel.final_prompt_manual = False
+        panel.prompt_source = MODE_TEMPLATE
+        panel.prompt_key = None
+        if reset:
+            panel.prompt_warning = None
+        return panel.final_prompt or ""
     if not reset and text and panel.prompt_source == "ia" and ai_prompt_enabled(panel):
         return panel.final_prompt or ""
     cast = panel_cast(session, panel)
@@ -900,6 +927,95 @@ def update_panel_prompt(
     if not ai_prompt_enabled(panel):
         panel.prompt_warning = None
     return panel.final_prompt or ""
+
+
+# --- prompt image « gabarit » (pipeline/prompt_template.py) -------------------------------
+def image_prompt_mode(presets: PresetRegistry, project: Project) -> str:
+    """Prompt image de la série (fiche série, « Prompt image ») : `détaillé` ou `gabarit` ; sans choix,
+    `image_prompt_mode` de defaults.yaml (détaillé)."""
+    if project.image_prompt_mode in MODES:
+        return str(project.image_prompt_mode)
+    return presets.defaults.image_prompt_mode if presets.defaults is not None else MODE_DETAILED
+
+
+def template_mode(presets: PresetRegistry, panel: Panel) -> bool:
+    """La série de la case est en prompt image « gabarit »."""
+    return image_prompt_mode(presets, panel.page.chapter.project) == MODE_TEMPLATE
+
+
+def panel_references(
+    presets: PresetRegistry, panel: Panel, cast: PanelCast, preset_id: str | None = None
+) -> list[ReferenceSlot]:
+    """Images de référence qui partiront avec la case (workflow `preset_id`, sinon celui résolu pour la case)."""
+    loaded = presets.workflows.get(preset_id or resolve_preset_id(presets, panel, cast.entries))
+    slots = len(loaded.preset.reference_images) if loaded is not None else 0
+    per_entry = presets.defaults.panel_references if presets.defaults else "toutes"
+    return [ReferenceSlot(entry_kind(e), e.name) for e, _ in pick_references(cast.reference_entries, slots, per_entry)]
+
+
+def panel_template_brief(
+    presets: PresetRegistry, session: Session, panel: Panel, preset_id: str | None = None
+) -> TemplateBrief:
+    """Données de la case pour le prompt « gabarit » : présents et leur ancre visuelle, absents, images envoyées,
+    plan, décor (lieu de la série, sinon décor de la bibliothèque, sinon lieu écrit par le scénario) et style."""
+    cast = panel_cast(session, panel, presets)
+    project = panel.page.chapter.project
+    present = {c.id for c in cast.characters}
+    series = list(session.scalars(select(Character).where(Character.project_id == project.id).order_by(Character.id)))
+    da = applied_panel_direction(panel)
+    location = panel.location
+    decor = cast.decor
+    return TemplateBrief.build(
+        description=panel_description(panel),
+        setting=panel.setting or "",
+        staging=panel_staging(panel, cast.characters),
+        shot_type=panel.shot_type,
+        plan=da.get("plan"),
+        angle=da.get("angle"),
+        action=da.get("action"),
+        characters=[
+            TemplateSource(
+                c.name,
+                c.visual_anchor or "",
+                c.visual_description or ", ".join(c.prompt_keywords or []),
+                split_trigger_words(c.lora_trigger_words) if c.lora_name else (),
+            )
+            for c in cast.characters
+        ],
+        extras=CharacterMatcher(series).unmatched(panel.character_names or []),
+        absent=[c.name for c in series if c.id not in present],
+        offscreen=list(panel.offscreen_names or []),
+        place=location.name if location is not None else (decor.name if decor is not None else ""),
+        place_description=location.description if location is not None else "",
+        decor_description=decor.visual_description if decor is not None else "",
+        references=panel_references(presets, panel, cast, preset_id),
+        style_lead=series_style_lead(presets, project),
+        finition=series_finition(presets, project),
+        triggers=lora_triggers(presets, project),
+        keep=[e.name for e in cast.entries],
+        settings=presets.image_prompt,
+        monochrome=series_monochrome(presets, project),
+    )
+
+
+def reference_descriptions(presets: PresetRegistry, entries: Sequence[LibraryEntry]) -> dict[str, str]:
+    """Description courte de chaque fiche (ligne « <image2> is Robot, … » du mode gabarit)."""
+    words = presets.image_prompt.template.anchor_words
+    return {e.name: summarize(e.visual_description or ", ".join(e.prompt_keywords or []), words) for e in entries}
+
+
+def reset_series_prompts(presets: PresetRegistry, session: Session, project_id: int) -> int:
+    """Série passée d'un mode de prompt image à l'autre : chaque prompt automatique (non retouché à la main) est
+    reconstruit dans le nouveau mode (rédigé de nouveau à la prochaine génération). Renvoie le nombre de cases."""
+    panels = session.scalars(
+        select(Panel)
+        .join(Page, Panel.page_id == Page.id)
+        .join(Chapter, Page.chapter_id == Chapter.id)
+        .where(Chapter.project_id == project_id, Panel.final_prompt_manual.is_(False), Panel.final_prompt.is_not(None))
+    ).all()
+    for panel in panels:
+        update_panel_prompt(presets, session, panel, reset=True)
+    return len(panels)
 
 
 # --- prompt rédigé par l'IA (pipeline/prompt_writer.py) ---------------------------------
@@ -971,13 +1087,7 @@ def panel_brief(
     du workflow (`preset_id`, sinon celui résolu pour la case) et les personnages de la série absents.
     `found` : savoir-faire déjà cherché pour la case (sinon cherché ici, avec `knowledge`)."""
     cast = panel_cast(session, panel, presets)
-    entries = cast.entries
-    loaded = presets.workflows.get(preset_id or resolve_preset_id(presets, panel, entries))
-    slots = len(loaded.preset.reference_images) if loaded is not None else 0
-    per_entry = presets.defaults.panel_references if presets.defaults else "toutes"
-    references = [
-        ReferenceSlot(entry_kind(e), e.name) for e, _ in pick_references(cast.reference_entries, slots, per_entry)
-    ]
+    references = panel_references(presets, panel, cast, preset_id)
     project = panel.page.chapter.project
     present = {c.id for c in cast.characters}
     series = list(session.scalars(select(Character).where(Character.project_id == project.id).order_by(Character.id)))
@@ -1019,7 +1129,13 @@ def prompt_pending(
 ) -> bool:
     """Le prompt de la case sera rédigé par l'IA à la prochaine génération : jamais rédigé, la case a changé
     depuis, « Réécrire les prompts du chapitre », ou (avec `knowledge`) le savoir-faire du rédacteur a changé
-    depuis la rédaction. Jamais pour un prompt édité à la main."""
+    depuis la rédaction. Jamais pour un prompt édité à la main. Mode gabarit : les phrases d'action de la case."""
+    if template_mode(presets, panel):
+        if TEMPLATE_PROMPT_ID not in presets.prompts or manual_prompt(panel):
+            return False
+        if panel.prompt_source != MODE_TEMPLATE:
+            return True
+        return panel.prompt_key != panel_template_brief(presets, session, panel).key()
     if not ai_prompt_enabled(panel) or WRITER_PROMPT_ID not in presets.prompts:
         return False
     if manual_prompt(panel):
@@ -1032,9 +1148,18 @@ def prompt_pending(
     return stamp is not None and panel.prompt_knowledge != stamp
 
 
-def rewritable_prompts(session: Session, chapter: Chapter) -> list[Panel]:
+def rewritable_prompts(session: Session, chapter: Chapter, presets: PresetRegistry | None = None) -> list[Panel]:
     """Cases du chapitre dont le prompt a été rédigé par l'IA (ou a tenté de l'être) et n'a pas été retouché
-    à la main : celles que « Réécrire les prompts du chapitre » remet à rédiger."""
+    à la main : celles que « Réécrire les prompts du chapitre » remet à rédiger (mode gabarit, avec `presets` : ses
+    phrases d'action)."""
+    if presets is not None and image_prompt_mode(presets, chapter.project) == MODE_TEMPLATE:
+        panels = session.scalars(
+            select(Panel)
+            .join(Page, Panel.page_id == Page.id)
+            .where(Page.chapter_id == chapter.id)
+            .order_by(Page.number, Panel.index)
+        ).all()
+        return [p for p in panels if not manual_prompt(p) and p.prompt_source == MODE_TEMPLATE]
     if not chapter.project.ai_prompt:
         return []
     panels = session.scalars(
@@ -1046,11 +1171,11 @@ def rewritable_prompts(session: Session, chapter: Chapter) -> list[Panel]:
     return [p for p in panels if not manual_prompt(p) and (p.prompt_source == "ia" or p.prompt_warning)]
 
 
-def mark_prompts_pending(session: Session, chapter: Chapter) -> int:
+def mark_prompts_pending(session: Session, chapter: Chapter, presets: PresetRegistry | None = None) -> int:
     """« Réécrire les prompts du chapitre » : chaque prompt rédigé par l'IA (non retouché) sera rédigé de
     nouveau à la prochaine génération de sa case ; le texte actuel reste affiché d'ici là. Renvoie le nombre
     de cases."""
-    panels = rewritable_prompts(session, chapter)
+    panels = rewritable_prompts(session, chapter, presets)
     for panel in panels:
         panel.prompt_key = None
     return len(panels)
@@ -1063,7 +1188,8 @@ class PromptRequest:
     panel_id: int
     project_id: int
     key: str
-    brief: PromptBrief
+    # Mode gabarit : `TemplateBrief` (phrases d'action seulement, ni savoir-faire ni bible).
+    brief: PromptBrief | TemplateBrief
     # Empreinte du savoir-faire du rédacteur (None : sans base de connaissances) et passages reçus.
     stamp: str | None = None
     sources: dict[str, Any] = field(default_factory=dict)
@@ -1080,10 +1206,19 @@ def prompt_request(
 ) -> PromptRequest | None:
     """Rédaction à faire pour la case, ou None : série par fragments, prompt édité à la main, ou prompt
     déjà rédigé (ou déjà retombé sur les fragments) pour les mêmes données — une fois par case, pas à
-    chaque génération. `force` (« Reconstruire le prompt ») : toujours redemandé."""
-    if not ai_prompt_enabled(panel) or WRITER_PROMPT_ID not in presets.prompts:
-        return None
+    chaque génération. `force` (« Reconstruire le prompt ») : toujours redemandé. Mode gabarit : les phrases d'action
+    de la case (même règle d'une fois par case)."""
     if manual_prompt(panel):
+        return None
+    if template_mode(presets, panel):
+        if TEMPLATE_PROMPT_ID not in presets.prompts:
+            return None
+        template = panel_template_brief(presets, session, panel, preset_id)
+        key = template.key()
+        if not force and panel.prompt_key == key and panel.prompt_source == MODE_TEMPLATE:
+            return None
+        return PromptRequest(panel_id=panel.id, project_id=panel.page.chapter.project_id, key=key, brief=template)
+    if not ai_prompt_enabled(panel) or WRITER_PROMPT_ID not in presets.prompts:
         return None
     project_id = panel.page.chapter.project_id
     key = panel_brief(presets, session, panel, None, preset_id).key()
@@ -1105,14 +1240,16 @@ def run_prompt_request(
     llm_error: str | None,
     request: PromptRequest,
     progress: Callable[[str], None] | None = None,
-) -> tuple[WriteRun | None, str | None]:
+) -> tuple[WriteRun | ActionRun | None, str | None]:
     """Appel du LLM (hors de toute session) : (rédaction, None) ou (None, erreur lisible). Jamais d'exception :
-    une panne du rédacteur ne bloque pas la génération (repli par fragments)."""
+    une panne du rédacteur ne bloque pas la génération (repli par fragments, ou sur la description en gabarit)."""
     if llm is None:
         return None, f"LLM indisponible : {llm_error or 'non configuré'}"
     try:
+        if isinstance(request.brief, TemplateBrief):
+            return write_action(llm, presets.prompt(TEMPLATE_PROMPT_ID), request.brief, progress), None
         return write_prompt(llm, presets.prompt(WRITER_PROMPT_ID), request.brief, progress), None
-    except (PromptWriterError, PresetError) as exc:
+    except (PromptWriterError, TemplateWriterError, PresetError) as exc:
         return None, str(exc)
     except Exception as exc:  # noqa: BLE001 — repli par fragments plutôt qu'une génération bloquée
         log.exception("rédaction du prompt de la case %s impossible", request.panel_id)
@@ -1124,14 +1261,35 @@ def apply_prompt_request(
     session: Session,
     panel: Panel,
     request: PromptRequest,
-    run: WriteRun | None,
+    run: WriteRun | ActionRun | None,
     error: str | None,
     knowledge: KnowledgeBase | None = None,
 ) -> None:
-    """Stocke le prompt rédigé sur la case ; en échec, le prompt par fragments et un avertissement."""
+    """Stocke le prompt rédigé sur la case ; en échec, le prompt par fragments et un avertissement (mode gabarit :
+    le prompt du moteur avec la description de la case à la place des phrases d'action)."""
     if manual_prompt(panel):
         return  # édité à la main pendant la rédaction : l'édition l'emporte
-    if run is not None:
+    if isinstance(request.brief, TemplateBrief):
+        written = run.output if isinstance(run, ActionRun) else None
+        panel.final_prompt = template_body(
+            request.brief,
+            presets.image_prompt,
+            action=written.action if written is not None else None,
+            setting=written.setting if written is not None else None,
+        )
+        panel.final_prompt_manual = False
+        panel.prompt_source = MODE_TEMPLATE
+        panel.prompt_sources = None
+        panel.prompt_warning = (
+            None
+            if written is not None
+            else f"Action rédigée par l'IA indisponible ({error}) : description de la case utilisée. "
+            "« Reconstruire le prompt » pour réessayer."
+        )
+        panel.prompt_key = request.key
+        panel.prompt_knowledge = None
+        return
+    if run is not None and isinstance(run, WriteRun):
         panel.final_prompt = run.output.prompt
         panel.final_prompt_manual = False
         panel.prompt_source = "ia"
@@ -1602,6 +1760,8 @@ class _Plan:
     # Journal des générations : sorte (pipeline/journal.py, KINDS) et faits de la case (ids, plan, prompt…).
     kind: str = "panel"
     journal: dict[str, Any] = field(default_factory=dict)
+    # Mode du prompt image de la série (« détaillé » ou « gabarit »), noté sur la version produite.
+    prompt_mode: str = MODE_DETAILED
 
 
 def _capitalize(text: str) -> str:
@@ -1815,9 +1975,17 @@ class GenerationExecutor:
             panel_prompt = prompt
             rendering = series_rendering(presets, chapter.project)
             monochrome = rendering is not None and rendering.monochrome
+            mode = image_prompt_mode(presets, chapter.project)
             # Anti-doublon dans le prompt POSITIF : à cfg 1 (Turbo, croquis), le négatif n'est pas lu.
             single = presets.image_prompt.single_instance if panel.character_names else ""
-            if angle_id:
+            if repair is None and not angle_id and mode == MODE_TEMPLATE:
+                # Gabarit : une ligne par image envoyée et la consigne de tri commune devant le prompt court de la
+                # case (ni tri par fiche, ni « identité seulement », ni anti-doublon : le casting fermé le dit).
+                slots = [ReferenceSlot(r["kind"], r["name"]) for r in references]
+                prompt = frame_template(
+                    prompt, slots, presets.image_prompt, descriptions=reference_descriptions(presets, cast.entries)
+                )
+            elif angle_id:
                 # Mot déclencheur et vocabulaire de caméra en tête, puis la scène de la version de départ.
                 # L'ancien angle quitte la scène : il contredirait la nouvelle vue et le modèle garderait le cadrage.
                 scene = angle_scene(presets, prompt)
@@ -1916,6 +2084,7 @@ class GenerationExecutor:
                 control_data=control_data,
                 upload_folder=page_folder(chapter, page),
                 panel_label=panel_name(panel),
+                prompt_mode=mode,
             )
             session.commit()  # prompt final éventuellement reconstruit
             return plan
@@ -1944,7 +2113,7 @@ class GenerationExecutor:
         if kind == "angle":
             return {**out, **inherited_facts(session, PANEL_IMAGE, job.params.get("angle_source_id"))}
         passages: list[dict[str, Any]] = []
-        if panel.prompt_source != "ia" and not manual_prompt(panel) and self.knowledge is not None:
+        if panel.prompt_source not in ("ia", MODE_TEMPLATE) and not manual_prompt(panel) and self.knowledge is not None:
             found = panel_knowledge(session, self.knowledge, panel, cast.characters)
             passages = [p.as_dict(excerpt=0) for p in found.fragment_passages]
         facts = prompt_facts(presets, panel, WRITER_PROMPT_ID, passages)
@@ -2215,6 +2384,8 @@ class GenerationExecutor:
                     "preset_name": preset.name,
                     "tier": preset.tier.name if preset.tier else None,
                     "prompt": built.params["positive_prompt"],
+                    # Mode du prompt image de la série à la génération (« détaillé » ou « gabarit »).
+                    "prompt_mode": plan.prompt_mode,
                     **({"panel_prompt": plan.panel_prompt} if plan.panel_prompt != plan.prompt else {}),
                     "negative_prompt": built.params["negative_prompt"],
                     # À cfg 1, ComfyUI saute la passe négative : le prompt négatif n'a pas été lu.

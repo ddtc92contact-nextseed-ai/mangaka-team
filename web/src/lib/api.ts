@@ -58,6 +58,8 @@ export interface Project {
   cfg: number | null;
   /** « Prompt rédigé par l'IA » : le LLM écrit le prompt de chaque case (false : assemblage par fragments). */
   ai_prompt: boolean;
+  /** « Prompt image » de la série : détaillé (fragments ou rédacteur) ou gabarit (prompt court du moteur). */
+  image_prompt_mode: ImagePromptMode;
   /** « Cohérence anime » : LoRA d'identité (presets/camera_loras.yaml) ajouté aux générations de la série. */
   anime_consistency: boolean;
   /** Pourquoi la cohérence anime ne s'applique pas au palier de la série (« Disponible en palier Qualité »). */
@@ -97,8 +99,12 @@ export type ProjectInput = Pick<
   | "upscaler"
   | "cfg"
   | "ai_prompt"
+  | "image_prompt_mode"
   | "anime_consistency"
 >;
+
+/** « Prompt image » d'une série (#228). */
+export type ImagePromptMode = "détaillé" | "gabarit";
 
 export type CleanMode = "img2img" | "controlnet";
 
@@ -661,6 +667,8 @@ export interface PanelImage {
   tier: string | null;
   params: {
     prompt?: string;
+    /** Mode du prompt image de la série à la génération (absent : versions d'avant le mode gabarit = détaillé). */
+    prompt_mode?: ImagePromptMode;
     negative_prompt?: string;
     duration_ms?: number;
     loras?: unknown[];
@@ -939,10 +947,13 @@ export interface PanelDetail {
   final_prompt_manual: boolean;
   /** Ce que le dialogue avec l'IA impose à la case (« Plan : gros plan »…), jusqu'à « Reconstruire le prompt ». */
   dialog_overrides?: string[];
-  /** Origine du prompt automatique : rédigé par l'IA ou assemblé par fragments (null : jamais construit). */
-  prompt_source?: "ia" | "fragments" | null;
+  /** Origine du prompt automatique : rédigé par l'IA, assemblé par fragments, ou prompt court « gabarit » (null :
+   * jamais construit). */
+  prompt_source?: "ia" | "fragments" | "gabarit" | null;
   /** La série fait rédiger ses prompts par l'IA. */
   ai_prompt?: boolean;
+  /** « Prompt image » de la série (détaillé ou gabarit). */
+  prompt_mode?: ImagePromptMode;
   /** Sera rédigé par l'IA à la prochaine génération (ou « Reconstruire le prompt »). */
   prompt_pending?: boolean;
   /** Rédaction en échec : prompt par fragments utilisé (message lisible). */
@@ -1372,6 +1383,8 @@ export interface Character {
   updated_at: string;
   /** Autres noms reconnus par le scénario (personnages seulement). */
   aliases?: string[];
+  /** Ancre visuelle du prompt image « gabarit » (≈ 15 mots, anglais ; personnages seulement). */
+  visual_anchor?: string;
 }
 
 /** Rattachement d'un nom écrit par le scénario à une fiche (`character_id` null : foule anonyme marquée
@@ -1478,7 +1491,7 @@ export type LibraryEntry = Character | SeriesAsset;
 export type LibraryEntryInput = Pick<
   Character,
   "name" | "visual_description" | "prompt_keywords" | "lora_name" | "lora_weight" | "lora_trigger_words"
-> & { aliases?: string[] };
+> & { aliases?: string[]; visual_anchor?: string };
 
 /** Élément de la bibliothèque cité par une case. */
 export interface LibraryRef {
@@ -1770,6 +1783,8 @@ export interface Presets {
     /** Agrandisseur de la finition d'impression et part du dpi cible qui suffit (0,9). */
     upscaler?: string | null;
     finishing_tolerance?: number;
+    /** « Prompt image » des nouvelles séries. */
+    image_prompt_mode?: ImagePromptMode;
   } | null;
   page_formats: {
     id: string;
@@ -3376,6 +3391,9 @@ export const api = {
     request<LibraryEntry>(`/projects/${projectId}/${LIBRARY_SEGMENT[kind]}`, json("POST", body)),
   updateLibraryEntry: (kind: LibraryKind, id: number, body: Partial<LibraryEntryInput>) =>
     request<LibraryEntry>(`/${LIBRARY_SEGMENT[kind]}/${id}`, json("PATCH", body)),
+  /** « Proposer » l'ancre visuelle d'un personnage (rien n'est enregistré) : description du formulaire si donnée. */
+  proposeVisualAnchor: (characterId: number, body: { visual_description?: string; prompt_keywords?: string[] } = {}) =>
+    request<{ visual_anchor: string }>(`/characters/${characterId}/visual-anchor/propose`, json("POST", body)),
   deleteLibraryEntry: (kind: LibraryKind, id: number) =>
     request<void>(`/${LIBRARY_SEGMENT[kind]}/${id}`, { method: "DELETE" }),
   /** Objet → véhicule ou créature (et retour) : mêmes images, variantes et cases. */

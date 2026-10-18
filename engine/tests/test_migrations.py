@@ -999,8 +999,8 @@ def test_v34_database_gets_the_series_dna_from_their_genre(make_settings: Callab
     assert _columns(settings.database_path) == _columns(fresh)
 
 
-def test_v39_database_moves_flux_series_and_panels_back_to_qwen(make_settings: Callable[..., Settings]) -> None:
-    """v39 → v40 : retrait de FLUX 3 Klein. La série FLUX passe au palier par défaut de defaults.yaml, la case
+def test_v40_database_moves_flux_series_and_panels_back_to_qwen(make_settings: Callable[..., Settings]) -> None:
+    """v40 → v41 : retrait de FLUX 3 Klein. La série FLUX passe au palier par défaut de defaults.yaml, la case
     FLUX suit de nouveau sa série ; les versions déjà générées restent, et croquis, propre et Qualité passent."""
     from mangaka_engine.providers.comfyui.mock import MockComfyUIClient
     from tests.test_generation import _providers, _wait, setup_chapter
@@ -1017,7 +1017,7 @@ def test_v39_database_moves_flux_series_and_panels_back_to_qwen(make_settings: C
     con = sqlite3.connect(settings.database_path)
     con.execute("UPDATE projects SET workflow_preset = 'flux3-klein-qualite' WHERE id = ?", (data["series"]["id"],))
     con.execute("UPDATE panels SET generation_preset = 'flux3-klein-edit-ref-qualite' WHERE id = ?", (panel["id"],))
-    con.execute("PRAGMA user_version = 39")
+    con.execute("PRAGMA user_version = 40")
     con.commit()
     con.close()
 

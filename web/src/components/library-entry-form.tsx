@@ -48,6 +48,9 @@ export function LibraryEntryForm({
   const [keywords, setKeywords] = useState((initial?.prompt_keywords ?? []).join(", "));
   // Personnages : autres noms reconnus par le scénario (« le vieux maître »).
   const [aliases, setAliases] = useState((initial?.aliases ?? []).join(", "));
+  // Personnages : ancre visuelle du prompt image « gabarit » (≈ 15 mots, anglais).
+  const [anchor, setAnchor] = useState(initial?.visual_anchor ?? "");
+  const [proposing, setProposing] = useState(false);
   const [loraName, setLoraName] = useState(initial?.lora_name ?? "");
   const [loraWeight, setLoraWeight] = useState(String(initial?.lora_weight ?? 0.8));
   const [loraTriggers, setLoraTriggers] = useState(initial?.lora_trigger_words ?? "");
@@ -61,6 +64,23 @@ export function LibraryEntryForm({
   const loraNotice = loraUnsupportedNotice(
     presets.data?.workflows.find((w) => w.id === project.data?.workflow_preset),
   );
+
+  async function proposeAnchor() {
+    if (!initial) return;
+    setProposing(true);
+    setErrors((e) => ({ ...e, visual_anchor: "" }));
+    try {
+      const out = await api.proposeVisualAnchor(initial.id, {
+        visual_description: description,
+        prompt_keywords: parseKeywords(keywords),
+      });
+      setAnchor(out.visual_anchor);
+    } catch (err) {
+      setErrors((e) => ({ ...e, visual_anchor: err instanceof EngineError ? (err.fieldErrors.visual_anchor ?? errorMessage(err)) : errorMessage(err) }));
+    } finally {
+      setProposing(false);
+    }
+  }
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -80,7 +100,7 @@ export function LibraryEntryForm({
       lora_name: loraName.trim() || null,
       lora_weight: weight,
       lora_trigger_words: loraTriggers.trim(),
-      ...(kind === "character" ? { aliases: parseKeywords(aliases) } : {}),
+      ...(kind === "character" ? { aliases: parseKeywords(aliases), visual_anchor: anchor.trim() } : {}),
     };
     try {
       let saved = initial
@@ -147,6 +167,40 @@ export function LibraryEntryForm({
           placeholder={info.descriptionPlaceholder}
         />
       </Field>
+      {kind === "character" && (
+        <Field
+          label="Ancre visuelle (≈ 15 mots, anglais)"
+          htmlFor="visual_anchor"
+          error={errors.visual_anchor || undefined}
+          hint={
+            initial
+              ? "Cheveux, peau, tenue : reprise telle quelle par le prompt image « gabarit » des cases où le personnage est présent. « Proposer » la fait rédiger par l’IA à partir de la description ; relis-la, puis enregistre. Vide : un résumé de la description."
+              : "Cheveux, peau, tenue : reprise par le prompt image « gabarit ». « Proposer » est disponible une fois la fiche créée. Vide : un résumé de la description."
+          }
+        >
+          <div className="flex gap-2">
+            <Input
+              id="visual_anchor"
+              value={anchor}
+              onChange={(e) => setAnchor(e.target.value)}
+              placeholder="short black hair, tan skin, red gi with a black belt"
+              maxLength={300}
+              aria-invalid={Boolean(errors.visual_anchor)}
+            />
+            {initial && (
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={proposeAnchor}
+                disabled={proposing || saving}
+                data-testid="propose-anchor"
+              >
+                {proposing ? "Rédaction…" : "Proposer"}
+              </Button>
+            )}
+          </div>
+        </Field>
+      )}
       <Field
         label="Mots-clés de prompt"
         htmlFor="prompt_keywords"

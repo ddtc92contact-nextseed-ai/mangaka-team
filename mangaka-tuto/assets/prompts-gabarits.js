@@ -595,6 +595,48 @@ window.TUTO_GABARITS = {
   }
  ],
  "prompts": {
+  "ancre-visuelle": {
+   "id": "ancre-visuelle",
+   "file": "presets/prompts/ancre-visuelle.yaml",
+   "description": "Ancre visuelle courte d'un personnage (≈ 15 mots, anglais) tirée de sa description.",
+   "temperature": 0.2,
+   "temperatureLine": 11,
+   "maxRetries": 1,
+   "maxRetriesLine": 10,
+   "extra": {
+    "language": "en",
+    "max_words": 25
+   },
+   "parts": [
+    {
+     "key": "system",
+     "line": 14,
+     "text": "You write the visual anchor of a manga character for an image model: about 15 English words, a comma-separated\nlist of the most distinctive visible traits — hair (cut, colour), skin, build, outfit, one signature accessory.\nNever the name, never a personality trait, never a pose, never a word of photography. At most $max_words words.\nYou answer ONLY with a valid JSON object, with no text around it and no code block.\n",
+     "used": [
+      "max_words"
+     ]
+    },
+    {
+     "key": "user",
+     "line": 20,
+     "text": "Character: $name\nVisual description (French or English): $description\nPrompt keywords: $keywords\n\nAnswer format:\n{\"anchor\": \"short black hair, tan skin, red gi with a black belt, bare feet\", \"language\": \"en\"}\n\n<contexte>\n$context_json\n</contexte>\n",
+     "used": [
+      "name",
+      "description",
+      "keywords",
+      "context_json"
+     ]
+    },
+    {
+     "key": "retry",
+     "line": 32,
+     "text": "Your previous answer is invalid (errors in French):\n$error\nFix these errors and send the complete JSON object again, and only it.\n",
+     "used": [
+      "error"
+     ]
+    }
+   ]
+  },
   "createur-serie": {
    "id": "createur-serie",
    "file": "presets/prompts/createur-serie.yaml",
@@ -1000,6 +1042,57 @@ window.TUTO_GABARITS = {
     {
      "key": "retry",
      "line": 127,
+     "text": "Your previous answer is invalid (errors in French):\n$error\nFix these errors and send the complete JSON object again, and only it.\n",
+     "used": [
+      "error"
+     ]
+    }
+   ]
+  },
+  "redacteur-image-gabarit": {
+   "id": "redacteur-image-gabarit",
+   "file": "presets/prompts/redacteur-image-gabarit.yaml",
+   "description": "Phrases d'action courtes d'une case (qui, action, expression, gauche ou droite) pour le prompt image « gabarit ».",
+   "temperature": 0.3,
+   "temperatureLine": 22,
+   "maxRetries": 1,
+   "maxRetriesLine": 21,
+   "extra": {
+    "language": "en",
+    "max_words": 60
+   },
+   "parts": [
+    {
+     "key": "system",
+     "line": 25,
+     "text": "You write the action of ONE manga panel for the Qwen-Image 2.1 image model. The studio already writes everything\nelse (who each reference image is, the characters' looks, the rules, the style): you only write what happens.\nThe panel data is in French: translate it. Answer in English with:\n- \"action\": 1 to 3 short plain sentences, at most $max_words words in total. For each character in the frame:\n  their exact name, what they do, their expression, and whether they are on the left, in the centre or on the\n  right. Nothing else: no looks, outfits or hair (the sheets give them), no style, no camera, no light;\n- \"setting\": one short phrase, at most $setting_max_words words: the name of the place and its 3 or 4 main\n  elements, nothing more.\nHard rules:\n- name only the characters of the panel, never an absent one;\n- never any word of optics or photography (photo, lens, bokeh, depth of field, realistic…);\n- no text, speech bubble or sound effect, never a line of dialogue;\n$palette_rule\nYou answer ONLY with a valid JSON object, with no text around it and no code block.\n",
+     "used": [
+      "max_words",
+      "setting_max_words",
+      "palette_rule"
+     ]
+    },
+    {
+     "key": "user",
+     "line": 41,
+     "text": "Panel (French inputs, to translate):\n- shot size: $plan ($camera)\n- camera angle: $angle\n- body action chosen by the art direction: $action\n- description: $description\n- staging (who does what, where in the frame): $staging\n- setting: $setting\n- recurring place: $place\n\nCharacters in the frame (exact names): $characters\nAbsent characters (never name them): $absent_characters\n\nAnswer format:\n{\"action\": \"1 to 3 sentences\", \"setting\": \"place and its main elements\", \"language\": \"en\"}\n\n<contexte>\n$context_json\n</contexte>\n",
+     "used": [
+      "plan",
+      "camera",
+      "angle",
+      "action",
+      "description",
+      "staging",
+      "setting",
+      "place",
+      "characters",
+      "absent_characters",
+      "context_json"
+     ]
+    },
+    {
+     "key": "retry",
+     "line": 61,
      "text": "Your previous answer is invalid (errors in French):\n$error\nFix these errors and send the complete JSON object again, and only it.\n",
      "used": [
       "error"

@@ -10,6 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_vali
 Title = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 Name = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
 LongText = Annotated[str, StringConstraints(strip_whitespace=True, max_length=4000)]
+# « Prompt image » d'une série (#228) : détaillé (fragments ou rédacteur) ou gabarit (prompt court du moteur).
+ImagePromptMode = Literal["détaillé", "gabarit"]
 PresetId = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
 Direction = Literal["ltr", "rtl"]
 SeriesStatusName = Literal["ongoing", "paused", "completed", "cancelled"]
@@ -75,6 +77,8 @@ class ProjectCreate(_In):
     cfg: Cfg | None = None
     # « Prompt rédigé par l'IA » ; absent : `enabled` de presets/prompts/redacteur-image.yaml (oui).
     ai_prompt: bool | None = None
+    # « Prompt image » : détaillé ou gabarit (#228) ; absent : `image_prompt_mode` de presets/defaults.yaml.
+    image_prompt_mode: ImagePromptMode | None = None
     # « Cohérence anime » : LoRA d'identité de presets/camera_loras.yaml (palier Qualité) ; non par défaut.
     anime_consistency: bool = False
 
@@ -101,6 +105,7 @@ class ProjectUpdate(_In):
     upscaler: PresetId | None = None  # null : revient à l'agrandisseur de defaults.yaml
     cfg: Cfg | None = None  # null : CFG du palier ; > 1 refusé pour un palier distillé (Turbo)
     ai_prompt: bool | None = None  # « Prompt rédigé par l'IA » (false : assemblage par fragments)
+    image_prompt_mode: ImagePromptMode | None = None  # « Prompt image » ; null : celui de defaults.yaml
     anime_consistency: bool | None = None  # « Cohérence anime » (LoRA d'identité, palier Qualité)
     # false : masque la note « série passée en sage par une ancienne mise à jour » (seule valeur admise).
     layout_style_notice: Literal[False] | None = None
@@ -138,6 +143,8 @@ class ProjectOut(BaseModel):
     upscaler: str | None = None
     cfg: float | None = None  # null : celui du palier
     ai_prompt: bool = False
+    # « Prompt image » suivi par la série (choix de la série, sinon defaults.yaml) : détaillé ou gabarit.
+    image_prompt_mode: ImagePromptMode = "détaillé"
     anime_consistency: bool = False
     # Pourquoi « Cohérence anime » ne s'applique pas au palier de la série (« Disponible en palier Qualité »).
     anime_consistency_problem: str | None = None
@@ -996,8 +1003,11 @@ class PanelDetailOut(BaseModel):
     # Origine du prompt automatique : "ia" (rédigé par le LLM) | "fragments" ; `ai_prompt` : réglage de la
     # série ; `prompt_pending` : sera rédigé par l'IA à la prochaine génération (ou « Reconstruire ») ;
     # `prompt_warning` : rédaction en échec, repli par fragments.
-    prompt_source: Literal["ia", "fragments"] | None = None
+    prompt_source: Literal["ia", "fragments", "gabarit"] | None = None
     ai_prompt: bool = False
+    # « Prompt image » de la série (détaillé ou gabarit, #228) : « gabarit » = prompt court du moteur, dont les
+    # phrases d'action sont rédigées par l'IA (`prompt_source` « gabarit »).
+    prompt_mode: ImagePromptMode = "détaillé"
     prompt_pending: bool = False
     prompt_warning: str | None = None
     # « Sources utilisées » du prompt actuel : savoir-faire reçu par le rédacteur et date de la rédaction.
@@ -1204,6 +1214,8 @@ Keywords = Annotated[list[Annotated[str, StringConstraints(max_length=100)]], Fi
 
 
 Aliases = Annotated[list[Name], Field(max_length=20)]
+# Ancre visuelle d'un personnage (≈ 15 mots visés) : un plafond large, la longueur visée est dans le preset.
+VisualAnchor = Annotated[str, StringConstraints(strip_whitespace=True, max_length=300)]
 
 
 def _clean_aliases(value: list[str] | None) -> list[str] | None:
@@ -1237,6 +1249,8 @@ class EntryCreate(_In):
 class CharacterCreate(EntryCreate):
     # Autres noms reconnus par le scénario (« le petit dragon ») : voir pipeline/names.py.
     aliases: Aliases = Field(default_factory=list)
+    # Ancre visuelle du prompt image « gabarit » (≈ 15 mots, anglais) ; vide = résumé de la description.
+    visual_anchor: VisualAnchor = ""
 
     _aliases = field_validator("aliases")(_clean_aliases)
 
@@ -1254,6 +1268,7 @@ class EntryUpdate(_In):
 
 class CharacterUpdate(EntryUpdate):
     aliases: Aliases | None = None
+    visual_anchor: VisualAnchor | None = None
 
     _aliases = field_validator("aliases")(_clean_aliases)
 
@@ -1303,6 +1318,21 @@ class CharacterOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     aliases: list[str] = Field(default_factory=list)  # personnages seulement
+    visual_anchor: str = ""  # personnages seulement : ancre visuelle du prompt image « gabarit »
+
+
+class AnchorProposeIn(_In):
+    """« Proposer » l'ancre visuelle : description et mots-clés du formulaire (non enregistrés) ; absents, ceux
+    de la fiche."""
+
+    visual_description: LongText | None = None
+    prompt_keywords: Keywords | None = None
+
+
+class AnchorProposalOut(BaseModel):
+    """Ancre proposée par l'IA : rien n'est enregistré, l'auteur relit puis enregistre la fiche."""
+
+    visual_anchor: str
 
 
 # --- Objets, décors, véhicules et créatures de la bibliothèque (mêmes champs qu'un personnage) ------
