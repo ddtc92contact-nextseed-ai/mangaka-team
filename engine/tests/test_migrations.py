@@ -1042,3 +1042,50 @@ def test_v40_database_moves_flux_series_and_panels_back_to_qwen(make_settings: C
                 assert str(done["params"].get("preset", "")).startswith("qwen-image"), (path, done["params"])
         assert len(c.get(f"/panels/{panel['id']}/images").json()) == 4
     assert _version(settings.database_path) == SCHEMA_VERSION
+
+
+def test_v42_database_drops_flux_workflows_from_agent_profiles(make_settings: Callable[..., Settings]) -> None:
+    """v42 → v43 : les profils d'agents (global et série) perdent leurs workflows `flux3-klein-*`, le réglage
+    redevient hérité ; le reste du profil (modèle, fournisseur, savoir-faire) et l'historique restent intacts."""
+    settings = make_settings()
+    knowledge = {"collections": ["Encrage"], "top_k": 3, "budget_tokens": 900}
+    flux = {"workflow": "flux3-klein-qualite", "workflow_with_references": "flux3-klein-edit-ref-qualite"}
+    kept = {"provider": "deepseek", "model": "deepseek-flash", "steps": 31, "knowledge": knowledge}
+    with TestClient(create_app(settings)) as c:
+        sid = c.post("/projects", json={**STYLE, "title": "Série"}).json()["id"]
+    con = sqlite3.connect(settings.database_path)
+    for project_id in (None, sid):
+        con.execute(
+            'INSERT INTO agent_profiles (agent_id, project_id, "values", version, created_at, updated_at)'
+            " VALUES ('dessinateur', ?, ?, 1, ?, ?)",
+            (project_id, json.dumps({**flux, **kept}), NOW, NOW),
+        )
+        con.execute(
+            'INSERT INTO agent_profile_versions (profile_id, version, "values", diff, author, action, created_at)'
+            " VALUES (last_insert_rowid(), 1, ?, '[]', 't', 'save', ?)",
+            (json.dumps({**flux, **kept}), NOW),
+        )
+    con.execute(
+        'INSERT INTO agent_profiles (agent_id, project_id, "values", version, created_at, updated_at)'
+        " VALUES ('scenariste', NULL, ?, 1, ?, ?)",
+        (json.dumps({"temperature": 0.2}), NOW, NOW),
+    )
+    con.execute("PRAGMA user_version = 42")
+    con.commit()
+    con.close()
+
+    with TestClient(create_app(settings)) as c:
+        service = c.app.state.ctx.agents  # type: ignore[attr-defined]
+        presets = c.app.state.ctx.presets  # type: ignore[attr-defined]
+        with service.db.session_scope() as session:
+            for project_id in (None, sid):
+                assert service.raw_stored(session, "dessinateur", project_id) == kept
+                assert service.versions(session, "dessinateur", project_id)[0].values == {**flux, **kept}
+            assert service.raw_stored(session, "scenariste", None) == {"temperature": 0.2}
+        for project_id in (None, sid):
+            q = f"?project_id={project_id}" if project_id else ""
+            d = c.get(f"/agents/dessinateur{q}").json()
+            assert d["warnings"] == [] and d["problem"] is None
+            wf = next(s for s in d["settings"] if s["key"] == "workflow")
+            assert wf["value"] == presets.defaults.workflow and wf["origin"] == "preset"
+    assert _version(settings.database_path) == SCHEMA_VERSION

@@ -144,7 +144,7 @@ from .slugs import RESERVED_ENTRIES, RESERVED_SERIES, slugify, unique_slug
 
 log = logging.getLogger("mangaka_engine")
 
-SCHEMA_VERSION = 42
+SCHEMA_VERSION = 43
 
 
 class MigrationError(RuntimeError):
@@ -699,6 +699,22 @@ def _v40_to_v41(cur: sqlite3.Cursor) -> None:
     cur.execute("UPDATE panels SET generation_preset = NULL WHERE generation_preset LIKE ?", (FLUX_PRESETS,))
 
 
+def _v42_to_v43(cur: sqlite3.Cursor) -> None:
+    # Suite du retrait de FLUX 3 Klein (#233) : les profils d'agents (global et séries) qui gardaient un workflow
+    # `flux3-klein-*` le perdent, le réglage redevient hérité (defaults.yaml). L'historique des versions est gardé.
+    prefix = FLUX_PRESETS.removesuffix("%")
+    for profile_id, raw in cur.execute('SELECT id, "values" FROM agent_profiles').fetchall():
+        try:
+            values = json.loads(raw) if isinstance(raw, str) else raw
+        except ValueError:
+            continue
+        if not isinstance(values, dict):
+            continue
+        kept = {k: v for k, v in values.items() if not (isinstance(v, str) and v.startswith(prefix))}
+        if kept != values:
+            cur.execute('UPDATE agent_profiles SET "values" = ? WHERE id = ?', (json.dumps(kept), profile_id))
+
+
 def _json_list(raw: object) -> list[object]:
     try:
         value = json.loads(raw) if isinstance(raw, str) else raw
@@ -751,6 +767,7 @@ MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     39: (40, _v39_to_v40),
     40: (41, _v40_to_v41),
     41: (42, _v41_to_v42),
+    42: (43, _v42_to_v43),
 }
 
 
