@@ -31,6 +31,7 @@ Après modification d'un preset, redémarre le moteur (`npm run dev`).
 | `image_prompt.yaml` | Construction du prompt final des cases (étape 3) et termes « pas de texte » du prompt négatif |
 | `qc.yaml` | Contrôle qualité des cases (étape 4) : poids, seuils de verdict, règles des détecteurs, seuil CCIP, zone de doute de la vision, nouveaux essais automatiques |
 | `qc_tonality.yaml` | Mesures de tonalité de chaque image générée (% sombre, % noir, % blanc, saturation, densité de trait) et cible (planche de référence) |
+| `sfx_library.yaml` | Bibliothèque des onomatopées (20 à 30, par usage) : seule source du scénariste et du directeur artistique, voir « Bibliothèque des onomatopées » |
 | `journal.yaml` | Journal des générations : raisons d'un rejet (liste fermée), seuil « peu de données » et tranches de longueur de prompt de la page Statistiques |
 | `workflows/*.yaml` + `*.json` | Workflows ComfyUI : le JSON API exporté + le mapping des paramètres |
 | `upscalers/*.yaml` + `*.json` | Finition d'impression : agrandissement de la version retenue d'une case jusqu'au dpi du format, avant l'assemblage |
@@ -298,7 +299,7 @@ pas se répéter) et son savoir-faire (`knowledge.yaml` › `art_direction`). Il
   y a lieu, ses fiches de référence), `angle`, `cadre` (normal, sans bord, fond perdu, incrustation), `ambiance`, `action`
   (courte phrase en français : le mouvement ou la pose du corps — « bondit par-dessus la rambarde,
   manteau au vent », jamais « regarde » ou « est debout » seuls ; reprise par le rédacteur de prompt),
-  `sfx` (onomatopées : texte + intensité).
+  `sfx` (onomatopées : texte + intensité, 0 à 2 par case, prises dans `sfx_library.yaml`).
 
 Réponse invalide (schéma, pages ou cases manquantes, gabarit impossible) → relance avec l'erreur
 (`max_retries`, 2 au maximum) → sinon erreur visible sur le job.
@@ -1954,6 +1955,34 @@ prompt de la case).
   automatique), `DELETE /bubbles/{id}`.
 - Export : PNG (halo, contour, remplissage, transformés) et SVG (`<g transform="translate rotate
   skewX">` + `<text>` : le texte reste sélectionnable, police réduite embarquée).
+
+### Bibliothèque des onomatopées (`sfx_library.yaml`)
+
+Les agents n'inventent plus leurs onomatopées : le scénariste (`prompts/script.yaml`, `script-scene.yaml`) et
+le directeur artistique (`prompts/direction-artistique.yaml`) reçoivent la liste par la variable
+`$sfx_library` (une ligne par groupe : « BOUM (explosion, chute lourde…) ; … ») avec la consigne de n'en
+choisir que là, et rien si aucune ne convient. Le directeur artistique en propose au plus 2 par case
+(`MAX_SFX`).
+
+```yaml
+groups:
+  - label: Coups
+    entries:
+      - { text: BAM, usage: "coup de poing ou impact net et sec" }
+      - { text: PAF, usage: "gifle, tape, coup léger ou comique" }
+```
+
+- 20 à 30 onomatopées en tout, chacune avec son `usage` (une ligne) ; deux entrées de même clé sont un
+  doublon. Fichier invalide : écarté au démarrage avec l'erreur (`GET /presets`, journal du moteur) ;
+  absent : signalé, et les onomatopées des agents ne sont plus filtrées.
+- Variante permise : le même mot aux lettres étirées et/ou avec « ! » — la comparaison ignore casse,
+  accents, ponctuation, espaces et lettres répétées (« BOUUUM ! » = BOUM, « AIE » = AÏE, « ZIP » =
+  ZIIIP) ; un mot répété (« TOC TOC ») accepte aussi une ou plusieurs répétitions.
+- Contrôle du moteur : une onomatopée de la réponse du LLM hors de la liste est retirée (pas de relance).
+  Scénario : nommée sous le message du dernier découpage (`params.sfx_rejected` du job) ; Direction
+  artistique : sous les onomatopées de la case (`sfx_rejected`) et dans le message du job.
+- Celles de l'auteur ne sont jamais filtrées : lettrage (`POST /panels/{id}/sfx`), écran Scénario,
+  écran Direction artistique (jusqu'à 4 par case).
 
 ### Polices disponibles
 

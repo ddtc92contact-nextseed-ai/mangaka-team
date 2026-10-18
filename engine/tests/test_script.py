@@ -321,7 +321,8 @@ def test_mock_script_fills_some_sfx_and_prompt_documents_them() -> None:
     assert sfx and all(s.intensity in ("calme", "normal", "choc") for s in sfx)
     assert any(pa.sfx == [] for p in out.pages for pa in p.panels)  # quelques-unes seulement
     _, user = render_messages(PROMPT, _ctx())
-    assert "« sfx »" in user.content and '"sfx": [{"text": "VROUM !"' in user.content
+    assert "« sfx »" in user.content and '"sfx": [{"text": "…"' in user.content
+    assert "UNIQUEMENT dans cette bibliothèque" in user.content  # plus d'exemples libres (VROUM, CLIC…)
     assert "sfx" not in _ctx().as_json()["bubble_kinds"]  # pas un type de réplique
 
 

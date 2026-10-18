@@ -59,7 +59,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..presets import PresetError, PresetRegistry, PromptPreset
-from ..presets.schemas import BriefRules
+from ..presets.schemas import BriefRules, SfxLibrary
 from ..providers.llm import ChatMessage, LLMError, LLMProvider
 from ..store.db import Database
 from ..store.models import (
@@ -68,6 +68,7 @@ from ..store.models import (
     Chapter,
     ChapterStatus,
     Character,
+    Job,
     LLMRun,
     Page,
     PageKind,
@@ -340,6 +341,49 @@ def parse_script(text: str, library: SeriesLibrary | None = None) -> ScriptOutpu
     return out
 
 
+# --- onomatopées -------------------------------------------------------------------
+def sfx_library_text(library: SfxLibrary | None) -> str:
+    """$sfx_library des prompts : les onomatopées permises par groupe, ou la consigne de n'en proposer aucune."""
+    if library is None:
+        return "(bibliothèque d'onomatopées absente : n'en propose aucune)"
+    return library.prompt_text()
+
+
+def filter_sfx(output: ScriptOutput, library: SfxLibrary | None) -> list[str]:
+    """Onomatopées du scénariste hors de la bibliothèque : retirées de la réponse (jamais de relance pour ça).
+    Renvoie les retirées, lisibles (« page 1 › case 2 : « FROU » »). Sans bibliothèque, rien n'est retiré."""
+    if library is None:
+        return []
+    rejected: list[str] = []
+    for p, page in enumerate(output.pages, start=1):
+        for c, panel in enumerate(page.panels, start=1):
+            kept = [fx for fx in panel.sfx if library.match(fx.text) is not None]
+            rejected += [f"page {p} › case {c} : « {fx.text} »" for fx in panel.sfx if fx not in kept]
+            panel.sfx = kept
+    return rejected
+
+
+def sfx_note(rejected: Sequence[str]) -> str:
+    """Fin du message d'un job : « , 2 onomatopées hors bibliothèque retirées (FROU, KARI) »."""
+    words = list(dict.fromkeys(SFX_QUOTED.findall(" ".join(rejected)) or rejected))
+    if not words:
+        return ""
+    n = len(rejected)
+    s = "s" if n > 1 else ""
+    return f", {n} onomatopée{s} hors bibliothèque retirée{s} ({', '.join(words)})"
+
+
+SFX_QUOTED = re.compile(r"« (.+?) »")
+SFX_REJECTED = "sfx_rejected"  # clé de `Job.params` : onomatopées retirées par le dernier découpage
+
+
+def note_rejected_sfx(session: Session, job_id: int | None, rejected: Sequence[str]) -> None:
+    """Garde les onomatopées retirées sur le job (`params`), pour l'avertissement de l'écran Scénario."""
+    job = session.get(Job, job_id) if job_id is not None else None
+    if job is not None:
+        job.params = {**(job.params or {}), SFX_REJECTED: list(rejected)}
+
+
 # --- contexte -------------------------------------------------------------------
 @dataclass
 class ScriptContext:
@@ -357,6 +401,8 @@ class ScriptContext:
     focus: SceneFrame | None = None
     written: str = ""
     fiches: str = ""
+    # Onomatopées permises (presets/sfx_library.yaml) ; None : bibliothèque absente, onomatopées libres.
+    sfx_library: SfxLibrary | None = None
 
     def as_json(self) -> dict[str, Any]:
         return {
@@ -372,6 +418,7 @@ class ScriptContext:
             "bubble_kinds": list(BUBBLE_KINDS),
             "intensities": list(INTENSITIES),
             "rythmes": list(RYTHMES),
+            "sfx_library": [e.text for e in self.sfx_library.entries()] if self.sfx_library is not None else None,
         }
 
 
@@ -431,6 +478,7 @@ def build_context(
         library=SeriesLibrary.load(session, series.id),
         charter=series_charter(presets, series),
         scenes=script_scenes(presets, chapter),
+        sfx_library=presets.sfx_library,
     )
 
 
@@ -491,6 +539,7 @@ def render_messages(
         "bubble_kinds": ", ".join(BUBBLE_KINDS),
         "intensities": ", ".join(INTENSITIES),
         "rythmes": ", ".join(RYTHMES),
+        "sfx_library": sfx_library_text(ctx.sfx_library),
         "dialogue_rules": dialogue_text(scene_rules(prompt, ctx)),
         # Charte de la série (ADN) : cases par planche, dialogue par planche, courbe de rythme.
         "pre_direction": script_text(ctx.charter, int(ctx.chapter.get("target_pages") or 0)),
@@ -623,6 +672,8 @@ class ScriptRun:
     messages: list[ChatMessage]
     # Règles de dialogue encore enfreintes après les relances (découpage gardé, avertissements).
     warnings: list[str] = field(default_factory=list)
+    # Onomatopées hors bibliothèque retirées de la réponse gardée (« page 1 › case 2 : « FROU » »).
+    sfx_rejected: list[str] = field(default_factory=list)
 
 
 def focus_problems(output: ScriptOutput, ctx: ScriptContext, templates: PromptPreset | None) -> list[str]:
@@ -673,6 +724,7 @@ def run_script(
             continue
         try:
             output = parse_script(result.text, ctx.library)
+            rejected = filter_sfx(output, ctx.sfx_library)
             counts = panel_count_problems([len(p.panels) for p in output.pages], ctx.charter)
             if ctx.focus is not None:
                 scene_pages = focus_problems(output, ctx, templates)
@@ -695,6 +747,7 @@ def run_script(
                     attempts=attempt,
                     messages=messages,
                     warnings=scene_pages + counts + profile + actions + brief + problems,
+                    sfx_rejected=rejected,
                 )
                 where = "de la scène" if ctx.focus is not None else "de la série"
                 parts = []
@@ -718,7 +771,7 @@ def run_script(
                 retry = _render(retry_template, {"error": last_error}, "retry")
                 messages = [*messages, ChatMessage("assistant", result.text[:20000]), ChatMessage("user", retry)]
             continue
-        return ScriptRun(output=output, attempts=attempt, messages=messages)
+        return ScriptRun(output=output, attempts=attempt, messages=messages, sfx_rejected=rejected)
     if fallback is not None:
         return fallback
     raise ScriptError(f"Le LLM a renvoyé un découpage invalide {total} fois de suite. Dernière erreur : {last_error}")
@@ -930,7 +983,19 @@ def script_job(
                 session.commit()
         if frames and templates is not None:
             return _run_scenes(
-                db, presets, llm, chapter_id, prompt, templates, ctx, frames, fiches, others, scene_id, progress
+                db,
+                presets,
+                llm,
+                chapter_id,
+                prompt,
+                templates,
+                ctx,
+                frames,
+                fiches,
+                others,
+                scene_id,
+                progress,
+                job_id=job_id,
             )
         rules = prompt.dialogue_rules
 
@@ -965,13 +1030,14 @@ def script_job(
                 raise ScriptError("Chapitre introuvable (supprimé pendant le découpage ?)")
             pages = save_script(session, chapter, run.output, ctx.scenes)
             layout_pages(presets, pages)
+            note_rejected_sfx(session, job_id, run.sfx_rejected)
             session.commit()
             n_panels = sum(len(p.panels) for p in pages)
         tries = f" en {run.attempts} essais" if run.attempts > 1 else ""
         if run.warnings:
             n = len(run.warnings)
             tries += f", avec {n} avertissement{'s' if n > 1 else ''} de dialogues ou de brief d'image"
-        return f"{len(pages)} pages, {n_panels} cases{tries}"
+        return f"{len(pages)} pages, {n_panels} cases{tries}{sfx_note(run.sfx_rejected)}"
 
     return run
 
@@ -1020,6 +1086,8 @@ def _run_scenes(
     others: str,
     scene_id: int | None,
     progress: Progress,
+    *,
+    job_id: int | None = None,
 ) -> str:
     """Name scène par scène : une génération par scène, dans l'ordre (ou la seule scène `scene_id`), chacune avec la
     liste validée, le résumé des scènes déjà écrites et sa charte (ADN de la série précisé par son profil)."""
@@ -1066,6 +1134,7 @@ def _run_scenes(
         runs.append((frame, run))
 
     warnings = [f"scène {f.number} : {w}" for f, r in runs for w in r.warnings]
+    rejected = [f"scène {f.number} › {w}" for f, r in runs for w in r.sfx_rejected]
     progress(88, "Enregistrement des pages, cases et bulles, puis mise en page automatique…")
     with db.session_scope() as session:
         chapter = session.get(Chapter, chapter_id)
@@ -1086,6 +1155,7 @@ def _run_scenes(
                 inner = check_dialogues(script_panels(merged), rules.model_copy(update={"max_mean_words": 100.0}))
                 warnings += [w for w in inner if w.startswith("aucune pensée")]
         layout_pages(presets, pages)
+        note_rejected_sfx(session, job_id, rejected)
         session.commit()
         n_panels = sum(len(p.panels) for p in pages)
     attempts = max(r.attempts for _f, r in runs)
@@ -1098,4 +1168,4 @@ def _run_scenes(
             f", avec {n} avertissement{'s' if n > 1 else ''} (profil des scènes, dialogues, une action par case, "
             "brief d'image)"
         )
-    return f"{where}{len(pages)} pages, {n_panels} cases{scenes}{tries}"
+    return f"{where}{len(pages)} pages, {n_panels} cases{scenes}{tries}{sfx_note(rejected)}"

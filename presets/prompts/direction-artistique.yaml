@@ -15,6 +15,7 @@
 #   $variety             (audace demandée, réglage « variety » ci-dessous)
 #   $request             (ce qui est demandé : tout le chapitre, ou une autre proposition pour une page)
 #   $rythmes $intensities $plans $angles $cadres $page_chocs $sfx_intensities $points_de_vue (valeurs autorisées)
+#   $sfx_library         (onomatopées permises, par usage : presets/sfx_library.yaml ; les autres sont retirées)
 #   $variety_rules       (règles de mise en scène variée ci-dessous, en clair)
 #   $page_rules          (règles par planche ci-dessous, en clair)
 #   $pre_direction       (charte chiffrée de la série, son ADN : échelle des plans, présence, formes de planche,
@@ -176,7 +177,10 @@ user: |
   - « action » : une courte phrase en français qui décrit le mouvement ou la pose du corps du
     personnage principal (« bondit par-dessus la rambarde, manteau au vent », « se penche vers Kenji,
     poing serré sur la table ») — jamais « regarde » ou « est debout » seuls ;
-  - « sfx » : onomatopées suggérées (0 à 4), chacune {"text": "…", "intensity": l'une de $sfx_intensities} ;
+  - « sfx » : onomatopées suggérées (0 à 2), chacune {"text": "…", "intensity": l'une de $sfx_intensities},
+    choisies UNIQUEMENT dans cette bibliothèque (variante aux lettres étirées et/ou avec « ! » permise :
+    « BOUUUM ! » pour BOUM) ; si aucune ne convient, pas d'onomatopée — toute autre est retirée par le moteur :
+  $sfx_library
   - « decor » (facultatif) : null pour garder le décor du scénario, sinon l'id d'un décor de la
     bibliothèque ci-dessus — jamais un id absent de la liste ;
   - « objets » (facultatif) : null pour garder les objets du scénario, sinon la liste des ids d'objets,

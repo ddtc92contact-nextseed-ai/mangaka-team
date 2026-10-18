@@ -1,0 +1,55 @@
+# Bibliothèque des onomatopées (engine/mangaka_engine/presets/schemas.py · SfxLibrary).
+# Seule source des onomatopées proposées par le scénariste (prompts/script.yaml, script-scene.yaml) et par
+# le directeur artistique (prompts/direction-artistique.yaml) : la liste leur est donnée ($sfx_library) et
+# le moteur retire de leur réponse toute onomatopée qui n'y est pas (avertissement visible dans les écrans
+# Scénario et Direction artistique). Celles que l'auteur tape à la main ne sont jamais filtrées.
+#
+# Variante permise : le même mot aux lettres étirées et/ou avec « ! » (« BOUUUM ! » = BOUM, « ZIP » = ZIIIP).
+# La comparaison ignore la casse, les accents, la ponctuation, les espaces et les lettres répétées. Un mot
+# répété (« TOC TOC ») accepte aussi une seule ou plusieurs répétitions (« TOC », « TOC TOC TOC »).
+#
+# Entre 20 et 30 onomatopées en tout (fichier refusé sinon), chacune avec une ligne « quand l'employer » ;
+# groupes par usage. Les accents s'affichent au lettrage (AÏE).
+groups:
+  - label: Coups
+    entries:
+      - { text: BAM, usage: "coup de poing ou impact net et sec" }
+      - { text: PAF, usage: "gifle, tape, coup léger ou comique" }
+      - { text: POW, usage: "coup puissant, uppercut, impact de super-héros" }
+      - { text: VLAN, usage: "porte claquée, coup du plat de la main, choc plat" }
+      - { text: TCHAC, usage: "lame qui tranche, coup de sabre ou de couteau" }
+  - label: Chocs, chutes et explosions
+    entries:
+      - { text: BOUM, usage: "explosion, chute lourde, détonation" }
+      - { text: BLAM, usage: "coup de feu, porte enfoncée" }
+      - { text: CRAC, usage: "os, bois ou glace qui casse" }
+      - { text: CRASH, usage: "collision, voiture ou vitre qui se brise" }
+      - { text: BADABOUM, usage: "chute en cascade, dégringolade d'objets" }
+  - label: Mouvement et vitesse
+    entries:
+      - { text: VROUM, usage: "moteur qui démarre ou accélère" }
+      - { text: ZIIIP, usage: "passage éclair, fermeture éclair, trait de vitesse" }
+      - { text: FFFT, usage: "objet lancé, souffle bref, esquive" }
+      - { text: WHOOSH, usage: "déplacement rapide dans l'air, bourrasque" }
+      - { text: ZOOM, usage: "départ en trombe, mise au point soudaine" }
+  - label: Eau
+    entries:
+      - { text: SPLASH, usage: "éclaboussure, plongeon, vague qui frappe" }
+      - { text: PLOUF, usage: "chute dans l'eau, petit plongeon" }
+      - { text: FLIC FLOC, usage: "gouttes, pas dans les flaques, pluie" }
+  - label: Petits bruits
+    entries:
+      - { text: CLIC, usage: "interrupteur, déclic, arme qu'on arme" }
+      - { text: CLAC, usage: "claquement sec, porte ou boîte qui se ferme" }
+      - { text: TOC TOC, usage: "on frappe à la porte" }
+      - { text: TIC TAC, usage: "horloge, compte à rebours" }
+      - { text: DRING, usage: "sonnerie de téléphone, de réveil ou de porte" }
+      - { text: BIIIP, usage: "signal électronique, alarme, appareil" }
+  - label: Corps et réactions
+    entries:
+      - { text: AÏE, usage: "douleur, petite blessure" }
+      - { text: OUCH, usage: "douleur vive, choc reçu" }
+      - { text: GLOUPS, usage: "gorge serrée, gêne, déglutition inquiète" }
+      - { text: SNIF, usage: "larmes, reniflement, tristesse" }
+      - { text: ZZZ, usage: "sommeil, ronflement" }
+      - { text: GRRR, usage: "colère, grognement, bête menaçante" }

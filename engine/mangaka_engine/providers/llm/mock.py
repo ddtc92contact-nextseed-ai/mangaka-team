@@ -155,8 +155,29 @@ _REPLIES = ["Quoi ?!", "Tiens bon !", "Je n'y crois pas…", "Allons-y, vite !",
 _SHOUTS = ["À couvert !", "Maintenant !", "Lâche ça !", "Recule !"]
 _MOCK_WORDS = 8  # mots au plus par réplique factice
 _RYTHMES = ["normal", "rapide", "lent", "normal", "rapide"]
-# Onomatopées des cases « choc » (et d'une case calme de temps en temps), accents compris.
-_SFX = ["VROUM !", "CLIC", "BIIIP !", "BAM !", "ÇA CRAQUE !", "BAÏE !"]
+# Onomatopées des cases « choc » (et d'une case calme de temps en temps), accents compris : celles de la
+# bibliothèque du contexte (presets/sfx_library.yaml, « sfx_library »), sinon cette liste, toutes dedans.
+_SFX = ["VROUM !", "CLIC", "BIIIP !", "BAM !", "CRAC !", "AÏE !"]
+# Onomatopée inventée, hors bibliothèque (une par réponse quand le contexte en a une) : le moteur la retire
+# avec un avertissement visible, ce que le mode mock permet de vérifier.
+MOCK_OFF_LIBRARY = "FROU"
+MOCK_DA_OFF_LIBRARY = "KARI"
+
+
+def _sfx_words(ctx: dict[str, Any], fallback: list[str]) -> list[str]:
+    """Onomatopées permises du contexte, une sur deux étirée ou criée (« BOUUUM ! », « CLIC ! »)."""
+    library = [str(w) for w in ctx.get("sfx_library") or [] if w]
+    if not library:
+        return fallback
+    return [_stretch(w) if k % 2 else w for k, w in enumerate(library)]
+
+
+def _stretch(word: str) -> str:
+    """Variante permise : dernière voyelle triplée et « ! » (« BOUM » → « BOUUUM ! »)."""
+    for k in range(len(word) - 1, -1, -1):
+        if word[k] in "AEIOUY":
+            return f"{word[: k + 1]}{word[k] * 2}{word[k + 1 :]} !"
+    return f"{word} !"
 
 
 def _script_context(messages: list[ChatMessage]) -> dict[str, Any] | None:
@@ -279,6 +300,8 @@ def mock_script(ctx: dict[str, Any], *, sparse: bool = False) -> dict[str, Any]:
         counts = others if len(set(others)) >= 2 else [c for c in range(lo, min(hi, 7) + 1) if c != 5] or counts
     pages = []
     beat = 0
+    sfx_words = _sfx_words(ctx, _SFX)
+    off_library = ctx.get("sfx_library") is not None  # une onomatopée inventée, retirée par le moteur
     narration_max = profile.get("narration.max_per_page")
     opening = (not focus or int(focus.get("number") or 1) == 1) and narration_max != 0
     for p in range(n_pages):
@@ -315,9 +338,12 @@ def mock_script(ctx: dict[str, Any], *, sparse: bool = False) -> dict[str, Any]:
                     )
             sfx = []
             if intensity == "choc":
-                sfx.append({"text": _SFX[(p + i) % len(_SFX)], "intensity": "choc"})
+                sfx.append({"text": sfx_words[(p + i) % len(sfx_words)], "intensity": "choc"})
+                if off_library:
+                    sfx.append({"text": MOCK_OFF_LIBRARY, "intensity": "choc"})
+                    off_library = False
             elif intensity == "calme" and p % 3 == 1:
-                sfx.append({"text": "tic… tac…", "intensity": "calme"})
+                sfx.append({"text": "TIC TAC…", "intensity": "calme"})
             place = ((p + offset) // _PAGES_PER_PLACE) % len(_LIEUX)
             panels.append(
                 {
@@ -448,7 +474,7 @@ _DA_AMBIANCES = [
     "soleil de midi, ombres dures et nettes",
     "brume légère, arrière-plan estompé",
 ]
-_DA_SFX = ["BAM", "VLAN", "FSHHH", "CLAC", "BOUM", "TCHAC"]
+_DA_SFX = ["BAM", "VLAN", "WHOOSH", "CLAC", "BOUM", "TCHAC"]
 _RYTHME_PHRASES = {
     "calme": "Page d'installation : on laisse respirer le décor et les personnages.",
     "montée": "La tension monte : les cadrages se resserrent au fil des cases.",
@@ -497,6 +523,8 @@ def mock_art_direction(ctx: dict[str, Any], *, establish: bool = True) -> dict[s
         curve = _scene_curve(len(pages), charter, scene, ctx.get("before_rythmes") or [])
     places = (charter.get("places") or {}) if whole else {}
     opening = _establishing(pages, ctx.get("previous_location")) if establish and places.get("establishing") else set()
+    sfx_words = _sfx_words(ctx, _DA_SFX)
+    off_library = ctx.get("sfx_library") is not None  # une onomatopée inventée, retirée par le moteur
     for index, page in enumerate(pages):
         n = int(page["page"])
         seed = n * 7 + number * 3 + variant * 5
@@ -538,6 +566,12 @@ def mock_art_direction(ctx: dict[str, Any], *, establish: bool = True) -> dict[s
             cast = others if point_de_vue == "vue subjective" else list(pa.get("characters") or [])
             who = next(iter(cast), None)
             action = _DA_ACTIONS[(seed + i) % len(_DA_ACTIONS)]
+            sfx = []
+            if intensity == "choc":
+                sfx.append({"text": sfx_words[(seed + i) % len(sfx_words)], "intensity": "fort"})
+                if off_library:
+                    sfx.insert(0, {"text": MOCK_DA_OFF_LIBRARY, "intensity": "fort"})
+                    off_library = False
             out_panels.append(
                 {
                     "panel": i + 1,
@@ -547,9 +581,7 @@ def mock_art_direction(ctx: dict[str, Any], *, establish: bool = True) -> dict[s
                     "cadre": cadre,
                     "ambiance": _DA_AMBIANCES[(seed + i) % len(_DA_AMBIANCES)],
                     "action": f"{who} {action}" if who else action[:1].upper() + action[1:],
-                    "sfx": [{"text": _DA_SFX[(seed + i) % len(_DA_SFX)], "intensity": "fort"}]
-                    if intensity == "choc"
-                    else [],
+                    "sfx": sfx,
                     **({"point_de_vue": point_de_vue, "spectateurs": viewers} if point_de_vue else {}),
                     **({_FIXED: True} if fixed else {}),
                 }

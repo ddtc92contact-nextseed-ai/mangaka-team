@@ -3477,3 +3477,71 @@ class CoverCharterSettings(_Strict):
         if bad:
             raise ValueError(f"defaults : choix inconnu ({', '.join(bad)})")
         return self
+
+
+# --- onomatopées (sfx_library.yaml) ------------------------------------------------------------
+_SFX_REPEATS = re.compile(r"(.)\1+")
+SFX_LIBRARY_MIN = 20
+SFX_LIBRARY_MAX = 30
+
+
+def sfx_key(text: str) -> str:
+    """Clé de comparaison d'une onomatopée : sans casse, accents, ponctuation ni espaces, lettres répétées
+    réduites à une (« GRAAA ! », « Graaaa », « graa » → « gra » ; « Bam… » → « bam »)."""
+    decomposed = unicodedata.normalize("NFKD", text.casefold())
+    letters = "".join(ch for ch in decomposed if ch.isalnum())
+    return _SFX_REPEATS.sub(r"\1", letters) or text.strip().casefold()
+
+
+class SfxEntry(_Strict):
+    text: str = Field(min_length=1, max_length=40)
+    usage: str = Field(min_length=1, max_length=160)  # quand l'employer (une ligne)
+
+    def variants(self) -> set[str]:
+        """Clés acceptées : le mot ; un mot répété (« TOC TOC ») vaut aussi de 1 à 4 répétitions."""
+        words = [sfx_key(w) for w in self.text.split()]
+        if len(words) > 1 and len(set(words)) == 1:
+            return {words[0] * n for n in range(1, 5)}
+        return {sfx_key(self.text)}
+
+
+class SfxGroup(_Strict):
+    label: str = Field(min_length=1, max_length=60)
+    entries: list[SfxEntry] = Field(min_length=1)
+
+
+class SfxLibrary(_Strict):
+    """Bibliothèque des onomatopées (`presets/sfx_library.yaml`) : seule source du scénariste et du directeur
+    artistique. Une onomatopée renvoyée par le LLM hors de cette liste (après `sfx_key`) est retirée."""
+
+    groups: list[SfxGroup] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _check(self) -> SfxLibrary:
+        entries = self.entries()
+        if not SFX_LIBRARY_MIN <= len(entries) <= SFX_LIBRARY_MAX:
+            raise ValueError(
+                f"groups : {len(entries)} onomatopées, il en faut entre {SFX_LIBRARY_MIN} et {SFX_LIBRARY_MAX}"
+            )
+        seen: dict[str, str] = {}
+        for e in entries:
+            key = sfx_key(e.text)
+            if key in seen:
+                raise ValueError(f"groups : « {e.text} » fait doublon avec « {seen[key]} »")
+            seen[key] = e.text
+        return self
+
+    def entries(self) -> list[SfxEntry]:
+        return [e for g in self.groups for e in g.entries]
+
+    def match(self, text: str) -> str | None:
+        """Onomatopée de la bibliothèque dont `text` est le mot ou une variante (lettres étirées, « ! »,
+        casse, accents), sinon None."""
+        key = sfx_key(text)
+        return next((e.text for e in self.entries() if key in e.variants()), None)
+
+    def prompt_text(self) -> str:
+        """Liste donnée aux agents ($sfx_library) : une ligne par groupe, « MOT (quand l'employer) »."""
+        return "\n".join(
+            f"- {g.label} : " + " ; ".join(f"{e.text} ({e.usage})" for e in g.entries) for g in self.groups
+        )

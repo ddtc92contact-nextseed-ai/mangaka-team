@@ -12,6 +12,7 @@ Arborescence attendue :
       qc.yaml                  # contrôle qualité des cases (étape 4) : seuils, poids, règles
       qc_tonality.yaml         # mesures de tonalité de chaque image générée et cible (journal)
       journal.yaml             # journal des générations : raisons d'un rejet, page Statistiques
+      sfx_library.yaml         # onomatopées : seule source du scénariste et du directeur artistique
       knowledge.yaml           # savoir-faire : découpage, recherche hybride, collections par agent
       identity.yaml            # identité visuelle de la série : palettes proposées, logo du titre
       logo_styles/*.yaml       # effets du logo du titre (contours, ombre, dégradé, couleurs par défaut)
@@ -81,6 +82,7 @@ from .schemas import (
     ReferenceSheet,
     SceneTypesSettings,
     SeriesCreatorSettings,
+    SfxLibrary,
     StyleGenre,
     StyleLoraCatalog,
     StyleOptions,
@@ -144,6 +146,8 @@ class PresetRegistry:
     qc: QCSettings | None = None
     tonality: TonalitySettings = field(default_factory=TonalitySettings)
     journal: JournalSettings = field(default_factory=JournalSettings)
+    # Onomatopées permises aux agents (sfx_library.yaml) ; None : absente ou invalide (onomatopées libres).
+    sfx_library: SfxLibrary | None = None
     knowledge: KnowledgeSettings = field(default_factory=KnowledgeSettings)
     defaults: Defaults | None = None
     agents: dict[str, AgentPreset] = field(default_factory=dict)
@@ -390,6 +394,12 @@ class PresetRegistry:
                 parsed = reg._parse(path, schema)
                 if parsed is not None:
                     setattr(reg, attr, parsed)
+
+        sfx_path = root / "sfx_library.yaml"
+        if sfx_path.exists():
+            reg.sfx_library = reg._parse(sfx_path, SfxLibrary)
+        else:
+            reg.issues.append(PresetIssue(reg._rel(sfx_path), "fichier absent : onomatopées des agents non filtrées"))
 
         knowledge_path = root / "knowledge.yaml"
         if knowledge_path.exists():

@@ -8,7 +8,7 @@
 #
 # Variables : toutes celles de prompts/script.yaml ($series_title, $characters, $decors, $objets, $lieux,
 # $previous_chapters, $synopsis, $bible, $savoir_faire, $style_packs, $style_guidelines, $reading_direction,
-# $character_names, $bubble_kinds, $intensities, $rythmes, $dialogue_rules, $context_json…), où :
+# $character_names, $bubble_kinds, $intensities, $rythmes, $dialogue_rules, $sfx_library, $context_json…), où :
 #   $pre_direction   charte de la SCÈNE : ADN de la série précisé par le profil de la scène
 #   $dialogue_rules  règles de dialogue de la série, aux valeurs par planche du profil de la scène
 #   $scenes          la liste validée complète, en clair (scène, type, pages, profil de tempo)
@@ -134,7 +134,10 @@ user: |
     narration, off = voix hors champ) ; « dialogues » ne contient jamais d'onomatopée (elles vont dans « sfx ») ;
   - « importance » vaut 1 (case de transition), 2 (case normale) ou 3 (le moment important, grande case) ;
   - « intensity » (facultatif) : $intensities ; « rythme » d'une page (facultatif) : $rythmes ;
-  - « sfx » (facultatif) : onomatopées hors bulle, chacune avec « text » (court, en majuscules) et « intensity » ;
+  - « sfx » (facultatif) : onomatopées hors bulle, chacune avec « text » (en majuscules) et « intensity », choisies
+    UNIQUEMENT dans cette bibliothèque (variante aux lettres étirées et/ou avec « ! » permise : « BOUUUM ! » pour
+    BOUM) ; si aucune ne convient, pas d'onomatopée — toute autre est retirée par le moteur :
+  $sfx_library
   - « characters » : personnages PRÉSENTS À L'IMAGE ; « offscreen » : cités mais hors cadre ; une case de décor
     n'a aucun personnage ; pour un personnage qui a une fiche, recopie EXACTEMENT son nom parmi : $character_names ;
     un personnage « offscreen » n'agit pas à l'image : si la description ou le « staging » décrit ce qu'il fait
