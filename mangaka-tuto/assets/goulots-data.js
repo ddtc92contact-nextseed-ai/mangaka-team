@@ -128,9 +128,9 @@ window.GOULOTS = {
           title: "Trois essais au plus pour les agents d'écriture, puis erreur",
           text: "Le nombre de relances est plafonné à 2 (donc 3 essais) ; scénario, scènes et direction artistique sont réglés au maximum. Le rédacteur de prompt image est à 1 relance (2 essais), puis il se replie sur des fragments sans bloquer la génération.",
           src: [
-            { f: "engine/mangaka_engine/presets/schemas.py", l: 2092, x: "max_retries: int = Field(default=2, ge=0, le=2)" },
-            { f: "engine/mangaka_engine/pipeline/script.py", l: 587, x: "total = 1 + prompt.max_retries" },
-            { f: "engine/mangaka_engine/pipeline/script.py", l: 599, x: "Le LLM n'a pas pu répondre" },
+            { f: "engine/mangaka_engine/presets/schemas.py", l: 2109, x: "max_retries: int = Field(default=2, ge=0, le=2)" },
+            { f: "engine/mangaka_engine/pipeline/script.py", l: 658, x: "total = 1 + prompt.max_retries" },
+            { f: "engine/mangaka_engine/pipeline/script.py", l: 670, x: "Le LLM n'a pas pu répondre" },
             { f: "presets/prompts/redacteur-image.yaml", l: 61, x: "max_retries: 1" },
           ],
         },
@@ -147,7 +147,7 @@ window.GOULOTS = {
           text: "Au-delà du `timeout_s` du flux (600 s par défaut), le moteur interrompt ComfyUI et le job échoue. Chaque requête HTTP vers ComfyUI a 5 s.",
           src: [
             { f: "engine/mangaka_engine/presets/schemas.py", l: 375, x: "timeout_s: float = Field(default=600" },
-            { f: "engine/mangaka_engine/pipeline/generation.py", l: 2313, x: "n'a pas terminé la génération en" },
+            { f: "engine/mangaka_engine/pipeline/generation.py", l: 2333, x: "n'a pas terminé la génération en" },
             { f: "engine/mangaka_engine/config.py", l: 49, x: "comfyui_timeout_s: float = 5.0" },
           ],
         },
@@ -206,8 +206,8 @@ window.GOULOTS = {
           title: "DeepSeek tombe",
           text: "Scènes, scénario et direction artistique répondent 503 « LLM indisponible » ou échouent après leurs essais. La génération continue : le prompt image se replie sur des fragments.",
           src: [
-            { f: "engine/mangaka_engine/api/chapters.py", l: 465, x: "LLM indisponible" },
-            { f: "engine/mangaka_engine/pipeline/generation.py", l: 1245, x: "une panne du rédacteur ne bloque pas la génération" },
+            { f: "engine/mangaka_engine/api/chapters.py", l: 488, x: "LLM indisponible" },
+            { f: "engine/mangaka_engine/pipeline/generation.py", l: 1256, x: "une panne du rédacteur ne bloque pas la génération" },
           ],
         },
         {
@@ -300,7 +300,7 @@ window.GOULOTS = {
       impact: 2,
       mesure: "llm_echecs",
       cause: "3 essais au plus, puis erreur ; jusqu'à 300 s par appel.",
-      src: [{ f: "engine/mangaka_engine/pipeline/script.py", l: 599, x: "Le LLM n'a pas pu répondre" }],
+      src: [{ f: "engine/mangaka_engine/pipeline/script.py", l: 670, x: "Le LLM n'a pas pu répondre" }],
       piste: "Distinguer dans l'erreur délai, réponse invalide et panne, pour savoir quoi corriger.",
     },
     {

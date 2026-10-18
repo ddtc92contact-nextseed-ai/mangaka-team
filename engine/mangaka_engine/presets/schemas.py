@@ -2081,6 +2081,23 @@ class OneActionRule(_Strict):
     max_verbs: int = Field(default=2, ge=1, le=10)
 
 
+class BriefRules(_Strict):
+    """Brief d'image d'une case (prompts/script.yaml › brief_rules, pipeline/brief.py) : chaque champ a UN rôle.
+    Vérifié à la sortie du scénariste (relance, puis avertissement sur la case dans l'écran Scénario) :
+    personnage cité dans « setting » ou « staging » sans être dans « characters », vocabulaire de plan dans
+    « setting » (`shot_terms`), « setting » vide ou sans aucun mot de décor (`decor_terms`, plus les mots du lieu de
+    la case), page qui a plus de cases que d'emplacements dans son gabarit, lieu de la case contredit par sa
+    description. Termes comparés sans accents ni casse, en mots entiers ; un terme de décor couvre aussi son
+    pluriel (« rocher » → « rochers »)."""
+
+    shot_terms: list[str] = Field(default_factory=list, max_length=200)
+    decor_terms: list[str] = Field(default_factory=list, max_length=1000)
+    check_cast: bool = True  # personnage absent de « characters » cité dans setting / staging
+    check_setting: bool = True  # plan dans setting, setting vide ou sans décor
+    check_slots: bool = True  # cases de la page contre les emplacements du gabarit
+    check_location: bool = True  # lieu de la case contredit par sa description
+
+
 class PromptPreset(_Strict):
     """Gabarits `string.Template` ($variable) d'une étape LLM."""
 
@@ -2111,6 +2128,8 @@ class PromptPreset(_Strict):
     dialogue_rules: DialogueRules | None = None
     # Name scène par scène (prompts/script-scene.yaml) : contrôle « une action par case ».
     one_action: OneActionRule | None = None
+    # Brief d'image de chaque case du scénariste (prompts/script.yaml) : un rôle par champ, contrôlé.
+    brief_rules: BriefRules | None = None
 
     @field_validator("plans")
     @classmethod

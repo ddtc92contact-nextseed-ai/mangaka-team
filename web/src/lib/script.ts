@@ -1,5 +1,5 @@
 // Vocabulaire du découpage (mêmes valeurs que le moteur : pipeline/script.py).
-import type { BubbleKind, PageData, PageInput, PageKind, PanelInput, Rythme } from "./api";
+import type { BriefNote, BubbleKind, PageData, PageInput, PageKind, PanelInput, Rythme } from "./api";
 
 export const SHOT_TYPES = [
   "plan d'ensemble",
@@ -49,15 +49,17 @@ export interface DraftDialogue {
 export interface DraftPanel extends Omit<PanelInput, "characters" | "dialogues" | "decor" | "objets" | "setting" | "staging" | "location"> {
   key: string;
   charactersText: string;
-  /** Lieu et mise en scène (prompt image : « Lieu : … », « Mise en scène : … »). */
+  /** Décor de la case et mise en scène (prompt image : « Setting: … », « Staging: … »). */
   setting: string;
   staging: string;
   /** Noms sans fiche personnage, d'après le moteur (dernier enregistrement). */
   unmatched: string[];
+  /** Défauts du brief d'image, d'après le moteur (dernier enregistrement). */
+  briefNotes: BriefNote[];
   /** Bibliothèque de la série : décor (id) et objets (ids) de la case. */
   decor: number | null;
   objets: number[];
-  /** Lieu de la série (unité de lieu) ; `setting` en est la précision de cadrage. */
+  /** Lieu de la série (unité de lieu) ; `setting` décrit ce qu'on en voit dans la case. */
   location: number | null;
   dialogues: DraftDialogue[];
 }
@@ -70,6 +72,8 @@ export interface DraftPage {
   panels: DraftPanel[];
   /** Scène du chapitre (étape Scènes), gardée par le moteur tant que la page garde son id. */
   sceneId?: number | null;
+  /** Défauts du brief d'image de la page (emplacements du gabarit), d'après le moteur. */
+  briefNotes?: BriefNote[];
 }
 
 export function toDraft(pages: PageData[]): DraftPage[] {
@@ -79,6 +83,7 @@ export function toDraft(pages: PageData[]): DraftPage[] {
     kind: p.kind,
     rythme: p.rythme,
     sceneId: p.scene_id ?? null,
+    briefNotes: p.brief_notes ?? [],
     panels: p.panels.map((pa) => ({
       key: key(),
       id: pa.id,
@@ -86,6 +91,7 @@ export function toDraft(pages: PageData[]): DraftPage[] {
       setting: pa.setting ?? "",
       staging: pa.staging ?? "",
       unmatched: pa.unmatched_characters ?? [],
+      briefNotes: pa.brief_notes ?? [],
       charactersText: pa.characters.join(", "),
       decor: pa.decor ?? null,
       objets: pa.objets ?? [],
@@ -131,6 +137,7 @@ export const newPanel = (): DraftPanel => ({
   setting: "",
   staging: "",
   unmatched: [],
+  briefNotes: [],
   charactersText: "",
   decor: null,
   objets: [],

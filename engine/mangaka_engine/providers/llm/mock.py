@@ -57,7 +57,9 @@ renvoient une réponse invalide (variable MOCK_LLM_INVALID_ATTEMPTS, ou `[mock:i
 synopsis du chapitre ; `[mock:da-invalide:N]` pour la seule direction artistique ;
 `[mock:id-invalide:N]` : découpage bien formé qui cite un décor inexistant ;
 `[mock:dialogues-maigres:N]` : découpage valide mais aux dialogues maigres, comme le chapitre 3 « vulcano »
-— une réplique sur deux cases, cases de combat réduites à leur onomatopée, ni pensée ni narration).
+— une réplique sur deux cases, cases de combat réduites à leur onomatopée, ni pensée ni narration ;
+`[mock:brief-sale:N]` : brief d'image sale sur les premières cases, comme « Second round » — plan et personnage
+absent dans le décor, hors cadre qui agit dans la mise en scène, décor sans mot de décor, `dirty_brief`).
 `[mock:sans-etablissement:N]` : les N premiers essais de la direction artistique (relance ciblée comprise)
 n'installent pas les nouveaux lieux (pas de case d'établissement au changement de lieu).
 L'essai courant se déduit des messages : aucun état entre deux appels.
@@ -99,6 +101,7 @@ import colorsys
 import json
 import math
 import re
+import unicodedata
 from collections.abc import Callable
 from typing import Any
 
@@ -124,6 +127,7 @@ _SCENES_INVALID_MARK = re.compile(r"\[mock:scenes-invalide:(\d+)\]")
 _SCENE_PAGES_MARK = re.compile(r"\[mock:scenes-pages:(\d+)\]")
 _MULTI_ACTION_MARK = re.compile(r"\[mock:plusieurs-actions:(\d+)\]")
 _NO_CLOSE_UP_MARK = re.compile(r"\[mock:da-sans-gros-plan:(\d+)\]")
+_DIRTY_BRIEF_MARK = re.compile(r"\[mock:brief-sale:(\d+)\]")
 MULTI_ACTION = "Il dégaine puis tire et s'enfuit."
 _ANY_MARK = re.compile(r"\s*\[mock:[a-z-]+:\d+\]\s*")
 UNKNOWN_ID = 999_999  # id de décor cité par `[mock:id-invalide:N]` (absent de toute bibliothèque)
@@ -180,6 +184,7 @@ def _sentences(text: str) -> list[str]:
     text = _NO_ESTABLISHING_MARK.sub("", _SPARSE_MARK.sub("", text))
     text = _SCENE_PAGES_MARK.sub("", _SCENES_INVALID_MARK.sub("", text))
     text = _NO_CLOSE_UP_MARK.sub("", _MULTI_ACTION_MARK.sub("", text))
+    text = _DIRTY_BRIEF_MARK.sub("", text)
     parts = [p.strip() for p in re.split(r"(?<=[.!?…])\s+|\n+", text) if p.strip()]
     return parts or ["La scène s'installe."]
 
@@ -210,6 +215,22 @@ def _staging(who: str, other: str, i: int) -> str:
         f"{who} {_GESTURES[i % len(_GESTURES)]}, tourné vers {other} ; "
         f"{other} {_GESTURES[(i + 2) % len(_GESTURES)]}, lui répond d'un geste"
     )
+
+
+def _plain_words(text: str) -> set[str]:
+    decomposed = unicodedata.normalize("NFKD", text)
+    plain = "".join(ch for ch in decomposed if not unicodedata.combining(ch)).casefold()
+    return set(re.findall(r"\w+", plain))
+
+
+def _lieu_named(text: str, lieux: dict[str, int]) -> int | None:
+    """Lieu de la série que la phrase nomme en entier (« Aiko arrive au dojo » → « Le dojo ») : la case s'y passe."""
+    words = _plain_words(text)
+    for name, lieu_id in lieux.items():
+        keys = [w for w in _plain_words(name) if len(w) >= 4]
+        if keys and all(k in words or f"{k}s" in words for k in keys):
+            return lieu_id
+    return None
 
 
 def _short(text: str, limit: int = _MOCK_WORDS) -> str:
@@ -302,7 +323,8 @@ def mock_script(ctx: dict[str, Any], *, sparse: bool = False) -> dict[str, Any]:
                 {
                     "description": f"{text} ({who}{' et ' + other if other != who else ''}, page {p + offset + 1}, "
                     f"case {i + 1})",
-                    "lieu": known.get(_LIEUX[place].casefold(), _LIEUX[place]),
+                    # Le lieu que la phrase nomme, sinon celui de la série de pages (lieu cohérent avec la description).
+                    "lieu": _lieu_named(text, known) or known.get(_LIEUX[place].casefold(), _LIEUX[place]),
                     "setting": _SETTINGS[place],
                     "staging": _staging(cast[0], cast[-1], i),
                     "characters": cast,
@@ -322,6 +344,23 @@ def mock_script(ctx: dict[str, Any], *, sparse: bool = False) -> dict[str, Any]:
     recap = f" Suite du chapitre {previous[-1]['number']}." if previous else ""
     summary = f"Chapitre {chapter.get('number', '?')} — {' '.join(beats)[:400]}{recap}"
     return {"pages": pages, "summary": summary}
+
+
+def dirty_brief(out: dict[str, Any], names: list[str]) -> None:
+    """Défauts du brief d'image relevés par l'audit de « Second round » (18/10), sur les premières cases à
+    personnage : plan et personnage absent dans le décor (« Plan américain sur Tora, Haru en arrière-plan »), un
+    hors cadre qui agit dans la mise en scène, un décor sans aucun mot de décor."""
+    panels = [pa for page in out["pages"] for pa in page["panels"] if pa["characters"]]
+    for k, pa in enumerate(panels[:3]):
+        who = pa["characters"][0]
+        absent = next((n for n in names if n not in pa["characters"]), None)
+        if k == 0 and absent:
+            pa["setting"] = f"Plan américain sur {who}, {absent} en arrière-plan"
+        elif k == 1 and absent:
+            pa["offscreen"] = [absent]
+            pa["staging"] = f"{pa['staging']} ; {absent} le regarde, déglutissant"
+        else:
+            pa["setting"] = f"{who} concentré, la mèche collée sur le front"
 
 
 def _replies(panels: list[dict[str, Any]]) -> int:
@@ -956,6 +995,9 @@ class MockLLMProvider:
         mark = _MULTI_ACTION_MARK.search(synopsis)
         if mark and attempt <= int(mark.group(1)) and out["pages"]:
             out["pages"][0]["panels"][0]["description"] = MULTI_ACTION
+        mark = _DIRTY_BRIEF_MARK.search(synopsis)
+        if mark and attempt <= int(mark.group(1)):
+            dirty_brief(out, [c["name"] for c in ctx.get("characters") or [] if c.get("name")])
         return json.dumps(out, ensure_ascii=False)
 
     def _image_prompt_answer(self, messages: list[ChatMessage], ctx: dict[str, Any]) -> str:

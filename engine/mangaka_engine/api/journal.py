@@ -76,7 +76,13 @@ def log_out(session: Session, presets: PresetRegistry, row: GenerationLog) -> Ge
     measures = {k: getattr(row, k) for k in MEASURES}
     fields = {c: getattr(row, c) for c in GenerationLogOut.model_fields if hasattr(GenerationLog, c)}
     return GenerationLogOut(
-        **{**fields, "references": row.references or [], "loras": row.loras or [], "knowledge": row.knowledge or []},
+        **{
+            **fields,
+            "references": row.references or [],
+            "loras": row.loras or [],
+            "knowledge": row.knowledge or [],
+            "prompt_guard": row.prompt_guard or [],
+        },
         measures=measures,
         gaps=tonality_gaps(measures, presets.tonality),
         verdict=judged[-1].verdict if judged else None,  # type: ignore[arg-type]

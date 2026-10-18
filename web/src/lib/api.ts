@@ -264,13 +264,26 @@ export interface NameNote {
   message: string;
 }
 
+/**
+ * Défaut du brief d'image d'une case ou de sa page (moteur : pipeline/brief.py), resté après les relances du
+ * scénariste : un champ qui sort de son rôle (personnage absent cité, plan dans le décor, décor vide, lieu
+ * contredit par la description) ou une page qui a plus de cases que d'emplacements dans son gabarit.
+ */
+export interface BriefNote {
+  field: "setting" | "staging" | "lieu" | "page";
+  kind: "personnage absent" | "plan" | "sans décor" | "lieu" | "emplacements";
+  message: string;
+  names: string[];
+}
+
 export interface PanelData {
   id: number;
   index: number;
+  /** Un instant figé et dessinable. */
   description: string;
-  /** Lieu de la case (lieu, moment, éléments du décor) — « Lieu : … » du prompt image. */
+  /** Décor de la case : moment (heure, météo) et éléments visibles du lieu ; jamais de plan ni de personnage. */
   setting?: string;
-  /** Mise en scène (qui fait quoi, où dans le cadre) — « Mise en scène : … » du prompt image. */
+  /** Mise en scène : pose, geste, regard, expression et place dans l'image des seuls personnages présents. */
   staging?: string;
   /** Personnages présents à l'image (dessinés, avec leur image de référence). */
   characters: string[];
@@ -278,6 +291,8 @@ export interface PanelData {
   unmatched_characters?: string[];
   /** Noms ambigus, sans fiche ou cités sans être déclarés : signalés à l'auteur. */
   name_notes?: NameNote[];
+  /** Brief d'image : champs sortis de leur rôle, restés après les relances du scénariste. */
+  brief_notes?: BriefNote[];
   /** Cités par la case mais hors cadre : jamais dessinés ni pourvus d'image de référence. Absent à l'envoi = gardés. */
   offscreen_characters?: string[];
   viewpoint?: Viewpoint | null;
@@ -285,7 +300,7 @@ export interface PanelData {
   decor?: number | null;
   /** Objets de la bibliothèque de la série (ids). */
   objets?: number[];
-  /** Lieu de la série (unité de lieu) ; `setting` en est la précision de cadrage. */
+  /** Lieu de la série (unité de lieu) ; `setting` décrit ce qu'on en voit dans la case. */
   location?: number | null;
   location_name?: string | null;
   shot_type: string | null;
@@ -590,6 +605,8 @@ export interface PageData {
   panels: PanelData[];
   /** Scène du chapitre (étape Scènes) ; null : page bonus, ou chapitre écrit sans scènes. */
   scene_id?: number | null;
+  /** Brief d'image de la page : plus de cases que d'emplacements dans son gabarit. */
+  brief_notes?: BriefNote[];
 }
 
 export type NameState = "validated" | "stale" | "pending";

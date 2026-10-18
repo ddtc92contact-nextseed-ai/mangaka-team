@@ -331,6 +331,18 @@ class CardRef(BaseModel):
     name: str
 
 
+class BriefNoteOut(BaseModel):
+    """Défaut du brief d'image d'une case ou de sa page (pipeline/brief.py), resté après les relances du scénariste."""
+
+    field: Literal["setting", "staging", "lieu", "page"]
+    # personnage absent : nommé dans setting / staging sans être dans characters ; plan : vocabulaire de cadrage
+    # dans setting ; sans décor : setting vide ou sans mot de décor ; lieu : la description nomme un autre lieu ;
+    # emplacements : la page a plus de cases que son gabarit.
+    kind: Literal["personnage absent", "plan", "sans décor", "lieu", "emplacements"]
+    message: str
+    names: list[str] = Field(default_factory=list)
+
+
 class NameNoteOut(BaseModel):
     """Nom de personnage lu dans une case qui demande l'avis de l'auteur (pipeline/names.py)."""
 
@@ -444,20 +456,22 @@ class PanelOut(BaseModel):
     id: int
     index: int
     description: str
-    setting: str = ""  # précision de cadrage du lieu : moment, coin du lieu, éléments du décor
-    staging: str = ""  # mise en scène : qui fait quoi, où dans le cadre
+    setting: str = ""  # décor de la case : moment (heure, météo) et éléments visibles du lieu
+    staging: str = ""  # mise en scène : pose, geste, regard, place dans l'image des personnages présents
     characters: list[str]  # présents à l'image (dessinés, avec leur image de référence)
     # Noms de `characters` qui ne désignent aucune fiche personnage (ni nom, ni alias, ni nom partiel) :
     # sans référence, sans description ni LoRA pour la génération — à rattacher à une fiche.
     unmatched_characters: list[str] = Field(default_factory=list)
     # Noms ambigus, sans fiche ou cités sans être déclarés : à signaler à l'auteur (jamais perdus en silence).
     name_notes: list[NameNoteOut] = Field(default_factory=list)
+    # Brief d'image : défauts des champs (un rôle par champ) restés après les relances du scénariste.
+    brief_notes: list[BriefNoteOut] = Field(default_factory=list)
     # Cités par la case mais hors cadre : jamais dessinés ni pourvus d'image de référence.
     offscreen_characters: list[str] = Field(default_factory=list)
     viewpoint: ViewpointOut | None = None
     decor: int | None = None  # décor de la bibliothèque (id)
     objets: list[int] = Field(default_factory=list)  # objets de la bibliothèque (ids)
-    location: int | None = None  # lieu de la série (id) ; `setting` en est la précision de cadrage
+    location: int | None = None  # lieu de la série (id) ; `setting` décrit ce qu'on en voit dans la case
     location_name: str | None = None
     shot_type: str | None
     importance: int
@@ -540,6 +554,8 @@ class PageOut(BaseModel):
     panels: list[PanelOut]
     # Scène du chapitre (étape Scènes) ; None : page bonus, ou chapitre écrit sans scènes.
     scene_id: int | None = None
+    # Brief d'image de la page : plus de cases que d'emplacements dans son gabarit.
+    brief_notes: list[BriefNoteOut] = Field(default_factory=list)
 
 
 class PageLayoutIn(_In):
@@ -1978,6 +1994,8 @@ class GenerationLogOut(BaseModel):
     references: list[dict[str, Any]] = Field(default_factory=list)
     loras: list[dict[str, Any]] = Field(default_factory=list)
     knowledge: list[dict[str, Any]] = Field(default_factory=list)
+    # Garde-fou du prompt : noms de personnages absents de la case retirés du prompt envoyé [{name, removed}].
+    prompt_guard: list[dict[str, Any]] = Field(default_factory=list)
     framing: str | None = None
     angle: str | None = None
     mood: str | None = None

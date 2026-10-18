@@ -15,7 +15,11 @@
    planche, dialogue compté par planche ; enfreintes → même relance, puis le découpage est gardé avec des
    avertissements (écran Scénario). La charte arrive en clair dans le prompt (`$pre_direction`) ;
    Lieu de chaque case (`lieu`) : un lieu de la série par son id, ou un nouveau lieu par son nom (créé à
-   l'enregistrement, `pipeline/locations.py`) ; `setting` n'est plus que la précision de cadrage ;
+   l'enregistrement, `pipeline/locations.py`) ; `setting` est le décor de la case (moment, éléments visibles) ;
+   brief d'image de chaque case (`brief_rules` du preset, `pipeline/brief.py`) : personnage absent de « characters »
+   cité dans setting / staging, plan dans setting, setting sans décor, lieu contredit par la description, page qui
+   a plus de cases que d'emplacements dans son gabarit (mise en page à blanc) → même relance, puis avertissement
+   (et signalement sur la case dans l'écran Scénario, `brief_notes` de l'API) ;
 4. personnages de chaque case : « characters » = présents à l'image, « offscreen » = cités mais hors cadre ;
    un présent que la description ne cite pas passe hors cadre (`framing.settle_cast`) ;
 5. enregistrement en Pages + Panels + Bubbles (remplace les pages « story » du chapitre) et
@@ -55,6 +59,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..presets import PresetError, PresetRegistry, PromptPreset
+from ..presets.schemas import BriefRules
 from ..providers.llm import ChatMessage, LLMError, LLMProvider
 from ..store.db import Database
 from ..store.models import (
@@ -69,6 +74,7 @@ from ..store.models import (
     Panel,
 )
 from ..validation import format_errors
+from .brief import layout_slots, panel_notes, slot_note
 from .dialogues import DialoguePanel, Reply, check_dialogues, dialogue_text, room_problems
 from .framing import aliases_from, settle_cast, split_cast
 from .knowledge import AgentKnowledge, KnowledgeBase
@@ -539,6 +545,71 @@ def script_panels(output: ScriptOutput) -> list[DialoguePanel]:
     ]
 
 
+# --- brief d'image ------------------------------------------------------------------
+def script_matcher(ctx: ScriptContext) -> CharacterMatcher:
+    """Fiches personnages du contexte (nom et alias), pour lire les noms des champs du découpage."""
+    cards = [
+        Character(id=i, name=str(c["name"]), aliases=list(c.get("aliases") or []))
+        for i, c in enumerate(ctx.characters, start=1)
+        if c.get("name")
+    ]
+    return CharacterMatcher(cards)
+
+
+def brief_problems(output: ScriptOutput, ctx: ScriptContext, rules: BriefRules | None) -> list[str]:
+    """Défauts du brief d'image de chaque case de la réponse (pipeline/brief.py), lisibles pour la relance."""
+    if rules is None:
+        return []
+    matcher = script_matcher(ctx)
+
+    def lieu_name(lieu: int | str | None) -> str | None:
+        return ctx.library.location_name(lieu) if isinstance(lieu, int) else lieu
+
+    lieux = list(
+        dict.fromkeys(
+            [str(e["name"]) for e in ctx.library.lieux]
+            + [pa.lieu for page in output.pages for pa in page.panels if isinstance(pa.lieu, str) and pa.lieu]
+        )
+    )
+    return [
+        f"page {p} › case {c} › {note.message}"
+        for p, page in enumerate(output.pages, start=1)
+        for c, pa in enumerate(page.panels, start=1)
+        for note in panel_notes(
+            rules,
+            matcher,
+            description=pa.description,
+            setting=pa.setting,
+            staging=pa.staging,
+            characters=pa.characters,
+            lieu=lieu_name(pa.lieu),
+            lieux=lieux,
+        )
+    ]
+
+
+# Problème d'emplacements renvoyé par le contrôle de mise en page à blanc (`check`) : rangé avec le brief d'image.
+SLOTS_MARK = "› gabarit ›"
+
+
+def slot_problems(presets: PresetRegistry, pages: Sequence[Page], rules: BriefRules | None) -> list[str]:
+    """Pages mises en page (à blanc) qui ont plus de cases que d'emplacements dans leur gabarit, numérotées comme
+    dans la réponse du scénariste (1 = première page de `pages`)."""
+    if rules is None or not rules.check_slots:
+        return []
+    out = []
+    for n, page in enumerate(pages, start=1):
+        slots = layout_slots(page.layout)
+        if slots is None:
+            continue
+        template_id = str((page.layout or {}).get("template_id") or "")
+        template = presets.layout_templates.get(template_id)
+        note = slot_note(len(page.panels), slots, template.name if template else template_id)
+        if note is not None:
+            out.append(f"page {n} {SLOTS_MARK} {note.message}")
+    return out
+
+
 # --- appel du LLM avec relances -------------------------------------------------
 Progress = Callable[[int, str], None]
 # Contrôle supplémentaire d'une réponse valide (place réelle des bulles) : problèmes lisibles, [] si rien.
@@ -612,14 +683,18 @@ def run_script(
                 scene_pages = scene_page_problems([p.scene for p in output.pages], ctx.scenes)
                 profile, actions = [], []
             problems = check_dialogues(script_panels(output), scene_rules(prompt, ctx))
+            brief = brief_problems(output, ctx, prompt.brief_rules)
             if check is not None:
-                problems += check(output)
-            if problems or counts or scene_pages or profile or actions:
+                # Place réelle des bulles et emplacements des gabarits (mise en page à blanc).
+                extra = check(output)
+                brief += [p for p in extra if SLOTS_MARK in p]
+                problems += [p for p in extra if SLOTS_MARK not in p]
+            if problems or counts or scene_pages or profile or actions or brief:
                 fallback = ScriptRun(
                     output=output,
                     attempts=attempt,
                     messages=messages,
-                    warnings=scene_pages + counts + profile + actions + problems,
+                    warnings=scene_pages + counts + profile + actions + brief + problems,
                 )
                 where = "de la scène" if ctx.focus is not None else "de la série"
                 parts = []
@@ -631,6 +706,8 @@ def run_script(
                     parts.append("profil de la scène à respecter : " + " ; ".join(profile[:8]))
                 if actions:
                     parts.append(" ; ".join(actions[:8]))
+                if brief:
+                    parts.append("brief d'image à revoir (un rôle par champ) : " + " ; ".join(brief[:12]))
                 if problems:
                     parts.append("dialogues à revoir : " + " ; ".join(problems[:12]))
                 raise ScriptValidationError(" ; ".join(parts))
@@ -858,8 +935,11 @@ def script_job(
         rules = prompt.dialogue_rules
 
         def room(output: ScriptOutput) -> list[str]:
-            """Place réelle : découpage enregistré et mis en page à blanc (annulé), bulles lettrées."""
-            if rules is None or not rules.check_room:
+            """Place réelle : découpage enregistré et mis en page à blanc (annulé), bulles lettrées ; et cases de
+            chaque page contre les emplacements de son gabarit."""
+            room_on = rules is not None and rules.check_room
+            slots_on = prompt.brief_rules is not None and prompt.brief_rules.check_slots
+            if not room_on and not slots_on:
                 return []
             with db.session_scope() as session:
                 chapter = session.get(Chapter, chapter_id)
@@ -868,7 +948,8 @@ def script_job(
                 try:
                     pages = save_script(session, chapter, output, ctx.scenes)
                     layout_pages(presets, pages)
-                    return room_problems(presets, pages, rules=rules)
+                    found = room_problems(presets, pages, rules=rules) if room_on else []
+                    return found + slot_problems(presets, pages, prompt.brief_rules)
                 except LayoutError:
                     return []  # l'erreur de mise en page sera signalée à l'enregistrement
                 finally:
@@ -889,7 +970,7 @@ def script_job(
         tries = f" en {run.attempts} essais" if run.attempts > 1 else ""
         if run.warnings:
             n = len(run.warnings)
-            tries += f", avec {n} avertissement{'s' if n > 1 else ''} de dialogues"
+            tries += f", avec {n} avertissement{'s' if n > 1 else ''} de dialogues ou de brief d'image"
         return f"{len(pages)} pages, {n_panels} cases{tries}"
 
     return run
@@ -957,8 +1038,11 @@ def _run_scenes(
             )
 
         def room(output: ScriptOutput, frame: SceneFrame = frame) -> list[str]:
-            """Place réelle : la scène enregistrée et mise en page à blanc (annulé), bulles lettrées."""
-            if rules is None or not rules.check_room:
+            """Place réelle : la scène enregistrée et mise en page à blanc (annulé), bulles lettrées ; et cases de
+            chaque page contre les emplacements de son gabarit."""
+            room_on = rules is not None and rules.check_room
+            slots_on = prompt.brief_rules is not None and prompt.brief_rules.check_slots
+            if not room_on and not slots_on:
                 return []
             with db.session_scope() as session:
                 chapter = session.get(Chapter, chapter_id)
@@ -967,7 +1051,8 @@ def _run_scenes(
                 try:
                     pages = save_scene(session, chapter, frame, output)
                     layout_pages(presets, pages)
-                    return room_problems(presets, pages)
+                    found = room_problems(presets, pages) if room_on else []
+                    return found + slot_problems(presets, pages, prompt.brief_rules)
                 except LayoutError:
                     return []
                 finally:
@@ -1009,5 +1094,8 @@ def _run_scenes(
     tries = f" en {attempts} essais" if attempts > 1 else ""
     if warnings:
         n = len(warnings)
-        tries += f", avec {n} avertissement{'s' if n > 1 else ''} (profil des scènes, dialogues, une action par case)"
+        tries += (
+            f", avec {n} avertissement{'s' if n > 1 else ''} (profil des scènes, dialogues, une action par case, "
+            "brief d'image)"
+        )
     return f"{where}{len(pages)} pages, {n_panels} cases{scenes}{tries}"

@@ -45,8 +45,8 @@ system: |
   ses dialogues et l'intention de chaque case, d'un seul tenant, comme un mangaka qui prépare sa planche
   brouillon. Le chapitre a été découpé en scènes et validé par l'éditeur : tu n'écris QUE la scène demandée,
   dans son nombre de pages exact, en restant cohérent avec les scènes déjà écrites.
-  La composition des images (cadrage précis, angle, place des personnages dans l'image) revient au directeur
-  artistique, à l'étape suivante : tu donnes l'intention (moment fort, détail, visage, décor), il cadre.
+  Le cadrage de chaque image (le plan, l'angle de la caméra) revient au directeur artistique, à l'étape
+  suivante : tu donnes l'intention (moment fort, détail, visage, décor), il cadre.
 
   Règles de la name (méthode des mangakas, à appliquer sans les citer) :
   - UNE CASE = UN MOMENT, UNE SEULE ACTION. Une case qui contient plusieurs actions (« il dégaine puis tire et
@@ -116,9 +116,20 @@ user: |
 
   Contraintes :
   - exactement $scene_pages pages, chacune avec « scene » = $scene_number ;
-  - « description » : UN moment, UNE action (voir les règles de la name) ; « setting » : moment, coin du lieu et
-    éléments visibles du décor ; « staging » : ce que fait chaque personnage présent (geste, posture, regard),
-    sans dire où il se trouve dans l'image ;
+  - chaque champ d'une case a UN rôle (ils partent tels quels vers le dessinateur, qui dessine tout ce qui y est
+    écrit) :
+    · « description » : UN instant figé et dessinable, UNE action (voir les règles de la name) — jamais une action
+      qui dure ni un point de vue sans dire ce qu'on voit : « Haru double Ren » → « Haru court un pas devant Ren,
+      tourne la tête vers lui avec une grimace moqueuse » ; « Kurogane observe la course au loin » → « Kurogane
+      accoudé au bastingage, un sourire ironique, les coureurs minuscules sur la plage derrière lui » ; « Les trois
+      garçons se dispersent pour encercler le gorille » → « Haru, Ren et Tora en triangle autour du gorille,
+      genoux fléchis, prêts à bondir » ;
+    · « setting » (décor de la case) : le moment (heure, météo, lumière) et les éléments visibles du lieu ; jamais
+      de plan ni de cadrage (aucun mot de caméra, ni « hors cadre »), jamais de nom de personnage ;
+    · « staging » (mise en scène) : pose, geste, regard, expression et place dans l'image (gauche, droite, premier
+      plan, arrière-plan) des SEULS personnages de « characters » ; il ajoute à la description, il ne la
+      reformule pas ;
+    · le plan et l'angle : jamais, ils viennent du directeur artistique ;
   - « kind » d'un dialogue vaut exactement l'une de ces valeurs : $bubble_kinds (narration = encadré de
     narration, off = voix hors champ) ; « dialogues » ne contient jamais d'onomatopée (elles vont dans « sfx ») ;
   - « importance » vaut 1 (case de transition), 2 (case normale) ou 3 (le moment important, grande case) ;
@@ -129,7 +140,8 @@ user: |
     un personnage « offscreen » n'agit pas à l'image : si la description ou le « staging » décrit ce qu'il fait
     (geste, coup, posture), il est dans « characters » ;
   - « lieu » : l'id (nombre) d'un lieu de la série ci-dessus, ou le nom court d'un lieu nouveau ; toutes les cases
-    d'un même endroit portent le même lieu ;
+    d'un même endroit portent le même lieu ; une case peut avoir un lieu différent de sa scène (le pont du bateau
+    n'est pas la plage) : le lieu de la case est celui où se passe sa description ;
   - « decor » : id d'un décor de la liste ou null ; « objets » : ids des objets visibles ([] sinon), jamais inventés ;
   - « summary » : ce qui se passe dans CETTE scène, en 1 à 3 phrases (il sert de mémoire pour les scènes suivantes).
 

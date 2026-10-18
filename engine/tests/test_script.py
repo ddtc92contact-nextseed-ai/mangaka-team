@@ -30,6 +30,7 @@ VALID = {
             "panels": [
                 {
                     "description": "Kyoto sous la pluie, vue des toits.",
+                    "setting": "toits de Kyoto, nuit, pluie battante",
                     "characters": [],
                     "shot_type": "plan large",
                     "importance": 3,
@@ -37,13 +38,18 @@ VALID = {
                 },
                 {
                     "description": "Aiko dégaine.",
+                    "setting": "ruelle pavée, pluie, lanternes éteintes",
                     "characters": ["Aiko", "Aiko"],
                     "shot_type": "Contre plongée",
                     "dialogues": [{"speaker": "Aiko", "text": "Recule !", "kind": "SHOUT"}],
                     "camera": "ignoré",
                 },
                 # Case muette (dialogue compté par planche : une case sans réplique).
-                {"description": "Les toits ruissellent, la ruelle est vide.", "characters": []},
+                {
+                    "description": "Les toits ruissellent, la ruelle est vide.",
+                    "setting": "ruelle vide, toits ruisselants, nuit",
+                    "characters": [],
+                },
             ]
         }
     ],
@@ -131,14 +137,13 @@ def test_mock_script_is_valid() -> None:
 
 # --- prompt et contexte ---------------------------------------------------------------
 def test_the_scenarist_no_longer_frames_the_panels() -> None:
-    """Étape 1 : l'histoire, l'intention, ce que fait chaque personnage — ni plan, ni place dans le cadre."""
+    """Étape 1 : l'histoire, l'intention, ce que fait chaque personnage — jamais de plan (#227 : la place des
+    personnages dans l'image appartient désormais à la mise en scène, seul le cadrage revient à la DA)."""
     system, user = render_messages(PROMPT, _ctx())
     text = (system.content + "\n" + user.content).replace(DIRECTION_LABELS["rtl"], "")
     assert "shot_type" not in text and '"shot_types"' not in text
     for shot in SHOT_TYPES:
         assert shot not in text.lower(), shot
-    for placement in ("gauche", "droite", "premier plan", "arrière-plan"):
-        assert placement not in text, placement
     raw = (PRESETS_DIR / "prompts" / "script.yaml").read_text(encoding="utf-8")
     assert "Kaï au premier plan" not in raw and "à gauche" not in raw and "à droite" not in raw
     # Le simulateur suit la même consigne : ni plan, ni gauche / droite dans la mise en scène.

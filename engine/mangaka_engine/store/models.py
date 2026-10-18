@@ -601,9 +601,9 @@ class Panel(TimestampMixin, Base):
         ForeignKey("series_locations.id", ondelete="SET NULL"), default=None, index=True
     )
     shot_type: Mapped[str | None] = mapped_column(String(50), default=None)
-    # Donnés par le scénario : lieu (lieu, moment, éléments du décor — depuis l'unité de lieu, une précision de
-    # cadrage du lieu `location_id`) et mise en scène (qui fait quoi, où dans le cadre, interactions) ; vides
-    # pour les cases d'avant (le prompt les omet alors).
+    # Donnés par le scénario (pipeline/brief.py, un rôle par champ) : décor de la case (moment et éléments visibles
+    # du lieu `location_id`, jamais de plan ni de personnage) et mise en scène (pose, geste, regard, place dans
+    # l'image des seuls présents) ; vides pour les cases d'avant (le prompt les omet alors).
     setting: Mapped[str] = mapped_column(Text, default="", server_default="")
     staging: Mapped[str] = mapped_column(Text, default="", server_default="")
     dialogues: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)  # inutilisé : voir Bubble
@@ -1041,6 +1041,9 @@ class GenerationLog(Base):
     loras: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)  # [{name, weight, source}]
     # Savoir-faire reçu : [{document_id, title, collection, tokens}].
     knowledge: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    # Garde-fou du prompt (#227) : noms de personnages absents de la case retirés du prompt envoyé
+    # [{name, removed}] (pipeline/brief.py `strip_absent`) ; vide : rien retiré.
+    prompt_guard: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list, server_default="[]")
     framing: Mapped[str | None] = mapped_column(String(100), default=None)  # plan
     angle: Mapped[str | None] = mapped_column(String(100), default=None)
     mood: Mapped[str | None] = mapped_column(String(200), default=None)  # ambiance

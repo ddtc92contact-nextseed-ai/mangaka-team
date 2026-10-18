@@ -765,6 +765,19 @@ densité, la brièveté, les répliques visées et la case d'action parlée, ré
 `dialogue_rules`, aucune règle. Mode mock : `[mock:dialogues-maigres:N]` dans le synopsis rend les N
 premiers découpages maigres (comme le chapitre 3).
 
+**Brief d'image de chaque case (`brief_rules` de `script.yaml`, `pipeline/brief.py`).** Audit du chapitre 15
+« Second round » d'OSU (18/10) : 62 cases sur 82 mettaient un plan ou des personnages dans `setting`, 28 citaient
+un personnage absent de la case. Chaque champ a UN rôle, écrit de la même façon dans le prompt, l'aide de l'UI et
+l'écran Scénario : `setting` (« Décor de la case ») = moment et éléments visibles du lieu, jamais de plan ni de nom ;
+`staging` (« Mise en scène ») = pose, geste, regard, place dans l'image des seuls présents ; `description` = un
+instant figé ; le plan et l'angle viennent de la direction artistique. Contrôlé sur chaque réponse : nom de fiche
+(ou alias) dans setting / staging absent de `characters`, vocabulaire de plan dans setting (`shot_terms`), setting
+vide ou sans mot de décor (`decor_terms`, plus les mots du lieu de la case), page qui a plus de cases que
+d'emplacements dans son gabarit (mise en page à blanc), description qui nomme un autre lieu que celui de la case.
+Un défaut relance le scénariste ; après les relances, il est signalé sur la case (`brief_notes` de l'API, écran
+Scénario). À la génération, un garde-fou retire du prompt envoyé à ComfyUI tout nom de personnage absent de la case
+(noté au journal, `prompt_guard`). Mode mock : `[mock:brief-sale:N]` dans le synopsis.
+
 La zone de bulles de `layout.yaml` a, en plus de sa fraction de case, un plancher absolu : `bubble_mm2`
 par bulle et `char_mm2` par caractère (taille réelle du lettrage, toujours bornée à `max_fraction`) —
 sans lui, deux répliques courtes débordaient déjà d'une case d'une planche à 6 cases. `max_fraction` vaut

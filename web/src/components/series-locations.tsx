@@ -322,7 +322,7 @@ function Regroup({
       <p className="mb-3 text-sm text-zinc-400">
         Avant l&apos;unité de lieu, le lieu n&apos;était qu&apos;un texte libre recopié sur chaque case (« clairière »,
         « clairière au centre de l&apos;île »…). L&apos;IA range ces variantes en lieux ; relis, corrige, puis valide.
-        Rien n&apos;est perdu : le texte de chaque case reste comme précision de cadrage.
+        Rien n&apos;est perdu : le texte de chaque case reste comme décor de la case.
       </p>
       {error && <Alert>{error}</Alert>}
       {proposal && proposal.variants.length > 0 && (
