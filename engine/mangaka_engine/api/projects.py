@@ -9,7 +9,13 @@ from sqlalchemy.orm import Session
 from ..agents.profiles import ProfileInvalid
 from ..pipeline.camera import identity_problem
 from ..pipeline.comfy_check import control_types
-from ..pipeline.generation import ACTIVE, ai_prompt_default, drop_written_prompts
+from ..pipeline.generation import (
+    ACTIVE,
+    ai_prompt_default,
+    drop_written_prompts,
+    image_prompt_mode,
+    reset_series_prompts,
+)
 from ..pipeline.generation import STEP as GENERATION_STEP
 from ..pipeline.layout import LayoutError
 from ..pipeline.pages import change_reading_direction, layout_page
@@ -77,6 +83,7 @@ def project_out(
         upscaler=project.upscaler,
         cfg=project.cfg,
         ai_prompt=project.ai_prompt,
+        image_prompt_mode=image_prompt_mode(presets, project),  # type: ignore[arg-type]
         anime_consistency=project.anime_consistency,
         anime_consistency_problem=identity_problem(
             presets.camera_loras, presets.workflows.get(project.workflow_preset)
@@ -264,6 +271,8 @@ def create_project(
         cfg=body.cfg,
         # Prompt rédigé par l'IA : réglage global de l'écran « L'équipe » (dessinateur), oui par défaut.
         ai_prompt=body.ai_prompt if body.ai_prompt is not None else ai_prompt_default(ctx.agents.presets_for(None)),
+        # « Prompt image » : None = celui de defaults.yaml (suivi s'il change).
+        image_prompt_mode=body.image_prompt_mode,
         anime_consistency=body.anime_consistency,
     )
     fonts = {
@@ -344,10 +353,14 @@ def update_project(
     if "style_lora_name" in changes:
         changes["style_lora_name"] = changes["style_lora_name"] or None
     ai_off = changes.get("ai_prompt") is False and project.ai_prompt
+    mode_before = image_prompt_mode(ctx.agents.presets_for(project.id), project)
     for key, value in changes.items():
         setattr(project, key, value)
     renamed = rename_series(ctx, session, project) if "title" in changes else None
-    if ai_off:
+    if image_prompt_mode(ctx.agents.presets_for(project.id), project) != mode_before:
+        # Autre mode de prompt image : chaque prompt automatique repart dans le nouveau mode.
+        reset_series_prompts(ctx.agents.presets_for(project.id), session, project.id)
+    elif ai_off:
         drop_written_prompts(ctx.agents.presets_for(project.id), session, project.id)
     if direction is not None:
         # Après les autres champs : un changement de format en même temps fait tout recalculer.

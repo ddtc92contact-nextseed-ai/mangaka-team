@@ -30,6 +30,10 @@ layout_style: dynamique
 sketch_enabled: true
 # Workflow des croquis (son `with_references` sert aux cases avec références).
 workflow_sketch: qwen-image-croquis
+# Prompt image des nouvelles séries et des séries sans choix (fiche série, « Prompt image ») : détaillé (fragments
+# ou paragraphe du rédacteur, prompts/redacteur-image.yaml) ou gabarit (prompt court assemblé par le moteur,
+# `template` d'image_prompt.yaml, #228). Chaque série peut choisir le sien.
+image_prompt_mode: détaillé
 # Finition d'impression : agrandisseur de la version retenue avant l'assemblage (presets/upscalers/).
 # Chaque série peut choisir le sien (fiche série).
 upscaler: realesrgan-x4plus-anime-6b
