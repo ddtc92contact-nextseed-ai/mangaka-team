@@ -68,6 +68,11 @@ FILE_MODELS: dict[str, type[BaseModel]] = {
 }
 WORKFLOWS = "workflows/*.yaml"
 LAYOUTS = "layouts/*.yaml"
+STALE_LABELS = {
+    "workflows": "workflow « {} » retiré",
+    "fonts": "police « {} » retirée",
+    "page_formats": "format « {} » retiré",
+}
 
 
 class Knowledge(BaseModel):
@@ -422,6 +427,28 @@ class AgentService:
             return {k: f.name for k, f in self.base.page_formats.items()}
         return dict(setting.choice_labels)
 
+    def stale_choices(self, agent: AgentPreset, values: dict[str, Any]) -> dict[str, str]:
+        """Choix enregistrés qui n'existent plus (preset retiré, ex. FLUX 3 Klein) : réglage → avertissement.
+
+        Ces valeurs sont ignorées partout (fiche, enregistrement, exécution) : le réglage reprend sa valeur héritée.
+        """
+        out: dict[str, str] = {}
+        for key, value in values.items():
+            setting = agent.setting(key)
+            if setting is None or setting.type != "choice" or value is None:
+                continue
+            if isinstance(value, str) and value in self.choices(setting):
+                continue
+            what = STALE_LABELS.get(setting.choices_from or "", "choix « {} » retiré")
+            out[key] = f"{what.format(value)}, valeur d'origine reprise"
+        return out
+
+    def _clean(self, agent: AgentPreset | None, values: dict[str, Any]) -> dict[str, Any]:
+        if agent is None:
+            return dict(values)
+        stale = self.stale_choices(agent, values)
+        return {k: v for k, v in values.items() if k not in stale}
+
     def secrets(self, agent: AgentPreset) -> list[dict[str, Any]]:
         """« clé présente / absente » : jamais la valeur."""
         out = []
@@ -470,9 +497,21 @@ class AgentService:
         q = q.where(AgentProfile.project_id.is_(None) if project_id is None else AgentProfile.project_id == project_id)
         return session.scalars(q).first()
 
-    def stored(self, session: Session, agent_id: str, project_id: int | None) -> dict[str, Any]:
+    def raw_stored(self, session: Session, agent_id: str, project_id: int | None) -> dict[str, Any]:
+        """Valeurs enregistrées telles quelles, choix retirés compris (cf. `stale_choices`)."""
         profile = self._profile(session, agent_id, project_id)
         return dict(profile.values or {}) if profile else {}
+
+    def stored(self, session: Session, agent_id: str, project_id: int | None) -> dict[str, Any]:
+        """Valeurs enregistrées, sans les choix retirés des presets."""
+        return self._clean(self.agent(agent_id), self.raw_stored(session, agent_id, project_id))
+
+    def warnings(self, session: Session, agent: AgentPreset, project_id: int | None) -> dict[str, str]:
+        """Choix retirés des profils de la portée (global, puis série) : réglage → avertissement."""
+        out = self.stale_choices(agent, self.raw_stored(session, agent.id, None))
+        if project_id is not None:
+            out |= self.stale_choices(agent, self.raw_stored(session, agent.id, project_id))
+        return out
 
     def _layers(self, session: Session, project_id: int | None) -> dict[str, dict[str, dict[str, Any]]]:
         """agent → {"global": valeurs, "series": valeurs} pour une portée."""
@@ -483,7 +522,8 @@ class AgentService:
             )
         out: dict[str, dict[str, dict[str, Any]]] = {}
         for p in session.scalars(q):
-            out.setdefault(p.agent_id, {})["global" if p.project_id is None else "series"] = dict(p.values or {})
+            values = self._clean(self.agent(p.agent_id), dict(p.values or {}))
+            out.setdefault(p.agent_id, {})["global" if p.project_id is None else "series"] = values
         return out
 
     # --- résolution ----------------------------------------------------------------------------
@@ -620,6 +660,9 @@ class AgentService:
             revision = self._revision
         with self.db.session_scope() as session:
             layers = self._layers(session, project_id)
+            for agent in self.agents():
+                for key, warning in self.warnings(session, agent, project_id).items():
+                    log.warning("profil de l'agent %s, réglage %s ignoré : %s", agent.id, key, warning)
         per_agent: dict[str, list[tuple[AgentSetting, Any]]] = {}
         for agent in self.agents():
             items = self._overrides(agent, self.merged_values(layers, agent))
@@ -768,6 +811,7 @@ class AgentService:
         before = dict(profile.values or {}) if profile else {}
         if before == values:
             return None
+        before = self._clean(agent, before)  # diff : le choix retiré n'était déjà plus appliqué
         g = self.stored(session, agent.id, None)
         if project_id is None:
             old, old_k = self.resolve(agent, before, None)
@@ -827,7 +871,7 @@ class AgentService:
         target = next((v for v in (profile.versions if profile else []) if v.version == number), None)
         if target is None:
             raise LookupError(f"version {number} introuvable")
-        values = dict(target.values or {})
+        values = self._clean(agent, dict(target.values or {}))
         errors = self._check_presets(session, agent, project_id, values)
         if errors:
             raise ProfileInvalid(errors)

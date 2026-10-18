@@ -438,3 +438,91 @@ def test_knowledge_profile_drives_the_rag_per_series(c: TestClient) -> None:
     _save(c, "scenariste", {}, knowledge=knowledge)
     script = next(a for a in c.get("/knowledge/status").json()["agents"] if a["role"] == "script")
     assert (script["source"], script["collections"], script["top_k"]) == ("profile", ["gags MAISON"], 3)
+
+
+# --- choix retiré des presets (#233) ------------------------------------------------------------
+FLUX_PROFILE = {
+    "workflow": "flux3-klein-qualite",
+    "workflow_with_references": "flux3-klein-edit-ref-qualite",
+    "provider": "deepseek",
+    "model": "deepseek-v4-pro",  # ≠ modèle livré (deepseek-flash) : prouve que le profil s'applique
+    "steps": 31,
+}
+
+
+def _stored_profile(c: TestClient, agent: str, values: dict[str, Any], project_id: int | None = None) -> None:
+    """Profil enregistré tel qu'une ancienne version du moteur l'a laissé (sans passer par la validation)."""
+    from mangaka_engine.store.models import AgentProfile, AgentProfileVersion
+
+    with _ctx(c).db.session_scope() as session:
+        profile = AgentProfile(agent_id=agent, project_id=project_id, values=dict(values), version=1)
+        session.add(profile)
+        session.flush()
+        session.add(
+            AgentProfileVersion(
+                profile_id=profile.id, version=1, values=dict(values), diff=[], author="t", action="save"
+            )
+        )
+        session.commit()
+    _ctx(c).agents.invalidate()
+
+
+def test_retired_workflow_in_a_profile_falls_back_without_blocking_the_sheet(c: TestClient) -> None:
+    _stored_profile(c, "dessinateur", FLUX_PROFILE)
+    service = _ctx(c).agents
+    defaults = _ctx(c).presets.defaults
+    d = c.get("/agents/dessinateur").json()
+    wf, ref = _setting(d, "workflow"), _setting(d, "workflow_with_references")
+    assert wf["value"] == defaults.workflow and wf["origin"] == "preset"
+    assert ref["value"] == defaults.workflow_with_references and ref["origin"] == "preset"
+    assert wf["warning"] == "workflow « flux3-klein-qualite » retiré, valeur d'origine reprise"
+    assert "flux3-klein-edit-ref-qualite" in ref["warning"]
+    assert len(d["warnings"]) == 2 and d["problem"] is None
+    assert _setting(d, "model")["value"] == "deepseek-v4-pro" and _setting(d, "steps")["value"] == 31
+
+    # À l'exécution, seul le réglage retiré est ignoré : le reste du profil s'applique.
+    assert "dessinateur" not in service.problems_for(None)
+    presets = service.presets_for(None)
+    assert presets.defaults.workflow == defaults.workflow
+    assert presets.workflow("qwen-image-base-qualite").preset.defaults["steps"] == 31
+    llm, error = service.llm_for("dessinateur", None)
+    assert error is None and llm is not None and llm.model == "deepseek-v4-pro"  # type: ignore[attr-defined]
+
+    # L'enregistrement de la fiche (toutes les valeurs du formulaire, comme l'UI) passe et nettoie le profil.
+    form = {s["key"]: s["value"] for s in d["settings"]} | {"steps": 28}
+    r = _save(c, "dessinateur", form)
+    assert r.status_code == 200, r.text
+    stored = c.get("/agents/dessinateur").json()
+    assert stored["warnings"] == [] and _setting(stored, "steps")["value"] == 28
+    with service.db.session_scope() as session:
+        values = service.stored(session, "dessinateur", None)
+    assert "workflow" not in values and "workflow_with_references" not in values
+    assert values["model"] == "deepseek-v4-pro" and values["provider"] == "deepseek"
+
+
+def test_retired_workflow_in_a_series_profile_is_ignored_alone(c: TestClient) -> None:
+    sid = _series(c)
+    _stored_profile(c, "dessinateur", {"workflow_with_references": "flux3-klein-edit-ref-qualite", "steps": 29}, sid)
+    service = _ctx(c).agents
+    assert "dessinateur" not in service.problems_for(sid)
+    assert service.presets_for(sid).workflow("qwen-image-base-qualite").preset.defaults["steps"] == 29
+    d = c.get(f"/agents/dessinateur?project_id={sid}").json()
+    assert _setting(d, "workflow_with_references")["warning"] and d["warnings"]
+    assert _save(c, "dessinateur", {"steps": 30}, sid).status_code == 200
+
+
+def test_restoring_a_version_with_a_retired_workflow_drops_it_with_a_warning(c: TestClient) -> None:
+    _stored_profile(c, "dessinateur", FLUX_PROFILE)
+    assert _save(c, "dessinateur", {"steps": 27}).status_code == 200
+    r = c.post("/agents/dessinateur/versions/1/restore", json={})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["saved_version"] == 3
+    assert any("flux3-klein-qualite" in w for w in body["warnings"])
+    assert _setting(body, "workflow")["value"] == _ctx(c).presets.defaults.workflow
+    assert _setting(body, "steps")["value"] == 31 and _setting(body, "model")["value"] == "deepseek-v4-pro"
+    service = _ctx(c).agents
+    with service.db.session_scope() as session:
+        assert "workflow" not in service.stored(session, "dessinateur", None)
+        # L'historique n'est pas réécrit.
+        assert service.versions(session, "dessinateur", None)[-1].values["workflow"] == "flux3-klein-qualite"
