@@ -2083,6 +2083,8 @@ export interface AgentSetting {
   preset: unknown;
   /** Valeur sans le niveau en cours d'édition (ce que « hérité » donnerait). */
   inherited: unknown;
+  /** Choix enregistré retiré des presets (ex. workflow FLUX 3 Klein) : ignoré, la valeur héritée est reprise. */
+  warning?: string | null;
 }
 
 export interface Knowledge {
@@ -2101,6 +2103,8 @@ export interface AgentDetail extends AgentSummary {
   settings: AgentSetting[];
   knowledge: { value: Knowledge; origin: SettingOrigin; inherited: Knowledge };
   problem: string | null;
+  /** Choix retirés des presets, ignorés (« Workflow … : workflow « x » retiré, valeur d'origine reprise »). */
+  warnings?: string[];
   saved_version?: number | null;
 }
 

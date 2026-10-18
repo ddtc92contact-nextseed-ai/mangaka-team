@@ -64,6 +64,11 @@ export function SettingField({
         )}
       </div>
       <Control setting={setting} id={id} value={value} onChange={onChange} invalid={Boolean(shown)} disabled={locked} />
+      {setting.warning && (
+        <p className="mt-1 text-xs text-amber-300" role="status">
+          ⚠ {setting.warning}
+        </p>
+      )}
       {shown ? (
         <p className="mt-1 text-xs text-red-400" role="alert">
           {shown}

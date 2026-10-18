@@ -115,6 +115,14 @@ function AgentPage() {
         </div>
       )}
 
+      {a.warnings && a.warnings.length > 0 && (
+        <div className="mb-4">
+          <Alert tone="info">
+            Valeurs enregistrées retirées des presets, ignorées (la valeur d&apos;origine s&apos;applique) :{" "}
+            {a.warnings.join(" ; ")}
+          </Alert>
+        </div>
+      )}
       {notice && (
         <div className="mb-4">
           <Alert tone="info">{notice}</Alert>

@@ -165,7 +165,7 @@ def _env_value(service: AgentService, setting: AgentSetting) -> str | None:
     return raw.strip() if isinstance(raw, str) and raw.strip() else None
 
 
-def _setting_out(service: AgentService, r: ResolvedSetting) -> dict[str, Any]:
+def _setting_out(service: AgentService, r: ResolvedSetting, warning: str | None = None) -> dict[str, Any]:
     s = r.setting
     choices = service.choices(s) if s.type == "choice" else []
     labels = service.choice_labels(s) if s.type == "choice" else {}
@@ -190,6 +190,8 @@ def _setting_out(service: AgentService, r: ResolvedSetting) -> dict[str, Any]:
         "origin": r.origin,
         "preset": to_text(s, r.preset),
         "inherited": to_text(s, r.inherited),
+        # Choix enregistré retiré des presets (ex. workflow FLUX 3 Klein) : ignoré, valeur héritée affichée.
+        "warning": warning,
     }
 
 
@@ -221,11 +223,19 @@ def _series_profiles(service: AgentService, session: Session, agent_id: str) -> 
     )
 
 
-def _detail(ctx: AppContext, session: Session, agent: AgentPreset, project: Project | None) -> dict[str, Any]:
+def _detail(
+    ctx: AppContext,
+    session: Session,
+    agent: AgentPreset,
+    project: Project | None,
+    extra_warnings: dict[str, str] | None = None,
+) -> dict[str, Any]:
     service = ctx.agents
     project_id = project.id if project else None
     resolved, knowledge = service.resolved_for(session, agent, project_id)
     problems = service.problems_for(project_id)
+    warnings = (extra_warnings or {}) | service.warnings(session, agent, project_id)
+    labels = {s.key: s.label for s in agent.settings}
     return {
         **_summary(ctx, session, agent, _comfy(ctx)),
         "model": _model_label(service, agent, resolved),
@@ -236,9 +246,10 @@ def _detail(ctx: AppContext, session: Session, agent: AgentPreset, project: Proj
         "trial": agent.trial is not None,
         "trial_description": agent.trial_description,
         "secrets": service.secrets(agent),
-        "settings": [_setting_out(service, r) for r in resolved],
+        "settings": [_setting_out(service, r, warnings.get(r.setting.key)) for r in resolved],
         "knowledge": knowledge,
         "problem": problems.get(agent.id),
+        "warnings": [f"{labels.get(k, k)} : {w}" for k, w in warnings.items()],
     }
 
 
@@ -363,13 +374,15 @@ def restore_version(
     """« Revenir à cette version » : ses valeurs deviennent une nouvelle version."""
     agent = _agent(ctx, agent_id)
     project = _project(session, project_id)
+    target = next((v for v in ctx.agents.versions(session, agent.id, project_id) if v.version == version), None)
+    retired = ctx.agents.stale_choices(agent, dict(target.values or {})) if target else {}
     try:
         saved = ctx.agents.restore(session, agent, project_id, version, author=body.author if body else None)
     except LookupError:
         raise HTTPException(status_code=404, detail=f"Version {version} introuvable") from None
     except ProfileInvalid as exc:
         return _invalid(exc.errors)
-    return {**_detail(ctx, session, agent, project), "saved_version": saved.version if saved else None}
+    return {**_detail(ctx, session, agent, project, retired), "saved_version": saved.version if saved else None}
 
 
 @router.post("/agents/{agent_id}/reset")
