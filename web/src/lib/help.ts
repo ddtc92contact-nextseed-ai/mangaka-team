@@ -142,6 +142,8 @@ export const HELP = {
     "Change la forme de la bulle et sa police (parole, pensée, cri, hors champ ou récitatif). Le récitatif est un cartouche de narration, sans queue.",
   "lettrage.bubble_auto":
     "Oublie la position, la taille du cadre et la queue réglées à la main : la bulle reprend la place calculée automatiquement. Une taille de texte fixée à la main reste (bouton « Auto » de la taille pour l'oublier).",
+  "lettrage.add_bubble":
+    "Ajoute une réplique à cette case : elle apparaît aussi dans le Scénario. Une bulle (ou un récitatif) posée sur un défaut de l'image le cache : glisse-la dessus, ses poignées la redimensionnent. Sans locuteur, la bulle n'a pas de queue.",
   "lettrage.bubble_size":
     "Quand tu agrandis ou rétrécis une bulle à la poignée, son texte grandit ou diminue en proportion pour remplir le cadre (bulle deux fois plus grande, texte deux fois plus grand), sans passer sous la taille minimale ni au-dessus du plafond du style (réglages du Lettreur, écran « L'équipe »). Saisis une taille et « Fixer » pour l'imposer ; « Auto » rend la main au calcul.",
   "lettrage.sfx":

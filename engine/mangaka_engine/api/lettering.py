@@ -12,10 +12,13 @@ from sqlalchemy.orm import Session
 
 from ..pipeline.fonts import FontBook
 from ..pipeline.lettering import LetteringError
+from ..pipeline.names import CharacterMatcher, panel_context
 from ..pipeline.render import (
+    NO_TAIL,
     STEP,
     bubble_fit_preview,
     lettering_json,
+    no_tail,
     page_file_stem,
     page_inputs,
     read_render_info,
@@ -30,7 +33,7 @@ from .chapters import get_chapter_or_404, get_page_or_404
 from .deps import AppContext, get_ctx, get_session
 from .errors import FieldError
 from .jobs import job_out
-from .schemas import BubbleBox, BubbleUpdate, ExportIn, JobOut, RenderIn, SfxCreate
+from .schemas import BubbleBox, BubbleCreate, BubbleUpdate, ExportIn, JobOut, RenderIn, SfxCreate
 from .stages import gate
 from .storage import sync_library
 
@@ -91,12 +94,13 @@ def reset_lettering(
     page_id: int, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
 ) -> dict[str, Any]:
     """« Recalculer le lettrage » : oublie les positions, queues et tailles de texte ajustées à la main (et,
-    pour une onomatopée, sa taille, son angle et son cisaillement ; son intensité et sa police restent)."""
+    pour une onomatopée, sa taille, son angle et son cisaillement ; son intensité et sa police restent). Une
+    bulle sans queue (ajoutée sans locuteur) le reste."""
     page = get_page_or_404(session, page_id)
     for panel in page.panels:
         for bubble in panel.bubbles:
             bubble.position = None
-            bubble.tail = None
+            bubble.tail = dict(NO_TAIL) if no_tail(bubble.tail) else None
             if bubble.kind == BubbleKind.sfx and bubble.sfx:
                 bubble.sfx = {k: v for k, v in bubble.sfx.items() if k in ("intensity", "font")}
     session.commit()
@@ -136,6 +140,8 @@ def update_bubble(
         bubble.kind = BubbleKind(changes["kind"])
     if "speaker" in changes:
         bubble.speaker_name = changes["speaker"]
+        if changes["speaker"] and no_tail(bubble.tail):
+            bubble.tail = None  # un locuteur rend sa queue à une bulle ajoutée sans locuteur
     width = page.layout["page"]["width"] if page.layout else None
     height = page.layout["page"]["height"] if page.layout else None
     if "position" in changes or "size_pt" in changes:
@@ -157,7 +163,10 @@ def update_bubble(
         if tail is not None and width and height:
             tail["x"] = min(max(tail["x"], 0), width)
             tail["y"] = min(max(tail["y"], 0), height)
-        bubble.tail = {**tail, "manual": True} if tail is not None else None
+        if tail is not None:
+            bubble.tail = {**tail, "manual": True}
+        elif not no_tail(bubble.tail):  # « Replacer automatiquement » : une bulle sans queue le reste
+            bubble.tail = None
     session.commit()
     return _lettering(ctx, page)
 
@@ -217,6 +226,53 @@ def _update_sfx(bubble: Bubble, body: BubbleUpdate, changes: dict[str, Any], *, 
     bubble.sfx = params
 
 
+@router.post("/panels/{panel_id}/bubbles", status_code=201)
+def add_bubble(
+    panel_id: int, body: BubbleCreate, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
+) -> dict[str, Any]:
+    """Ajoute une réplique à la case depuis le lettrage (par ex. une bulle posée sur un défaut de l'image) ;
+    renvoie le lettrage de la page.
+
+    Une réplique comme les autres : après les répliques de la case (ses onomatopées restent dernières), visible
+    au Scénario. Le locuteur est retrouvé dans les fiches de la série comme au Scénario ; sans locuteur, la
+    bulle n'a pas de queue. Un cadre envoyé est posé à la main (borné comme `PATCH /bubbles/{id}`) ; sinon
+    placement automatique.
+    """
+    panel = session.get(Panel, panel_id)
+    if panel is None:
+        raise HTTPException(status_code=404, detail="Case introuvable")
+    page = panel.page
+    replies = [b for b in panel.bubbles if b.kind != BubbleKind.sfx]
+    position = None
+    if body.position is not None:
+        pos = body.position.model_dump()
+        if page.layout:
+            width, height = page.layout["page"]["width"], page.layout["page"]["height"]
+            pos["x"] = min(max(pos["x"], -pos["w"] + 10), width - 10)
+            pos["y"] = min(max(pos["y"], -pos["h"] + 10), height - 10)
+        position = {**pos, "manual": True}
+    speaker_id = None
+    if body.speaker:
+        matcher = CharacterMatcher.for_project(session, page.chapter.project_id)
+        speaker_id = matcher.match(body.speaker, panel_context(matcher, panel))
+    bubble = Bubble(
+        order=max((b.order for b in replies), default=-1) + 1,
+        text=body.text,
+        kind=BubbleKind(body.kind),
+        speaker_name=body.speaker,
+        speaker_id=speaker_id,
+        position=position,
+        tail=None if body.speaker else dict(NO_TAIL),
+    )
+    for b in panel.bubbles:
+        if b.kind == BubbleKind.sfx and b.order >= bubble.order:
+            b.order += 1
+    panel.bubbles.append(bubble)
+    session.commit()
+    session.expire(panel, ["bubbles"])  # relue dans l'ordre (`Bubble.order`)
+    return _lettering(ctx, page)
+
+
 @router.post("/panels/{panel_id}/sfx", status_code=201)
 def add_sfx(
     panel_id: int, body: SfxCreate, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
@@ -247,12 +303,14 @@ def add_sfx(
 def delete_sfx(
     bubble_id: int, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
 ) -> dict[str, Any]:
-    """Supprime une onomatopée (les répliques se suppriment dans l'écran Scénario) ; renvoie le lettrage."""
+    """Supprime une onomatopée (une réplique : `DELETE /bubbles/{id}/reply`) ; renvoie le lettrage."""
     bubble = session.get(Bubble, bubble_id)
     if bubble is None:
         raise HTTPException(status_code=404, detail="Bulle introuvable")
     if bubble.kind != BubbleKind.sfx:
-        raise FieldError("bubble", "seules les onomatopées se suppriment ici ; les répliques, dans le Scénario")
+        raise FieldError(
+            "bubble", "seules les onomatopées se suppriment ici ; une réplique, avec DELETE /bubbles/{id}/reply"
+        )
     page = bubble.panel.page
     session.delete(bubble)
     session.commit()
@@ -264,7 +322,7 @@ def delete_sfx(
 def delete_reply(
     bubble_id: int, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
 ) -> dict[str, Any]:
-    """Supprime une réplique depuis la planche brouillon (name) ; les suivantes de la case se resserrent.
+    """Supprime une réplique (planche brouillon, case agrandie du lettrage) ; les suivantes de la case se resserrent.
     Renvoie le lettrage de la page."""
     bubble = session.get(Bubble, bubble_id)
     if bubble is None:

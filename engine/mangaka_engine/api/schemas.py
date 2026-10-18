@@ -627,6 +627,24 @@ class BubbleUpdate(_In):
     sfx: SfxParams | None = None
 
 
+class BubbleCreate(_In):
+    """Réplique ajoutée depuis l'écran Lettrage (une onomatopée passe par `SfxCreate`)."""
+
+    text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)]
+    kind: BubbleKindName = "speech"
+    # Personnage de la série (fiche retrouvée comme au Scénario) ; vide = sans locuteur, donc sans queue.
+    speaker: Short = ""
+    # Cadre posé à la main (px de la page) ; absent = placement automatique.
+    position: BubbleBox | None = None
+
+    @field_validator("kind", mode="before")
+    @classmethod
+    def _not_sfx(cls, value: Any) -> Any:
+        if value == "sfx":
+            raise ValueError("une onomatopée s'ajoute avec « Ajouter une onomatopée » (POST /panels/{id}/sfx)")
+        return value
+
+
 class SfxCreate(_In):
     text: SfxText
     intensity: IntensityName = "normal"

@@ -575,6 +575,8 @@ class BubbleSpec:
     manual_tail: Point | None = None
     # Taille du texte saisie à la main (écran Lettrage) : l'emporte sur l'ajustement automatique.
     size_pt: float | None = None
+    # Réplique ajoutée au lettrage sans locuteur (légende posée sur un défaut de l'image) : jamais de queue.
+    no_tail: bool = False
 
 
 @dataclass
@@ -1094,7 +1096,7 @@ class Letterer:
         return out
 
     def tail_tip(self, b: BubbleSpec, box: Box, panel: PanelSpec, direction: Direction) -> Point | None:
-        if b.kind == "narration":
+        if b.kind == "narration" or b.no_tail:
             return None
         if b.manual_tail is not None:
             return b.manual_tail

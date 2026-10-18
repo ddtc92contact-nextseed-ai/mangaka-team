@@ -1946,6 +1946,8 @@ export interface PageLettering {
     /** Où l'image entière tombe sur la page une fois cadrée (la case n'en montre que la fenêtre). */
     image_rect?: Rect | null;
     faces: Rect[];
+    /** Personnages présents : locuteurs proposés à l'ajout d'une bulle. */
+    characters?: string[];
   }[];
   bubbles: LetteredBubble[];
   sfx?: LetteredSfx[];
@@ -3710,6 +3712,9 @@ export const api = {
   fitBubble: (id: number, box: BubbleBox) => request<BubbleFit>(`/bubbles/${id}/fit`, json("POST", box)),
   addSfx: (panelId: number, body: { text: string; intensity?: Intensity; x?: number; y?: number }) =>
     request<PageLettering>(`/panels/${panelId}/sfx`, json("POST", body)),
+  /** Réplique ajoutée depuis le lettrage ; sans locuteur, la bulle n'a pas de queue. */
+  addBubble: (panelId: number, body: { text: string; kind?: BubbleKind; speaker?: string; position?: BubbleBox }) =>
+    request<PageLettering>(`/panels/${panelId}/bubbles`, json("POST", body)),
   deleteSfx: (id: number) => request<PageLettering>(`/bubbles/${id}`, { method: "DELETE" }),
   renderPage: (pageId: number, body: ExportOptions) => request<PageRender>(`/pages/${pageId}/render`, json("POST", body)),
   getRender: (pageId: number) => request<PageRender>(`/pages/${pageId}/render`),

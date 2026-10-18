@@ -1,16 +1,16 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { InfoTip } from "@/components/info-tip";
+import { HelpLabel, InfoTip } from "@/components/info-tip";
 import { Alert, Button, Card, Field, Input, Select, Textarea } from "@/components/ui";
-import type { BubbleKind, BubbleUpdate, LetteredBubble, LetteringWarning } from "@/lib/api";
+import type { BubbleKind, BubbleUpdate, LetteredBubble, LetteringWarning, PageLettering } from "@/lib/api";
 import { BUBBLE_KINDS } from "@/lib/script";
 
 const TAIL_STEP = 24; // ≈ 2 mm à 300 DPI
 const SIZE_MIN = 4;
 const SIZE_MAX = 72;
 
-/** Panneau d'édition de la bulle choisie : texte, type (et sa police), locuteur, taille du texte, position automatique, queue. */
+/** Panneau d'édition de la bulle choisie : texte, type (et sa police), locuteur, taille du texte, position automatique, queue, suppression. */
 export function BubbleEditor({
   bubble,
   fontName,
@@ -18,6 +18,7 @@ export function BubbleEditor({
   warnings,
   busy,
   onSave,
+  onDelete,
   onClose,
 }: {
   bubble: LetteredBubble;
@@ -27,6 +28,8 @@ export function BubbleEditor({
   warnings: LetteringWarning[];
   busy: boolean;
   onSave: (update: BubbleUpdate) => Promise<boolean>;
+  /** Supprime la réplique (confirmation comprise) ; absent = pas de suppression ici. */
+  onDelete?: () => void;
   onClose: () => void;
 }) {
   const [text, setText] = useState(bubble.text);
@@ -63,6 +66,7 @@ export function BubbleEditor({
             {bubble.font.manual_size ? " (à la main)" : ""} ·{" "}
             {bubble.manual ? "cadre ajusté à la main" : "placement automatique"}
             {bubble.manual_tail ? " · queue ajustée" : ""}
+            {!bubble.tail && bubble.kind !== "narration" ? " · sans queue" : ""}
           </p>
         </div>
         <Button variant="ghost" className="!px-2 !py-1" onClick={onClose} aria-label="Fermer l'éditeur de bulle">
@@ -94,7 +98,11 @@ export function BubbleEditor({
               ))}
             </Select>
           </Field>
-          <Field label="Locuteur" htmlFor="bubble-speaker">
+          <Field
+            label="Locuteur"
+            htmlFor="bubble-speaker"
+            hint={!bubble.tail && bubble.kind !== "narration" ? "Un locuteur donne une queue à la bulle." : undefined}
+          >
             <Input id="bubble-speaker" value={speaker} onChange={(e) => setSpeaker(e.target.value)} maxLength={120} />
           </Field>
         </div>
@@ -195,7 +203,111 @@ export function BubbleEditor({
           </Button>
           <InfoTip help="lettrage.bubble_auto" label="Replacer automatiquement" />
         </span>
+        {onDelete && (
+          <div>
+            <Button variant="danger" disabled={busy} onClick={onDelete} data-testid="bubble-delete">
+              Supprimer la bulle
+            </Button>
+          </div>
+        )}
       </div>
+    </Card>
+  );
+}
+
+const NO_SPEAKER = "";
+
+/**
+ * Ajout d'une réplique dans la case agrandie : type, locuteur (un personnage de la case, ou aucun : bulle
+ * sans queue, par ex. pour masquer un défaut de l'image), texte. Placement automatique, puis on la glisse.
+ */
+export function AddBubble({
+  panel,
+  busy,
+  onAdd,
+}: {
+  panel: PageLettering["panels"][number];
+  busy: boolean;
+  onAdd: (panelId: number, body: { text: string; kind: BubbleKind; speaker: string }) => Promise<boolean>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  const [kind, setKind] = useState<BubbleKind>("speech");
+  const [speaker, setSpeaker] = useState(NO_SPEAKER);
+  const characters = [...new Set((panel.characters ?? []).map((c) => c.trim()).filter(Boolean))];
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!text.trim()) return;
+    if (await onAdd(panel.id, { text: text.trim(), kind, speaker })) {
+      setText("");
+      setKind("speech");
+      setSpeaker(NO_SPEAKER);
+      setOpen(false);
+    }
+  }
+
+  return (
+    <Card data-testid="add-bubble-card">
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="font-semibold text-zinc-100">
+          <HelpLabel help="lettrage.add_bubble">Bulles</HelpLabel>
+        </h2>
+        {!open && (
+          <Button variant="secondary" onClick={() => setOpen(true)} disabled={busy} data-testid="add-bubble-open">
+            Ajouter une bulle
+          </Button>
+        )}
+      </div>
+      {open && (
+        <form onSubmit={submit} className="mt-3 space-y-3" data-testid="add-bubble-form">
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Type" htmlFor="new-bubble-kind" help="lettrage.bubble_kind">
+              <Select id="new-bubble-kind" value={kind} onChange={(e) => setKind(e.target.value as BubbleKind)} data-testid="new-bubble-kind">
+                {(Object.keys(BUBBLE_KINDS) as BubbleKind[]).map((k) => (
+                  <option key={k} value={k}>
+                    {BUBBLE_KINDS[k]}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Locuteur" htmlFor="new-bubble-speaker">
+              <Select id="new-bubble-speaker" value={speaker} onChange={(e) => setSpeaker(e.target.value)} data-testid="new-bubble-speaker">
+                <option value={NO_SPEAKER}>Aucun (sans queue)</option>
+                {characters.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </div>
+          <Field
+            label="Texte"
+            htmlFor="new-bubble-text"
+            hint="La bulle se pose seule dans la case : glisse-la ensuite sur le défaut à cacher, ses poignées la redimensionnent."
+          >
+            <Textarea
+              id="new-bubble-text"
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              maxLength={1000}
+              required
+              autoFocus
+              placeholder="Qu'est-ce que c'était ?"
+              data-testid="new-bubble-text"
+            />
+          </Field>
+          <div className="flex flex-wrap gap-2">
+            <Button type="submit" disabled={busy || !text.trim()} data-testid="add-bubble">
+              Ajouter la bulle
+            </Button>
+            <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={busy}>
+              Annuler
+            </Button>
+          </div>
+        </form>
+      )}
     </Card>
   );
 }
