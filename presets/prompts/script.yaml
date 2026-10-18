@@ -65,13 +65,70 @@ dialogue_rules:
   check_room: true          # après la mise en page : chaque bulle tient dans la zone de bulles de sa case…
   max_cover: 0.5            # …et les bulles couvrent au plus la moitié de la case (règle de la name)
 
+# Brief d'image de chaque case (pipeline/brief.py) : chaque champ a UN rôle, et rien de contradictoire n'atteint
+# l'image (« setting » et « staging » partent tels quels dans le prompt image). Vérifié sur chaque réponse : un
+# défaut relance le scénariste avec l'erreur ; après les relances, le découpage est gardé et le défaut est signalé
+# sur la case dans l'écran Scénario. Termes comparés sans accents ni casse, en mots entiers ; un terme de décor
+# couvre aussi son pluriel. Sans ce bloc, aucun contrôle.
+# (Audit du chapitre 15 « Second round » d'OSU, 18/10 : 62 cases sur 82 mettaient un plan ou des personnages dans
+# « setting », 28 citaient dans setting ou staging un personnage absent de la case, dont 23 hors cadre.)
+brief_rules:
+  check_cast: true          # un nom de fiche (ou un alias) dans setting / staging, absent de « characters »
+  check_setting: true       # vocabulaire de plan dans setting ; setting vide ou sans aucun mot de décor
+  check_slots: true         # page qui a plus de cases que d'emplacements dans son gabarit de mise en page
+  check_location: true      # description qui nomme un autre lieu de la série que celui de la case
+  # Vocabulaire de plan et de cadrage, interdit dans « setting » (le plan vient de la direction artistique).
+  # « arrière-plan » et « au loin » n'y sont pas : la profondeur du décor (montagnes au loin) est permise.
+  shot_terms: [
+    plan d'ensemble, plan large, plan moyen, plan américain, plan rapproché, plan serré, plan taille,
+    plan poitrine, plan pied, plan en pied, gros plan, très gros plan, insert, plongée, contre-plongée,
+    vue subjective, vue plongeante, caméra, cadrage, recadrage, hors cadre, hors champ,
+    champ contrechamp, champ contre-champ, zoom, travelling, panoramique, en amorce, focale, objectif,
+    cadre penché, angle de vue, de dos, de face, de profil, de trois quarts
+  ]
+  # Mots de décor : moment (heure, météo, saison, lumière) et éléments visibles d'un lieu. Les mots du lieu de la
+  # case comptent aussi (« Plage de sable blanc » : plage, sable, blanc).
+  decor_terms: [
+    # moment, lumière, météo, saison
+    aube, aurore, matin, matinée, midi, après-midi, soir, soirée, crépuscule, nuit, minuit, jour, journée,
+    heure, coucher de soleil, lever de soleil, soleil, lune, étoile, ciel, nuage, brume, brouillard, pluie,
+    orage, neige, vent, tempête, éclair, arc-en-ciel, chaleur, lumière, ombre, pénombre, obscurité, lueur,
+    contre-jour, printemps, été, automne, hiver, beau temps, temps gris, grisaille, humidité, givre, gel, rosée,
+    # nature
+    plage, sable, mer, océan, vague, écume, rivage, rive, côte, crique, baie, port, quai, ponton, jetée, île,
+    lac, étang, mare, rivière, fleuve, ruisseau, cascade, source, marais, eau, glace, falaise, rocher, roche,
+    pierre, caillou, galet, grotte, caverne, montagne, colline, vallée, plaine, prairie, champ, pré, désert,
+    dune, volcan, cratère, lave, forêt, bois, jungle, clairière, arbre, palmier, cocotier, tronc, branche,
+    feuillage, feuille, buisson, broussaille, fourré, herbe, fleur, mousse, liane, racine, sentier, chemin,
+    piste, horizon, terre, boue, poussière, sol, terrain, gazon, pelouse, jardin, verger, potager, ferme,
+    # ville, bâtiments
+    ville, village, quartier, rue, ruelle, avenue, boulevard, place, carrefour, trottoir, pavé, route,
+    autoroute, pont, tunnel, gare, station, métro, quai, parking, immeuble, maison, cabane, hutte, tente,
+    temple, sanctuaire, église, château, palais, tour, donjon, rempart, muraille, mur, toit, terrasse, balcon,
+    façade, fenêtre, vitre, porte, portail, escalier, marche, couloir, hall, salle, chambre, cuisine, salon,
+    bureau, classe, école, lycée, collège, gymnase, dojo, tatami, arène, stade, ring, terrain, vestiaire,
+    magasin, boutique, marché, échoppe, étal, café, bar, restaurant, auberge, taverne, hôpital, laboratoire,
+    labo, usine, entrepôt, hangar, atelier, garage, cave, grenier, sous-sol, cour, préau, plafond, plancher,
+    parquet, carrelage, moquette, tapis, rideau, lampe, lanterne, néon, enseigne, panneau, lampadaire,
+    # mobilier et objets de décor
+    table, chaise, banc, lit, canapé, fauteuil, étagère, bibliothèque, comptoir, bureau, tableau, écran,
+    tonneau, baril, caisse, carton, sac, coffre, statue, fontaine, colonne, pilier, arche, clôture, barrière,
+    grille, haie, palissade, poteau, câble, fil, torche, feu, flamme, bougie, cheminée, foyer,
+    # véhicules et mer
+    bateau, navire, voilier, barque, pont du bateau, bastingage, mât, voile, cale, cabine, coque, avion,
+    voiture, train, wagon, bus, camion, vaisseau, cockpit,
+    # ambiance d'un lieu
+    foule, décor, paysage, panorama, lointain, au loin, fond, silhouette, reflet, débris, ruines, fumée,
+    poussière, trace, traces de pas, lucioles, linge
+  ]
+
 system: |
   Tu es scénariste de manga professionnel. Tu découpes un chapitre en pages puis en cases,
   comme pour une publication hebdomadaire : l'histoire, l'intention de chaque case et ce que
   fait chaque personnage. Tu respectes la continuité de la série (personnages, événements des
   chapitres précédents) et le rythme d'un vrai chapitre : accroche, montée, cliffhanger final.
-  La composition des images (cadrage, angle, place des personnages dans l'image) revient au
-  directeur artistique, à l'étape suivante : tu ne la décides pas.
+  Le cadrage de chaque image (le plan, l'angle de la caméra) revient au directeur artistique, à
+  l'étape suivante : tu ne le décides pas.
   Tu réponds UNIQUEMENT par un objet JSON valide, sans texte autour ni bloc de code.
 
 user: |
@@ -143,12 +200,28 @@ user: |
     ou, pour un lieu nouveau, son nom court (« La clairière », « La crique ») ; toutes les cases qui se
     passent au même endroit portent le MÊME lieu (même id, ou exactement le même nom) : un lieu est un
     endroit, pas une rédaction (« clairière » et « clairière au centre de l'île » sont le même lieu) ;
-  - « setting » : la précision de cadrage du lieu pour cette case — moment (heure, météo, saison),
-    coin du lieu et éléments visibles du décor (« bord du lac, fin d'après-midi, herbes hautes,
-    rochers moussus, montagnes au loin ») ;
-  - « staging » : ce que fait chaque personnage PRÉSENT (jamais un personnage hors cadre) — geste,
-    posture, regard, réaction, interaction avec les autres — sans dire où il se trouve dans l'image ;
-  - « description » raconte l'action de la case ; « setting » et « staging » la complètent sans la répéter ;
+  - une case peut avoir un lieu différent de sa scène : le pont du bateau n'est pas la plage. Si la case
+    montre un autre endroit que les cases voisines (le bateau vu depuis la plage, puis le pont du bateau), donne-lui
+    SON lieu ; le lieu de la case doit être celui où se passe sa description ;
+  Chaque champ d'une case a UN rôle (ils partent tels quels vers le dessinateur, qui dessine tout ce qui y est
+  écrit) :
+  - « description » : un INSTANT FIGÉ et dessinable, ce que montre l'image à ce moment précis. Jamais une action
+    qui dure ou qui s'enchaîne, jamais un point de vue sans dire ce qu'on voit :
+    · « Haru double Ren » → « Haru court un pas devant Ren, tourne la tête vers lui avec une grimace moqueuse » ;
+    · « Kurogane observe la course au loin » → « Kurogane accoudé au bastingage, un sourire ironique, les coureurs
+      minuscules sur la plage derrière lui » ;
+    · « Les trois garçons se dispersent pour encercler le gorille » → « Haru, Ren et Tora en triangle autour du
+      gorille, genoux fléchis, prêts à bondir » ;
+  - « setting » (décor de la case) : le MOMENT (heure, météo, saison, lumière) et les ÉLÉMENTS VISIBLES du lieu
+    (« bord du lac, fin d'après-midi, herbes hautes, rochers moussus, montagnes au loin »). Jamais de plan ni de
+    cadrage (aucun mot de caméra, ni « hors cadre ») et jamais de nom de personnage : « Cadrage serré sur Tora,
+    Haru et Ren derrière lui, le gorille hors cadre » est interdit ; écris « plage de sable blanc, midi, palmiers
+    penchés, mer calme » ;
+  - « staging » (mise en scène) : la pose, le geste, le regard, l'expression et la place dans l'image (gauche,
+    droite, premier plan, arrière-plan) des SEULS personnages de « characters » ; jamais un personnage hors
+    cadre ni un absent (s'il doit être vu, il est dans « characters »). Il AJOUTE à la description ce qu'elle ne
+    dit pas, il ne la reformule pas ;
+  - le plan et l'angle de la case : jamais. Ils viennent du directeur artistique, à l'étape suivante ;
   - « decor » : l'id (nombre) du décor récurrent où se passe la case, pris UNIQUEMENT dans la liste
     des décors ci-dessus, ou null si la case se passe ailleurs ;
   - « objets » : les ids (nombres) des objets, véhicules et créatures récurrents visibles dans la case,
