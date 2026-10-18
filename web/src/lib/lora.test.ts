@@ -19,15 +19,16 @@ test("avec un fichier : nom du fichier et poids, comme avant", () => {
   assert.equal(loraSummary("encre.safetensors", null), "LoRA encre.safetensors");
 });
 
-test("flux sans LoRA (FLUX 3 Klein) : avertissement en français avec la licence ; Qwen : rien", () => {
-  const flux = { name: "FLUX 3 Klein · Qualité", engine: "flux3-klein", engine_name: "FLUX 3 Klein", supports_lora: false };
-  const notice = loraUnsupportedNotice(flux);
-  assert.ok(notice?.startsWith("Le flux de cette série (FLUX 3 Klein) ne prend pas de LoRA"));
-  assert.match(notice!, /FLUX Kommunity interdit le fine-tuning/);
+test("flux sans LoRA : avertissement en français, sans ligne de licence ; Qwen : rien", () => {
+  const maison = { name: "Maison · Qualité", engine: "maison", engine_name: "Moteur maison", supports_lora: false };
+  assert.equal(
+    loraUnsupportedNotice(maison),
+    "Le flux de cette série (Moteur maison) ne prend pas de LoRA : les LoRA de la série et des fiches sont ignorés à la génération, et chaque génération le signale.",
+  );
   assert.equal(loraUnsupportedNotice({ name: "Qualité", engine: "qwen-image", supports_lora: true }), null);
   // Flux encore inconnu (presets en chargement, ancien moteur) : pas d'alerte.
   assert.equal(loraUnsupportedNotice(undefined), null);
   assert.equal(loraUnsupportedNotice({ name: "Qualité" }), null);
-  // Autre moteur sans LoRA : avertissement sans la ligne de licence FLUX.
-  assert.doesNotMatch(loraUnsupportedNotice({ name: "Autre", supports_lora: false })!, /Kommunity/);
+  // Sans nom de moteur : le nom du flux.
+  assert.ok(loraUnsupportedNotice({ name: "Autre", supports_lora: false })?.startsWith("Le flux de cette série (Autre)"));
 });

@@ -1048,8 +1048,8 @@ class WorkflowPresetOut(BaseModel):
     id: str
     name: str
     description: str
-    engine: str | None = None  # moteur d'image (qwen-image, flux3-klein)
-    engine_name: str | None = None  # nom affiché du moteur (« FLUX 3 Klein »)
+    engine: str | None = None  # moteur d'image (qwen-image)
+    engine_name: str | None = None  # nom affiché du moteur (« Qwen-Image 2.1 »)
     params: list[str]
     reference_slots: int
     supports_lora: bool

@@ -236,30 +236,12 @@ REQUIRED_WORKFLOW_PARAMS = ("positive_prompt", "negative_prompt", "seed", "width
 MIN_CFG = 1.0
 MAX_CFG = 3.0
 # Nom affiché des moteurs d'image (`engine` des presets) ; un moteur absent s'affiche par son id.
-ENGINE_NAMES = {"qwen-image": "Qwen-Image 2.1", "flux3-klein": "FLUX 3 Klein"}
+ENGINE_NAMES = {"qwen-image": "Qwen-Image 2.1"}
 WorkflowRole = Literal["generation", "croquis", "propre", "controle"]
-# Format du prompt positif : `paragraph` (le paragraphe Qwen 2.1, seul) ou `layout` (FLUX 3 Klein : le paragraphe
-# plus une grille de composition à boîtes, une par personnage, branchée sur CreateBoundingBoxes → Flux3LayoutPrompt).
-PromptFormat = Literal["paragraph", "layout"]
 # Un preset de réparation (inpainting) part de l'image source : pas de taille, mais un débruitage partiel.
 REQUIRED_INPAINT_PARAMS = ("positive_prompt", "negative_prompt", "seed", "denoise")
 REPAIR_TARGETS = ("face", "hand", "zone")
 REPAIR_PROMPT_VARIABLES = frozenset({"target", "character", "description", "style"})
-
-
-class BoxLayoutSettings(_Strict):
-    """Grille de composition à boîtes (`prompt_format: layout`, workflow officiel BFL de FLUX 3 Klein).
-
-    `boxes` reçoit les boîtes en pixels de la case (`[{x, y, width, height, metadata: {type, text, desc,
-    palette}}]`, l'état de l'éditeur du nœud CreateBoundingBoxes) ; `width` et `height` y reçoivent la taille
-    de la case, celle du latent. Le paragraphe passe par le nœud qui ajoute la table des boîtes au prompt
-    (Flux3LayoutPrompt) : c'est lui que vise `mapping.positive_prompt`. Sans boîte (case à 0 ou 1 personnage),
-    la liste est vide et le paragraphe passe seul, inchangé.
-    """
-
-    boxes: NodeInput
-    width: NodeInput
-    height: NodeInput
 
 
 class InpaintSettings(_Strict):
@@ -380,7 +362,7 @@ class WorkflowPreset(_Strict):
     id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
     name: str
     description: str = ""
-    # Moteur d'image du graphe (`qwen-image`, `flux3-klein`) : affiché dans la fiche série et sur les jobs.
+    # Moteur d'image du graphe (`qwen-image`) : affiché dans la fiche série et sur les jobs.
     engine: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9-]*$")
     workflow_file: str = Field(description="Chemin du JSON API ComfyUI, relatif au fichier preset")
     output_node: str = Field(description="Nœud SaveImage dont on récupère les images")
@@ -425,9 +407,6 @@ class WorkflowPreset(_Strict):
     # Modèle distillé (Turbo, croquis) : cfg 1 imposé, le prompt négatif n'est jamais lu. Un modèle de
     # base accepte un vrai CFG (1 à 3) : au-dessus de 1, le prompt négatif est lu (et le coût double).
     distilled: bool = False
-    # Format du prompt positif : `paragraph` (défaut, tout l'existant) ou `layout` (bloc `layout` obligatoire).
-    prompt_format: PromptFormat = "paragraph"
-    layout: BoxLayoutSettings | None = None
 
     @property
     def is_inpaint(self) -> bool:
@@ -435,7 +414,7 @@ class WorkflowPreset(_Strict):
 
     @property
     def engine_name(self) -> str | None:
-        """Nom affiché du moteur (« FLUX 3 Klein »), son id s'il est inconnu."""
+        """Nom affiché du moteur (« Qwen-Image 2.1 »), son id s'il est inconnu."""
         return ENGINE_NAMES.get(self.engine, self.engine) if self.engine else None
 
     @property
@@ -476,8 +455,6 @@ class WorkflowPreset(_Strict):
             raise ValueError("with_control ne peut pas désigner le workflow lui-même")
         if self.sketch == self.id:
             raise ValueError("sketch ne peut pas désigner le workflow lui-même")
-        if (self.prompt_format == "layout") != (self.layout is not None):
-            raise ValueError("un workflow « layout » déclare un bloc layout, et lui seul")
         if (self.role == "controle") != (self.control is not None):
             raise ValueError("un workflow « controle » déclare un bloc control, et lui seul")
         if self.role == "propre":

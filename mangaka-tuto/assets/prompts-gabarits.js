@@ -2323,36 +2323,6 @@ window.TUTO_GABARITS = {
    }
   ],
   "negativeWorkflow": "qwen-image-edit-ref-qualite",
-  "flux": {
-   "prompt": "<image1> is the identity reference for Aiko <obj_1>: keep the face, hair and outfit; ignore its pose, framing and background. <image2> is the identity reference for Ren <obj_2>: keep the face, hair and outfit; ignore its pose, framing and background. Black and white manga panel, hand-drawn inked line art with halftone screentone shading, shonen manga style. Close-up, the face fills the frame, shoulders cut by the frame edge. Camera angle: low-angle view looking up. Aiko lève son sabre face à Ren sur le toit, le vent soulève son bandeau. Action and pose: Aiko bondit en avant, sabre levé à deux mains, le poids sur la jambe avant. Setting: toit d'un lycée au crépuscule, château d'eau, antennes, ville en contrebas. Staging: Aiko au premier plan à gauche, sabre levé ; Ren à droite, en retrait, bras croisés. Mood and lighting: contre-jour, vent violent. Two characters: Aiko (lycéenne, cheveux courts noirs, bandeau, sabre de bois, anime girl, headband); Ren (rival au regard froid, long manteau gris, cicatrice à la joue, anime boy, grey coat). Series bible notes: Aiko: always wears her mother's headband. Style: shonen manga, dynamic energetic style, determined young hero, black and white manga, halftone screentone dots, regular grey dot pattern, no cross-hatching, bright joyful atmosphere, warm light, light screentone, subtly grey. Style notes: Low-angle panels exaggerate the foreshortening of the raised arm. A single continuous scene in one panel, no text or speech bubbles in the image. From <image1> take only the face, hair, body and outfit of Aiko; ignore its layout, pose grid, rules, labels and white background. From <image2> take only the face, hair, body and outfit of Ren; ignore its layout, pose grid, rules, labels and white background. Use the reference images for identity and design only (face, hair, body shape, outfit, materials): draw a new scene with new poses, a new camera angle and the whole background described above, everything (extras and places included) drawn in the same manga style as the reference images. Exactly one continuous scene in a single panel: not a character sheet, not a turnaround, not a collage, no side-by-side views, no multiple poses, no plain white background. Each character appears only once in the panel, no duplicate or twin of the same character. White paper dominant, clean line art, screentone only in the shadows, large white areas, no muddy grey fill.",
-   "boxes": [
-    {
-     "name": "Aiko",
-     "x": 0.0,
-     "y": 0.08,
-     "w": 0.6,
-     "h": 0.92,
-     "desc": "Aiko, anime girl, red headband",
-     "source": "mise en scène",
-     "place": {
-      "column": "left",
-      "depth": "front"
-     }
-    },
-    {
-     "name": "Ren",
-     "x": 0.4,
-     "y": 0.1,
-     "w": 0.6,
-     "h": 0.88,
-     "desc": "Ren, anime boy, grey coat",
-     "source": "mise en scène",
-     "place": {
-      "column": "right"
-     }
-    }
-   ]
-  },
   "writerUser": "Panel to describe (French inputs, to translate):\n- shot size (French): gros plan\n- camera angle (French): en contre-plongée\n- framing terms: close-up, the face fills the frame, shoulders cut by the frame edge, low-angle view looking up\n- body action or pose chosen by the art direction: Aiko bondit en avant, sabre levé à deux mains, le poids sur la jambe avant\n- description: Aiko lève son sabre face à Ren sur le toit, le vent soulève son bandeau\n- setting: toit d'un lycée au crépuscule, château d'eau, antennes, ville en contrebas\n- staging (who does what, where in the frame): Aiko au premier plan à gauche, sabre levé ; Ren à droite, en retrait, bras croisés\n- mood and lighting: contre-jour, vent violent\n\nCharacters of the panel (name them all, exactly as written):\n- Aiko: lycéenne, cheveux courts noirs, bandeau, sabre de bois, anime girl, headband\n- Ren: rival au regard froid, long manteau gris, cicatrice à la joue, anime boy, grey coat\n\nAbsent characters (never name nor draw them): (none)\n\nFraming rule: (ordinary panel: the characters listed above are in the frame)\n\nRecurring setting: (none)\nRecurring objects: (none)\n\nReference images sent to the model with this prompt (the studio writes these role sentences in front of\nyour paragraph: never write them yourself):\n- <image1> is the identity reference for Aiko: keep the face, hair and outfit; ignore its pose, framing and background.\n- <image2> is the identity reference for Ren: keep the face, hair and outfit; ignore its pose, framing and background.\n\nSeries bible notes (to respect):\nAiko: always wears her mother's red headband\n\nTeam know-how (apply it without quoting it):\nLow-angle panels exaggerate the foreshortening of the raised arm\nThese notes are guidance, not a format: they mention fields you do not have (narrative_role, variation_reason, panel_weight…); answer only in the requested format.\n\nStyle sentence of the series (open the paragraph with it, exactly as written): Black and white manga panel, hand-drawn inked line art with halftone screentone shading, shonen manga style.\nStyle keywords of the series (copy them exactly at the end of the paragraph): shonen manga, dynamic energetic style, determined young hero, black and white manga, halftone screentone dots, regular grey dot pattern, no cross-hatching, bright joyful atmosphere, warm light, light screentone, subtly grey\n\nAnswer format:\n{\"prompt\": \"the paragraph\", \"language\": \"en\", \"notes\": \"one optional sentence for the author, or null\"}",
   "style": {
    "value": "shonen manga, dynamic energetic style, determined young hero, black and white manga, halftone screentone dots, regular grey dot pattern, no cross-hatching, bright joyful atmosphere, warm light, light screentone, subtly grey",

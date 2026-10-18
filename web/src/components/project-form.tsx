@@ -115,7 +115,7 @@ export function ProjectForm({
     .filter((w) => w.tier_choice)
     .sort((a, b) => (a.tier_order ?? 0) - (b.tier_order ?? 0));
   const currentWorkflow = presets.data?.workflows.find((w) => w.id === workflow);
-  // Flux sans point d'insertion LoRA (FLUX 3 Klein) : le LoRA de style est signalé, grisé, jamais avalé sans un mot.
+  // Flux sans point d'insertion LoRA (`lora_chain`) : le LoRA de style est signalé, grisé, jamais avalé sans un mot.
   const loraNotice = loraUnsupportedNotice(currentWorkflow);
   // Palier des nouvelles séries (Rapide) : proposé en un clic à une série restée sur un palier inférieur.
   const recommendedTier = tiers.find((w) => w.id === defaults?.workflow);

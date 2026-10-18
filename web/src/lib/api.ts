@@ -668,7 +668,7 @@ export interface PanelImage {
     reference_images?: UsedReference[];
     /** Fiches qui avaient une image mais n'ont pas eu d'emplacement (priorité : personnages d'abord). */
     dropped_references?: DroppedReference[];
-    /** LoRA de la série et des fiches non appliqués : le flux ne prend pas de LoRA (FLUX 3 Klein). */
+    /** LoRA de la série et des fiches non appliqués : le flux ne prend pas de LoRA (pas de `lora_chain`). */
     lora_warning?: string;
     /** Réparation ciblée : version source et réglages (absent pour une génération). */
     repair?: RepairParams;
@@ -1132,7 +1132,7 @@ export interface WorkflowPreset {
   id: string;
   name: string;
   description: string;
-  /** Moteur d'image (`qwen-image`, `flux3-klein`) et son nom affiché. */
+  /** Moteur d'image (`qwen-image`) et son nom affiché. */
   engine?: string | null;
   engine_name?: string | null;
   params: string[];
@@ -1786,7 +1786,7 @@ export interface Presets {
     description: string;
     params: string[];
     reference_slots: number;
-    /** Moteur d'image (`qwen-image`, `flux3-klein`) et son nom affiché (« FLUX 3 Klein »). */
+    /** Moteur d'image (`qwen-image`) et son nom affiché (« Qwen-Image 2.1 »). */
     engine?: string | null;
     engine_name?: string | null;
     /** Faux : le flux n'a pas de point d'insertion LoRA, ceux de la série et des fiches sont ignorés. */

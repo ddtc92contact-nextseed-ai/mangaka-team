@@ -33,7 +33,6 @@ sys.path.insert(0, str(ROOT / "engine"))
 from mangaka_engine.agents import trials  # noqa: E402
 from mangaka_engine.pipeline import prompt as P  # noqa: E402
 from mangaka_engine.pipeline import style as S  # noqa: E402
-from mangaka_engine.pipeline.prompt_layout import LayoutSubject, cite_boxes, layout_boxes  # noqa: E402
 from mangaka_engine.pipeline.prompt_writer import PromptBrief, render_messages  # noqa: E402
 from mangaka_engine.presets.loader import PresetRegistry  # noqa: E402
 
@@ -425,10 +424,6 @@ def trace(presets: PresetRegistry) -> dict[str, Any]:
                 {"t": term, "src": "style", "file": f"presets/style_renderings/{project.style_rendering}.yaml"}
             )
 
-    # FLUX 3 Klein, grille de composition : boîtes et <obj_N> (prompt_layout.py).
-    boxes = layout_boxes([LayoutSubject(c.name, tuple(c.prompt_keywords)) for c in characters], panel["staging"])
-    flux = cite_boxes(final, boxes)
-
     # Rédacteur de prompt : le message utilisateur réellement rendu pour la même case.
     brief = PromptBrief.build(
         description=panel["description"],
@@ -473,7 +468,6 @@ def trace(presets: PresetRegistry) -> dict[str, Any]:
         "sent": final,
         "negative": neg_terms,
         "negativeWorkflow": wf_id,
-        "flux": {"prompt": flux, "boxes": [b.as_dict() for b in boxes]},
         "writerUser": user,
         "style": {"value": style, "length": len(style), "cap": ip.style_max_chars, "cut": style_cut(presets, project)},
     }

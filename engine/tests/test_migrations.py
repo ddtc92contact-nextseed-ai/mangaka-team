@@ -11,8 +11,8 @@ from fastapi.testclient import TestClient
 from mangaka_engine.config import Settings
 from mangaka_engine.main import create_app
 from mangaka_engine.store.db import create_db_engine
-from mangaka_engine.store.migrations import SCHEMA_VERSION, MigrationError
-from tests.conftest import STYLE, png_bytes, start_script
+from mangaka_engine.store.migrations import QWEN_SERIES_WORKFLOW, SCHEMA_VERSION, MigrationError
+from tests.conftest import STYLE, force_stages, png_bytes, start_script
 
 V1_SCHEMA = (Path(__file__).parent / "fixtures" / "schema_v1.sql").read_text()
 NOW = "2026-10-01 10:00:00.000000"
@@ -997,3 +997,48 @@ def test_v34_database_gets_the_series_dna_from_their_genre(make_settings: Callab
     fresh = settings.database_path.parent / "fresh.db"
     create_db_engine(fresh).dispose()
     assert _columns(settings.database_path) == _columns(fresh)
+
+
+def test_v39_database_moves_flux_series_and_panels_back_to_qwen(make_settings: Callable[..., Settings]) -> None:
+    """v39 → v40 : retrait de FLUX 3 Klein. La série FLUX passe au palier par défaut de defaults.yaml, la case
+    FLUX suit de nouveau sa série ; les versions déjà générées restent, et croquis, propre et Qualité passent."""
+    from mangaka_engine.providers.comfyui.mock import MockComfyUIClient
+    from tests.test_generation import _providers, _wait, setup_chapter
+
+    settings = make_settings()
+    with TestClient(create_app(settings, providers=_providers(MockComfyUIClient()))) as c:
+        data = setup_chapter(c)
+        panel = data["panels"][0]
+        r = c.post(f"/panels/{panel['id']}/generate", json={"count": 1})
+        assert r.status_code == 202, r.text
+        _wait(c)
+        before = c.get(f"/panels/{panel['id']}/images").json()
+        assert len(before) == 1
+    con = sqlite3.connect(settings.database_path)
+    con.execute("UPDATE projects SET workflow_preset = 'flux3-klein-qualite' WHERE id = ?", (data["series"]["id"],))
+    con.execute("UPDATE panels SET generation_preset = 'flux3-klein-edit-ref-qualite' WHERE id = ?", (panel["id"],))
+    con.execute("PRAGMA user_version = 39")
+    con.commit()
+    con.close()
+
+    with TestClient(create_app(settings, providers=_providers(MockComfyUIClient()))) as c:
+        presets = c.app.state.ctx.presets  # type: ignore[attr-defined]
+        assert presets.defaults.workflow == QWEN_SERIES_WORKFLOW and QWEN_SERIES_WORKFLOW in presets.workflows
+        assert c.get(f"/projects/{data['series']['id']}").json()["workflow_preset"] == QWEN_SERIES_WORKFLOW
+        assert c.get(f"/panels/{panel['id']}").json()["generation_preset"] is None
+        assert c.get(f"/panels/{panel['id']}/images").json() == before  # historique gardé
+        force_stages(c, data["chapter"]["id"], "name")
+        for path in ("sketch", "clean", "regenerate-quality"):
+            if path == "clean":
+                [sketch] = [i for i in c.get(f"/panels/{panel['id']}/images").json() if i["kind"] == "croquis"]
+                r = c.post(f"/panels/{panel['id']}/sketch/validate", json={"image_id": sketch["id"]})
+                assert r.status_code == 200, r.text
+            r = c.post(f"/panels/{panel['id']}/{path}")
+            assert r.status_code == 202, r.text
+            _wait(c)
+            for job in r.json():
+                done = c.get(f"/jobs/{job['id']}").json()
+                assert done["status"] == "succeeded", (path, done)
+                assert str(done["params"].get("preset", "")).startswith("qwen-image"), (path, done["params"])
+        assert len(c.get(f"/panels/{panel['id']}/images").json()) == 4
+    assert _version(settings.database_path) == SCHEMA_VERSION

@@ -194,7 +194,7 @@ def list_presets(ctx: AppContext = Depends(get_ctx)) -> dict[str, Any]:
                 "description": w.preset.description,
                 "engine": w.preset.engine,
                 "engine_name": w.preset.engine_name,
-                # Sans point d'insertion LoRA (FLUX 3 Klein) : la fiche série et les fiches le signalent.
+                # Sans point d'insertion LoRA (`lora_chain`) : la fiche série et les fiches le signalent.
                 "supports_lora": w.preset.supports_lora,
                 "params": sorted(w.preset.mapping),
                 "reference_slots": len(w.preset.reference_images),

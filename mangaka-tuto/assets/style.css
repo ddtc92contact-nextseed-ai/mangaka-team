@@ -274,7 +274,6 @@ pre.gabarit {
   border-radius: 8px; padding: 10px 12px; white-space: pre-wrap; word-break: break-word; max-height: 420px; overflow: auto; margin: 6px 0 10px;
 }
 mark.var { background: rgba(125, 211, 252, 0.16); color: var(--llm); border-radius: 3px; padding: 0 1px; }
-mark.obj { background: rgba(252, 211, 77, 0.25); color: var(--comfy); border-radius: 3px; }
 .fiche details summary { cursor: pointer; color: var(--text); padding: 4px 0; }
 .code-steps li { margin-bottom: 8px; }
 

@@ -1005,9 +1005,9 @@ Règles vérifiées au chargement :
   avertissement dans `GET /presets`, et les cases avec références de ce palier échouent avec un
   message clair : jamais de repli sur un autre palier) ;
 - `sketch` doit désigner un workflow chargé de rôle `croquis`, `quality` un workflow de rôle `generation`
-  (voir « Second moteur : FLUX 3 Image Klein »).
+  (voir « Croquis et Qualité propres à un preset »).
 
-Chaque preset déclare aussi son moteur d'image, `engine: qwen-image` ou `engine: flux3-klein` (exposé par
+Chaque preset déclare aussi son moteur d'image, `engine: qwen-image` (exposé par
 `GET /presets` et `GET /presets/workflows`, avec `engine_name` et `supports_lora`).
 
 Les noms de fichiers de modèles (`unet_name`, `clip_name`, `vae_name`) vivent
@@ -1127,116 +1127,19 @@ série Rapide, `qwen-image-edit-ref` dans une série Qualité. `defaults.yaml �
 ne sert plus qu'aux presets sans `with_references`. La taille de génération reste celle de la mise en page
 (≈ 1 Mpx, `layout.yaml`) pour tous les paliers, cases avec références comprises.
 
-### Second moteur : FLUX 3 Image Klein
+### Croquis et Qualité propres à un preset (`sketch`, `quality`)
 
-Six presets écrits et mesurés par Morigane (16/10/2026), à côté de Qwen-Image 2.1 (`engine: flux3-klein`) :
-
-| Preset | Rôle | Étapes | cfg | Réf. | Liens |
-| --- | --- | --- | --- | --- | --- |
-| `flux3-klein-croquis` | `croquis` | 6 | 1 | 0 | `with_references` → `flux3-klein-edit-ref-croquis` |
-| `flux3-klein-edit-ref-croquis` | `croquis` | 6 | 1 | 5 | — |
-| `flux3-klein-qualite` (palier de série « FLUX 3 Klein · Qualité ») | `generation` | 15 | 2,5 | 0 | `with_references`, `from_sketch`, `sketch`, `quality` |
-| `flux3-klein-edit-ref-qualite` | `generation` | 15 | 2,5 | 5 | `from_sketch`, `sketch`, `quality` |
-| `flux3-klein-qualite-from-sketch` | `propre` | 15 | 2,5 | 0 | `with_references`, `source_image`, `denoise` 0,65 |
-| `flux3-klein-edit-ref-qualite-from-sketch` | `propre` | 15 | 2,5 | 5 | `source_image`, `denoise` 0,65 |
+Qwen-Image 2.1 est le seul moteur livré (`engine: qwen-image`) ; le champ `engine` reste lu (groupage des
+listes par moteur, « Recharger les flux ») pour un flux ajouté à la main.
 
 - **Les paliers suivent le preset.** Un preset peut déclarer son croquis (`sketch:`) et sa Qualité
   (`quality:`). Croquis et « Régénérer en Qualité » d'une case : preset de la case (`generation_preset`),
   sinon de la série ; puis son lien `sketch` / `quality` ; puis la variante `with_references` si une fiche
-  de la case a une image. Sans lien (presets Qwen) : `defaults.workflow_sketch` / `workflow_quality`,
-  comportement inchangé. « Passer au propre » suivait déjà la case (`from_sketch`). L'estimation des
-  croquis suit la même résolution. Une case FLUX dans une série Qwen croque et passe en Qualité sur FLUX ;
-  une case Qwen dans une série FLUX, sur Qwen.
-- **cfg 2,5 et `distilled: false` pour la Qualité.** Mesuré à case, prompt et graine identiques : cfg 1 =
-  score 68, rejeté (zone de texte parasite) ; cfg 2,5 = 96, ok. Le point de contrôle lit donc son négatif
-  au-dessus de 1 ; le croquis reste à cfg 1 (`distilled: true`).
-- **Pas de palier « Qualité max ».** 30 pas n'apportent rien (79 → 79, 63 → 52, mesuré) : `quality`
-  pointe sur la Qualité à 15 pas.
-- **Références** : `ReferenceMultiLatent` (nœud 6), entrées **pointées** `images.image0…4` (une forme
-  imbriquée `{"images": {…}}` est acceptée par ComfyUI et ignorée en silence). Un emplacement vide est
-  retiré avec son entrée. Le VAE FLUX 2 (nœud 3) est obligatoire : sans lui, les références sont ignorées.
-- **Aucun LoRA** (licence FLUX Kommunity v1.0 : pas de fine-tuning) : pas de `lora_chain`. Le moteur ne
-  passe alors aucun LoRA au graphe et inscrit sur le job et la version `lora_warning` (« LoRA ignorés : le
-  flux FLUX 3 Klein ne prend pas de LoRA (encre.safetensors (style), …) ») ; la fiche série et les fiches
-  de la bibliothèque affichent un avertissement et grisent leurs champs LoRA.
-
-#### Grille de composition à boîtes (`prompt_format: layout`)
-
-Pour une image à plusieurs sujets, FLUX 3 Klein accepte, en plus du paragraphe, une table de boîtes : le
-workflow officiel de BFL (`image_flux3_klein_distilled_t2i.json`) les dessine dans `CreateBoundingBoxes`,
-puis `Flux3LayoutPrompt` les ajoute au prompt (`[{"id": "obj_1", "bbox": […], "desc": …}]`). Un preset
-choisit son format :
-
-- `prompt_format: paragraph` (défaut, tous les presets d'avant) : le paragraphe seul, graphe inchangé ;
-- `prompt_format: layout` + bloc `layout` : le paragraphe entre dans `Flux3LayoutPrompt` (c'est lui que vise
-  `mapping.positive_prompt`), les boîtes dans `CreateBoundingBoxes` :
-
-```yaml
-prompt_format: layout
-mapping:
-  positive_prompt: { node: "31", input: prompt }   # Flux3LayoutPrompt ; le nœud 4 encode sa sortie
-layout:
-  boxes: { node: "30", input: editor_state }       # CreateBoundingBoxes : boîtes en pixels
-  width: { node: "30", input: width }               # taille de la case (celle du latent)
-  height: { node: "30", input: height }
-```
-
-Deux presets livrés, dérivés de ceux de Morigane (mêmes modèles, 15 pas, cfg 2,5 ; seul le chemin du prompt
-positif change) : `flux3-klein-qualite-layout` et `flux3-klein-edit-ref-qualite-layout` (ses
-`with_references`). Ils ne sont **pas proposés comme palier de série** : le gain de la grille n'est pas
-mesuré. On les choisit sur une case (« Workflow » de l'atelier), ou on les compare au paragraphe avec le banc.
-
-**Quand l'utiliser** : les cases à 2 personnages ou plus dont la mise en scène place les personnages (« Kenji à
-gauche, Aiko à droite au premier plan »), quand le paragraphe seul les mélange, les inverse ou en perd un. Une
-case à 0 ou 1 personnage n'a pas de boîte : le paragraphe passe seul, le résultat est celui du preset
-`paragraph`. Pas de grille pour « Passer au propre » (image → image), une réparation ou « Changer l'angle ».
-
-**Les boîtes** (`pipeline/prompt_layout.py`) : une par personnage présent à l'image (noms de la case dans
-l'ordre de la distribution, puis les fiches non nommées), en fractions de la case (x, y, l, h dans [0, 1]),
-avec une courte description : le nom puis 4 mots-clés de la fiche au plus (sans les mots de couleur pour
-une série en noir et blanc). Position :
-
-- lue dans la mise en scène de la case, phrase par phrase : `gauche` / `centre` / `droite` (et `left`,
-  `center`, `middle`, `right`) donnent la colonne, `premier plan` / `arrière-plan`, `au fond`, `second plan`
-  la profondeur (boîte haute et ancrée en bas, ou plus petite, plus étroite et plus haute). Un repère se
-  rapporte au personnage qui le précède, sinon à celui qui le suit ; « main droite », « bras gauche »… ne
-  comptent pas ;
-- sinon répartition en colonnes égales, dans l'ordre de la distribution (déterministe).
-
-Les colonnes se recouvrent de 20 % (deux personnages côte à côte se touchent), jamais une boîte n'en
-contient une autre. Le paragraphe cite chaque boîte par `<obj_N>` après la première mention du nom
-(consigne du nœud). La version garde `prompt_format` et `layout_boxes` (position, description, source :
-« mise en scène » ou « répartition »).
-
-**Piège** : dans le format API, une liste en entrée est lue comme un lien `[nœud, sortie]` (« Bad linked
-input »). Les boîtes passent donc enveloppées, `{"__value__": [...]}`, comme le fait le frontend de ComfyUI.
-
-#### Banc A/B paragraphe / grille (`python -m mangaka_engine.bench.flux_layout`)
-
-```bash
-cd engine
-.venv/bin/python -m mangaka_engine.bench.flux_layout --chapter 12 --limit 6 --seed 42             # réel (GPU)
-.venv/bin/python -m mangaka_engine.bench.flux_layout --chapter 12 --dry-run                       # préparation seule
-MANGAKA_DATA_DIR=/tmp/copie-data .venv/bin/python -m mangaka_engine.bench.flux_layout --chapter 12 --mock
-```
-
-Le banc prend les cases du chapitre à 2 personnages ou plus (dans l'ordre des pages, `--limit` au plus,
-5 par défaut) et prépare pour chacune deux jobs à la **même graine**, avec le **même prompt** (figé, comme
-« Comparer deux prompts ») et les **mêmes fiches** : bras A sur `flux3-klein-qualite`, bras B sur
-`flux3-klein-qualite-layout` (leurs variantes avec références si une fiche a une image ;
-`--paragraph-preset` / `--layout-preset` pour en choisir d'autres). Il les envoie à ComfyUI l'un après
-l'autre, passe chaque version au contrôle qualité, puis écrit `report.html` (images côte à côte, boîtes,
-verdict et score du QC, temps, prompt) et `report.json` dans `data/bench/flux-layout/<date-heure>-<mode>/`
-(`--out` pour un autre dossier).
-
-- Les deux bras sont des comparaisons A/B ordinaires (`ab_mode` « layout » au journal) : les versions
-  s'ajoutent aux cases et l'auteur peut y retenir son bras. Les jobs sont créés « en cours » et exécutés
-  par le banc : la file du moteur, s'il tourne, ne les prend pas. Mieux vaut le lancer file vide.
-- `--dry-run` : cases, presets, graines et boîtes, sans rien écrire en base ni rien envoyer.
-- `--mock` : ComfyUI et contrôle qualité factices, rapport factice. Il écrit dans la base comme le mode
-  réel : à lancer sur une copie de `data/` (`MANGAKA_DATA_DIR`).
-- Jamais en CI ni en QA : la mesure réelle se fait sur la GX10 (Morigane ou David). Les tests
-  (`tests/test_flux_layout.py`) le font tourner en mock.
+  de la case a une image. Sans lien (presets Qwen livrés) : `defaults.workflow_sketch` / `workflow_quality`.
+  « Passer au propre » suit la case (`from_sketch`). L'estimation des croquis suit la même résolution.
+- **Flux sans LoRA.** Un preset sans `lora_chain` ne reçoit aucun LoRA : le moteur inscrit sur le job et la
+  version `lora_warning` (« LoRA ignorés : le flux … ne prend pas de LoRA (encre.safetensors (style), …) ») ;
+  la fiche série et les fiches de la bibliothèque affichent un avertissement et grisent leurs champs LoRA.
 
 ### Palier croquis et passage au propre
 

@@ -19,7 +19,7 @@ export function workshopPresets(presets: WorkflowPreset[], selected?: string | n
 export const OTHER_ENGINES = "Autres";
 
 /** Moteurs connus, dans l'ordre d'affichage ; les autres suivent dans l'ordre des presets, « Autres » en dernier. */
-const ENGINE_ORDER = ["qwen-image", "flux3-klein"];
+const ENGINE_ORDER = ["qwen-image"];
 
 export interface EngineGroup<T> {
   /** `engine` du preset ; null : « Autres ». */
@@ -30,7 +30,7 @@ export interface EngineGroup<T> {
 
 type EngineFields = Pick<WorkflowPreset, "engine" | "engine_name">;
 
-/** Nom affiché du moteur d'un flux (« Qwen-Image 2.1 », « FLUX 3 Klein ») ; « Autres » sans moteur déclaré. */
+/** Nom affiché du moteur d'un flux (« Qwen-Image 2.1 ») ; « Autres » sans moteur déclaré. */
 export function engineLabel(preset: EngineFields | null | undefined): string {
   if (!preset?.engine) return OTHER_ENGINES;
   return preset.engine_name || preset.engine;
@@ -60,7 +60,7 @@ export function groupByEngine<T extends EngineFields>(presets: T[]): EngineGroup
   return [...groups.values()].sort((a, b) => rank(a) - rank(b));
 }
 
-/** Résumé de « Recharger les flux » : « 37 flux rechargés (Qwen-Image 2.1 : 30, FLUX 3 Klein : 7). » */
+/** Résumé de « Recharger les flux » : « 30 flux rechargés (Qwen-Image 2.1 : 30). » */
 export function reloadSummary(result: Pick<PresetsReload, "workflows" | "engines" | "issues">): string {
   const engines = result.engines.map((e) => `${e.name} : ${e.workflows}`).join(", ");
   const head = `${result.workflows} flux rechargé${result.workflows > 1 ? "s" : ""}${engines ? ` (${engines})` : ""}.`;

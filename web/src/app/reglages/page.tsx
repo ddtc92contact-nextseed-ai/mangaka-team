@@ -137,7 +137,7 @@ function PresetsReloadCard() {
         </Button>
       </div>
       <p className="text-sm text-zinc-400">
-        Après avoir ajouté ou corrigé un flux dans <code>presets/workflows/</code> (Qwen-Image 2.1, FLUX 3 Klein…),
+        Après avoir ajouté ou corrigé un flux dans <code>presets/workflows/</code> (Qwen-Image 2.1),
         recharge-les ici : pas besoin de redémarrer le moteur. Refusé tant qu&apos;une génération tourne ; les
         générations en attente partiront avec les nouveaux flux. Les pages déjà ouvertes les voient après
         actualisation.
