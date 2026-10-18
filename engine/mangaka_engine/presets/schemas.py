@@ -647,6 +647,9 @@ class Defaults(_Strict):
     panel_references: Literal["principale", "toutes"] = "principale"
     # Planche de style de la série (essais, référence de style) ; absent = pas de planche de style.
     style_board: StyleBoardSettings | None = None
+    # Prompt image des nouvelles séries et des séries sans choix (fiche série, « Prompt image ») : `détaillé`
+    # (fragments ou paragraphe du rédacteur, inchangé) ou `gabarit` (prompt court assemblé par le moteur, #228).
+    image_prompt_mode: Literal["détaillé", "gabarit"] = "détaillé"
 
 
 STYLE_BOARD_VARIABLES = {"scene", "style"}
@@ -2386,6 +2389,114 @@ class MentionSettings(_Strict):
     crowd_warning: int = Field(default=2, ge=0, le=20)
 
 
+TEMPLATE_LINE_VARIABLES = {"slot", "name", "description"}
+
+
+class TemplateReferenceLines(_Strict):
+    """Ligne de chaque image envoyée en mode gabarit, par sorte de fiche ($slot, $name, $description : description
+    courte de la fiche ; un objet, un véhicule ou une créature est nommé et décrit en quelques mots)."""
+
+    character: str = "<image$slot> is the model sheet of $name."
+    decor: str = "<image$slot> is the location $name."
+    object: str = "<image$slot> is $name, $description."
+    vehicle: str = "<image$slot> is $name, $description."
+    creature: str = "<image$slot> is $name, $description."
+    style: str = "<image$slot> is a style reference only."
+    # Ligne d'une fiche sans description (« <image2> is Robot. ») : sa description est vide.
+    bare: str = "<image$slot> is $name."
+
+    @field_validator("character", "decor", "object", "vehicle", "creature", "style", "bare")
+    @classmethod
+    def _check_line(cls, value: str) -> str:
+        _check_templates([value], TEMPLATE_LINE_VARIABLES)
+        return value
+
+
+class TemplatePromptSettings(_Strict):
+    """Prompt image « gabarit » (`template` d'image_prompt.yaml, pipeline/prompt_template.py) : prompt court assemblé
+    par le moteur, dans cet ordre — une ligne par image envoyée, UNE consigne de tri commune, l'ancre visuelle de
+    chaque personnage présent, les règles (casting fermé, pas de texte), le décor en une phrase (détaillé en plan
+    large seulement), le style en une phrase, puis la case (terme de plan + 1 à 3 phrases d'action du LLM)."""
+
+    references: TemplateReferenceLines = Field(default_factory=TemplateReferenceLines)
+    # Consigne de tri commune, ajoutée dès qu'une fiche de personnage est envoyée.
+    sorting: str = (
+        "Take only each character's face, hair, body and outfit from the sheets, not their layout, rulers or labels."
+    )
+    # Ancre de chaque personnage présent ($name, $anchor : ancre de la fiche, sinon résumé de sa description).
+    anchor: str = "$name: $anchor."
+    # Mots au plus du résumé de la description qui remplace une ancre vide (et de la description courte d'un objet).
+    anchor_words: int = Field(default=15, ge=3, le=60)
+    # Casting fermé de la case ($names : présents, joints par « , ») ; `empty` pour une case sans personnage.
+    cast: str = (
+        "The characters of this panel are $names; each appears once; every character has two arms and two hands; "
+        "no other people."
+    )
+    empty: str = "No people."
+    # Toujours ajouté aux règles (le négatif « pas de texte » n'est pas lu à cfg 1).
+    no_text: str = "No text, no speech bubbles."
+    # Décor en une phrase ($setting : nom du lieu et ses éléments principaux) ; éléments au plus.
+    setting: str = "Setting: $setting."
+    setting_elements: int = Field(default=4, ge=1, le=8)
+    # Décor détaillé ($details), ajouté seulement pour les plans de `wide_shots`.
+    details: str = "Details of the place: $details."
+    wide_shots: list[str] = Field(default_factory=lambda: ["plan large", "plan d'ensemble"])
+    # Style en une phrase ($style_lead : phrase de style de la série, $finition, $triggers : mots déclencheurs du
+    # LoRA de style) ; un morceau dont une variable est vide est omis.
+    style: list[str] = Field(default_factory=lambda: ["$style_lead", "$finition.", "$triggers."])
+    # La case : terme de plan de `camera_terms` ($camera), puis les phrases d'action ($action).
+    panel: list[str] = Field(default_factory=lambda: ["$camera.", "$action"])
+    # Phrases d'action du LLM : mots au plus (au-delà : refusé, une relance, puis repli sur la description).
+    action_max_words: int = Field(default=60, ge=10, le=200)
+    # Décor court rédigé par le LLM : mots au plus.
+    setting_max_words: int = Field(default=25, ge=5, le=80)
+    # Longueur visée du prompt envoyé (mots, indicative : vérifiée par les tests, jamais tronquée).
+    min_words: int = Field(default=120, ge=10)
+    max_words: int = Field(default=200, ge=10)
+
+    @field_validator("anchor")
+    @classmethod
+    def _check_anchor(cls, value: str) -> str:
+        _check_templates([value], {"name", "anchor"})
+        return value
+
+    @field_validator("cast")
+    @classmethod
+    def _check_cast(cls, value: str) -> str:
+        _check_templates([value], {"names"})
+        return value
+
+    @field_validator("setting")
+    @classmethod
+    def _check_setting(cls, value: str) -> str:
+        _check_templates([value], {"setting"})
+        return value
+
+    @field_validator("details")
+    @classmethod
+    def _check_details(cls, value: str) -> str:
+        _check_templates([value], {"details"})
+        return value
+
+    @field_validator("style")
+    @classmethod
+    def _check_style(cls, value: list[str]) -> list[str]:
+        _check_templates(value, {"style_lead", "finition", "triggers"})
+        return value
+
+    @field_validator("panel")
+    @classmethod
+    def _check_panel(cls, value: list[str]) -> list[str]:
+        _check_templates(value, {"camera", "action"})
+        return value
+
+    @field_validator("sorting", "empty", "no_text")
+    @classmethod
+    def _check_fixed(cls, value: str) -> str:
+        _check_templates([value], set())
+        return value
+
+
 class ImagePromptSettings(_Strict):
     """Construction du prompt final d'une case (voir pipeline/prompt.py)."""
 
@@ -2485,6 +2596,8 @@ class ImagePromptSettings(_Strict):
     # (croquis, version propre, Turbo…) : à cfg 1 le négatif (« duplicate character ») n'est jamais lu.
     # Vide = aucune ligne.
     single_instance: str = ""
+    # Prompt image « gabarit » (série en mode gabarit, `image_prompt_mode`).
+    template: TemplatePromptSettings = Field(default_factory=TemplatePromptSettings)
 
     @field_validator("parts")
     @classmethod

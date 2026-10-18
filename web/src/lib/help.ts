@@ -37,6 +37,8 @@ export const HELP = {
     "Force avec laquelle le modèle suit le prompt (1 à 3). À 1, ComfyUI saute la passe négative : le prompt négatif est ignoré (« négatif inactif »). Au-dessus de 1, il est lu, et chaque étape coûte environ deux fois plus. Au-delà de 3, l'image se dégrade (trop contrastée). Les paliers distillés (Turbo, croquis) restent à 1. Vide : la valeur du palier.",
   "serie.ai_prompt":
     "Oui : le LLM du dessinateur rédige le prompt image de chaque case en un vrai paragraphe (sujet, action, cadrage, décor, lumière, style), comme l'attend Qwen-Image. Il est écrit une fois par case, visible et modifiable dans l'atelier. Non : l'assemblage par fragments, sans LLM. Consignes, langue et longueur : écran « L'équipe », Dessinateur.",
+  "serie.image_prompt_mode":
+    "Détaillé : le prompt habituel (paragraphe du rédacteur ou fragments, rôle et tri de chaque fiche, décor complet). Gabarit : un prompt court du moteur (fiches, ancres des personnages, casting fermé, décor simple, style, 1 à 3 phrases d'action de l'IA) ; changer de mode reconstruit les prompts automatiques.",
   "serie.anime_consistency":
     "Ajoute le LoRA « Cohérence anime » aux générations de la série : visages et design des personnages restent plus stables d'une case à l'autre. Testé seulement au palier Qualité (modèle non distillé) : sur Turbo et Rapide il n'est pas ajouté. Désactivé par défaut.",
   "serie.sketch":

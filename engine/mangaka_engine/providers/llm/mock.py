@@ -20,6 +20,12 @@ dans le cadre avec une pose, décrit la caméra, la lumière, et finit par les m
 la description française de la case n'y entre pas (elle reste dans `notes`). `[mock:prompt-invalide:N]` dans la description de la case :
 les N premiers essais sont invalides ; `[mock:prompt-intrus:N]` : ils nomment un personnage absent.
 
+Pour le prompt image « gabarit » (`"task": "image_prompt_template"`), il rend 1 à 3 phrases d'action anglaises
+(qui, action, expression, gauche ou droite ; 60 mots au plus) et le décor court (lieu et éléments reçus) ;
+`[mock:gabarit-invalide:N]` dans la description : les N premières réponses sont refusées (trop longues, mot
+photo). Pour l'ancre visuelle d'une fiche (`"task": "visual_anchor"`), le début de sa description et de ses
+mots-clés (le mock ne traduit pas), sans le nom.
+
 Pour le dialogue sur une case (`"task": "image_prompt_dialog"`), il lit la consigne de l'auteur : un plan
 (« gros plan », « plan large »…), un angle (« contre-plongée », « de dos »…), « en train de … » (action),
 « fond blanc » (ambiance) ; pour un gros plan il choisit l'image « portrait » ou « visage » d'un personnage
@@ -110,6 +116,7 @@ _ID_INVALID_MARK = re.compile(r"\[mock:id-invalide:(\d+)\]")
 _SPARSE_MARK = re.compile(r"\[mock:dialogues-maigres:(\d+)\]")
 _PROMPT_INVALID_MARK = re.compile(r"\[mock:prompt-invalide:(\d+)\]")
 _PROMPT_INTRUDER_MARK = re.compile(r"\[mock:prompt-intrus:(\d+)\]")
+_TEMPLATE_INVALID_MARK = re.compile(r"\[mock:gabarit-invalide:(\d+)\]")
 _DIALOG_INVALID_MARK = re.compile(r"\[mock:dialogue-invalide:(\d+)\]")
 _DRAFT_INVALID_MARK = re.compile(r"\[mock:fiche-invalide:(\d+)\]")
 _IDENTITY_INVALID_MARK = re.compile(r"\[mock:identite-invalide:(\d+)\]")
@@ -129,6 +136,8 @@ TASKS = (
     "art_direction",
     "image_prompt",
     "image_prompt_dialog",
+    "image_prompt_template",
+    "visual_anchor",
     "character_draft",
     "cover_prompt",
     "palette",
@@ -931,6 +940,10 @@ class MockLLMProvider:
             return LLMResult(text=json.dumps(mock_cover_prompt(ctx), ensure_ascii=False), model="mock")
         if ctx is not None and ctx.get("task") == "image_prompt":
             return LLMResult(text=self._image_prompt_answer(messages, ctx), model="mock")
+        if ctx is not None and ctx.get("task") == "image_prompt_template":
+            return LLMResult(text=self._template_answer(messages, ctx), model="mock")
+        if ctx is not None and ctx.get("task") == "visual_anchor":
+            return LLMResult(text=json.dumps(mock_visual_anchor(ctx), ensure_ascii=False), model="mock")
         if ctx is not None and ctx.get("task") == "back_summary":
             return LLMResult(text=self._summary_answer(messages, ctx), model="mock")
         if ctx is not None and ctx.get("task") == "series_creation":
@@ -1002,6 +1015,19 @@ class MockLLMProvider:
         if intruder and absent and attempt <= int(intruder.group(1)):
             out["prompt"] = f"{out['prompt']} {absent[0]} watches the scene from the edge of the frame."
         return json.dumps(out, ensure_ascii=False)
+
+    def _template_answer(self, messages: list[ChatMessage], ctx: dict[str, Any]) -> str:
+        attempt = 1 + sum(1 for m in messages if m.role == "assistant")
+        description = str((ctx.get("panel") or {}).get("description") or "")
+        mark = _TEMPLATE_INVALID_MARK.search(description)
+        invalid = int(mark.group(1)) if mark else self.invalid_attempts
+        if attempt <= invalid:
+            if attempt % 2:
+                return json.dumps(
+                    {"action": " ".join(["Aiko runs across the frame, seen through a telephoto lens."] * 8)}
+                )
+            return "Voici l'action : ils courent…"
+        return json.dumps(mock_template_action(ctx), ensure_ascii=False)
 
     def _dialog_answer(self, messages: list[ChatMessage], ctx: dict[str, Any]) -> str:
         attempt = 1 + sum(1 for m in messages if m.role == "assistant")
@@ -1393,6 +1419,40 @@ def mock_image_prompt(ctx: dict[str, Any]) -> dict[str, Any]:
     if lang == "en" and description:
         notes += f" Case (non traduite) : {description[:600]}"
     return {"prompt": " ".join(sentences), "language": lang, "notes": notes}
+
+
+_TEMPLATE_ACTIONS = ["lunges forward", "crouches low, ready to spring", "steps back, one hand raised", "reaches out"]
+_TEMPLATE_LOOKS = ["with a determined frown", "wide-eyed with surprise", "with a tense, clenched jaw"]
+_TEMPLATE_SPOTS = ["on the left", "on the right", "in the centre"]
+
+
+def mock_template_action(ctx: dict[str, Any]) -> dict[str, Any]:
+    """Phrases d'action déterministes du gabarit : une par personnage présent (3 au plus), anglaises, courtes ;
+    décor court tiré du lieu et des éléments reçus (le mock ne traduit pas)."""
+    panel = ctx.get("panel") or {}
+    seed = _seed(str(panel.get("description") or "") + str(panel.get("action") or ""))
+    names = [str(c.get("name")) for c in ctx.get("characters") or [] if c.get("name")]
+    names += [str(e) for e in ctx.get("extras") or []]
+    sentences = []
+    for i, name in enumerate(names[:3]):
+        act = _TEMPLATE_ACTIONS[(seed + i) % len(_TEMPLATE_ACTIONS)]
+        look = _TEMPLATE_LOOKS[(seed + i) % len(_TEMPLATE_LOOKS)]
+        sentences.append(f"{name} {act} {_TEMPLATE_SPOTS[i % len(_TEMPLATE_SPOTS)]}, {look}.")
+    if not sentences:
+        sentences.append("The place is empty and still, nobody in sight.")
+    place = ", ".join(p for p in (str(ctx.get("place") or ""), *(str(e) for e in ctx.get("elements") or [])) if p)
+    return {"action": " ".join(sentences), "setting": place or None, "language": "en"}
+
+
+def mock_visual_anchor(ctx: dict[str, Any]) -> dict[str, Any]:
+    """Ancre factice : le début de la description et des mots-clés (15 mots au plus), sans le nom du personnage."""
+    name = str(ctx.get("name") or "")
+    text = ", ".join(p for p in (str(ctx.get("description") or ""), *(str(k) for k in ctx.get("keywords") or [])) if p)
+    if name:
+        text = re.sub(rf"(?<![\w-]){re.escape(name)}(?![\w-])", " ", text, flags=re.IGNORECASE)
+    words = _ANY_MARK.sub(" ", text).replace(".", ",").split()
+    anchor = " ".join(words[:15]).strip(" ,;:")
+    return {"anchor": anchor or "slim build, plain clothes", "language": "en"}
 
 
 def mock_cover_prompt(ctx: dict[str, Any]) -> dict[str, Any]:

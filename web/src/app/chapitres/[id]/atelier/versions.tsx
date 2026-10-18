@@ -474,7 +474,9 @@ function VersionLarge({ img }: { img: PanelImage }) {
         )}
         {typeof p.prompt === "string" && (
           <details>
-            <summary className="cursor-pointer text-zinc-400 hover:text-zinc-200">Prompt utilisé</summary>
+            <summary className="cursor-pointer text-zinc-400 hover:text-zinc-200">
+              Prompt utilisé · mode {typeof p.prompt_mode === "string" ? p.prompt_mode : "détaillé"}
+            </summary>
             <p className="mt-1 whitespace-pre-line break-words text-xs text-zinc-400">{p.prompt}</p>
           </details>
         )}

@@ -387,3 +387,48 @@ framing:
   subjective: "Subjective point-of-view panel: we see exactly what the onlookers see, through their eyes; the onlookers themselves stay out of the frame, no figure in the foreground"
   empty: "No character in the frame: the panel shows only the place and what happens in it"
   only: "Only $names in the frame, nobody else"
+
+# Prompt image « gabarit » (#228) : prompt COURT assemblé par le moteur pour les séries en mode gabarit (fiche
+# série, « Prompt image » ; défaut : `image_prompt_mode` de defaults.yaml). Pipeline/prompt_template.py. Inspiré
+# du manuel qui donne des planches cohérentes à 80 % avec Qwen-Image 2.1 : une consigne de tri commune, une courte
+# ancre par personnage, les règles écrites une fois, un décor simple, une à trois phrases d'action par case.
+# Ordre fixe :
+#   1. une ligne par image envoyée (`references`, ajoutées à l'envoi : elles dépendent des emplacements) ;
+#   2. UNE consigne de tri commune (`sorting`), dès qu'une fiche de personnage est envoyée ;
+#   3. l'ancre visuelle de chaque personnage PRÉSENT (`anchor` ; champ « Ancre visuelle » de la fiche, sinon
+#      résumé de sa description en `anchor_words` mots) ;
+#   4. les règles : casting fermé (`cast`, `empty` sans personnage) et `no_text` ;
+#   5. le décor en une phrase (`setting` : nom du lieu et `setting_elements` éléments) ; le décor détaillé
+#      (`details`) seulement pour les plans de `wide_shots` ;
+#   6. le style en une phrase (`style` : phrase de style et finition de la série, mots déclencheurs du LoRA) ;
+#   7. la case (`panel`) : terme de plan (`camera_terms`), puis 1 à 3 phrases d'action écrites par le LLM
+#      (prompts/redacteur-image-gabarit.yaml), `action_max_words` mots au plus ; refusées (mots photo, mots de
+#      couleur d'une série en N&B, personnage absent nommé) → une relance → sinon la description de la case.
+# Rien du mode détaillé : ni consigne de tri par fiche, ni `references.after`, ni `single_instance`, ni savoir-faire
+# ni bible. Restent le prompt négatif (« pas de texte », anti-photo, plan serré) et le retrait des mots de couleur
+# d'une série en noir et blanc. Cible : `min_words` à `max_words` mots au total.
+template:
+  references:
+    character: "<image$slot> is the model sheet of $name."
+    decor: "<image$slot> is the location $name."
+    object: "<image$slot> is $name, $description."
+    vehicle: "<image$slot> is $name, $description."
+    creature: "<image$slot> is $name, $description."
+    style: "<image$slot> is a style reference only."
+    bare: "<image$slot> is $name."
+  sorting: "Take only each character's face, hair, body and outfit from the sheets, not their layout, rulers or labels."
+  anchor: "$name: $anchor."
+  anchor_words: 15
+  cast: "The characters of this panel are $names; each appears once; every character has two arms and two hands; no other people."
+  empty: "No people."
+  no_text: "No text, no speech bubbles."
+  setting: "Setting: $setting."
+  setting_elements: 4
+  details: "Details of the place: $details."
+  wide_shots: [plan large, plan d'ensemble]
+  style: ["$style_lead", "$finition.", "$triggers."]
+  panel: ["$camera.", "$action"]
+  action_max_words: 60
+  setting_max_words: 25
+  min_words: 120
+  max_words: 200

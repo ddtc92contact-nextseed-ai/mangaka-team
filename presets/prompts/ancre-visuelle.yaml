@@ -1,0 +1,34 @@
+# Fiche personnage, bouton « Proposer » de l'« Ancre visuelle » (#228) : le LLM du Dessinateur résume la description
+# visuelle de la fiche en une ancre courte, en anglais (cheveux, peau, tenue), reprise telle quelle par le prompt
+# image « gabarit » (template.anchor d'image_prompt.yaml). Rien n'est enregistré : l'auteur relit puis enregistre.
+#
+# Variables : $name $description $keywords $max_words $context_json ; relance : $error.
+id: ancre-visuelle
+description: Ancre visuelle courte d'un personnage (≈ 15 mots, anglais) tirée de sa description.
+language: en
+max_words: 25             # au-delà : refusée puis redemandée (≈ 15 mots visés)
+max_retries: 1
+temperature: 0.2
+
+system: |
+  You write the visual anchor of a manga character for an image model: about 15 English words, a comma-separated
+  list of the most distinctive visible traits — hair (cut, colour), skin, build, outfit, one signature accessory.
+  Never the name, never a personality trait, never a pose, never a word of photography. At most $max_words words.
+  You answer ONLY with a valid JSON object, with no text around it and no code block.
+
+user: |
+  Character: $name
+  Visual description (French or English): $description
+  Prompt keywords: $keywords
+
+  Answer format:
+  {"anchor": "short black hair, tan skin, red gi with a black belt, bare feet", "language": "en"}
+
+  <contexte>
+  $context_json
+  </contexte>
+
+retry: |
+  Your previous answer is invalid (errors in French):
+  $error
+  Fix these errors and send the complete JSON object again, and only it.
