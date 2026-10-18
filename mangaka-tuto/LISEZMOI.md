@@ -100,7 +100,7 @@ Deux fichiers de données :
   (`presets/prompts/`, morceaux d'`image_prompt.yaml`, consigne de vision de `qc.yaml`) avec leurs lignes, les
   variables déclarées par les agents, les modèles de `providers.yaml`, et le prompt de la case d'essai de l'appli
   (`engine/mangaka_engine/agents/trials.py`) construit par le vrai code du moteur (`build_prompt`,
-  `frame_references`, `cite_boxes`…), découpé morceau par morceau. Aucun appel LLM, aucune base. Après un
+  `frame_references`…), découpé morceau par morceau. Aucun appel LLM, aucune base. Après un
   changement de preset ou de code de prompt, depuis la racine du dépôt :
 
   ```bash

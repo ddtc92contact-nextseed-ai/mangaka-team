@@ -48,8 +48,6 @@ class BuiltWorkflow:
     source_image: str | None = None  # image de composition (nom côté ComfyUI)
     # Contrôle appliqué : {type, name, strength, preprocessor, patch, image[, post]} (preset ControlNet).
     control: dict[str, Any] | None = None
-    # Grille de composition (preset `layout`) : boîtes en pixels écrites dans le nœud `layout.boxes`.
-    layout_boxes: list[dict[str, Any]] = field(default_factory=list)
 
 
 def is_link(value: Any) -> bool:
@@ -73,7 +71,6 @@ def build_workflow(
     source_image: str | None = None,
     inpaint_images: tuple[str, str] | None = None,
     control: ControlInput | None = None,
-    layout_boxes: Sequence[dict[str, Any]] = (),
 ) -> BuiltWorkflow:
     """Applique `defaults` puis `params` sur une copie du JSON API.
 
@@ -91,9 +88,6 @@ def build_workflow(
       du type remplace le nœud `preprocessor`, la carte est mise à la taille de la case, le nœud
       d'aperçu (`map_output`) est retiré. Les LoRA restent chaînés AVANT le patch (le patch consomme
       la sortie du modèle, comme le reste : la chaîne LoRA s'insère entre les deux).
-    - preset `layout` (bloc `layout`) : `layout_boxes` = boîtes de la case en fractions (`{x, y, w, h, desc}`,
-      `pipeline/prompt_layout.LayoutBox.as_dict`), écrites en pixels de la case dans `layout.boxes`, avec sa
-      taille ; sans boîte, la liste est vide et le paragraphe passe seul. Un preset `paragraph` n'en accepte aucune.
     """
     preset = loaded.preset
     unknown = sorted(set(params) - set(preset.mapping))
@@ -138,8 +132,6 @@ def build_workflow(
         raise PresetError(f"le workflow {preset.id} verrouille la composition : il attend une image guide")
     if control is not None and preset.control is None:
         raise PresetError(f"le workflow {preset.id} n'accepte pas d'image guide (bloc control)")
-    if layout_boxes and preset.layout is None:
-        raise PresetError(f"le workflow {preset.id} n'a pas de grille de composition (prompt_format: layout)")
 
     workflow = copy.deepcopy(loaded.workflow)
     for name, value in resolved.items():
@@ -152,17 +144,6 @@ def build_workflow(
 
     if preset.source_image is not None:
         workflow[preset.source_image.node]["inputs"][preset.source_image.input] = source_image
-    pixels: list[dict[str, Any]] = []
-    if preset.layout is not None:
-        layout = preset.layout
-        pixels = editor_state(layout_boxes, int(resolved["width"]), int(resolved["height"]))
-        # Une liste dans les entrées du format API est lue comme un lien `[nœud, sortie]` (refus « Bad linked
-        # input ») : le frontend de ComfyUI enveloppe donc toute liste de widget dans {"__value__": …}, que
-        # ComfyUI déballe à la validation. Même forme ici.
-        workflow[layout.boxes.node]["inputs"][layout.boxes.input] = {"__value__": pixels}
-        for key, target in (("width", layout.width), ("height", layout.height)):
-            if resolved.get(key) is not None:
-                workflow[target.node]["inputs"][target.input] = resolved[key]
 
     applied: dict[str, Any] | None = None
     removed: list[str] = []
@@ -191,31 +172,7 @@ def build_workflow(
         removed_nodes=removed,
         source_image=source_image,
         control=applied,
-        layout_boxes=pixels,
     )
-
-
-def editor_state(boxes: Sequence[dict[str, Any]], width: int, height: int) -> list[dict[str, Any]]:
-    """Boîtes en fractions de la case → pixels, au format de l'éditeur du nœud de boîtes de ComfyUI
-    (`{x, y, width, height, metadata: {type, text, desc, palette}}`, CreateBoundingBoxes)."""
-    out: list[dict[str, Any]] = []
-    for box in boxes:
-        try:
-            x, y, w, h = (float(box[k]) for k in ("x", "y", "w", "h"))
-        except (KeyError, TypeError, ValueError):
-            raise PresetError(f"boîte de composition invalide (x, y, w, h attendus) : {box!r}") from None
-        if min(x, y) < 0 or min(w, h) <= 0 or x + w > 1 + 1e-6 or y + h > 1 + 1e-6:
-            raise PresetError(f"boîte de composition hors de la case (fractions de 0 à 1) : {box!r}")
-        out.append(
-            {
-                "x": round(x * width),
-                "y": round(y * height),
-                "width": round(w * width),
-                "height": round(h * height),
-                "metadata": {"type": "obj", "text": "", "desc": str(box.get("desc") or ""), "palette": []},
-            }
-        )
-    return out
 
 
 def control_type(settings: ControlSettings, preset_id: str, type_id: str) -> Any:

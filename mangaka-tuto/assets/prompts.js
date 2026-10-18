@@ -396,13 +396,6 @@
       html += '<p class="prompt-line">' + currentSegs.map(function (s, i) {
         return (i ? '<span class="sep">, </span>' : "") + segmentsHtml([s]).replace('data-seg="0"', 'data-seg="' + i + '"');
       }).join("") + "</p>";
-    } else if (traceTab === "flux") {
-      html += '<pre class="gabarit">' + esc(TR.flux.prompt).replace(/&lt;obj_(\d+)&gt;/g, '<mark class="obj">&lt;obj_$1&gt;</mark>') + "</pre>";
-      html += '<div class="table-wrap"><table class="steps stack"><thead><tr><th>Boîte</th><th>Position (x, y, l, h)</th><th>Description</th><th>Placée par</th></tr></thead><tbody>' +
-        TR.flux.boxes.map(function (b, i) {
-          return "<tr><td><code>obj_" + (i + 1) + "</code> " + esc(b.name) + "</td><td><code>" + [b.x, b.y, b.w, b.h].join(", ") + "</code></td><td>" + esc(b.desc) + "</td><td>" +
-            esc(b.source) + (b.place ? " (" + esc(Object.keys(b.place).map(function (k) { return b.place[k]; }).join(", ")) + ")" : "") + "</td></tr>";
-        }).join("") + "</tbody></table></div>";
     } else if (traceTab === "writer") {
       html += '<pre class="gabarit">' + esc(TR.writerUser) + "</pre>";
     }

@@ -197,8 +197,6 @@ IMAGE_PROMPT_POINTS = [
     ("pipeline/prompt_writer.py", "write_prompt"),
     ("pipeline/prompt_writer.py", "finish_paragraph"),
     ("pipeline/prompt_dialog.py", "propose"),
-    ("pipeline/prompt_layout.py", "layout_boxes"),
-    ("pipeline/prompt_layout.py", "cite_boxes"),
     ("pipeline/generation.py", "build_panel_prompt"),
     ("pipeline/generation.py", "sent_prompt"),
     ("pipeline/generation.py", "panel_brief"),

@@ -21,7 +21,6 @@ window.TUTO = {
 
   engines: {
     "qwen-image": "Qwen-Image 2.1",
-    "flux3-klein": "FLUX 3 Klein",
   },
 
   // presets/workflows/<id>.yaml : `name`, `engine`, `tier.name`. Seuls les flux cités par la carte.
@@ -39,9 +38,6 @@ window.TUTO = {
     "qwen-image-inpaint-turbo": { name: "Qwen-Image 2.1 · Turbo — réparation ciblée", engine: "qwen-image", tier: "Turbo" },
     "qwen-image-inpaint-rapide": { name: "Qwen-Image 2.1 · Rapide — réparation ciblée", engine: "qwen-image", tier: "Rapide" },
     "qwen-image-couverture": { name: "Qwen-Image 2.1 · Qualité — couverture de tome", engine: "qwen-image", tier: "Qualité" },
-    "flux3-klein-qualite": { name: "FLUX 3 Klein · Qualité — texte → image", engine: "flux3-klein", tier: "Qualité" },
-    "flux3-klein-qualite-layout": { name: "FLUX 3 Klein · Qualité · grille — texte → image", engine: "flux3-klein", tier: "Qualité" },
-    "flux3-klein-croquis": { name: "FLUX 3 Klein · Croquis — texte → image", engine: "flux3-klein", tier: "Croquis" },
   },
 
   // presets/defaults.yaml
@@ -246,7 +242,7 @@ window.TUTO = {
         "Prompt retouché à la main (`final_prompt_manual`) : plus jamais réécrit",
       ],
       weak: ["Le paragraphe IA est rédigé à l'intérieur du job ComfyUI : pendant l'appel au LLM, la file entière attend."],
-      src: ["engine/mangaka_engine/pipeline/prompt.py", "engine/mangaka_engine/pipeline/prompt_writer.py", "engine/mangaka_engine/pipeline/prompt_layout.py", "engine/mangaka_engine/pipeline/generation.py", "presets/prompts/redacteur-image.yaml", "presets/image_prompt.yaml"],
+      src: ["engine/mangaka_engine/pipeline/prompt.py", "engine/mangaka_engine/pipeline/prompt_writer.py", "engine/mangaka_engine/pipeline/generation.py", "presets/prompts/redacteur-image.yaml", "presets/image_prompt.yaml"],
       next: ["croquis"],
     },
 
@@ -256,7 +252,7 @@ window.TUTO = {
       title: "Croquis",
       what: "Palier croquis, activé par défaut pour les nouvelles séries : un brouillon de chaque case en quelques secondes (512 px de grand côté), avec le même prompt et les mêmes références que la future version propre. L'auteur trie : il valide une composition (le « croquis retenu »), en redemande une autre ou corrige la description.",
       who: [
-        { kind: "comfy", label: "ComfyUI", detail: "Flux des croquis (`workflow_sketch`), pendant « avec références » si une fiche de la case a des images.", workflows: ["qwen-image-croquis", "qwen-image-edit-ref-croquis", "flux3-klein-croquis"] },
+        { kind: "comfy", label: "ComfyUI", detail: "Flux des croquis (`workflow_sketch`), pendant « avec références » si une fiche de la case a des images.", workflows: ["qwen-image-croquis", "qwen-image-edit-ref-croquis"] },
         { kind: "human", label: "Auteur", detail: "Trie : valide, redemande, corrige." },
       ],
       inputs: ["Prompt de la case", "Images de référence des fiches", "Cadre de la case (ratio)"],
@@ -292,7 +288,7 @@ window.TUTO = {
       title: "Passage au propre / génération",
       what: "La version finale de chaque case. Avec le palier croquis : image → image depuis le croquis retenu, même graine, même prompt, débruitage partiel (ou ControlNet, au choix dans la fiche série). Sans croquis : génération directe. Le flux suit le palier de la série ; une case dont un personnage a une image de référence passe par le flux « avec références ».",
       who: [
-        { kind: "comfy", label: "ComfyUI", detail: "Palier par défaut des nouvelles séries : Qualité. Autres paliers dans la fiche série : Turbo, Rapide, Qualité max, FLUX 3 Klein.", workflows: ["qwen-image-base-qualite", "qwen-image-edit-ref-qualite", "qwen-image-base-qualite-from-sketch", "qwen-image-edit-ref-qualite-from-sketch", "flux3-klein-qualite"] },
+        { kind: "comfy", label: "ComfyUI", detail: "Palier par défaut des nouvelles séries : Qualité. Autres paliers dans la fiche série : Turbo, Rapide, Qualité max.", workflows: ["qwen-image-base-qualite", "qwen-image-edit-ref-qualite", "qwen-image-base-qualite-from-sketch", "qwen-image-edit-ref-qualite-from-sketch"] },
         { kind: "code", label: "Composition verrouillée", detail: "Option : carte de contrôle (job `control_map`) puis pendant ControlNet du palier.", workflows: ["qwen-image-base-qualite-controlnet"] },
       ],
       inputs: ["Prompt, croquis retenu, images de référence", "Palier de la série (`Project.workflow_preset`) ou flux imposé à la case", "Taille en mégapixels (`layout.yaml`)"],
@@ -719,8 +715,8 @@ window.TUTO = {
     { id: "case", term: "Case, planche", def: "Une case (`panel`) est une image de la page ; la planche est la page assemblée et lettrée.", src: ["engine/mangaka_engine/store/models.py"] },
     { id: "distribution", term: "Distribution", def: "Qui apparaît dans le chapitre, case par case (présents, hors champ, locuteurs), et si chacun a sa fiche avec image de référence.", src: ["engine/mangaka_engine/pipeline/cast.py"] },
     { id: "fiche", term: "Fiche, référence", def: "Entrée de la bibliothèque (personnage, décor, objet, véhicule, créature). Ses images sont envoyées au flux « avec références » pour garder la même tête d'une case à l'autre.", src: ["engine/mangaka_engine/pipeline/reference_sheets.py"] },
-    { id: "flux", term: "Flux (workflow)", def: "Graphe ComfyUI livré dans `presets/workflows/` : un `.json` pour ComfyUI et un `.yaml` qui dit quoi y brancher. Deux moteurs : Qwen-Image 2.1 et FLUX 3 Klein.", src: ["presets/workflows/qwen-image-base-qualite.yaml", "engine/mangaka_engine/presets/workflow.py"] },
-    { id: "palier", term: "Palier", def: "Compromis vitesse / qualité d'un flux, choisi dans la fiche série : Turbo (~35 s par case), Rapide (~1 min), Qualité (défaut, ~3 min), Qualité max, FLUX 3 Klein · Qualité (~1 min 30). Plus le palier Croquis, pour les brouillons.", src: ["presets/defaults.yaml", "presets/workflows/qwen-image-turbo.yaml"] },
+    { id: "flux", term: "Flux (workflow)", def: "Graphe ComfyUI livré dans `presets/workflows/` : un `.json` pour ComfyUI et un `.yaml` qui dit quoi y brancher. Un seul moteur : Qwen-Image 2.1.", src: ["presets/workflows/qwen-image-base-qualite.yaml", "engine/mangaka_engine/presets/workflow.py"] },
+    { id: "palier", term: "Palier", def: "Compromis vitesse / qualité d'un flux, choisi dans la fiche série : Turbo (~35 s par case), Rapide (~1 min), Qualité (défaut, ~3 min), Qualité max. Plus le palier Croquis, pour les brouillons.", src: ["presets/defaults.yaml", "presets/workflows/qwen-image-turbo.yaml"] },
     { id: "croquis", term: "Croquis", def: "Brouillon d'une case en quelques secondes (`kind = croquis`). Jamais choisi, assemblé, lettré ni exporté.", src: ["engine/mangaka_engine/pipeline/sketch.py"] },
     { id: "croquis-retenu", term: "Croquis retenu", def: "Le croquis dont l'auteur a validé la composition (`Panel.sketch_image_id`). Le passage au propre part de lui.", src: ["engine/mangaka_engine/store/models.py"] },
     { id: "propre", term: "Passage au propre", def: "Version finale fabriquée depuis le croquis retenu : même graine, même prompt, débruitage partiel (ou ControlNet).", src: ["engine/mangaka_engine/pipeline/sketch.py"] },

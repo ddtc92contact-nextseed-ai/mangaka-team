@@ -83,7 +83,13 @@
   (`panels.cast_manual`, `location_manual`, `offscreen_kept`). Les scènes existantes reçoivent la distribution
   déclarée par leurs cases (fiches des personnages présents, hors cadre et locuteurs, sans perte) ; aucune case n'a
   de choix manuel enregistré.
-- 40 : garde-fou du prompt (`generation_logs.prompt_guard`) : noms de personnages absents de la case retirés du
+- 40 : prompt image « gabarit » (#228) : mode choisi par série (`projects.image_prompt_mode`, NULL = celui de
+  presets/defaults.yaml) et ancre visuelle des fiches personnage (`characters.visual_anchor`, vide).
+- 41 : retrait de FLUX 3 Klein (Qwen-Image 2.1 redevient le seul moteur). Les séries sur un flux `flux3-klein-*`
+  passent au palier de série par défaut (`QWEN_SERIES_WORKFLOW`, celui de presets/defaults.yaml) ; les cases qui
+  imposaient un flux FLUX suivent de nouveau leur série (`generation_preset` vidé). Les versions d'images déjà
+  générées restent telles quelles (historique).
+- 42 : garde-fou du prompt (`generation_logs.prompt_guard`) : noms de personnages absents de la case retirés du
   prompt envoyé à ComfyUI. Vide pour les générations existantes.
 
 Une base neuve est créée directement à la dernière version. Chaque migration tourne dans une
@@ -138,7 +144,7 @@ from .slugs import RESERVED_ENTRIES, RESERVED_SERIES, slugify, unique_slug
 
 log = logging.getLogger("mangaka_engine")
 
-SCHEMA_VERSION = 41
+SCHEMA_VERSION = 42
 
 
 class MigrationError(RuntimeError):
@@ -637,7 +643,7 @@ def _v39_to_v40(cur: sqlite3.Cursor) -> None:
         cur.execute("ALTER TABLE characters ADD COLUMN visual_anchor TEXT NOT NULL DEFAULT ''")
 
 
-def _v40_to_v41(cur: sqlite3.Cursor) -> None:
+def _v41_to_v42(cur: sqlite3.Cursor) -> None:
     # Garde-fou du prompt (#227) : noms de personnages absents retirés du prompt envoyé, notés au journal.
     if "prompt_guard" not in {row[1] for row in cur.execute("PRAGMA table_info(generation_logs)")}:
         cur.execute("ALTER TABLE generation_logs ADD COLUMN prompt_guard JSON NOT NULL DEFAULT '[]'")
@@ -678,6 +684,19 @@ def _fill_scene_casts(cur: sqlite3.Cursor) -> None:
                 if i not in ids:
                     ids.append(i)
         cur.execute("UPDATE chapter_scenes SET character_ids = ? WHERE id = ?", (json.dumps(ids), scene_id))
+
+
+# Palier de série par défaut (`workflow` de presets/defaults.yaml) au retrait de FLUX 3 Klein (v41) : figé ici,
+# une migration ne lit pas les presets (tests/test_migrations.py vérifie qu'il est toujours livré).
+QWEN_SERIES_WORKFLOW = "qwen-image-base-qualite"
+FLUX_PRESETS = "flux3-klein-%"
+
+
+def _v40_to_v41(cur: sqlite3.Cursor) -> None:
+    cur.execute(
+        "UPDATE projects SET workflow_preset = ? WHERE workflow_preset LIKE ?", (QWEN_SERIES_WORKFLOW, FLUX_PRESETS)
+    )
+    cur.execute("UPDATE panels SET generation_preset = NULL WHERE generation_preset LIKE ?", (FLUX_PRESETS,))
 
 
 def _json_list(raw: object) -> list[object]:
@@ -731,6 +750,7 @@ MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     38: (39, _v38_to_v39),
     39: (40, _v39_to_v40),
     40: (41, _v40_to_v41),
+    41: (42, _v41_to_v42),
 }
 
 

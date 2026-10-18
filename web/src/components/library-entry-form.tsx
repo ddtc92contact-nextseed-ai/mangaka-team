@@ -58,7 +58,7 @@ export function LibraryEntryForm({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  // Flux de la série sans point d'insertion LoRA (FLUX 3 Klein) : le LoRA de la fiche est signalé et grisé.
+  // Flux de la série sans point d'insertion LoRA (`lora_chain`) : le LoRA de la fiche est signalé et grisé.
   const project = useEngineData(() => api.getProject(projectId), [projectId]);
   const presets = useEngineData(() => api.presets());
   const loraNotice = loraUnsupportedNotice(
