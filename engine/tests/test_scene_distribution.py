@@ -412,7 +412,7 @@ def test_v38_database_fills_scene_casts_from_their_panels(make_settings: Callabl
         panel = _pages(c, w)[0]["panels"][0]
         detail = _ok(c.get(f"/panels/{panel['id']}"))
         assert detail["offscreen_kept"] == []
-    assert _version(settings.database_path) == SCHEMA_VERSION == 39
+    assert _version(settings.database_path) == SCHEMA_VERSION
     fresh = settings.database_path.parent / "fresh.db"
     create_db_engine(fresh).dispose()
     assert _columns(settings.database_path) == _columns(fresh)
