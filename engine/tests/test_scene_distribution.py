@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections.abc import Callable, Iterator
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -15,7 +16,15 @@ from fastapi.testclient import TestClient
 from mangaka_engine.config import Settings
 from mangaka_engine.main import create_app
 from mangaka_engine.pipeline.generation import build_panel_prompt
-from mangaka_engine.pipeline.names import CharacterMatcher, visible_actions, without_actions
+from mangaka_engine.pipeline.names import (
+    OFFSCREEN_ACTION,
+    UNDECLARED,
+    CharacterMatcher,
+    name_key,
+    name_notes,
+    visible_actions,
+    without_actions,
+)
 from mangaka_engine.pipeline.scenes import script_scenes
 from mangaka_engine.pipeline.script import parse_script, save_script
 from mangaka_engine.store.db import create_db_engine
@@ -369,6 +378,100 @@ def test_keep_offscreen_resolves_the_alert_and_strips_the_action_from_the_prompt
     # Remis à l'image plus tard : il n'est plus « laissé hors cadre ».
     out = _ok(c.patch(f"/panels/{panels[0]['id']}", json={"characters": ["Aiko", "Gorille"]}))
     assert out["offscreen_kept"] == []
+
+
+def _gang() -> CharacterMatcher:
+    return CharacterMatcher(
+        [
+            Character(id=1, name="Voyou 1", aliases=[]),
+            Character(id=2, name="Voyou 2", aliases=[]),
+            Character(id=3, name="Ren", aliases=[]),
+        ]
+    )
+
+
+def test_a_group_name_in_action_gives_one_alert_for_the_whole_group() -> None:
+    m = _gang()
+    panel = SimpleNamespace(
+        character_names=["Ren"],
+        offscreen_names=["Voyou 1", "Voyou 2"],
+        description="Ren se fige.",
+        staging="Les voyous encerclent Ren.",
+        offscreen_kept=[],
+    )
+    notes = [n for n in name_notes(m, panel, None) if n.kind == OFFSCREEN_ACTION]
+    assert [(n.name, n.source, n.chosen) for n in notes] == [("Les voyous", "mise en scène", (1, 2))]
+    # Un seul voyou laissé hors cadre : l'alerte reste pour l'autre ; les deux : plus d'alerte.
+    panel.offscreen_kept = [1]
+    assert [n.chosen for n in name_notes(m, panel, None) if n.kind == OFFSCREEN_ACTION] == [(2,)]
+    panel.offscreen_kept = [1, 2]
+    assert not [n for n in name_notes(m, panel, None) if n.kind == OFFSCREEN_ACTION]
+    # Le même personnage nommé deux fois (nom puis alias) : toujours une alerte.
+    m = CharacterMatcher([Character(id=1, name="Gorille", aliases=["le singe"]), Character(id=2, name="Aiko")])
+    solo = SimpleNamespace(
+        character_names=["Aiko"],
+        offscreen_names=["Gorille"],
+        staging="",
+        offscreen_kept=[],
+        description="Le singe lève le bras. Le Gorille frappe Aiko.",
+    )
+    assert [n.chosen for n in name_notes(m, solo, None) if n.kind == OFFSCREEN_ACTION] == [(1,)]
+
+
+def test_name_notes_never_repeat_a_name_source_and_kind() -> None:
+    m = _gang()
+    # Non déclaré : « les voyous » et « voyous », dans la description et la mise en scène → une alerte, deux fiches.
+    panel = SimpleNamespace(
+        character_names=["Ren"],
+        offscreen_names=[],
+        description="Les voyous approchent. Voyous partout.",
+        staging="Les voyous encerclent Ren.",
+        offscreen_kept=[],
+    )
+    notes = name_notes(m, panel, None)
+    assert [(n.kind, n.chosen) for n in notes] == [(UNDECLARED, (1, 2))]
+    panel.offscreen_names = ["Voyou 1", "Voyou 2"]
+    notes = name_notes(m, panel, None)
+    triples = [(name_key(n.name), n.source, n.kind) for n in notes]
+    assert len(triples) == len(set(triples)) and {n.kind for n in notes} == {OFFSCREEN_ACTION}
+
+
+def test_keep_offscreen_on_a_group_strips_the_action_for_all(c: TestClient) -> None:
+    w = _series(c)
+    project = w["series"]["id"]
+    gang = [
+        _ok(c.post(f"/projects/{project}/characters", json={"name": name, "aliases": []}), 201)["id"]
+        for name in ("Voyou 1", "Voyou 2")
+    ]
+    body = {
+        "pages": [
+            {
+                "kind": "story",
+                "panels": [
+                    {
+                        "description": "Aiko se fige.",
+                        "staging": "Les voyous encerclent Aiko.",
+                        "characters": ["Aiko"],
+                        "offscreen_characters": ["Voyou 1", "Voyou 2"],
+                    }
+                ],
+            }
+        ]
+    }
+    _ok(c.put(f"/chapters/{w['chapter']['id']}/pages", json=body))
+    panel = _pages(c, w)[0]["panels"][0]
+    notes = [n for n in panel["name_notes"] if n["kind"] == "hors cadre en action"]
+    assert len(notes) == 1 and [x["id"] for x in notes[0]["chosen"]] == gang
+    assert "sont déclarés hors cadre" in notes[0]["message"]
+    with _db(c).session_scope() as session:
+        assert "encerclent" in build_panel_prompt(_presets(c), session.get(Panel, panel["id"]), [])
+    # « Laisser hors cadre » envoie les ids de l'alerte : tout le groupe.
+    out = _ok(c.patch(f"/panels/{panel['id']}", json={"offscreen_kept": [x["id"] for x in notes[0]["chosen"]]}))
+    assert "hors cadre en action" not in _kinds(out)
+    assert "hors cadre en action" not in _kinds(_pages(c, w)[0]["panels"][0])
+    with _db(c).session_scope() as session:
+        prompt = build_panel_prompt(_presets(c), session.get(Panel, panel["id"]), [])
+    assert "encerclent" not in prompt and "Aiko se fige" in prompt
 
 
 # --- pic du chapitre --------------------------------------------------------------------------------------------

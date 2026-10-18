@@ -458,12 +458,19 @@ def name_notes(matcher: CharacterMatcher, panel: Any, previous: Any = _AUTO) -> 
             if any(i not in declared for i in r.ids):
                 add(NameNote(r.name, source, UNDECLARED, r.ids, r.candidates if r.ambiguous else ()))
     # Hors cadre, mais le texte lui donne une action visible : dessiné d'après la prose, sans sa référence. Sauf
-    # « Laisser hors cadre » (`offscreen_kept`) : l'action est alors retirée du prompt image.
+    # « Laisser hors cadre » (`offscreen_kept`) : l'action est alors retirée du prompt image. Un nom de groupe
+    # (« les voyous » → voyou 1 et voyou 2) donne une seule alerte avec toutes ses fiches : un clic règle le groupe.
     kept = set(getattr(panel, "offscreen_kept", None) or [])
     hidden = [i for i in offscreen_ids(matcher, panel, context) if i not in kept]
     for source, text in texts:
+        groups: dict[str, tuple[str, list[int]]] = {}
         for cid, hits in visible_actions(matcher, text, hidden, [declared, *context]).items():
-            add(NameNote(hits[0][0], source, OFFSCREEN_ACTION, (cid,)))
+            for name, _sentence in hits:
+                ids = groups.setdefault(name_key(name), (name, []))[1]
+                if cid not in ids:
+                    ids.append(cid)
+        for name, ids in groups.values():
+            add(NameNote(name, source, OFFSCREEN_ACTION, tuple(sorted(ids, key=hidden.index))))
     return notes
 
 
