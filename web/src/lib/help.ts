@@ -113,12 +113,16 @@ export const HELP = {
     "Chaque réplique devient une bulle au lettrage. Le type change sa forme : parole, pensée, cri, hors champ (personnage hors de la case) ou récitatif (narration dans un cartouche).",
   "scenario.objets":
     "Les objets, véhicules et créatures récurrents de la bibliothèque visibles dans la case : leur description et leurs références sont jointes à la génération pour qu'ils restent identiques (pour un véhicule, la vue qui correspond au cadrage passe en premier). Une créature n'est pas un personnage : elle ne parle pas et se coche ici.",
+  "scenario.description":
+    "Un instant figé et dessinable : ce que montre l'image à ce moment précis. Pas d'action qui dure ni de point de vue sans dire ce qu'on voit : « Haru double Ren » devient « Haru court un pas devant Ren, tourne la tête vers lui avec une grimace moqueuse ». Le plan et l'angle viennent de la direction artistique, jamais du scénario.",
   "scenario.setting":
-    "Précision de cadrage du lieu : moment (heure, météo), coin du lieu et éléments visibles du décor. Il devient « Lieu : … » dans le prompt image, même sans décor récurrent : sans lui, le modèle dessine souvent un fond blanc.",
+    "Décor de la case : le moment (heure, météo) et les éléments visibles du lieu (« plage de sable blanc, midi, palmiers penchés »). Jamais de plan, jamais de nom de personnage : il part tel quel dans le prompt image, même sans décor récurrent, et sans lui le modèle dessine souvent un fond blanc.",
   "scenario.location":
     "Le lieu de la série où se passe la case (la clairière, la crique…) : toutes les cases d'un même endroit portent le même lieu. Son décor de la bibliothèque est envoyé comme référence de lieu à la génération, pour que le décor ne dérive pas d'une case à l'autre. Les lieux se gèrent depuis la fiche de la série.",
   "scenario.staging":
-    "Qui fait quoi et où dans le cadre : premier plan, arrière-plan, gauche, droite, regards et gestes entre personnages. Il devient « Mise en scène : … » dans le prompt image, sauf sur une case sans personnage où il n'est pas utilisé.",
+    "Mise en scène : pose, geste, regard, expression et position dans l'image (gauche, droite, premier plan, arrière-plan) des seuls personnages présents dans la case. Elle ajoute à la description, elle ne la reformule pas. Elle part dans le prompt image, sauf sur une case sans personnage où elle n'est pas utilisée.",
+  "scenario.brief":
+    "Ce champ sort de son rôle et le scénariste ne l'a pas corrigé après ses relances : personnage absent de la case cité dans le décor ou la mise en scène, plan dans le décor, décor vide, lieu contredit par la description, ou page qui a plus de cases que son gabarit. Corrige à la main puis enregistre. À la génération, un personnage absent n'est de toute façon jamais nommé dans le prompt envoyé.",
   "scenario.characters":
     "Tous les personnages visibles dans la case, séparés par des virgules. Chaque nom est rapproché d'une fiche (majuscules, accents et alias ignorés, « le vieux maître Kaï » → Kaï) : ses références, sa description et son LoRA servent à la génération.",
   "scenario.unmatched":

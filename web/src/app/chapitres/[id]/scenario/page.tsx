@@ -14,6 +14,7 @@ import {
   api,
   EngineError,
   errorMessage,
+  type BriefNote,
   type DialogueReport,
   type Intensity,
   type Job,
@@ -715,6 +716,11 @@ function PageEditor({
           </SmallButton>
         </span>
       </div>
+      {page.briefNotes && page.briefNotes.length > 0 && (
+        <div className="mb-3">
+          <BriefNotes notes={page.briefNotes} testId="page-brief-notes" />
+        </div>
+      )}
       <ol className="space-y-3">
         {page.panels.map((panel, ci) => (
           <PanelEditor
@@ -741,6 +747,26 @@ function PageEditor({
         </SmallButton>
       </div>
     </Card>
+  );
+}
+
+/** Défauts du brief d'image restés après les relances du scénariste (moteur, dernier enregistrement). */
+function BriefNotes({ notes, testId }: { notes: BriefNote[]; testId: string }) {
+  if (!notes.length) return null;
+  return (
+    <div className="rounded border border-amber-800/60 bg-amber-950/30 px-2 py-1.5 text-xs text-amber-200" data-testid={testId}>
+      <div className="mb-0.5 flex items-center gap-1.5 font-medium">
+        ⚠ Brief d&apos;image à revoir
+        <InfoTip help="scenario.brief" label="Brief d'image à revoir" />
+      </div>
+      <ul className="list-disc space-y-0.5 pl-4">
+        {notes.map((n, i) => (
+          <li key={i} data-kind={n.kind}>
+            {n.message}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -798,9 +824,12 @@ function PanelEditor({
       </div>
       <div className="grid gap-3 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
         <div className="space-y-1">
-          <label htmlFor={`${id}-desc`} className="text-xs text-zinc-400">
-            Description
-          </label>
+          <div className="flex items-center gap-1.5">
+            <label htmlFor={`${id}-desc`} className="text-xs text-zinc-400">
+              Description
+            </label>
+            <InfoTip help="scenario.description" label="Description" />
+          </div>
           <Textarea
             id={`${id}-desc`}
             className="min-h-20 text-sm"
@@ -835,16 +864,16 @@ function PanelEditor({
           </Select>
           <div className="flex items-center gap-1.5 pt-1">
             <label htmlFor={`${id}-setting`} className="text-xs text-zinc-400">
-              Précision de cadrage du lieu
+              Décor de la case
             </label>
-            <InfoTip help="scenario.setting" label="Précision de cadrage du lieu" />
+            <InfoTip help="scenario.setting" label="Décor de la case" />
           </div>
           <Textarea
             id={`${id}-setting`}
             className="min-h-12 text-sm"
             value={panel.setting}
             onChange={(e) => set("setting", e.target.value)}
-            placeholder="Bord du lac, fin d'après-midi, herbes hautes, montagnes au loin"
+            placeholder="Fin d'après-midi, bord du lac, herbes hautes, montagnes au loin"
             maxLength={1500}
             disabled={disabled}
           />
@@ -859,7 +888,7 @@ function PanelEditor({
             className={`min-h-12 text-sm${stagingUnused ? " text-zinc-500 line-through" : ""}`}
             value={panel.staging}
             onChange={(e) => set("staging", e.target.value)}
-            placeholder="Kaï lève son bâton, la mâchoire serrée ; Lina se fige, le souffle coupé"
+            placeholder="Kaï à gauche lève son bâton, la mâchoire serrée ; Lina au premier plan se fige, le souffle coupé"
             maxLength={1500}
             disabled={disabled}
             aria-describedby={stagingUnused ? `${id}-staging-unused` : undefined}
@@ -870,6 +899,7 @@ function PanelEditor({
               artistique). Vide-la ou ajoute les personnages présents.
             </p>
           )}
+          <BriefNotes notes={panel.briefNotes} testId="brief-notes" />
         </div>
         <div className="grid gap-2">
           <div className="space-y-1">
