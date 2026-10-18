@@ -102,6 +102,7 @@ from .art_direction import (
     is_out_of_date,
     to_apply_at_generation,
 )
+from .brief import strip_absent
 from .camera import (
     CameraError,
     angle_distance,
@@ -412,6 +413,16 @@ def without_kept_offscreen(panel: Panel, text: str | None) -> str:
     matcher = CharacterMatcher(sorted(panel.page.chapter.project.characters, key=lambda c: c.id))
     kept = kept_offscreen(matcher, panel)
     return without_actions(matcher, text, kept, panel_context(matcher, panel)) if kept else text
+
+
+def guard_absent(panel: Panel, characters: Sequence[Character], prompt: str) -> tuple[str, list[dict[str, str]]]:
+    """Garde-fou avant génération (#227, pipeline/brief.py `strip_absent`) : le prompt réellement envoyé (rédigé par
+    l'IA ou brut) sans aucun nom de fiche absente de la case — ni hors cadre, ni cité par le décor ou la mise en
+    scène. Présents : les noms à l'image et les fiches dessinées (`characters`). Renvoie ce qui a été retiré,
+    noté dans le journal de la génération."""
+    matcher = CharacterMatcher(sorted(panel.page.chapter.project.characters, key=lambda c: c.id))
+    present = {c.id for c in characters} | set(matcher.ids(panel.character_names or []))
+    return strip_absent(matcher, prompt, present)
 
 
 def panel_framing_sentence(presets: PresetRegistry, panel: Panel) -> str:
@@ -1639,6 +1650,8 @@ class _Plan:
     journal: dict[str, Any] = field(default_factory=dict)
     # Grille de composition (preset `layout`) : boîtes en fractions de la case (`LayoutBox.as_dict`).
     layout_boxes: list[dict[str, Any]] = field(default_factory=list)
+    # Garde-fou : noms de personnages absents retirés du prompt envoyé ([{name, removed}], `guard_absent`).
+    prompt_guard: list[dict[str, str]] = field(default_factory=list)
 
 
 def _capitalize(text: str) -> str:
@@ -1875,6 +1888,8 @@ class GenerationExecutor:
                 monochrome=monochrome,
                 keep=[*(e.name for e in cast.entries), *(panel.character_names or [])],
             )
+            # Garde-fou : un personnage absent de la case n'est jamais nommé dans le prompt envoyé à ComfyUI.
+            prompt, guarded = guard_absent(panel, cast.characters, prompt)
             # Grille de composition (FLUX 3 Klein, `prompt_format: layout`) : une boîte par personnage, citée
             # par <obj_N> dans le paragraphe ; jamais pour une réparation ni « Changer l'angle » (leur cadrage).
             boxes: list[LayoutBox] = []
@@ -1937,7 +1952,12 @@ class GenerationExecutor:
             )
             plan = _Plan(
                 kind=kind,
-                journal={**panel_facts(panel), **self._prompt_facts(session, presets, job, panel, cast, kind, sketch)},
+                journal={
+                    **panel_facts(panel),
+                    **self._prompt_facts(session, presets, job, panel, cast, kind, sketch),
+                    **({"prompt_guard": guarded} if guarded else {}),
+                },
+                prompt_guard=guarded,
                 loaded=loaded,
                 params=params,
                 references=references,
@@ -2261,6 +2281,7 @@ class GenerationExecutor:
                     "tier": preset.tier.name if preset.tier else None,
                     "prompt": built.params["positive_prompt"],
                     **({"panel_prompt": plan.panel_prompt} if plan.panel_prompt != plan.prompt else {}),
+                    **({"prompt_guard": plan.prompt_guard} if plan.prompt_guard else {}),
                     "negative_prompt": built.params["negative_prompt"],
                     # À cfg 1, ComfyUI saute la passe négative : le prompt négatif n'a pas été lu.
                     "cfg": built.params.get("cfg"),

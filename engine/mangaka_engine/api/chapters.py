@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, object_session, selectinload
 
 from ..pipeline.art_direction import keep_author_plan
+from ..pipeline.brief import stored_page_notes, stored_panel_notes
 from ..pipeline.cast import active_marks, is_crowd, panel_unmatched
 from ..pipeline.crop import PanelCrop, bounded
 from ..pipeline.dialogues import chapter_report
@@ -38,6 +39,7 @@ from ..pipeline.scene_name import scene_dialogue_warnings, scene_frames, scene_m
 from ..pipeline.script import normalize_shot_type, script_job
 from ..pipeline.sketch import cleaned_from, latest_sketch, validated_sketch
 from ..presets import PresetError, PresetRegistry
+from ..presets.schemas import BriefRules
 from ..store.files import FileStore, versioned_url
 from ..store.models import (
     Bubble,
@@ -61,6 +63,7 @@ from .name_notes import name_notes_out
 from .projects import get_project_or_404
 from .schemas import (
     BreakdownIn,
+    BriefNoteOut,
     BubbleOut,
     ChapterCreate,
     ChapterOut,
@@ -159,6 +162,16 @@ def _clamped_bbox(bbox: dict[str, Any] | None, layout_panel: dict[str, Any] | No
     return {k: layout_panel[k] for k in ("x1", "y1", "x2", "y2")}
 
 
+def _brief_rules(presets: PresetRegistry | None) -> BriefRules | None:
+    """Règles du brief d'image (prompts/script.yaml › brief_rules) ; None : aucun contrôle."""
+    if presets is None:
+        return None
+    try:
+        return presets.prompt("script").brief_rules
+    except PresetError:
+        return None
+
+
 def page_out(
     page: Page,
     regen_threshold: float | None = None,
@@ -186,6 +199,14 @@ def page_out(
     # Marge extérieure inviolable : une mise en page stockée avant le garde-fou est affichée coupée.
     layout = clamp_to_live(page.layout) if page.layout else None
     layout_panels = {lp.get("panel_id"): lp for lp in (layout or {}).get("panels", [])}
+    # Brief d'image (pipeline/brief.py) : un rôle par champ, défauts restés après les relances du scénariste.
+    brief_rules = _brief_rules(presets)
+    lieux = (
+        list(session.scalars(select(SeriesLocation.name).where(SeriesLocation.project_id == page.chapter.project_id)))
+        if session is not None and brief_rules is not None
+        else []
+    )
+    templates = {t.id: t.name for t in presets.layout_templates.values()} if presets is not None else {}
     return PageOut(
         id=page.id,
         chapter_id=page.chapter_id,
@@ -197,6 +218,7 @@ def page_out(
         rythme=page.rythme,  # type: ignore[arg-type]
         scene_id=page.scene_id,
         state=page.state.value,
+        brief_notes=[BriefNoteOut(**n.as_dict()) for n in stored_page_notes(brief_rules, page, templates)],
         layout=layout,
         layout_stale=bool(page.panels) and is_stale(page),
         # Name (palier croquis seulement) : validée, caduque (case modifiée depuis) ou à valider.
@@ -212,6 +234,7 @@ def page_out(
                 characters=list(p.character_names or []),
                 unmatched_characters=panel_unmatched(matcher, p, marked),
                 name_notes=name_notes_out(matcher, p),
+                brief_notes=[BriefNoteOut(**n.as_dict()) for n in stored_panel_notes(brief_rules, matcher, p, lieux)],
                 offscreen_characters=list(p.offscreen_names or []),
                 viewpoint=viewpoint_out(p),
                 decor=p.decor_id,

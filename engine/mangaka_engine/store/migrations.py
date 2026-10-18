@@ -83,6 +83,8 @@
   (`panels.cast_manual`, `location_manual`, `offscreen_kept`). Les scènes existantes reçoivent la distribution
   déclarée par leurs cases (fiches des personnages présents, hors cadre et locuteurs, sans perte) ; aucune case n'a
   de choix manuel enregistré.
+- 40 : garde-fou du prompt (`generation_logs.prompt_guard`) : noms de personnages absents de la case retirés du
+  prompt envoyé à ComfyUI. Vide pour les générations existantes.
 
 Une base neuve est créée directement à la dernière version. Chaque migration tourne dans une
 transaction unique, clés étrangères désactivées (recette « 12 étapes » de SQLite pour reconstruire
@@ -136,7 +138,7 @@ from .slugs import RESERVED_ENTRIES, RESERVED_SERIES, slugify, unique_slug
 
 log = logging.getLogger("mangaka_engine")
 
-SCHEMA_VERSION = 39
+SCHEMA_VERSION = 40
 
 
 class MigrationError(RuntimeError):
@@ -626,6 +628,12 @@ def _v38_to_v39(cur: sqlite3.Cursor) -> None:
     _fill_scene_casts(cur)
 
 
+def _v39_to_v40(cur: sqlite3.Cursor) -> None:
+    # Garde-fou du prompt (#227) : noms de personnages absents retirés du prompt envoyé, notés au journal.
+    if "prompt_guard" not in {row[1] for row in cur.execute("PRAGMA table_info(generation_logs)")}:
+        cur.execute("ALTER TABLE generation_logs ADD COLUMN prompt_guard JSON NOT NULL DEFAULT '[]'")
+
+
 def _fill_scene_casts(cur: sqlite3.Cursor) -> None:
     from ..pipeline.names import name_key  # le pipeline importe le store
 
@@ -712,6 +720,7 @@ MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     36: (37, _v36_to_v37),
     37: (38, _v37_to_v38),
     38: (39, _v38_to_v39),
+    39: (40, _v39_to_v40),
 }
 
 

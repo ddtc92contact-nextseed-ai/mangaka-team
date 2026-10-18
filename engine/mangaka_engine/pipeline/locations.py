@@ -5,7 +5,7 @@ Avant, le lieu n'était qu'un texte libre recopié sur chaque case (`Panel.setti
 des lieux. Désormais :
 
 - **lieu** : nom, description et décor de la bibliothèque (`decor_id`) ; une case s'y rattache
-  (`Panel.location_id`), `setting` reste la précision de cadrage (moment, météo, coin du lieu) ;
+  (`Panel.location_id`), `setting` est le décor de la case (moment, météo, éléments visibles du lieu) ;
 - **scénariste** (`pipeline/script.py`) : choisit un lieu existant par son id ou en crée un par son nom
   (`resolve_location`) ; le directeur artistique peut rattacher une case à un lieu existant ;
 - **regroupement** des cases d'avant : le LLM propose des groupes de variantes (`propose_groups`, prompt
