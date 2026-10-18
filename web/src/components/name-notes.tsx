@@ -6,6 +6,7 @@ import { InfoTip } from "@/components/info-tip";
 import { useToast } from "@/components/toast";
 import { Button, Select } from "@/components/ui";
 import { api, errorMessage, type Character, type NameNote, type PageData, type PanelDetail } from "@/lib/api";
+import { noteKey } from "@/lib/name-notes";
 
 const KIND_LABELS: Record<NameNote["kind"], string> = {
   ambigu: "ambigu",
@@ -49,9 +50,9 @@ export function NameNotes({
         <InfoTip help="atelier.name-notes" label="Noms de personnages à vérifier" />
       </p>
       <ul className="space-y-2">
-        {notes.map((note) => (
+        {notes.map((note, i) => (
           <NoteRow
-            key={`${note.kind}-${note.source}-${note.name}`}
+            key={noteKey(note, i)}
             note={note}
             detail={detail}
             characters={characters}
@@ -129,7 +130,10 @@ function NoteRow({
     );
   }
 
-  const selectId = `name-note-${detail.id}-${note.source}-${note.name}`.replace(/\W+/g, "-");
+  const selectId = `name-note-${detail.id}-${note.source}-${note.name}-${note.chosen.map((c) => c.id).join("-")}`.replace(
+    /\W+/g,
+    "-",
+  );
   return (
     <li className="space-y-1.5" data-testid="name-note" data-kind={note.kind}>
       <p className="text-xs leading-5">
@@ -254,9 +258,9 @@ export function ChapterNameNotes({
         <span className="font-normal text-amber-200/80"> — ambigus, sans fiche, non déclarés ou hors cadre en action : ils seraient dessinés sans leur référence.</span>
       </summary>
       <ul className="mt-2 space-y-1.5">
-        {rows.map(({ page, panel, note }) => (
+        {rows.map(({ page, panel, note }, i) => (
           <li
-            key={`${panel.id}-${note.kind}-${note.source}-${note.name}`}
+            key={`${panel.id}-${noteKey(note, i)}`}
             className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs"
             data-testid="chapter-name-note"
           >

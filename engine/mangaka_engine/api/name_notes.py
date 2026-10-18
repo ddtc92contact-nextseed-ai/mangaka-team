@@ -22,6 +22,11 @@ def name_notes_out(matcher: CharacterMatcher, panel: Panel) -> list[NameNoteOut]
             message = f"« {n.name} » ({where}) désigne plusieurs fiches : {names} retenu, pas {others}."
         elif n.kind == UNMATCHED:
             message = f"« {n.name} » ({where}) ne correspond à aucune fiche : ni référence, ni description."
+        elif n.kind == OFFSCREEN_ACTION and len(chosen) > 1:
+            message = (
+                f"« {n.name} » ({names}) sont déclarés hors cadre, mais la {n.source} leur donne une action visible : "
+                "ils seraient dessinés d'après le texte, sans leur référence."
+            )
         elif n.kind == OFFSCREEN_ACTION:
             message = (
                 f"{names} est déclaré hors cadre, mais la {n.source} lui donne une action visible : il serait dessiné "
