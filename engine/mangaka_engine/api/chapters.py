@@ -34,7 +34,7 @@ from ..pipeline.pages import (
     slant_page_cut,
 )
 from ..pipeline.pre_direction import dialogue_rules_for, panel_count_problems, series_charter
-from ..pipeline.render import crop_max_zoom, displayed_image, image_size
+from ..pipeline.render import crop_max_zoom, displayed_image, image_size, no_tail
 from ..pipeline.scene_name import scene_dialogue_warnings, scene_frames, scene_mode
 from ..pipeline.script import normalize_shot_type, script_job
 from ..pipeline.sketch import cleaned_from, latest_sketch, validated_sketch
@@ -676,7 +676,10 @@ def replace_pages(
                     text=d.text,
                     kind=BubbleKind(d.kind),
                     position=previous[d.id].position if d.id in previous else None,
-                    tail=previous[d.id].tail if d.id in previous else None,
+                    # Bulle sans queue (ajoutée au lettrage sans locuteur) : la queue revient avec un locuteur.
+                    tail=previous[d.id].tail
+                    if d.id in previous and not (d.speaker and no_tail(previous[d.id].tail))
+                    else None,
                 )
                 for j, d in enumerate(cin.dialogues)
                 if not (d.id in previous and previous[d.id].kind == BubbleKind.sfx)

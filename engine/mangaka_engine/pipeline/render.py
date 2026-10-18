@@ -191,6 +191,15 @@ def _manual_tail(tail: dict[str, Any] | None) -> tuple[float, float] | None:
         return None
 
 
+NO_TAIL: dict[str, Any] = {"none": True}
+
+
+def no_tail(tail: dict[str, Any] | None) -> bool:
+    """`Bubble.tail` = {"none": true} : réplique ajoutée au lettrage sans locuteur, dessinée sans queue. Le
+    marqueur survit à « Recalculer le lettrage » ; donner un locuteur à la bulle le retire."""
+    return bool(tail and tail.get("none"))
+
+
 def _manual_size(position: dict[str, Any] | None) -> float | None:
     """Taille du texte saisie à la main (`position.size_pt`, avec ou sans cadre ajusté) ; None = automatique."""
     size = _num((position or {}).get("size_pt"))
@@ -386,6 +395,7 @@ def page_inputs(
                         manual_box=_manual_box(b.position),
                         manual_tail=_manual_tail(b.tail),
                         size_pt=_manual_size(b.position),
+                        no_tail=no_tail(b.tail),
                     )
                     for b in panel.bubbles
                     if b.kind != BubbleKind.sfx
@@ -470,6 +480,8 @@ def lettering_json(
                 "image_kind": inputs.image_kinds.get(p.id),
                 "image_rect": r.as_rect() if (r := inputs.image_rects.get(p.id)) else None,
                 "faces": [f.as_rect() for f in inputs.faces.get(p.id, [])],
+                # Personnages présents : locuteurs proposés à l'ajout d'une bulle.
+                "characters": list(spec.characters),
             }
             for p, spec in zip(art.panels, inputs.specs, strict=True)
         ],

@@ -7,12 +7,12 @@ import { InfoTip } from "@/components/info-tip";
 import { modalOpen } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { Alert, Button, ButtonLink, Card, EmptyState, Loading, Select } from "@/components/ui";
-import { api, fullErrorMessage, type BubbleUpdate, type Intensity, type SfxUpdate } from "@/lib/api";
+import { api, fullErrorMessage, type BubbleKind, type BubbleUpdate, type Intensity, type SfxUpdate } from "@/lib/api";
 import { useEngineData } from "@/lib/hooks";
 import { PAGE_KINDS } from "@/lib/script";
 import { useChapter, useRememberPage, useWantedPage } from "../chapter-context";
 import { StepAlert } from "../step-alert";
-import { BubbleEditor } from "./bubble-editor";
+import { AddBubble, BubbleEditor } from "./bubble-editor";
 import { ExportPanel } from "./export-panel";
 import { LetteringCanvas, type CanvasEdit, type LetteringCanvasHandle } from "./lettering-canvas";
 import { LetteringWarnings, PanelZoom } from "./panel-zoom";
@@ -144,6 +144,33 @@ function Lettering() {
       select(null);
       toast("Onomatopée supprimée");
     });
+  const addBubble = (panelId: number, body: { text: string; kind: BubbleKind; speaker: string }) =>
+    run(async () => {
+      const next = await api.addBubble(panelId, body);
+      lettering.setData(next);
+      // La nouvelle réplique : la plus récente de la case, choisie pour la glisser tout de suite.
+      const created = next.bubbles.filter((b) => b.panel_id === panelId).sort((a, b) => b.id - a.id)[0];
+      if (created) select(created.id);
+      pages.reload(); // compteur de bulles de la page
+      toast("Bulle ajoutée");
+    });
+  const deleteBubble = async (id: number, text: string) => {
+    if (
+      !(await confirm({
+        title: "Supprimer la bulle ?",
+        message: `« ${text} » sera retirée de la case et du Scénario.`,
+        confirmLabel: "Supprimer",
+        danger: true,
+      }))
+    )
+      return;
+    run(async () => {
+      lettering.setData(await api.deleteReply(id));
+      select(null);
+      pages.reload();
+      toast("Bulle supprimée");
+    });
+  };
   const recompute = async () => {
     if (!page || !data) return;
     const manual =
@@ -177,6 +204,7 @@ function Lettering() {
           warnings={data.warnings}
           busy={busy}
           onSave={(body) => save(selected.id, body, "Bulle enregistrée")}
+          onDelete={() => deleteBubble(selected.id, selected.text)}
           onClose={() => {
             closeEditor(selected.id);
           }}
@@ -320,6 +348,7 @@ function Lettering() {
                   <>
                     {error && <Alert>{error}</Alert>}
                     {editors}
+                    <AddBubble key={`bubble:${data.page_id}:${panel.id}`} panel={panel} busy={busy} onAdd={addBubble} />
                     <AddSfx key={`${data.page_id}:${panel.id}`} panels={[panel]} busy={busy} onAdd={addSfx} />
                   </>
                 )}
