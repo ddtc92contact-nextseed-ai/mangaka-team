@@ -5,18 +5,20 @@
 # L'agent lit les réponses de l'auteur, les défauts chiffrés du genre (ADN, presets/pre_direction.yaml), les
 # personnages, les chapitres déjà écrits et le savoir-faire « Structure et rythme », puis propose :
 # - l'ADN de la série : seulement les valeurs qui s'écartent du genre, une phrase d'explication par écart ;
-# - la bible : univers, ton, règles, gags et motifs, et une note par personnage (caractère, rôle, arc, tics).
+# - la bible : synopsis de la série (l'histoire de base, qui développe l'idée de l'auteur sans la contredire),
+#   univers, ton, règles, gags et motifs, et une note par personnage (caractère, rôle, arc, tics).
 # L'auteur corrige la proposition avant de l'enregistrer ; ce qu'il a déjà écrit n'est jamais écrasé sans son accord.
 #
 # Variables disponibles ($nom ; écrire $$ pour un « $ » littéral) :
 #   $series_title    $genre (genre verrouillé de la série)   $style_packs   $style_guidelines   $reading_direction
-#   $pitch           (de quoi parle la série, en quelques phrases de l'auteur ; peut être vide)
+#   $pitch           (de quoi parle la série, en quelques phrases de l'auteur ; peut être vide — prérempli du
+#                    synopsis déjà écrit quand la série en a un)
 #   $answers         (réponses de l'auteur aux questions fermées, avec ses précisions et les pistes d'ADN)
 #   $characters      (fiches personnages : nom exact et apparence)
 #   $chapters        (synopsis des chapitres, et résumés des chapitres validés pour une série existante)
 #   $current_bible   (bible actuelle : ce que l'auteur a déjà écrit)
 #   $genre_dna       (ADN du genre : chemin, libellé, valeur et bornes de chaque réglage)
-#   $max_section_chars $max_note_chars (longueurs maximales)
+#   $max_section_chars $max_synopsis_chars $max_note_chars (longueurs maximales)
 #   $savoir_faire    (passages du savoir-faire : structure et rythme, écriture de scénario…)
 #   $context_json    (le même contexte, en JSON)
 # Gabarit de relance après une réponse invalide : $error (erreurs de validation).
@@ -70,15 +72,21 @@ user: |
      dans les bornes ; un minimum reste sous son maximum) et une phrase d'explication (« why ») qui cite la
      réponse de l'auteur. Les pistes données avec chaque réponse sont un point de départ, pas une obligation.
      Aucun écart si les réponses suivent le genre.
-  2. « bible » : « world » (univers), « tone » (ton), « rules » (règles de l'univers), « motifs » (gags et motifs
-     récurrents) — chacun $max_section_chars signes au plus, concret et utilisable par un scénariste.
+  2. « bible » :
+     - « synopsis » (synopsis de la série) : l'histoire de base, $max_synopsis_chars signes au plus — le héros,
+       ce qu'il veut, ce qui s'y oppose, l'arc principal de la série et la fin visée. Tu DÉVELOPPES l'idée de
+       l'auteur : tout ce qu'il a écrit y reste vrai (personnages, lieux, enjeux, fin), tu ne le contredis jamais
+       et tu n'en retires rien d'important. Sans idée de l'auteur, appuie-toi sur le titre, le genre et ses
+       réponses ;
+     - « world » (univers), « tone » (ton), « rules » (règles de l'univers), « motifs » (gags et motifs
+       récurrents) — chacun $max_section_chars signes au plus, concret et utilisable par un scénariste.
   3. « characters » : une note par personnage de la liste (nom exact), $max_note_chars signes au plus : caractère,
      rôle dans la série, arc, tics de langage (avec un exemple de réplique entre « »).
   4. « notes » : une phrase pour l'auteur (ce que tu as retenu de ses réponses), facultative.
 
   Format de réponse :
   {"dna": [{"path": "dialogue.max_per_page", "value": 6, "why": "…"}],
-   "bible": {"world": "…", "tone": "…", "rules": "…", "motifs": "…"},
+   "bible": {"synopsis": "…", "world": "…", "tone": "…", "rules": "…", "motifs": "…"},
    "characters": [{"name": "…", "note": "…"}],
    "notes": "…"}
 

@@ -63,7 +63,7 @@ def _brief(answers: list[Answer], characters: list[dict[str, Any]] | None = None
         base=SHONEN,
         characters=characters if characters is not None else [{"id": 7, "name": "Aiko", "description": "", "note": ""}],
         chapters=[],
-        bible={"world": "", "tone": "", "rules": "", "motifs": ""},
+        bible={"synopsis": "", "world": "", "tone": "", "rules": "", "motifs": ""},
         settings=SETTINGS,
     )
 
@@ -71,7 +71,13 @@ def _brief(answers: list[Answer], characters: list[dict[str, Any]] | None = None
 def _valid(**overrides: Any) -> dict[str, Any]:
     return {
         "dna": [{"path": "dialogue.max_per_page", "value": 5, "why": "Tu veux des personnages peu bavards."}],
-        "bible": {"world": "Une île.", "tone": "Doux.", "rules": "Pas de magie.", "motifs": "Un chat roux."},
+        "bible": {
+            "synopsis": "Aiko veut quitter l'île ; elle y reste pour la sauver.",
+            "world": "Une île.",
+            "tone": "Doux.",
+            "rules": "Pas de magie.",
+            "motifs": "Un chat roux.",
+        },
         "characters": [{"name": "aiko", "note": "Têtue. « Allons-y ! »"}],
         **overrides,
     }
@@ -159,10 +165,24 @@ def test_proposal_schema_and_dna_checks() -> None:
         (json.dumps(_valid(dna=[{"path": "dialogue.max_per_page", "value": 5}])), "sans explication"),
         (json.dumps(_valid(dna=[{"path": "shots.wide.min", "value": 0.6, "why": "x"}])), "minimum"),
         (json.dumps(_valid(dna=[{"path": "panels.max_per_page", "value": 99, "why": "x"}])), "panels.max_per_page"),
-        (json.dumps(_valid(bible={"world": "Une île.", "tone": "", "rules": "x", "motifs": "y"})), "Ton) : vide"),
+        (
+            json.dumps(_valid(bible={"synopsis": "s", "world": "Une île.", "tone": "", "rules": "x", "motifs": "y"})),
+            "Ton) : vide",
+        ),
+        (
+            json.dumps(_valid(bible={"world": "w", "tone": "t", "rules": "r", "motifs": "m"})),
+            "(Synopsis de la série) : vide",
+        ),
         (json.dumps(_valid(characters=[{"name": "Bob", "note": "x"}])), "n'est pas une fiche"),
         (json.dumps(_valid(characters=[])), "il manque la note de « Aiko »"),
-        (json.dumps(_valid(bible={"world": "x" * 5000, "tone": "a", "rules": "b", "motifs": "c"})), "au plus"),
+        (
+            json.dumps(_valid(bible={"synopsis": "s", "world": "x" * 5000, "tone": "a", "rules": "b", "motifs": "c"})),
+            "au plus",
+        ),
+        (
+            json.dumps(_valid(bible={**_valid()["bible"], "synopsis": "x" * (SETTINGS.max_synopsis_chars + 1)})),
+            f"bible.synopsis (Synopsis de la série) : {SETTINGS.max_synopsis_chars + 1} signes",
+        ),
     ]
     for text, message in bad:
         with pytest.raises(ProposalValidationError, match=re.escape(message)):
@@ -206,7 +226,7 @@ def test_conflicts_list_only_what_the_author_wrote() -> None:
     found = conflicts(
         base=SHONEN,
         current_overrides={"shots.wide.min": 0.25},
-        current_bible={"world": "Mon île.", "tone": "", "rules": "", "motifs": ""},
+        current_bible={"synopsis": "", "world": "Mon île.", "tone": "", "rules": "", "motifs": ""},
         current_notes={7: "Têtue."},
         dna={"shots.wide.min": 0.3, "dialogue.max_per_page": 5},
         bible={"world": "Une autre île.", "tone": "Doux."},
@@ -366,3 +386,102 @@ def test_apply_rejects_unknown_targets(client: TestClient) -> None:
     assert bad.status_code == 422 and "minimum" in bad.text
     assert client.post(url, json={"dna": {"rythme.global": 3}}).status_code == 422
     assert client.get("/projects/999/series-creator").status_code == 404
+
+
+# --- synopsis de la série (#243) ----------------------------------------------------------------------------
+def test_mock_synopsis_expands_the_pitch_without_growing_on_relaunch() -> None:
+    brief = _brief(resolve_answers(SETTINGS, NEUTRAL), pitch="Aiko veut quitter l'île.")
+    synopsis = mock_series_creation(brief.as_json())["bible"]["synopsis"]
+    assert synopsis.startswith("Aiko veut quitter l'île.") and "Fin visée" in synopsis
+    again = _brief(resolve_answers(SETTINGS, NEUTRAL), pitch=synopsis)
+    assert mock_series_creation(again.as_json())["bible"]["synopsis"] == synopsis
+    assert mock_series_creation(_brief(resolve_answers(SETTINGS, NEUTRAL)).as_json())["bible"]["synopsis"]
+
+
+def test_conflicts_cover_the_series_synopsis() -> None:
+    found = conflicts(
+        base=SHONEN,
+        current_overrides={},
+        current_bible={"synopsis": "Mon histoire.", "world": "", "tone": "", "rules": "", "motifs": ""},
+        current_notes={},
+        dna={},
+        bible={"synopsis": "Une autre histoire.", "world": "Une île."},
+        notes={},
+        names={},
+    )
+    assert [(c.key, c.label) for c in found] == [("bible.synopsis", "Synopsis de la série")]
+    same = conflicts(
+        base=SHONEN,
+        current_overrides={},
+        current_bible={"synopsis": "Mon histoire."},
+        current_notes={},
+        dna={},
+        bible={"synopsis": " Mon   histoire. "},
+        notes={},
+        names={},
+    )
+    assert same == []
+
+
+def test_the_pitch_becomes_the_series_synopsis_read_by_every_agent(client: TestClient) -> None:
+    """Série sans chapitre : l'idée de l'auteur devient le synopsis de la série (1re section de la bible), gardé
+    après rechargement, puis reçu en tête de bible par le découpage en scènes et le scénariste."""
+    pid, *_ = _series(client)
+    assert _ok(client.get(f"/projects/{pid}/series-creator"))["synopsis"] == ""
+    pitch = "Aiko, forgeronne sans magie, veut entrer à l'Académie des sabres pour retrouver son frère."
+    proposal = _ok(
+        client.post(f"/projects/{pid}/series-creator/proposal", json={"pitch": pitch, "answers": _answers()})
+    )
+    first = proposal["bible"][0]
+    assert first["key"] == "synopsis" and first["label"] == "Synopsis de la série" and first["current"] == ""
+    assert first["proposed"].startswith(pitch) and not first["conflict"]
+    user = client.app.state.ctx.providers.llm.calls[-1][1].content  # type: ignore[attr-defined]
+    assert "(bible vide)" in user and pitch in user
+
+    saved = _ok(client.post(f"/projects/{pid}/series-creator/apply", json=_accept_all(proposal)))
+    assert "bible.synopsis" in saved["written"] and saved["bible"]["synopsis"] == first["proposed"]
+    bible = _ok(client.get(f"/projects/{pid}/bible"))  # rechargement
+    assert bible["synopsis"] == first["proposed"]
+    assert bible["rendered"]["text"].startswith(f"Synopsis de la série :\n{first['proposed']}\n\nUnivers :")
+    info = _ok(client.get(f"/projects/{pid}/series-creator"))
+    assert info["synopsis"] == first["proposed"] and info["bible_filled"][0] == "synopsis"
+    assert info["bible_sections"] == 5
+
+    calls = client.app.state.ctx.providers.llm.calls  # type: ignore[attr-defined]
+    ch = _ok(client.post(f"/projects/{pid}/chapters", json={"title": "Un", "synopsis": "Aiko arrive."}), 201)
+    job = _ok(client.post(f"/chapters/{ch['id']}/scenes/propose"), 202)
+    client.app.state.ctx.jobs.wait(job["id"])  # type: ignore[attr-defined]
+    scenes_user = next(m.content for m in calls[-1] if m.role == "user")
+    assert pitch in scenes_user
+    assert scenes_user.index("Synopsis de la série :") < scenes_user.index("Univers :")
+    job = _ok(start_script(client, ch["id"]), 202)
+    client.app.state.ctx.jobs.wait(job["id"])  # type: ignore[attr-defined]
+    script_user = calls[-1][1].content
+    assert pitch in script_user and script_user.index("Synopsis de la série :") < script_user.index("Univers :")
+
+
+def test_relaunch_with_a_synopsis_shows_it_and_overwrites_it_only_when_confirmed(client: TestClient) -> None:
+    pid, *_ = _series(client)
+    saved = _ok(client.put(f"/projects/{pid}/bible", json={"synopsis": "Mon histoire.", "world": "Mon île."}))
+    assert saved["synopsis"] == "Mon histoire." and _ok(client.get(f"/projects/{pid}/chapters")) == []
+    info = _ok(client.get(f"/projects/{pid}/series-creator"))
+    assert info["synopsis"] == "Mon histoire." and info["bible_filled"] == ["synopsis", "world"]
+
+    proposal = _ok(
+        client.post(f"/projects/{pid}/series-creator/proposal", json={"pitch": info["synopsis"], "answers": _answers()})
+    )
+    user = client.app.state.ctx.providers.llm.calls[-1][1].content  # type: ignore[attr-defined]
+    assert "Synopsis de la série :\nMon histoire." in user  # donné à l'agent comme texte actuel
+    synopsis = proposal["bible"][0]
+    assert synopsis["key"] == "synopsis" and synopsis["current"] == "Mon histoire." and synopsis["conflict"]
+    assert synopsis["proposed"].startswith("Mon histoire.")
+
+    body = {"bible": {"synopsis": synopsis["proposed"]}}
+    refused = client.post(f"/projects/{pid}/series-creator/apply", json=body)
+    assert refused.status_code == 409 and "Synopsis de la série" in refused.text
+    after = _ok(client.get(f"/projects/{pid}/bible"))
+    assert after["synopsis"] == "Mon histoire." and after["world"] == "Mon île." and after["tone"] == ""
+
+    done = _ok(client.post(f"/projects/{pid}/series-creator/apply", json={**body, "overwrite": ["bible.synopsis"]}))
+    assert done["written"] == ["bible.synopsis"] and done["bible"]["synopsis"] == synopsis["proposed"]
+    assert done["bible"]["world"] == "Mon île." and done["bible"]["tone"] == ""

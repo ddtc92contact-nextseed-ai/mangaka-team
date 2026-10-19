@@ -944,14 +944,17 @@ sur l'échange, `?createur=1`), ou relancé sur une série existante (carte « C
 
 - **Échange borné** : les questions fermées de `series_creator.yaml` (rythme, dialogue, dureté du monde, humour,
   plans, mise en page, pensées et récit off, fin de chapitre), un choix à cliquer et une précision libre
-  facultative, plus l'idée de la série en quelques phrases. Chaque choix porte des pistes d'ADN (`shift` : écart
+  facultative, plus l'idée de la série en quelques phrases (préremplie du synopsis de la série quand la bible en
+  a un). Chaque choix porte des pistes d'ADN (`shift` : écart
   à la valeur du genre, `set` : valeur prise), combinées bornées et valides, données à l'agent comme point de
   départ — jamais appliquées seules.
 - **Contexte** : réponses, ADN du genre (chemins, valeurs et bornes), personnages, synopsis des chapitres et
   résumés des chapitres validés (`max_chapter_summaries`), bible actuelle et savoir-faire du rôle
   `series_creation` de `knowledge.yaml` (collections « Structure · … », écriture, humour).
 - **Proposition** validée (Pydantic puis `apply_overrides`) : écarts au genre avec une phrase d'explication
-  chacun (une valeur égale au genre est ignorée), bible en quatre sections (`max_section_chars`) et une note par
+  chacun (une valeur égale au genre est ignorée), bible en cinq sections — le synopsis de la série, qui développe
+  l'idée de l'auteur sans la contredire (`max_synopsis_chars`), puis univers, ton, règles, gags et motifs
+  (`max_section_chars`) — et une note par
   personnage (`max_note_chars`, noms exacts). Réponse invalide : relance avec l'erreur (`max_retries`, 2 au
   plus), puis erreur lisible dans la carte. Mock : `[mock:createur-invalide:N]` dans l'idée de la série.
 - **Différentiel** : la proposition s'affiche à côté de ce qui est déjà écrit ; l'auteur corrige et coche ce
@@ -2174,10 +2177,11 @@ une série, documents `.md` / `.txt` / `.pdf` (texte extrait par pypdf) ou texte
   et le budget libéré va aux passages suivants. « Sources utilisées » cite chaque fiche une fois et signale
   celles écartées comme redondantes. L'atelier (« Savoir-faire de la case », sous le prompt
   final ; `GET /panels/{id}/knowledge`) montre ce que reçoit chacun, avec les jetons.
-- **Bible de série** (page de la série) : univers, ton, règles, gags et motifs, notes par fiche
+- **Bible de série** (page de la série) : synopsis de la série (l'histoire de base : héros, ce qu'il
+  veut, arc principal, fin visée — toujours en tête), univers, ton, règles, gags et motifs, notes par fiche
   personnage, et le résumé de chaque chapitre passé à « Prêt » ou « Publié ». Toujours injectée
   dans les agents de sa série (`$bible`), coupée à `bible_max_tokens` en retirant d'abord les plus
-  anciens résumés.
+  anciens résumés, puis la fin du texte : le synopsis, en tête, part en dernier.
 - Chaque appel du LLM garde les passages et la bible reçus (table `llm_runs`) : l'écran Scénario
   les affiche sous « Sources utilisées ». Le panneau « Tester la recherche » montre le classement
   avec les scores (vecteurs, mots-clés, hybride).

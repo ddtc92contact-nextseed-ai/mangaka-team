@@ -11,6 +11,12 @@ import { useEngineData } from "@/lib/hooks";
 import { LIBRARY_KINDS, entryHref, libraryHref } from "@/lib/library";
 
 const SECTIONS = [
+  {
+    key: "synopsis",
+    label: "Synopsis de la série",
+    placeholder: "Un jeune forgeron sans magie veut entrer à l'Académie des sabres. Il y gagne sa place, perd son maître et finit par…",
+    help: "L'histoire de base : le héros, ce qu'il veut, l'arc principal, la fin visée. Tous les agents la lisent en premier.",
+  },
   { key: "world", label: "Univers", placeholder: "Kyoto, 1864. Les rônins errent sous la pluie…" },
   { key: "tone", label: "Ton", placeholder: "Mélancolique, avec des éclats d'humour." },
   { key: "rules", label: "Règles de l'univers", placeholder: "Aucun sabre ne se brise. Les esprits ne parlent qu'aux enfants." },
@@ -51,6 +57,7 @@ export function SeriesBible({ projectId }: { projectId: number }) {
 
 function BibleForm({ projectId, initial, onSaved }: { projectId: number; initial: Bible; onSaved: (b: Bible) => void }) {
   const [values, setValues] = useState({
+    synopsis: initial.synopsis,
     world: initial.world,
     tone: initial.tone,
     rules: initial.rules,
@@ -85,18 +92,20 @@ function BibleForm({ projectId, initial, onSaved }: { projectId: number; initial
     <form onSubmit={submit} className="space-y-4" noValidate>
       <div className="grid gap-4 md:grid-cols-2">
         {SECTIONS.map((s) => (
-          <Field key={s.key} label={s.label} htmlFor={`bible-${s.key}`} error={errors[s.key]}>
-            <Textarea
-              id={`bible-${s.key}`}
-              className="min-h-24"
-              value={values[s.key]}
-              placeholder={s.placeholder}
-              onChange={(e) => {
-                setValues((v) => ({ ...v, [s.key]: e.target.value }));
-                setSaved(false);
-              }}
-            />
-          </Field>
+          <div key={s.key} className={s.key === "synopsis" ? "md:col-span-2" : undefined}>
+            <Field label={s.label} htmlFor={`bible-${s.key}`} error={errors[s.key]} hint={"help" in s ? s.help : undefined}>
+              <Textarea
+                id={`bible-${s.key}`}
+                className={s.key === "synopsis" ? "min-h-32" : "min-h-24"}
+                value={values[s.key]}
+                placeholder={s.placeholder}
+                onChange={(e) => {
+                  setValues((v) => ({ ...v, [s.key]: e.target.value }));
+                  setSaved(false);
+                }}
+              />
+            </Field>
+          </div>
         ))}
       </div>
 

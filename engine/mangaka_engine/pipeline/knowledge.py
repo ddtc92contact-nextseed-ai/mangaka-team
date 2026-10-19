@@ -694,6 +694,7 @@ def agent_collections(
 
 # --- bible -----------------------------------------------------------------------
 BIBLE_SECTIONS = (
+    ("synopsis", "Synopsis de la série"),
     ("world", "Univers"),
     ("tone", "Ton"),
     ("rules", "Règles de l'univers"),

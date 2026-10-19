@@ -69,7 +69,9 @@ class CreatorOut(BaseModel):
     max_free_chars: int
     max_pitch_chars: int = MAX_PITCH_CHARS
     # Ce que l'auteur a déjà écrit : une relance propose un différentiel.
-    bible_filled: list[str]  # sections non vides (world, tone, rules, motifs)
+    bible_filled: list[str]  # sections non vides (synopsis, world, tone, rules, motifs)
+    bible_sections: int = len(BIBLE_SECTIONS)
+    synopsis: str = ""  # synopsis de la série déjà écrit : préremplit « De quoi parle ta série ? »
     notes_filled: int  # personnages avec une note
     characters: int
     dna_adjusted: int  # valeurs d'ADN ajustées par la série
@@ -134,11 +136,11 @@ class ApplyIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     dna: dict[str, DnaValue] = Field(default_factory=dict, max_length=100)
-    bible: dict[str, Text] = Field(default_factory=dict, max_length=4)
+    bible: dict[str, Text] = Field(default_factory=dict, max_length=len(BIBLE_SECTIONS))
     character_notes: dict[int, Annotated[str, StringConstraints(strip_whitespace=True, max_length=4000)]] = Field(
         default_factory=dict, max_length=500
     )
-    # Clés confirmées par l'auteur : « bible.world », « character.12 », « dna.shots.wide.min ».
+    # Clés confirmées par l'auteur : « bible.synopsis », « character.12 », « dna.shots.wide.min ».
     overwrite: list[str] = Field(default_factory=list, max_length=700)
 
 
@@ -197,6 +199,7 @@ def read_creator(
         ],
         max_free_chars=settings.max_free_chars if settings else 0,
         bible_filled=[k for k, v in sections.items() if v],
+        synopsis=sections["synopsis"],
         notes_filled=sum(1 for c in characters if c.id in notes),
         characters=len(characters),
         dna_adjusted=len(clean_overrides(base, project.pre_direction or {})) if base else 0,

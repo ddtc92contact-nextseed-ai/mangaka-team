@@ -13,6 +13,7 @@
 prompt: createur-serie        # presets/prompts/createur-serie.yaml
 max_chapter_summaries: 12     # série existante : résumés des derniers chapitres validés envoyés à l'agent
 max_section_chars: 1500       # bible : signes au plus par section (univers, ton, règles, gags et motifs)
+max_synopsis_chars: 3000      # bible : signes au plus du synopsis de la série (l'histoire de base)
 max_note_chars: 800           # bible : signes au plus par note de personnage
 max_free_chars: 500           # réponse libre facultative de chaque question
 

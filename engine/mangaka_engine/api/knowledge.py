@@ -9,6 +9,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from ..pipeline.knowledge import (
+    BIBLE_SECTIONS,
     KnowledgeError,
     Passage,
     collection_tokens,
@@ -510,6 +511,7 @@ def bible_out(session: Session, ctx: AppContext, project: Project) -> BibleOut:
     ).all()
     return BibleOut(
         project_id=project.id,
+        synopsis=bible.synopsis if bible else "",
         world=bible.world if bible else "",
         tone=bible.tone if bible else "",
         rules=bible.rules if bible else "",
@@ -558,7 +560,7 @@ def write_bible(
     project = get_project_or_404(session, project_id)
     bible = get_or_create_bible(session, project.id)
     changes = body.model_dump(exclude_unset=True)
-    for key in ("world", "tone", "rules", "motifs"):
+    for key, _ in BIBLE_SECTIONS:
         if key in changes:
             setattr(bible, key, changes[key] or "")
     if body.character_notes is not None:

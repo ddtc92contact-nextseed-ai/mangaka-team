@@ -923,6 +923,8 @@ class SeriesBible(TimestampMixin, Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), unique=True, index=True)
+    # Synopsis de la série : l'histoire de base (prémisse, arc principal, fin visée), en tête de la bible.
+    synopsis: Mapped[str] = mapped_column(Text, default="")
     world: Mapped[str] = mapped_column(Text, default="")  # univers
     tone: Mapped[str] = mapped_column(Text, default="")  # ton
     rules: Mapped[str] = mapped_column(Text, default="")  # règles de l'univers

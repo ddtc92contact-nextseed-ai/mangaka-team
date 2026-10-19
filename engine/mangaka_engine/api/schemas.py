@@ -1856,6 +1856,7 @@ class ChapterSummaryEntry(BaseModel):
 
 
 class BibleUpdate(_In):
+    synopsis: BibleField | None = None
     world: BibleField | None = None
     tone: BibleField | None = None
     rules: BibleField | None = None
@@ -1866,6 +1867,7 @@ class BibleUpdate(_In):
 
 class BibleOut(BaseModel):
     project_id: int
+    synopsis: str
     world: str
     tone: str
     rules: str

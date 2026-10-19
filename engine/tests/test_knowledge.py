@@ -374,6 +374,47 @@ def test_bible_budget_drops_oldest_chapter_summaries_first(db: Database) -> None
         assert "Résumé 5." in short.text and "Résumé 1." not in short.text and "Monde." in short.text
 
 
+def test_series_synopsis_comes_first_and_is_the_last_cut_by_the_budget(db: Database) -> None:
+    with db.session_scope() as session:
+        project = Project(title="S", page_format="a4-300dpi", workflow_preset="qwen-image-base")
+        session.add(project)
+        session.flush()
+        synopsis = "Aiko veut quitter l'île ; elle y reste pour la sauver."
+        session.add(
+            SeriesBible(
+                project_id=project.id,
+                synopsis=synopsis,
+                world="Monde. " + "y" * 600,
+                motifs="Un chat roux.",
+                character_notes={},
+                chapter_summaries=[],
+            )
+        )
+        session.flush()
+        for n in range(1, 4):
+            ch = Chapter(project_id=project.id, number=n, summary=f"Résumé {n}. " + "x" * 200)
+            ch.status = ChapterStatus.published
+            session.add(ch)
+            session.flush()
+            record_chapter_summary(session, ch)
+        full = render_bible(session, project.id, max_tokens=10_000)
+        assert full is not None and full.text.startswith(f"Synopsis de la série :\n{synopsis}\n\nUnivers :")
+        # Budget serré : résumés retirés, puis la fin du texte coupée — le synopsis, en tête, reste entier.
+        short = render_bible(session, project.id, max_tokens=60)
+        assert short is not None and short.truncated and short.chapter_summaries == 0
+        assert short.text.startswith(f"Synopsis de la série :\n{synopsis}") and "chat roux" not in short.text
+
+
+def test_bible_synopsis_is_saved_for_a_series_without_chapters(client: TestClient) -> None:
+    series = _series(client, "Repartir de zéro")
+    assert client.get(f"/projects/{series['id']}/bible").json()["synopsis"] == ""
+    saved = client.put(f"/projects/{series['id']}/bible", json={"synopsis": "  Un héros, un but, une fin.  "}).json()
+    assert saved["synopsis"] == "Un héros, un but, une fin." and saved["world"] == ""
+    again = client.get(f"/projects/{series['id']}/bible").json()
+    assert again["synopsis"] == "Un héros, un but, une fin." and again["rendered"]["text"].startswith("Synopsis")
+    assert client.get(f"/projects/{series['id']}/chapters").json() == []
+
+
 # --- agents ---------------------------------------------------------------------------
 def test_agent_profile_wins_over_preset(db: Database) -> None:
     settings = KnowledgeSettings(

@@ -144,7 +144,7 @@ from .slugs import RESERVED_ENTRIES, RESERVED_SERIES, slugify, unique_slug
 
 log = logging.getLogger("mangaka_engine")
 
-SCHEMA_VERSION = 43
+SCHEMA_VERSION = 44
 
 
 class MigrationError(RuntimeError):
@@ -715,6 +715,12 @@ def _v42_to_v43(cur: sqlite3.Cursor) -> None:
             cur.execute('UPDATE agent_profiles SET "values" = ? WHERE id = ?', (json.dumps(kept), profile_id))
 
 
+def _v43_to_v44(cur: sqlite3.Cursor) -> None:
+    # Synopsis de la série (#243) : l'histoire de base, première section de la bible ; vide sur les séries existantes.
+    if "synopsis" not in {row[1] for row in cur.execute("PRAGMA table_info(series_bibles)")}:
+        cur.execute("ALTER TABLE series_bibles ADD COLUMN synopsis TEXT NOT NULL DEFAULT ''")
+
+
 def _json_list(raw: object) -> list[object]:
     try:
         value = json.loads(raw) if isinstance(raw, str) else raw
@@ -768,6 +774,7 @@ MIGRATIONS: dict[int, tuple[int, Callable[[sqlite3.Cursor], None]]] = {
     40: (41, _v40_to_v41),
     41: (42, _v41_to_v42),
     42: (43, _v42_to_v43),
+    43: (44, _v43_to_v44),
 }
 
 

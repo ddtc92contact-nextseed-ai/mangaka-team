@@ -6,8 +6,8 @@ name: Créateur de série
 icon: "🧭"
 role: >-
   À la création d'une série, pose quelques questions à l'auteur (rythme, dialogue, dureté du monde, humour, plans,
-  fins de chapitre…) puis propose l'ADN de la série et rédige sa bible : univers, ton, règles, motifs et une note
-  par personnage.
+  fins de chapitre…) puis propose l'ADN de la série et rédige sa bible : synopsis de la série (qui développe
+  l'idée de l'auteur), univers, ton, règles, motifs et une note par personnage.
 step: 0
 step_label: Création de la série
 providers: [llm]
@@ -70,6 +70,7 @@ settings:
       - current_bible
       - genre_dna
       - max_section_chars
+      - max_synopsis_chars
       - max_note_chars
       - savoir_faire
       - context_json
