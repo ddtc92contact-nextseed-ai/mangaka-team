@@ -17,7 +17,7 @@ from ..pipeline.dialogues import chapter_report
 from ..pipeline.finishing import panel_print_info
 from ..pipeline.framing import set_cast
 from ..pipeline.journal import record_event
-from ..pipeline.knowledge import record_chapter_summary
+from ..pipeline.knowledge import drop_chapter_summaries, record_chapter_summary
 from ..pipeline.layout import LayoutError, clamp_to_live
 from ..pipeline.lettering import Box
 from ..pipeline.library import SeriesLibrary
@@ -40,6 +40,7 @@ from ..pipeline.script import normalize_shot_type, script_job
 from ..pipeline.sketch import cleaned_from, latest_sketch, validated_sketch
 from ..presets import PresetError, PresetRegistry
 from ..presets.schemas import BriefRules
+from ..store.comfy_folders import chapter_name
 from ..store.files import FileStore, versioned_url
 from ..store.models import (
     Bubble,
@@ -65,6 +66,7 @@ from .schemas import (
     BreakdownIn,
     BriefNoteOut,
     BubbleOut,
+    ChapterBulkDelete,
     ChapterCreate,
     ChapterOut,
     ChapterReorder,
@@ -416,13 +418,71 @@ def update_chapter(chapter_id: int, body: ChapterUpdate, session: Session = Depe
 def delete_chapter(
     chapter_id: int, session: Session = Depends(get_session), ctx: AppContext = Depends(get_ctx)
 ) -> Response:
-    chapter = get_chapter_or_404(session, chapter_id)
-    series, project_id = chapter.project.slug, chapter.project_id
-    session.delete(chapter)
-    session.commit()
-    ctx.files.delete_tree(f"projects/{project_id}/chapters/{chapter_id}")
-    remove_chapter_folders(ctx, series, chapter)  # mangaka/<série>/chapitre-NN dans ComfyUI
+    _delete_chapters(session, ctx, [get_chapter_or_404(session, chapter_id)])
     return Response(status_code=204)
+
+
+@router.post("/projects/{project_id}/chapters/delete", status_code=204)
+def delete_chapters(
+    project_id: int,
+    body: ChapterBulkDelete,
+    session: Session = Depends(get_session),
+    ctx: AppContext = Depends(get_ctx),
+) -> Response:
+    """Supprime plusieurs chapitres de la série d'un coup (tout ou rien). Le reste de la série ne bouge pas :
+    ADN, fiches et leurs références, planche de style, charte de couverture, identité, tomes (même vides),
+    réglages des agents, base de savoir ; les autres chapitres gardent leur numéro."""
+    get_project_or_404(session, project_id)
+    ids = list(dict.fromkeys(body.chapter_ids))
+    chapters = list(session.scalars(select(Chapter).where(Chapter.id.in_(ids), Chapter.project_id == project_id)))
+    if len(chapters) != len(ids):
+        raise FieldError("chapter_ids", "un des chapitres n'existe pas ou n'appartient pas à cette série")
+    _delete_chapters(session, ctx, sorted(chapters, key=lambda c: c.number))
+    return Response(status_code=204)
+
+
+JOB_LABELS = {
+    "script": "un découpage",
+    "scenes": "un découpage en scènes",
+    "art_direction": "une direction artistique",
+    "generation": "une génération d'image",
+    "qc": "un contrôle qualité",
+    "qc_bench": "un banc de contrôle qualité",
+    "finishing": "une finition",
+    "control_map": "une carte de composition",
+    "export": "un export",
+}
+
+
+def _delete_chapters(session: Session, ctx: AppContext, chapters: list[Chapter]) -> None:
+    """Refuse (409) si un travail attend ou tourne pour l'un des chapitres : il écrirait dans un chapitre
+    disparu. Sinon : lignes (cascade, le chapitre quitte son tome), résumés de la bible, fichiers de `data/` et
+    dossiers `chapitre-NN` de ComfyUI. `generation_logs` et `chapter_stage_decisions` restent (simples entiers)."""
+    by_id = {c.id: c for c in chapters}
+    busy = session.scalars(
+        select(Job)
+        .where(Job.chapter_id.in_(by_id), Job.status.in_((JobStatus.pending, JobStatus.running)))
+        .order_by(Job.id)
+        .limit(1)
+    ).first()
+    if busy is not None and busy.chapter_id is not None:
+        c = by_id[busy.chapter_id]
+        label = JOB_LABELS.get(busy.step, "un travail")
+        raise HTTPException(
+            status_code=409,
+            detail=f"Le chapitre {c.number} « {c.title or f'Chapitre {c.number}'} » a {label} en cours ou en "
+            "attente : attends la fin (ou annule-la) avant de le supprimer. Rien n'a été supprimé.",
+        )
+    project = chapters[0].project
+    series, project_id = project.slug, project.id
+    gone = [(c.id, chapter_name(c)) for c in chapters]
+    drop_chapter_summaries(session, project_id, list(by_id))
+    for c in chapters:
+        session.delete(c)
+    session.commit()
+    for cid, folder in gone:
+        ctx.files.delete_tree(f"projects/{project_id}/chapters/{cid}")
+        remove_chapter_folders(ctx, series, folder)  # mangaka/<série>/chapitre-NN dans ComfyUI
 
 
 # --- étape 1 : scénario ---------------------------------------------------------

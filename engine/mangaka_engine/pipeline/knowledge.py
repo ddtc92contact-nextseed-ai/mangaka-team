@@ -23,7 +23,7 @@ import io
 import json
 import math
 import re
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import PurePath
@@ -823,6 +823,19 @@ def record_chapter_summary(session: Session, chapter: Chapter) -> bool:
     )
     bible.chapter_summaries = sorted(entries, key=lambda e: e.get("number") or 0)
     return True
+
+
+def drop_chapter_summaries(session: Session, project_id: int, chapter_ids: Collection[int]) -> int:
+    """Chapitres supprimés : leurs résumés quittent la bible (plus de continuité tirée d'un chapitre disparu)."""
+    bible = get_bible(session, project_id)
+    if bible is None or not bible.chapter_summaries:
+        return 0
+    ids = set(chapter_ids)
+    kept = [e for e in bible.chapter_summaries if e.get("chapter_id") not in ids]
+    dropped = len(bible.chapter_summaries) - len(kept)
+    if dropped:
+        bible.chapter_summaries = kept
+    return dropped
 
 
 # --- injection dans un agent --------------------------------------------------------

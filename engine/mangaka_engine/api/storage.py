@@ -191,9 +191,10 @@ def remove_series_folders(ctx: AppContext, slug: str) -> None:
         _report(ctx.folders.remove(slug))
 
 
-def remove_chapter_folders(ctx: AppContext, series: str, chapter: Chapter) -> None:
+def remove_chapter_folders(ctx: AppContext, series: str, folder: str) -> None:
+    """`folder` : `chapter_name(chapter)`, relevé avant la suppression du chapitre."""
     if series:
-        _report(ctx.folders.remove(series, chapter_name(chapter)))
+        _report(ctx.folders.remove(series, folder))
 
 
 def remove_page_folders(ctx: AppContext, series: str, chapter: Chapter, numbers: list[int]) -> None:
