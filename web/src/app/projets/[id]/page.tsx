@@ -42,6 +42,8 @@ export default function ProjectPage() {
   // « ADN de la série » et « Bible de la série » sont relues.
   const creatorOpen = useSearchParams().get("createur") === "1";
   const [charterVersion, setCharterVersion] = useState(0);
+  // Chapitres supprimés : les tomes et la bible (résumés des chapitres) sont relus.
+  const [chaptersVersion, setChaptersVersion] = useState(0);
 
   function onProject(p: Project, styleChanged: boolean) {
     project.setData(p);
@@ -114,10 +116,16 @@ export default function ProjectPage() {
         />
       </div>
       <div className="mb-6">
-        <ChapterList projectId={id} />
+        <ChapterList
+          projectId={id}
+          onDeleted={() => {
+            setChaptersVersion((v) => v + 1);
+            project.reload();
+          }}
+        />
       </div>
       <div className="mb-6">
-        <VolumeList projectId={id} />
+        <VolumeList key={chaptersVersion} projectId={id} />
       </div>
       <div className="mb-6">
         <StyleBoardCard projectId={id} board={styleBoard} />
@@ -176,7 +184,7 @@ export default function ProjectPage() {
         <SeriesDnaCard key={charterVersion} projectId={id} genreKey={project.data.style_genre} />
       </div>
       <div className="mt-6">
-        <SeriesBible key={charterVersion} projectId={id} />
+        <SeriesBible key={`${charterVersion}-${chaptersVersion}`} projectId={id} />
       </div>
       <div className="mt-6">
         <SeriesFiles project={project.data} />

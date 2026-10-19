@@ -265,6 +265,10 @@ class ChapterReorder(_In):
     chapter_ids: list[int] = Field(min_length=1)
 
 
+class ChapterBulkDelete(_In):
+    chapter_ids: list[int] = Field(min_length=1)
+
+
 class ChapterOut(BaseModel):
     id: int
     project_id: int

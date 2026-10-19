@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useConfirm } from "@/components/confirm";
+import { chapterDeleteDialog } from "@/components/chapter-delete";
 import { ChapterForm } from "@/components/chapter-form";
 import { GenerateChapterButton } from "@/components/generate-chapter";
 import { InfoTip } from "@/components/info-tip";
@@ -61,12 +62,7 @@ export default function ChapterInfoPage() {
   }
 
   async function remove() {
-    const ok = await confirm({
-      title: `Supprimer le chapitre ${chapter.number} ?`,
-      message: "Le chapitre et toutes ses pages seront supprimés. Action définitive.",
-      confirmLabel: "Supprimer le chapitre",
-      danger: true,
-    });
+    const ok = await confirm(chapterDeleteDialog([chapter]));
     if (!ok) return;
     try {
       await api.deleteChapter(chapter.id);

@@ -3531,6 +3531,9 @@ export const api = {
     request<Chapter>(`/projects/${projectId}/chapters`, json("POST", body)),
   updateChapter: (id: number, body: Partial<ChapterInput>) => request<Chapter>(`/chapters/${id}`, json("PATCH", body)),
   deleteChapter: (id: number) => request<void>(`/chapters/${id}`, { method: "DELETE" }),
+  /** Supprime plusieurs chapitres de la série d'un coup (tout ou rien ; 409 si un travail tourne pour l'un d'eux). */
+  deleteChapters: (projectId: number, chapterIds: number[]) =>
+    request<void>(`/projects/${projectId}/chapters/delete`, json("POST", { chapter_ids: chapterIds })),
   chapterStages: (id: number) => request<ChapterStages>(`/chapters/${id}/stages`),
   overrideStage: (id: number, stage: StageKey, body: { author?: string; note?: string } = {}) =>
     request<ChapterStages>(`/chapters/${id}/stages/${stage}/override`, json("POST", body)),
