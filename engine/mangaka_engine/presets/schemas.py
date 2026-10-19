@@ -2058,6 +2058,7 @@ class SeriesCreatorSettings(_Strict):
     prompt: str = Field(default="createur-serie", description="Prompt de l'agent (presets/prompts/)")
     max_chapter_summaries: int = Field(default=12, ge=0, le=100)
     max_section_chars: int = Field(default=1500, ge=100, le=20000)
+    max_synopsis_chars: int = Field(default=3000, ge=100, le=20000)
     max_note_chars: int = Field(default=800, ge=50, le=4000)
     max_free_chars: int = Field(default=500, ge=0, le=4000)
     questions: list[CreatorQuestion] = Field(min_length=1, max_length=15)

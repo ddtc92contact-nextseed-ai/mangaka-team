@@ -1256,6 +1256,15 @@ def mock_series_creation(ctx: dict[str, Any]) -> dict[str, Any]:
         {"path": s["path"], "value": s["value"], "why": f"Tu as répondu « {s['choice']} » à « {s['question']} »."}
         for s in ctx.get("suggested") or []
     ]
+    # Synopsis : l'idée de l'auteur reprise telle quelle, puis développée (jamais contredite) ; un synopsis déjà
+    # développé (champ prérempli à la relance) est repris sans rallonge.
+    arc = (
+        "Arc principal : le héros poursuit ce qu'il veut, chapitre après chapitre, et chaque victoire lui coûte."
+        " Fin visée : il l'obtient, changé."
+    )
+    synopsis = pitch or f"L’histoire de « {title} » reste à préciser avec l’auteur."
+    if arc not in synopsis:
+        synopsis = f"{synopsis} {arc}"
     world = f"« {title} » ({ctx.get('genre') or 'genre libre'}). {pitch or 'Un univers à préciser avec l’auteur.'}"
     tone = (
         f"Monde {picked('monde', 'nuancé')}, humour : {picked('humour', 'des touches')}.{note('monde')}{note('humour')}"
@@ -1282,6 +1291,7 @@ def mock_series_creation(ctx: dict[str, Any]) -> dict[str, Any]:
     return {
         "dna": dna,
         "bible": {
+            "synopsis": synopsis[: int(ctx.get("max_synopsis_chars") or 3000)],
             "world": world[:section],
             "tone": tone[:section],
             "rules": rules[:section],

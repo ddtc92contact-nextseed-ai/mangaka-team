@@ -1089,3 +1089,32 @@ def test_v42_database_drops_flux_workflows_from_agent_profiles(make_settings: Ca
             wf = next(s for s in d["settings"] if s["key"] == "workflow")
             assert wf["value"] == presets.defaults.workflow and wf["origin"] == "preset"
     assert _version(settings.database_path) == SCHEMA_VERSION
+
+
+def test_v43_database_gets_an_empty_series_synopsis(make_settings: Callable[..., Settings]) -> None:
+    """v43 → v44 : synopsis de la série, vide sur les bibles existantes ; le reste de la bible ne bouge pas."""
+    settings = make_settings()
+    with TestClient(create_app(settings)) as c:
+        s = c.post("/projects", json={**STYLE, "title": "OSU"}).json()
+        before = c.put(f"/projects/{s['id']}/bible", json={"world": "Un lycée.", "tone": "Doux.", "motifs": "Un chat."})
+        before = before.json()
+    con = sqlite3.connect(settings.database_path)
+    con.execute("ALTER TABLE series_bibles DROP COLUMN synopsis")
+    con.execute("PRAGMA user_version = 43")
+    con.commit()
+    con.close()
+
+    with TestClient(create_app(settings)) as c:
+        bible = c.get(f"/projects/{s['id']}/bible").json()
+        assert bible["synopsis"] == ""
+        for key in ("world", "tone", "rules", "motifs", "characters", "chapter_summaries"):
+            assert bible[key] == before[key]
+        saved = c.put(f"/projects/{s['id']}/bible", json={"synopsis": "L'histoire de base."}).json()
+        assert saved["synopsis"] == "L'histoire de base." and saved["world"] == "Un lycée."
+    assert _version(settings.database_path) == SCHEMA_VERSION
+    fresh = settings.database_path.parent / "fresh.db"
+    create_db_engine(fresh).dispose()
+    assert _columns(settings.database_path) == _columns(fresh)
+    con = sqlite3.connect(fresh)
+    assert "synopsis" in {r[1] for r in con.execute("PRAGMA table_info(series_bibles)")}
+    con.close()

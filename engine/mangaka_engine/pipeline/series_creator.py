@@ -10,8 +10,9 @@ AVANT le premier synopsis — à la création d'une série, ou relancé sur une 
 2. **contexte** : réponses, défauts chiffrés du genre (`presets/pre_direction.yaml`), personnages, synopsis des
    chapitres et résumés des chapitres validés, bible actuelle, savoir-faire (« Structure · … », écriture…) ;
 3. **proposition** validée par Pydantic puis par l'ADN (`apply_overrides`) : écarts au genre avec une phrase
-   d'explication chacun, bible (univers, ton, règles, gags et motifs) et une note par personnage. Une réponse
-   invalide est renvoyée à l'agent avec l'erreur (`max_retries` du prompt, 2 au plus), puis `CreatorError` lisible ;
+   d'explication chacun, bible (synopsis de la série, univers, ton, règles, gags et motifs) et une note par
+   personnage. Le synopsis développe l'idée de l'auteur (`pitch`) sans la contredire. Une réponse invalide est
+   renvoyée à l'agent avec l'erreur (`max_retries` du prompt, 2 au plus), puis `CreatorError` lisible ;
 4. **différentiel** (`api/series_creator.py`) : la proposition est montrée à côté de ce qui est déjà écrit, l'auteur
    la corrige, et rien de ce qu'il a écrit (section de bible, note, valeur d'ADN ajustée) n'est remplacé sans
    confirmation explicite (`conflicts`).
@@ -45,12 +46,13 @@ ROLE = "series_creation"  # rôle dans presets/knowledge.yaml
 TASK = "series_creation"
 _FENCE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.DOTALL)
 BIBLE_SECTIONS: tuple[tuple[str, str], ...] = (
+    ("synopsis", "Synopsis de la série"),
     ("world", "Univers"),
     ("tone", "Ton"),
     ("rules", "Règles de l'univers"),
     ("motifs", "Gags et motifs récurrents"),
 )
-MAX_PITCH_CHARS = 2000
+MAX_PITCH_CHARS = 4000  # le champ est prérempli du synopsis de la série (3000 signes au plus proposés)
 MAX_DNA_CHANGES = 30
 
 
@@ -214,6 +216,7 @@ class CreatorBrief:
             "chapters": self.chapters,
             "bible": self.bible,
             "max_section_chars": s.max_section_chars,
+            "max_synopsis_chars": s.max_synopsis_chars,
             "max_note_chars": s.max_note_chars,
         }
 
@@ -352,6 +355,7 @@ def creator_messages(prompt: PromptPreset, brief: CreatorBrief) -> list[ChatMess
         "current_bible": bible or "(bible vide)",
         "genre_dna": genre_dna_text(brief.base),
         "max_section_chars": str(s.max_section_chars),
+        "max_synopsis_chars": str(s.max_synopsis_chars),
         "max_note_chars": str(s.max_note_chars),
         "savoir_faire": (brief.knowledge.savoir_faire() if brief.knowledge else "") or "(aucun passage)",
         "context_json": json.dumps(brief.as_json(), ensure_ascii=False),
@@ -374,6 +378,7 @@ class _DnaItem(BaseModel):
 class _Bible(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
+    synopsis: str = ""
     world: str = ""
     tone: str = ""
     rules: str = ""
@@ -469,14 +474,15 @@ def parse_proposal(text: str, brief: CreatorBrief) -> Proposal:
             apply_overrides(brief.base, {c.path: c.value for c in changes})
         except DnaError as exc:
             problems.append(f"dna : {exc.path} — {exc.message}")
-    # Bible : quatre sections remplies, dans la longueur.
+    # Bible : toutes les sections remplies, dans la longueur (le synopsis a la sienne).
     bible = {k: _clean(getattr(answer.bible, k)) for k, _ in BIBLE_SECTIONS}
     for key, label in BIBLE_SECTIONS:
         n = len(bible[key])
+        limit = s.max_synopsis_chars if key == "synopsis" else s.max_section_chars
         if not n:
             problems.append(f"bible.{key} ({label}) : vide")
-        elif n > s.max_section_chars:
-            problems.append(f"bible.{key} ({label}) : {n} signes, {s.max_section_chars} au plus")
+        elif n > limit:
+            problems.append(f"bible.{key} ({label}) : {n} signes, {limit} au plus")
     # Une note par personnage, au nom exact.
     by_name = {_name_key(c["name"]): c for c in brief.characters}
     notes: dict[int, str] = {}

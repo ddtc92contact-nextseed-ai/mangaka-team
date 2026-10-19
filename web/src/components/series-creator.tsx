@@ -42,7 +42,8 @@ export function SeriesCreatorCard({
     [projectId],
   );
   const [step, setStep] = useState<Step>(autoOpen ? "questions" : "closed");
-  const [pitch, setPitch] = useState("");
+  // null : l'auteur n'a pas encore touché au champ, prérempli du synopsis de la série déjà écrit.
+  const [typedPitch, setPitch] = useState<string | null>(null);
   const [answers, setAnswers] = useState<Record<string, CreatorAnswer>>({});
   const [proposal, setProposal] = useState<CreatorProposal | null>(null);
   const [written, setWritten] = useState<string[]>([]);
@@ -57,6 +58,7 @@ export function SeriesCreatorCard({
   }, [autoOpen, info.data?.available]);
 
   const data = info.data;
+  const pitch = typedPitch ?? (data?.synopsis ?? "").slice(0, data?.max_pitch_chars);
   const existing = data
     ? data.bible_filled.length > 0 ||
       data.notes_filled > 0 ||
@@ -97,7 +99,7 @@ export function SeriesCreatorCard({
         <>
           <p className="text-sm text-zinc-400">
             {existing
-              ? `Bible : ${data.bible_filled.length}/4 sections écrites, ${data.notes_filled}/${data.characters} personnages avec une note ; ADN : ${data.dna_adjusted} valeur${data.dna_adjusted > 1 ? "s" : ""} ajustée${data.dna_adjusted > 1 ? "s" : ""}. Une relance propose un différentiel : rien de ce que tu as écrit n'est remplacé sans ton accord.`
+              ? `Bible : ${data.bible_filled.length}/${data.bible_sections} sections écrites, ${data.notes_filled}/${data.characters} personnages avec une note ; ADN : ${data.dna_adjusted} valeur${data.dna_adjusted > 1 ? "s" : ""} ajustée${data.dna_adjusted > 1 ? "s" : ""}. Une relance propose un différentiel : rien de ce que tu as écrit n'est remplacé sans ton accord.`
               : `Quelques questions sur ta série, puis l'agent propose son ADN (les écarts au genre${data.genre_name ? ` « ${data.genre_name} »` : ""}) et rédige sa bible. Tu corriges tout avant d'enregistrer.`}
           </p>
           {step === "done" && (
@@ -203,6 +205,11 @@ function Questions({
           De quoi parle ta série ?{" "}
           <span className="font-normal text-zinc-500">(facultatif)</span>
         </label>
+        <p className="mb-1 text-xs text-zinc-500">
+          {creator.synopsis
+            ? "Repris du synopsis de la série. Le créateur le développe sans le contredire ; ce qu'il propose s'affiche à côté de ce qui est écrit."
+            : "Le créateur en tire le synopsis de la série (l'histoire de base), gardé dans la bible et lu par tous les agents."}
+        </p>
         <Textarea
           id="creator-pitch"
           className="min-h-16"

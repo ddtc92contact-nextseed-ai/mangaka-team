@@ -2838,6 +2838,8 @@ export interface ChapterSummaryEntry {
 
 export interface Bible {
   project_id: number;
+  /** Synopsis de la série : l'histoire de base (héros, ce qu'il veut, arc principal, fin visée). */
+  synopsis: string;
   world: string;
   tone: string;
   rules: string;
@@ -2891,6 +2893,10 @@ export interface SeriesCreator {
   max_free_chars: number;
   max_pitch_chars: number;
   bible_filled: string[];
+  /** Nombre de sections de la bible (synopsis, univers, ton, règles, gags et motifs). */
+  bible_sections: number;
+  /** Synopsis de la série déjà écrit : préremplit « De quoi parle ta série ? ». */
+  synopsis: string;
   notes_filled: number;
   characters: number;
   dna_adjusted: number;
@@ -2950,7 +2956,7 @@ export interface ScriptBrief {
   crowd_limit?: number;
 }
 
-export type BibleInput = Partial<Pick<Bible, "world" | "tone" | "rules" | "motifs" | "chapter_summaries">> & {
+export type BibleInput = Partial<Pick<Bible, "synopsis" | "world" | "tone" | "rules" | "motifs" | "chapter_summaries">> & {
   character_notes?: Record<number, string>;
 };
 

@@ -56,7 +56,7 @@ export const HELP = {
   "serie.createur":
     "Quelques questions sur ta série (rythme, dialogue, dureté du monde, humour, plans, fins de chapitre…). Le créateur de série propose alors l'ADN (seulement les écarts au genre, chacun expliqué) et rédige la bible avec une note par personnage. Tu corriges tout avant d'enregistrer ; relancé sur une série existante, il montre ce qui changerait et ne remplace jamais ce que tu as écrit sans ton accord.",
   "serie.bible":
-    "Univers, ton, règles et notes de personnages transmis à tous les agents de cette série (scénariste, prompts image) pour garder la cohérence d'un chapitre à l'autre.",
+    "Synopsis de la série, univers, ton, règles et notes de personnages transmis à tous les agents de cette série (scénariste, prompts image) pour garder la cohérence d'un chapitre à l'autre.",
   "chapitre_infos.target_pages":
     "Le nombre de pages que le scénariste vise au découpage. Ce n'est pas une limite stricte : tu peux ajouter ou retirer des pages ensuite.",
   "chapitre_infos.status":

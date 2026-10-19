@@ -21,7 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..pipeline.framing import cites
-from ..pipeline.knowledge import get_bible
+from ..pipeline.knowledge import BIBLE_SECTIONS, get_bible
 from ..pipeline.pre_direction import (
     GROUPS,
     DnaError,
@@ -218,7 +218,7 @@ def _bible_empty(session: Session, project_id: int) -> tuple[bool, dict[str, str
     if bible is None:
         return True, {}
     notes = {str(k): v for k, v in (bible.character_notes or {}).items() if (v or "").strip()}
-    sections = any((getattr(bible, k) or "").strip() for k in ("world", "tone", "rules", "motifs"))
+    sections = any((getattr(bible, k) or "").strip() for k, _ in BIBLE_SECTIONS)
     return not sections and not notes, notes
 
 
